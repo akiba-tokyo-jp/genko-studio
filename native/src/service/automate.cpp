@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <stop_token>
 #include <system_error>
 
 #include "core/color_raster.hpp"
@@ -36,6 +37,7 @@
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/segment/segment.hpp"
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
 #include "service/studio_service.hpp"
@@ -408,6 +410,18 @@ Json aim_steps(const core::Document& doc, const Json& steps, bool picture, bool 
     Json out = Json::array();
     if (steps.empty()) return out;
     if (recorded) {
+        // (PC6 review of B's P2-B: what makes a page among the book's — calculations into a new page, … — never played on
+        // each page in turn: the pages numbered when the steps were laid would be others by then)
+        // (on one page only — a picture's, a book of one page — nothing is numbered again before it: played as before, the
+        // pages it adds written: review of PC6-B, B2's P2-1)
+        const auto pages = static_cast<std::size_t>(std::count_if(doc.pages.begin(), doc.pages.end(), [&](const auto& page) { return picture || !core::is_cover(*page); }));
+        if (pages > 1) {
+            try {
+                core::check_pages_kept(steps);
+            } catch (const core::OpError& error) {
+                throw StepsError(std::string("the steps are run page by page: ") + error.what());
+            }
+        }
         for (const auto& page : doc.pages) {
             if (!picture && core::is_cover(*page)) continue;
             std::optional<std::string> layer;
@@ -698,6 +712,9 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
             formats::CopyOptions copy;
             copy.quality = target.quality;
             for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+                // (PC6: asked again between the files of one input — more formats, a book's pages —: stopped there, those
+                // written said with it)
+                if (!outputs.empty() && options.cancelled && options.cancelled()) throw render::Cancelled();
                 const fs::path dest = output_path(target, input, input.book ? core::file_stem(doc.page(p)) : std::string(), ext, written);
                 formats::check_target(guard, dest);
                 const formats::CopyResult wrote = formats::write_copy(doc, p, dest, copy);
@@ -791,6 +808,15 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 }
             }
             result.files.push_back(std::move(done));
+        } catch (const render::Cancelled&) {  // (PC6: the window's 中止 inside a file — its worker's StopScope —: stopped there)
+            result.cancelled = true;
+            if (!outputs.empty()) {  // (the files of it written before: kept, and said as done — "cancelled" in its row)
+                Json done{{"input", where}, {"cancelled", true}};
+                if (!input.book) done["output"] = outputs[0];
+                if (input.book || outputs.size() > 1) done["outputs"] = outputs;
+                result.files.push_back(std::move(done));
+            }
+            break;
         } catch (const core::Error& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
             if (!outputs.empty()) result.errors.back()["outputs"] = outputs;  // (written before it failed: kept)
@@ -1415,6 +1441,9 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
         if (!making) return;
         SheetInMaking sheet = std::move(*making);
         making.reset();
+        // (PC6: a sheet begun is finished even when the window's 中止 stopped the pictures — its worker's StopScope set
+        // aside here —: the sheets so far are opened, as said)
+        const render::segment::StopScope unstopped{std::stop_token()};
         char number[16];
         std::snprintf(number, sizeof number, "-%03zu", result.sheets + 1);
         const std::string title = s.title + number;
@@ -1530,6 +1559,9 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
                 const formats::Opened opened = formats::open_file(storage::read_file(input.path), core::path_to_utf8(input.path.filename()), reading);
                 put(drawn(opened.doc.page(0), opened.doc), stem);
             }
+        } catch (const render::Cancelled&) {  // (PC6: the window's 中止 inside a picture: the sheets so far kept)
+            result.cancelled = true;
+            break;
         } catch (const core::Error& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
             if (options.stop_on_error) break;

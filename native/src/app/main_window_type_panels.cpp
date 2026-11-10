@@ -104,7 +104,10 @@ void MainWindow::build_type_docks() {
         type_docks_.push_back(dock);
         QAction* toggle = action(QStringLiteral("act_panel_") + key);
         view_menu_->addAction(toggle);
-        connect(toggle, &QAction::triggered, dock, [this, dock](bool on) {
+        // (the window the context — its parts' signals let go of it as it goes, ~MainWindow: PC6, the review's P3-5 —, the
+        // dock looked for)
+        connect(toggle, &QAction::triggered, this, [this, dock = QPointer<QDockWidget>(dock)](bool on) {
+            if (!dock) return;
             dock->setVisible(on);
             if (on) {
                 dock->raise();

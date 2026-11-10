@@ -11,6 +11,7 @@
 #include <exception>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
 #include <thread>
@@ -28,6 +29,7 @@
 #include "core/ink.hpp"
 #include "core/lut3d.hpp"
 #include "core/paths.hpp"
+#include "core/layer_styles.hpp"
 #include "core/patterns.hpp"
 #include "core/psd_keep.hpp"
 #include "core/smart.hpp"
@@ -43,6 +45,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_styles.hpp"
 #include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
@@ -252,6 +255,7 @@ struct Ctx {
     render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
     std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
     std::map<std::string, std::string> layer_ids;                   // (PC5 J-a: a layer's id → its first layer's id in the document)
+    std::set<std::string>* patterns = nullptr;                      // (PC6: the book's patterns the document writes)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
@@ -719,6 +723,8 @@ Json locks_of(const core::Layer* layer) {
                 {"all", layer != nullptr && layer->lock_all}};  // (PC5 I-a, layer-locks@1)
 }
 
+void style_json(Ctx& ctx, const std::string& name, const core::Layer& layer, Json& out);
+
 // A layer's common settings (its content given): from the Genko layer when there is one, else plain.
 Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Json content, const render::PageLayer* shown) {
     Json out{{"id", ctx.next_id++},
@@ -775,7 +781,58 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
         }
         if (shown->vector_mask) out["vector_mask"] = pc::vector_mask_json(*shown->vector_mask, ctx.px);
     }
+    // (PC6, layer-styles@1: its style as upstream's effects, fill opacity and Blend If — a placed picture's, given without
+    // its layer, too —; a pen layer written as a group of its parts and lines: the group's — the review's P2-1: upstream
+    // draws a group's effects over what is in it, as Genko draws the pen layer's over its parts —, its parts given none)
+    const core::Layer* styled = layer != nullptr ? layer : shown != nullptr ? shown->styled : nullptr;
+    if (styled != nullptr && core::has_layer_style(*styled)) style_json(ctx, name, *styled, out);
     return out;
+}
+
+// PC6 (layer-styles@1, render/pcraft_styles): the layer's style onto its upstream layer — its effects (their patterns the
+// document's), fill opacity and Blend If —; of the PSD's blocks it kept (Genko keeps them only while the style is as it was
+// read: ops_layer_styles forgets them), as upstream holds them (io/src/psd_import.rs REGENERATED): its lfx2 the effects'
+// psd_raw, its lfxs and iOpa left out (upstream writes them from the fields), its lmfx and lrFX among the blocks.
+pc::StyleWrite style_writing(Ctx& ctx, const std::string& name) {
+    pc::StyleWrite w;
+    w.px = ctx.px;
+    w.mode = ctx.mode;
+    w.pattern = [&ctx](const Json& fill) -> std::optional<Json> {
+        const std::string id = fill.value("id", std::string());
+        const core::Pattern* p = core::find_pattern(ctx.doc, id);
+        if (p == nullptr) return std::nullopt;
+        if (ctx.patterns != nullptr) ctx.patterns->insert(id);
+        const Json phase = fill.value("phase_mm", Json::array({0.0, 0.0}));
+        return Json{{"name", p->name},
+                    {"id", p->id},
+                    {"scale", r6(fill.value("scale", 100.0) / 100.0 * ctx.dpi / std::max(p->dpi, 1.0))},
+                    {"angle", fill.value("angle", 0.0)},
+                    {"link", fill.value("link", true)},
+                    {"phase", Json::array({r6(phase[0].get<double>() * ctx.px), r6(phase[1].get<double>() * ctx.px)})}};
+    };
+    w.say = [&ctx, name](const std::string& text) { ctx.note(text + "（「" + name + "」）"); };
+    return w;
+}
+
+void style_json(Ctx& ctx, const std::string& name, const core::Layer& layer, Json& out) {
+    const Json& style = *layer.style;
+    const pc::StyleWrite w = style_writing(ctx, name);
+    out["effects"] = pc::effects_to_upstream(style, w);
+    out["fill_opacity"] = core::style_fill_opacity(style);
+    if (Json blend_if = pc::blend_if_to_upstream(style, w); !blend_if.is_null()) out["blend_if"] = std::move(blend_if);
+    if (out["psd_blocks"].is_array()) {
+        Json kept = Json::array();
+        for (Json& b : out["psd_blocks"]) {
+            const std::optional<std::string> key = b.is_array() && b.size() == 2 && b[0].is_string() ? pc::key_from_hex(b[0].get<std::string>()) : std::nullopt;
+            if (key && *key == "lfx2") {
+                out["effects"]["psd_raw"] = b[1];
+                continue;
+            }
+            if (key && (*key == "lfxs" || *key == "iOpa")) continue;
+            kept.push_back(std::move(b));
+        }
+        out["psd_blocks"] = std::move(kept);
+    }
 }
 
 Json raster_content(Json surface_json) { return Json{{"kind", "raster"}, {"surface", std::move(surface_json)}}; }
@@ -839,8 +896,6 @@ std::optional<Json> type_content(Ctx& ctx, const core::Layer& layer, const rende
 // A layer of the page (the picture page_layers drew of it, when it did) as an upstream layer.
 std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, std::set<std::string>& patterns) {
     const std::string name = title_of(layer);
-    // (layer-styles@1, PC4 E6: a style is not mapped to PhotoCraft's effects yet — its layer written without it, said)
-    if (layer.style) ctx.note("レイヤースタイルは .pcraft に書いていません（「" + name + "」）");
     if (layer.kind == core::LayerKind::Adjust) {
         if (!layer.adjust) return std::nullopt;
         std::optional<Json> adjustment = adjustment_of(ctx, *layer.adjust, name);
@@ -1094,6 +1149,7 @@ std::string folder_of(const core::Layer& layer) { return layer.parent_id.is_stri
 Json document_json(Ctx& ctx) {
     const core::Page& page = ctx.page;
     std::set<std::string> patterns;
+    ctx.patterns = &patterns;  // (PC6: the layers' styles' too)
     std::vector<Out> flat;
     std::size_t next = 0;  // (the page's layers written so far, page_layers' or hidden)
     const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);  // (groups@1: made once)
@@ -1261,7 +1317,9 @@ Json document_json(Ctx& ctx) {
         }
     }
     doc["metadata"] = std::move(metadata);
-    doc["global_light"] = Json{{"angle", 120.0}, {"altitude", 30.0}};
+    // (PC6, layer-styles@1: the book's global light — Photoshop's 120° and 30° when it sets none)
+    const std::array<double, 2> light = core::global_light(ctx.doc);
+    doc["global_light"] = Json{{"angle", light[0]}, {"altitude", light[1]}};
     // paths
     Json paths = Json::array();
     for (const core::vector::NamedPath& p : page.paths) paths.push_back(Json{{"name", p.name}, {"path", pc::path_json(p.path, ctx.px)}, {"psd_raw", nullptr}});
@@ -1269,9 +1327,9 @@ Json document_json(Ctx& ctx) {
     doc["work_path"] = page.work_path ? pc::path_json(*page.work_path, ctx.px) : Json(nullptr);
     doc["clipping_path"] = page.clipping_path ? Json{{"name", page.clipping_path->name}, {"flatness", page.clipping_path->flatness}} : Json(nullptr);
     doc["quick_mask"] = std::move(quick);
-    // the patterns its fills use
-    Json list = Json::array();
-    for (const std::string& id : patterns) {
+    // the patterns its fills use (PC6: and its layers' styles; its layer comps' styles' after them, below)
+    const auto add_patterns = [&](Json& list, const std::set<std::string>& ids) {
+    for (const std::string& id : ids) {
         const core::Pattern* p = core::find_pattern(ctx.doc, id);
         if (p == nullptr) continue;
         const auto bytes = file_bytes(ctx.doc, p->asset, core::pattern_suffix(*p));
@@ -1318,6 +1376,10 @@ Json document_json(Ctx& ctx) {
         }
         list.push_back(Json{{"id", p->id}, {"name", p->name}, {"width", p->width}, {"height", p->height}, {"surface", std::move(surf)}});
     }
+    };
+    Json list = Json::array();
+    add_patterns(list, patterns);
+    const std::set<std::string> written_patterns = patterns;
     doc["patterns"] = std::move(list);
     // the indexed page's table, a duotone page's inks
     doc["color_table"] = nullptr;
@@ -1348,8 +1410,15 @@ Json document_json(Ctx& ctx) {
         production.say = [&ctx](std::string note) {
             if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
         };
+        // (PC6: a layer comp's appearance's style as upstream's effects)
+        production.effects = [&ctx](const Json& style) { return pc::effects_to_upstream(style, style_writing(ctx, "レイヤーカンプ")); };
         render::pcraft_production::write(ctx.page, doc, production);
     }
+    // (PC6: the patterns only the layer comps' styles use)
+    std::set<std::string> more;
+    std::set_difference(patterns.begin(), patterns.end(), written_patterns.begin(), written_patterns.end(), std::inserter(more, more.end()));
+    if (!more.empty()) add_patterns(doc["patterns"], more);
+    ctx.patterns = nullptr;  // (the review's P3-7: the set was this function's)
     return doc;
 }
 

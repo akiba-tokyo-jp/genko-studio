@@ -64,6 +64,9 @@ std::optional<QString> get_item(QWidget* parent, const QString& title, const QSt
                                 bool editable = false);
 std::optional<QColor> colour(QWidget* parent, const QColor& now, const QString& title);
 bool question(QWidget* parent, const QString& title, const QString& text);
+// The same, いいえ the default button (a question whose yes lets something in: Enter does not say yes). Answered by the
+// responder's `question` too.
+bool question_default_no(QWidget* parent, const QString& title, const QString& text);
 void warning(QWidget* parent, const QString& title, const QString& text);
 QString existing_dir(QWidget* parent, const QString& caption, const QString& start = {});
 QString save_path(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter = {});

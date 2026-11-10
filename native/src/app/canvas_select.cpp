@@ -287,6 +287,15 @@ bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::Keyboa
         return true;
     }
     if (marquee == QLatin1String("polyline")) {
+        // (PC6, upstream's canvas.rs PolygonLasso: with three points or more, a press within 8 screen pixels of the first —
+        // 8 ÷ the zoom of the page's — closes the polygon, as Enter and a double click do)
+        if (poly_points_.size() >= 3) {
+            const QPointF first = pt(poly_points_.front().x(), poly_points_.front().y());
+            if (std::hypot(first.x() - pos.x(), first.y() - pos.y()) < 8.0) {
+                finish_points();
+                return true;
+            }
+        }
         poly_points_.push_back(mm);
         update();
         return true;

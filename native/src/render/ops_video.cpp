@@ -520,7 +520,9 @@ void video_alter(OpContext& c) {
 
 // set_video_layer {page, folder, show_altered?, fps?, alpha?, par?, placement_mm?, fit?}: 変更されたビデオを表示 and フッテージを
 // 解釈… (the footage's speed — its frames laid again at the timeline's from where they begin, the altered frames where
-// they are —, its alpha read straight, premultiplied or ignored, its pixels' aspect ratio) and where it is laid.
+// they are —, its alpha read straight, premultiplied or ignored, its pixels' aspect ratio) and where it is laid:
+// placement_mm (null: the finished size) is the page's mm as it is now — the row's transform (the footage turned with its
+// page, PC6) taken away with it, the footage laid upright in the box given (review of PC6-B: B2's P2-2).
 void set_video_layer(OpContext& c) {
     Page& page = c.doc.edit_page(core::require_page(c.doc, c.op));
     const Row row = row_of(page, c.op);
@@ -558,7 +560,10 @@ void set_video_layer(OpContext& c) {
         relay(frames, before, fps, fps_of(anim_of(page, false)));
         lengthen(anim_of(page, false), static_cast<std::int64_t>(frames.size()));
     }
-    if (core::has(c.op, "placement_mm")) video["placement_mm"] = core::production::to_json(placement_given(c.op, page));
+    if (core::has(c.op, "placement_mm")) {
+        video["placement_mm"] = core::production::to_json(placement_given(c.op, page));
+        video.erase("transform");  // (the box given the page's as it is now: upright in it)
+    }
     if (core::has(c.op, "fit")) video["fit"] = fit_given(c.op, video["fit"].get<std::string>());
     c.report = Json{{"show_altered", video["show_altered"]}};
 }

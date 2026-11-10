@@ -690,6 +690,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the exposures must be all of linear light .*)", "カメラ RAW・32 bit の画像（線形の光）と、ほかの画像は一緒に統合できません"));
         r.push_back(rule(R"(the exposures are too large to merge at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
                          "画像が大きすぎて一度に統合できません（作業に約 \\1 MiB。\\2 MiB まで）。画像の枚数を減らすか、縮小してから統合してください"));
+        r.push_back(rule(R"(the 32-bit HDR picture would pass the book's 1 GiB of precise pixels \((\d+)×(\d+) pixels\).*)",
+                         "32 bit の HDR 画像が、原稿の高精度の画素の上限（1 GiB）を越えます（\\1×\\2 pixel）。16 bit か 8 bit を選んでください"));
         r.push_back(rule(R"(an exposure of CMYK cannot be merged.*)", "CMYK の画像は HDR に統合できません（RGB かグレースケールの画像を選んでください）"));
         r.push_back(rule(R"(an exposure is RGB of 8 or 16 bits or floats)", "HDR に統合できるのは RGB の 8・16・32 bit の画像です"));
         r.push_back(rule(R"(the HDR mode is 32, 16 or 8 bits)", "HDR Pro に統合のモードは 32・16・8 bit です"));
@@ -1545,6 +1547,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("name gives the style its new name", "スタイルの新しい名前（name）を指定します"));
         r.push_back(rule("(replace|from_selection|apply|clear_overrides) is true or false", "\\1 は true か false です"));
         r.push_back(rule("a book keeps 512 (?:character|paragraph) styles at most", "文字スタイル・段落スタイルは、それぞれ 512 個までです"));
+        // (PC6-B: the styles and texts another book's pages bring — import_pages)
+        r.push_back(rule("the book would keep more than 512 (?:character|paragraph) styles with those the pages bring",
+                         "持ち込む文字スタイル・段落スタイルを合わせると、それぞれ 512 個を越えるため、取り込めません"));
+        r.push_back(rule("a text brought would hold more than 4096 ranges to keep its look.*",
+                         "持ち込む文字の見え方を保つと、文字の範囲が 4096 を越えるため、取り込めません（本の基本段落の違いを減らしてください）"));
         r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
@@ -1596,6 +1603,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a quoted field is not closed", "テキストファイルの \" で囲んだ欄が閉じていません"));
         r.push_back(rule(R"(row (\d+): the picture (.*) cannot be read)", "\\1 行目の画像「\\2」が読めません"));
         r.push_back(rule(R"(row (\d+): the picture (.*) is larger than 256 MiB)", "\\1 行目の画像「\\2」が大きすぎます（256 MiB まで）"));
+        // (PC6, review A P3-6 and C P2-5)
+        r.push_back(rule(R"(row (\d+): the picture (.*) is not in the text file's folder)",
+                         "\\1 行目の画像「\\2」は、テキストファイルと同じフォルダー（その中のフォルダー）にないため読み込みません"));
+        r.push_back(rule("the data sets' pictures are larger than 256 MiB together: save the book first",
+                         "データセットの画像が、あわせて 256 MiB を越えます。原稿を保存してから読み込んでください（保存した原稿では、画像を原稿の素材として置きます）"));
         // (groups@1, PC5 I-b — the C++ build's own: a folder drawn as a group, core/groups, render/ops_groups)
         r.push_back(rule("group makes a folder.*|group is set on a folder|.*the layer \\S+ is marked a group but is not a folder",
                          "グループとして描けるのはフォルダーだけです"));
@@ -1632,6 +1644,12 @@ const std::vector<Rule>& rules() {
                          "画像が大きすぎて、一度につなげません（合わせて約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
         r.push_back(rule(R"(the stack would be too large to hold at once \(about (\d+) MiB of 2048\).*)",
                          "スタックが大きすぎて、一度に持てません（約 \\1 MiB。2048 MiB まで）。画像を減らすか、小さな画像にしてください"));
+        // (PC6: a precise raster past what one holds — core/color_raster's own refusal)
+        r.push_back(rule("invalid or oversized high-precision color raster",
+                         "高精度の画素が正しくないか、大きすぎて扱えません（1 枚 約 6,700 万画素まで）"));
+        // (PC6, review C P2-1: a 16- or 32-bit stack past the book's precise pixels)
+        r.push_back(rule(R"(the stack's (\d+)-bit layers would pass the book's 1 GiB of precise pixels \(about (\d+) MiB\).*)",
+                         "\\1 bit のスタックが、原稿の高精度の画素の上限（1 GiB）を越えます（約 \\2 MiB）。画像を減らすか、小さな画像か 8 bit の画像にしてください"));
         r.push_back(rule(R"(the colours of the picture (.*) cannot be converted into the first picture's profile.*)",
                          "画像「\\1」の色を、最初の画像のプロファイルに変換できません"));
         r.push_back(rule("the layer \\S+ is not a paint layer \\(auto-align and auto-blend take paint layers\\)",
@@ -1652,6 +1670,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the picture (.*) could not be laid on the stack's page", "画像「\\1」をスタックのページに置けませんでした"));
         r.push_back(rule("the picture has no pixels to load|a picture to load is missing", "読み込む画像の画素がありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
+        // (PC6 review B P2-4, P2-5: what an animation's timeline times, and a video layer's box)
+        r.push_back(rule("an animation folder or its cels \\(a video layer's too\\) cannot go into a smart object.*",
+                         "アニメーションフォルダーとそのセル（ビデオレイヤーも）は、タイムラインで時間を決めているため、スマートオブジェクトにできません"));
+        r.push_back(rule("a video layer's footage (?:box )?would lie past the places a page holds", "ビデオレイヤーのフッテージが、ページから遠すぎる所に出てしまいます"));
+        r.push_back(rule("a video layer is copied onto an animation of the same frame rate only.*",
+                         "ビデオレイヤーは、フレームレートの同じアニメーションのページにだけ複製できます（先にそのページのフレームレートを合わせてください）"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));
         r.push_back(rule("the picture is too large to keep its 16 or 32 bits on this page.*", "画像が大きすぎて、このページでは 16・32 bit のまま置けません"));

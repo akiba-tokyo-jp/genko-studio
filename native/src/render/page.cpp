@@ -3557,7 +3557,7 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof) {
 }
 
 core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
-                                     bool paper) {
+                                     bool paper, std::optional<Box> region) {
     if (!page.color) throw core::Error("value", "an RGB page holds no inks");
     std::vector<std::string> omitted;
     Ctx ctx;
@@ -3569,8 +3569,21 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
     ctx.finish = false;
     ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
     limits::check_picture(ctx.size.width, ctx.size.height, "the page");
-    const Box area{0, 0, ctx.size.width, ctx.size.height};
-    InkCanvas canvas = paper ? InkCanvas(*page.color, page_background(page, ctx.size, false)) : InkCanvas(*page.color, ctx.size);
+    const Box whole{0, 0, ctx.size.width, ctx.size.height};
+    if (region) {
+        *region = intersection(*region, whole);
+        if (region->width() <= 0 || region->height() <= 0) throw core::Error("value", "the part to composite is off the page");
+        // (PC6, review C P3-3: a part of the page as the page's tiles draw it — the whole drawn and cut where a layer works on
+        // the whole page, or the layers are not the page's own)
+        if (*region == whole) {
+            region.reset();
+        } else if (&layers != &page.layers || needs_whole_page(page)) {
+            return crop_inks(composite_ink_layers(page, layers, dpi, episode, paper), *region);
+        }
+    }
+    const Box area = region ? *region : whole;
+    InkCanvas canvas = paper ? InkCanvas(*page.color, region ? page_background(page, ctx.size, false).crop(area) : page_background(page, ctx.size, false))
+                             : InkCanvas(*page.color, size_of(area));
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (!core::has_groups(layers)) {
         for (const Layer& layer : layers) {
@@ -3592,6 +3605,7 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
         inside.contents = true;
         inside.shape_only = true;
         inside.onion = false;
+        if (region) inside.region = RenderRegion{area.x0, area.y0, area.width(), area.height()};
         Image shape = render(alone, dpi, inside, episode, omitted).image.convert("RGBA").getchannel(3);
         if (const std::optional<Image> mask = mask_shown(ctx, group, area, Resample::Bilinear)) shape = chops::multiply(shape, *mask);
         return shape;

@@ -103,8 +103,11 @@ Json link_record(const QString& file, std::string_view bytes, const std::optiona
     return link;
 }
 
-// The sha256 of a linked file, remembered by its place, size and time (looked at again only when it changed).
-std::string linked_sha(const QString& file) {
+// The sha256 of a linked file, remembered by its place, size and time (looked at again only when it changed). (PC6, the
+// review A's P3-7: the book names the file — an agent's link too —: a file larger than a file taken in, 256 MiB, or of
+// another size than the link's, is not read — none: "modified", as it is —, so a large file named does not hold the
+// window each time it looks)
+std::string linked_sha(const QString& file, const Json& link) {
     struct Seen {
         qint64 size = -1;
         QDateTime time;
@@ -112,6 +115,10 @@ std::string linked_sha(const QString& file) {
     };
     static std::map<QString, Seen> seen;
     const QFileInfo info(file);
+    if (info.size() < 0 || static_cast<std::uint64_t>(info.size()) > render::smart::kFileMaxBytes) return {};
+    if (const Json* bytes = core::get(link, "bytes"); bytes != nullptr && bytes->is_number_integer() && bytes->get<std::int64_t>() != info.size()) {
+        return {};
+    }
     Seen& was = seen[file];
     if (was.size == info.size() && was.time == info.lastModified() && !was.sha.empty()) return was.sha;
     try {
@@ -1278,7 +1285,8 @@ void MainWindow::check_links() {
         }
         const QString at = qpath(*file);
         watched << at;
-        now[id] = linked_sha(at) == core::py_str(core::py_get(link, "sha256", Json(""))) ? "ok" : "modified";
+        const std::string sha = linked_sha(at, link);  // (none — not read —: modified)
+        now[id] = !sha.empty() && sha == core::py_str(core::py_get(link, "sha256", Json(""))) ? "ok" : "modified";
     }
     bool newly_modified = false;
     for (const auto& [id, status] : now) {

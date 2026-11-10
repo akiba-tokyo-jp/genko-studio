@@ -9,7 +9,9 @@
 #include <QDir>
 #include <QTemporaryDir>
 
+#include <filesystem>
 #include <string>
+#include <vector>
 
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
@@ -21,6 +23,8 @@
 #include "render/ops_registry.hpp"
 #include "render/ops_variables.hpp"
 #include "render/png.hpp"
+#include "service/wording.hpp"
+#include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -371,6 +375,108 @@ private slots:
         } catch (const core::Error& error) {
             QVERIFY2(std::string(error.what()).find("larger than 4 GiB together") != std::string::npos, error.what());
         }
+    }
+
+    // (PC6, review A P3-6) A picture's path inside the text file's folder (its folders too) is read — relative, coming back
+    // into it, or absolute —; one outside it (an absolute path elsewhere, "..", a link out) is refused, said in Japanese,
+    // unless the person said so (`outside`: the window asks, the paths listed by data_sets_outside before anything is read).
+    void csvPicturesStayInTheFolder() {
+        QTemporaryDir dir;
+        QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("csv/sub")));
+        const core::Document doc = run(book(), Json{{"op", "set_variables"},
+                                                    {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}});
+        const core::Variables v = core::variables_of(doc);
+        const std::string blue = png_of(4, 4, {0, 0, 255, 255});
+        genko::test::write_bytes(dir.path() + QStringLiteral("/outside.png"), blue);
+        genko::test::write_bytes(dir.path() + QStringLiteral("/csv/sub/in.png"), blue);
+        const std::filesystem::path folder = (dir.path() + QStringLiteral("/csv")).toStdString();
+        std::filesystem::create_symlink(dir.path().toStdString() + "/outside.png", folder / "link.png");
+        formats::CsvOptions options;
+        options.folder = folder;
+        const auto refused = [&](const std::string& path) {
+            try {
+                formats::read_data_sets_csv("DataSet,img\nA," + path + "\n", v, options);
+            } catch (const core::Error& error) {
+                const std::string said = error.what();
+                QVERIFY2(said.find("row 2: the picture " + path + " is not in the text file's folder") != std::string::npos, said.c_str());
+                QVERIFY(genko::wording::error(QString::fromStdString(said)).contains(QStringLiteral("テキストファイルと同じフォルダー")));
+                return;
+            }
+            QFAIL(path.c_str());
+        };
+        const std::string outside_abs = dir.path().toStdString() + "/outside.png";
+        refused(outside_abs);
+        refused("../outside.png");
+        refused("sub/../../outside.png");
+        refused("link.png");
+        // (inside: relative, coming back in, or absolute — compared where it leads — read as before)
+        const std::string inside_abs = dir.path().toStdString() + "/csv/sub/in.png";
+        const formats::CsvRead read = formats::read_data_sets_csv("DataSet,img\nA,sub/in.png\nB,sub/../sub/in.png\nC," + inside_abs + "\n", v, options);
+        QCOMPARE(read.files_read, std::size_t(1));
+        QCOMPARE(read.data_sets[0]["values"][0]["value"]["name"], Json("in.png"));
+        QCOMPARE(read.data_sets[2]["values"][0]["value"]["asset"], Json(core::bytes_ref(blue)));
+        // (those outside listed before anything is read — their rows and paths as written —, and read when the person says so)
+        const std::string text = "DataSet,img\nA,sub/in.png\nB,../outside.png\nC," + outside_abs + "\nD,link.png\n";
+        const std::vector<formats::CsvOutside> seen = formats::data_sets_outside(text, v, options);
+        QCOMPARE(seen.size(), std::size_t(3));
+        QCOMPARE(seen[0].row, std::size_t(3));
+        QCOMPARE(seen[0].path, std::string("../outside.png"));
+        QCOMPARE(seen[1].path, outside_abs);
+        QCOMPARE(formats::outside_refusal(seen[0]), std::string("row 3: the picture ../outside.png is not in the text file's folder"));
+        QVERIFY(formats::data_sets_outside("DataSet,img\nA,sub/in.png\nB," + inside_abs + "\n", v, options).empty());
+        options.outside = true;
+        const formats::CsvRead taken = formats::read_data_sets_csv(text, v, options);
+        QCOMPARE(taken.data_sets.size(), std::size_t(4));
+        QCOMPARE(taken.data_sets[1]["values"][0]["value"]["name"], Json("outside.png"));
+        QCOMPARE(taken.files_read, std::size_t(2));  // (in.png, and outside.png once — three ways of naming it)
+    }
+
+    // (PC6, review C P2-5) With a store (a saved book's asset store) each picture is put there as it is read and given by its
+    // ref alone — the op carries no picture's bytes, and takes the ref from the book's folder —; without one, the bytes the op
+    // carries are at most so many together (made small here), said in Japanese.
+    void csvPicturesIntoTheStore() {
+        QTemporaryDir dir;
+        const std::filesystem::path root = dir.path().toStdString();
+        core::Document doc = run(book(), Json{{"op", "set_variables"},
+                                              {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}});
+        doc.asset_dir = root / "b.genko";
+        std::filesystem::create_directories(*doc.asset_dir);
+        const core::Variables v = core::variables_of(doc);
+        const std::string blue = png_of(4, 4, {0, 0, 255, 255}), red = png_of(4, 4, {255, 0, 0, 255});
+        genko::test::write_bytes(dir.path() + QStringLiteral("/blue.png"), blue);
+        genko::test::write_bytes(dir.path() + QStringLiteral("/red.png"), red);
+        formats::CsvOptions options;
+        options.folder = root;
+        std::vector<std::string> kept;
+        options.store = [&](const std::string& bytes, const std::string& suffix) {
+            kept.push_back(suffix);
+            return storage::AssetStore(*doc.asset_dir).put_bytes(bytes, suffix);
+        };
+        const formats::CsvRead read = formats::read_data_sets_csv("DataSet,img\nA,blue.png\nB,red.png\nC,blue.png\n", v, options);
+        QCOMPARE(kept, (std::vector<std::string>{".png", ".png"}));
+        for (const Json& set : read.data_sets) {
+            const Json& value = set["values"][0]["value"];
+            QVERIFY2(!value.contains("data") && value["asset"].get<std::string>().starts_with("sha256:"), value.dump().c_str());
+        }
+        QCOMPARE(read.data_sets[1]["values"][0]["value"]["asset"], Json(core::bytes_ref(red)));
+        doc = run(doc, Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}});
+        QVERIFY(!doc.smart_files.contains(core::bytes_ref(blue)) && !doc.smart_files.contains(core::bytes_ref(red)));  // (read from the folder)
+        QCOMPARE(core::variables_of(doc).data_sets.size(), std::size_t(3));
+        const core::Document on = run(doc, Json{{"op", "apply_data_set"}, {"name", "B"}});
+        QVERIFY(layer(on, "photo").raster_png != nullptr);
+        // (without a store: the bytes carried, at most so many)
+        formats::CsvOptions carried;
+        carried.folder = root;
+        carried.carried_most = blue.size() + red.size() - 1;
+        try {
+            formats::read_data_sets_csv("DataSet,img\nA,blue.png\nB,red.png\n", v, carried);
+            QFAIL("not refused");
+        } catch (const core::Error& error) {
+            QVERIFY2(std::string(error.what()).find("larger than 256 MiB together: save the book first") != std::string::npos, error.what());
+            QVERIFY(genko::wording::error(QString::fromUtf8(error.what())).contains(QStringLiteral("原稿を保存してから")));
+        }
+        carried.carried_most = blue.size() + red.size();
+        QVERIFY(formats::read_data_sets_csv("DataSet,img\nA,blue.png\nB,red.png\n", v, carried).data_sets[1]["values"][0]["value"].contains("data"));
     }
 };
 

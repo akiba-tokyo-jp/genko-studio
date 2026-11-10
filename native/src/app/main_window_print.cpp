@@ -8,6 +8,7 @@
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QMenu>
+#include <QPointer>
 #include <QPrinter>
 #include <QPrinterInfo>
 #include <QProgressDialog>
@@ -22,6 +23,7 @@
 #include "app/open_dialog.hpp"
 #include "app/print_dialog.hpp"
 #include "app/session.hpp"
+#include "app/stoppable.hpp"
 #include "core/actor.hpp"
 #include "core/paths.hpp"
 #include "formats/exporting.hpp"
@@ -195,31 +197,38 @@ void MainWindow::contact_sheet_dialog() {
     const auto inputs = inputs_of(dialog.source);
     if (!inputs) return;
     const QString title = QStringLiteral("コンタクトシート II");
-    QProgressDialog progress(QStringLiteral("%1を作っています…").arg(title), QStringLiteral("中止"), 0, static_cast<int>(inputs->items.size()), this);
-    progress.setWindowTitle(title);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(500);
     automate::Options options;
     options.actor = core::Actor(session_->actor());
     options.open = file_open_options();
     options.book_brushes = false;  // (the app follows its brushes itself)
-    options.cancelled = [&progress] {
-        QCoreApplication::processEvents();
-        return progress.wasCanceled();
-    };
-    options.progress = [&progress](std::size_t done, std::size_t, const fs::path& now) {
-        progress.setValue(static_cast<int>(done));
-        if (!now.empty()) progress.setLabelText(QDir::toNativeSeparators(QString::fromStdString(core::path_to_utf8(now.filename()))));
-    };
-    automate::ContactSheetResult result;
+    // (PC6, the review's P2-4: on a worker with its progress window and 中止 — app/stoppable.hpp —, reading the files only;
+    // the sheets made so far kept when it is stopped, as before, and opened here)
+    const QPointer<MainWindow> alive(this);
+    auto told = std::make_shared<StoppableTold>();
+    auto made = std::make_shared<std::optional<automate::ContactSheetResult>>();
     try {
-        result = automate::contact_sheet(inputs->items, dialog.sheet(), options);
+        (void)run_stoppable(
+            this, title, QStringLiteral("%1を作っています…").arg(title),
+            [items = inputs->items, sheet = dialog.sheet(), options, told, made](const std::function<bool()>& stopped) mutable {
+                options.cancelled = stopped;
+                options.progress = [told](std::size_t done, std::size_t total, const fs::path& now) {
+                    told->put(total == 0 ? 1.0 : static_cast<double>(done) / static_cast<double>(total),
+                              now.empty() ? QString() : QDir::toNativeSeparators(QString::fromStdString(core::path_to_utf8(now.filename()))));
+                };
+                *made = automate::contact_sheet(items, sheet, options);
+                return true;
+            },
+            told);
     } catch (const std::exception& error) {
-        progress.reset();
-        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
         return;
     }
-    progress.reset();
+    if (!alive) return;
+    if (!*made) {  // (stopped before it could say anything)
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
+    automate::ContactSheetResult result = std::move(**made);
     const std::size_t sheets = result.books.size();
     for (core::Document& sheet : result.books) add_picture_book(std::move(sheet), {});
     QStringList said;

@@ -325,7 +325,14 @@ public:
     // its fill opacity as iOpa, its Blend If as the record's blending ranges
     void note_style(const render::PageLayer& layer) {
         style_ = nullptr;
-        if (!layer.section.empty()) return;  // (a pen layer's group: its layers' records carry its style)
+        // (PC6, the review of pc6-E's P2-1: a pen layer written as a group of its parts and lines — the group's record carries
+        // its style, lfxs as Photoshop's groups hold effects; its parts', made of no layer, none. A folder takes no style.)
+        if (layer.section == "group" && page_ != nullptr && !layer.id.empty()) {
+            for (const core::Layer& own : page_->layers)
+                if (own.id == layer.id && own.style && !core::is_group(own) && own.kind != core::LayerKind::Folder) style_ = &own;
+            return;
+        }
+        if (!layer.section.empty()) return;
         if (layer.styled != nullptr && layer.id.empty()) {  // (a placed picture's, the ink layer's lines: review P2-6)
             if (layer.styled->style) style_ = layer.styled;
             return;
@@ -368,7 +375,7 @@ public:
         }
         return out;
     }
-    std::string style_blocks() const {
+    std::string style_blocks(bool group = false) const {
         if (style_ == nullptr) return {};
         const core::Json& style = *style_->style;
         std::string out;
@@ -382,7 +389,7 @@ public:
             canvas.height_px = size_.height;
             canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
             canvas.book = book_;
-            if (const std::string payload = render::psd_effects::lfx2(style, canvas); !payload.empty()) out += tagged("lfx2", payload);
+            if (const std::string payload = render::psd_effects::lfx2(style, canvas); !payload.empty()) out += tagged(group ? "lfxs" : "lfx2", payload);
         }
         if (const double fill = core::style_fill_opacity(style); fill < 1.0) out += tagged("iOpa", render::psd_effects::iopa(fill));
         return out;
@@ -447,7 +454,7 @@ public:
             section_clip_ = layer.settings && layer.clip && page_ != nullptr &&
                             std::any_of(page_->layers.begin(), page_->layers.end(), [&](const core::Layer& l) { return l.id == layer.id && core::is_group(l); });
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
-                    layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask) + basics_blocks());
+                    layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask) + style_blocks(true) + basics_blocks());
             return;
         }
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
@@ -789,7 +796,14 @@ private:
         put_u8(records_, 0);
         std::string extra = mask_data_of(mask_plane.has_value());  // (a pen layer's mask settings and vector mask's too)
         const core::Layer* keep = type == 3 ? nullptr : std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: a group's own)
-        const std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        // (PC6: a pen layer's group's Blend If, as a record's — the ranges kept while they say it)
+        if (const core::Layer* styled = type == 3 ? nullptr : std::exchange(style_, nullptr)) {
+            const core::Json* blend_if = core::get(*styled->style, "blend_if");
+            const core::Json now = blend_if != nullptr ? *blend_if : core::Json::array();
+            if (ranges.empty() || !core::same_json_unordered(render::psd_effects::blend_if_of(ranges, channel_names()), now))
+                ranges = blend_if != nullptr ? render::psd_effects::ranges_of(*blend_if, channel_names()) : std::string();
+        }
         put_u32(extra, u32_of(ranges.size()));
         extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;

@@ -8,6 +8,7 @@
 #include "core/json.hpp"
 #include "core/prefs_table.hpp"
 #include "core/session_file.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::api {
 
@@ -33,6 +34,7 @@ int answer(const core::prefs::Outcome& out, bool ascii) {
 }
 
 std::optional<Json> parse(const QString& text) {
+    if (core::too_deep(text.toStdString())) return std::nullopt;  // (PC6, the review's P3-2: as text that is not JSON)
     try {
         return Json::parse(text.toStdString());
     } catch (const std::exception&) {

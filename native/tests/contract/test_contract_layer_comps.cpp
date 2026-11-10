@@ -22,6 +22,7 @@
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "core/layer_comps.hpp"
+#include "core/layer_styles.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/export.hpp"
@@ -423,6 +424,49 @@ private slots:
         process.start(tool, QStringList{QStringLiteral("check"), file});
         QVERIFY(process.waitForFinished(600000));
         QVERIFY2(process.exitCode() == 0, process.readAllStandardOutput().constData());
+    }
+
+    // PC6 (layer-styles@1): a comp's appearance keeps the layer's style in a .pcraft — its effects upstream's in the comp's
+    // state, its fill opacity — and reads it back the same (before: its effects left out, said); upstream's reader reads it.
+    void pcraftCompsKeepTheirStyles() {
+        core::Document doc = book();
+        const Json style{{"effects", Json::array({Json{{"kind", "drop_shadow"}, {"distance_mm", 1}}, Json{{"kind", "color_overlay"}, {"rgb", Json::array({0, 0, 255})}}})},
+                         {"fill_opacity", 0.5}};
+        doc = run(doc, Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "pic"}, {"style", style}});
+        doc = run(doc, op("new_layer_comp", {{"name", "S"}}));
+        const auto state_of = [](const core::Document& d, const std::string& layer) -> std::optional<core::CompLayerState> {
+            for (const core::CompLayerState& s : d.page(0).layer_comps->comps[0].layers)
+                if (s.layer == layer) return s;
+            return std::nullopt;
+        };
+        const auto before = state_of(doc, "pic");
+        QVERIFY(before && before->appearance && before->appearance->style);
+        std::vector<std::string> notes;
+        const std::string bytes = formats::pcraft_bytes(doc, 0, {}, &notes);
+        for (const std::string& n : notes) QVERIFY2(n.find("レイヤーカンプ") == std::string::npos, n.c_str());
+        const formats::Opened opened = formats::open_file(bytes, "styled_comps.pcraft");
+        for (const std::string& n : opened.notes) QVERIFY2(n.find("レイヤーカンプ") == std::string::npos, n.c_str());
+        const core::Layer* pic = titled(opened.doc, "pic");
+        QVERIFY(pic != nullptr && pic->style);
+        const auto after = state_of(opened.doc, pic->id);
+        QVERIFY(after && after->appearance && after->appearance->style);
+        QVERIFY2(core::same_json_unordered(*after->appearance->style, *before->appearance->style), after->appearance->style->dump().c_str());
+        QCOMPARE(after->appearance->opacity, before->appearance->opacity);
+        const QString tool = qEnvironmentVariable("GENKO_PCRAFT_CHECK");
+        if (tool.isEmpty()) return;
+        const QString file = path(QStringLiteral("styled_comps.pcraft"));
+        genko::test::write_bytes(file, bytes);
+        QProcess process;
+        process.start(tool, QStringList{QStringLiteral("dump"), file});
+        QVERIFY(process.waitForFinished(600000));
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+        const Json theirs = Json::parse(process.readAllStandardOutput().toStdString());
+        bool found = false;
+        for (const Json& s : theirs["document"]["layer_comps"][0]["states"]) {
+            if (s["appearance"].is_null()) continue;
+            found = found || (s["appearance"]["effects"]["items"].size() == 2 && s["appearance"]["effects"]["items"][0].contains("DropShadow"));
+        }
+        QVERIFY2(found, theirs["document"]["layer_comps"].dump().c_str());
     }
 };
 

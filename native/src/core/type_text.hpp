@@ -172,6 +172,10 @@ std::shared_ptr<const StoryLine> shared_record(StoryLine record);
 
 // Is the layer a type layer (its kind; its record held)?
 bool is_type_layer(const Layer& layer);
+// Is the record set by the OpenType typesetting — the one that reads the book's styles, Basic Paragraph too (PC5 G-b;
+// render::text::sets_opentype is this)? Its native_type sets it so (shaping "opentype", or any of char, para, runs,
+// paragraphs, char_style, para_style), or a line across whose style holds features. Any other is set as before.
+bool sets_opentype(const StoryLine& line);
 
 // The book uses type@1 (above). After an op: its features given type@1 when it does (never taken away here: the writer does).
 bool uses_type(const Document& doc);

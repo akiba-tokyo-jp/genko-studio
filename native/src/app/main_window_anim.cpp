@@ -12,6 +12,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QPointer>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QStandardItemModel>
@@ -24,6 +25,7 @@
 #include "app/plugins_dialog.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
+#include "app/stoppable.hpp"
 #include "app/timeline.hpp"
 #include "service/wording.hpp"
 #include "core/anim.hpp"
@@ -258,15 +260,31 @@ void TimelapseDialog::run() {
     const QString path = ask::save_path(this, QStringLiteral("タイムラプスの保存先"), QString::fromStdString(core::path_to_utf8(start)),
                                         QStringLiteral("*.%1").arg(ext));
     if (path.isEmpty()) return;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+    // (PC6, the review's P2-4: written on a worker with its progress window and 中止 — app/stoppable.hpp —, as write() writes
+    // it: the recorded pictures read and the movie made there, MP4's ffmpeg waited for there and stopped by 中止 too)
+    std::optional<double> fit;
+    if (seconds->value() != 0) fit = seconds->value();
+    const QPointer<TimelapseDialog> alive(this);
+    const QString title = QStringLiteral("タイムラプスを書き出し");
+    // (the file put in place: kept here even when 中止 came after it — the review's P3-3 —, as ビデオをレンダリング does)
+    auto whole = std::make_shared<std::optional<std::filesystem::path>>();
     try {
-        written = write(core::path_from_utf8(path.toStdString()));
+        (void)run_stoppable(this, title, QStringLiteral("タイムラプスを書き出しています…"),
+                            [project = project_, dest = core::path_from_utf8(path.toStdString()), asked = page(), rate = fps->value(), fit,
+                             format = movie->currentData().toString().toStdString(), whole](const std::function<bool()>&) {
+                                *whole = render::timelapse::export_timelapse(project, dest, asked, rate, fit, format);
+                                return true;
+                            });
     } catch (const std::exception& error) {
-        QApplication::restoreOverrideCursor();
-        ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
+        if (alive) ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
         return;
     }
-    QApplication::restoreOverrideCursor();
+    if (!alive) return;
+    if (!*whole) {  // (stopped: nothing written — the movie is written beside its name and moved there whole —, said here)
+        counted->setText(QStringLiteral("タイムラプスの書き出しを中止しました（何も書き出していません）"));
+        return;
+    }
+    written = std::move(*whole);
     accept();
 }
 

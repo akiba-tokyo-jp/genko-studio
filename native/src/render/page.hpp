@@ -143,8 +143,9 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof);
 // color-mode@1: layers of a CMYK or Lab page (as given, in order) composited as the page composites them (proof), onto
 // nothing or (paper) its paper, over the whole page at dpi: their inks with alpha, at the page's depth. What merging
 // them makes on such a page (render/ink_edit).
+// With `region` (PC6, review C P3-3): that part of the page alone (its pixels, as the whole cut there).
 core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
-                                     bool paper = false);
+                                     bool paper = false, std::optional<Box> region = std::nullopt);
 
 // PC4 E6 (layer-styles@1): `layers` (of `page`, in their order) composited alone over nothing as the page draws them —
 // their styles too — over the whole page at `dpi`: on a page of inks its inks (with their alpha, at its depth); else the

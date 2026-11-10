@@ -45,6 +45,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "service/studio_service.hpp"
+#include "service/wording.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
@@ -102,6 +103,15 @@ std::vector<double> middle(const core::Document& doc, std::int64_t frame) {
     options.at_frame = true;
     const render::Image drawn = render::render_page(render::footage::frame_page(doc.page(0), frame, &doc), 50, options, &doc).image.convert("RGB");
     return drawn.getpixel(drawn.width() / 2, drawn.height() / 2);
+}
+
+// A point of a page (mm) as it shows at that frame (50 dpi).
+std::vector<double> at_mm(const core::Document& doc, std::size_t page, std::int64_t frame, double x_mm, double y_mm) {
+    render::RenderOptions options;
+    options.mode = "proof";
+    options.at_frame = true;
+    const render::Image drawn = render::render_page(render::footage::frame_page(doc.page(page), frame, &doc), 50, options, &doc).image.convert("RGB");
+    return drawn.getpixel(static_cast<int>(x_mm / 25.4 * 50), static_cast<int>(y_mm / 25.4 * 50));
 }
 
 bool near(const std::vector<double>& px, const int rgb[3], int tolerance = 8) {
@@ -167,6 +177,12 @@ class TestContractVideo : public QObject {
         core::Document doc = book();
         const Json f = footage(doc);
         return run(doc, op("add_video_layer", {{"footage", f}, {"id", "v"}}));
+    }
+    // The same with its footage in a box off the page's middle — 20 × 15 mm at (10, 10), the four colours' 4:3 filling it —
+    // and frame 2 altered (its cel the footage's green there): a footage or a cel left where it was would show elsewhere.
+    core::Document off_book() {
+        core::Document doc = run(video_book(), op("set_video_layer", {{"folder", "v"}, {"placement_mm", Json::array({10, 10, 20, 15})}}));
+        return run(doc, op("video_alter", {{"folder", "v"}, {"at", 2}}));
     }
     static const Json& frames_of(const core::Document& doc) { return core::video_row(doc.page(0), Json("v"))->at("frames"); }
 
@@ -279,6 +295,289 @@ private slots:
         doc = run(doc, op("video_alter", {{"folder", "v"}, {"at", 1}}));
         doc = run(doc, op("delete_layers", {{"ids", Json::array({frames_of(doc)[0][1]})}}));
         QVERIFY(frames_of(doc)[0][1].is_null());
+    }
+
+    // PC6 review B P2-3: a page copied (duplicate_page) or brought from another book (import_pages) — its layers under new
+    // ids —: the video row's altered frame names the copy's cel, which shows there (before: the footage showed, the cel
+    // hidden in the folder).
+    void alteredFramesFollowTheirCopies() {
+        core::Document doc = run(video_book(), op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        const std::string cel = frames_of(doc)[1][1].get<std::string>();
+        const auto altered_on = [](const core::Document& d, std::size_t page) {
+            const Json& track = core::anim::spec(d.page(page))->at("tracks").at(0);
+            const core::VideoShown shown = core::video_shown(d.page(page), track.at("folder"), track.at("video"), 2);
+            const bool held = std::any_of(d.page(page).layers.begin(), d.page(page).layers.end(), [&](const core::Layer& l) {
+                return l.id == shown.cel && l.parent_id == track.at("folder");
+            });
+            return std::make_pair(shown.kind == core::VideoShown::Kind::Cel && held, shown.cel);
+        };
+        const core::Document twice = run(doc, Json{{"op", "duplicate_page"}, {"page", 1}});
+        QCOMPARE(twice.pages.size(), std::size_t(2));
+        const auto copied = altered_on(twice, 1);
+        QVERIFY2(copied.first, copied.second.c_str());
+        QVERIFY(copied.second != cel);
+        QVERIFY(altered_on(twice, 0) == std::make_pair(true, cel));
+        // (作品の結合: the other book's page under new ids)
+        const fs::path dir = fspath(QStringLiteral("altered.genko"));
+        genko::test::write_project(doc, dir);
+        const core::Document merged = run(book(), Json{{"op", "import_pages"}, {"from", dir.string()}});
+        QCOMPARE(merged.pages.size(), std::size_t(2));
+        const auto brought = altered_on(merged, 1);
+        QVERIFY2(brought.first, brought.second.c_str());
+    }
+
+    // (the review of PC6-B's P3-2) A video layer copied (duplicate_layers, on its page or onto another) is a video layer:
+    // its row copied with the copy's folder and altered cel; onto a page that is no animation, the page's timeline with it.
+    void videoLayersCopied() {
+        const core::Document doc = run(off_book(), Json{{"op", "add_page"}});
+        QCOMPARE(doc.pages.size(), std::size_t(2));
+        const std::string cel = frames_of(doc)[1][1].get<std::string>();
+        const auto copied_on = [&](const core::Document& d, std::size_t page, const std::string& folder) {
+            const Json* row = core::video_row(d.page(page), Json(folder));
+            QVERIFY(row != nullptr);
+            const Json& altered = row->at("frames")[1][1];
+            QVERIFY(altered.is_string() && altered != Json(cel));
+            QVERIFY(std::any_of(d.page(page).layers.begin(), d.page(page).layers.end(),
+                                [&](const core::Layer& l) { return l.id == altered.get<std::string>() && l.parent_id == Json(folder); }));
+            QCOMPARE(row->at("footage"), core::video_row(doc.page(0), Json("v"))->at("footage"));
+        };
+        const core::ApplyResult here = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}})}),
+                                                                                    core::Actor("human:test"));
+        const auto folder_of = [](const core::Document& d, std::size_t page, const Json& ids) {
+            for (const Json& id : ids)
+                for (const core::Layer& l : d.page(page).layers)
+                    if (l.id == id.get<std::string>() && l.kind == core::LayerKind::Folder) return l.id;
+            return std::string();
+        };
+        const std::string folder = folder_of(here.doc, 0, here.results[0]["ids"]);
+        QCOMPARE(core::anim::spec(here.doc.page(0))->at("tracks").size(), std::size_t(2));
+        copied_on(here.doc, 0, folder);
+        const core::ApplyResult there = core::CommandBus(render::ops_registry()).apply(
+            doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}, {"to_page", 2}})}), core::Actor("human:test"));
+        const std::string moved = folder_of(there.doc, 1, there.results[0]["ids"]);
+        QVERIFY(core::anim::spec(there.doc.page(1)) != nullptr);
+        QCOMPARE(core::anim::fps_of(there.doc.page(1)), core::anim::fps_of(doc.page(0)));
+        QCOMPARE(core::anim::frames_of(there.doc.page(1)), core::anim::frames_of(doc.page(0)));
+        copied_on(there.doc, 1, moved);
+        QVERIFY(near(at_mm(there.doc, 1, 3, 20, 17.5), kColours[2]));  // (its footage there)
+        QVERIFY(near(at_mm(there.doc, 1, 2, 20, 17.5), kColours[1]));  // (its altered frame)
+        // (B2's P3-4: onto an animation of another speed — the footage laid at 10 fps would run at 5 —: refused)
+        const core::Document slow = run(doc, Json{{"op", "set_animation"}, {"page", 2}, {"fps", 5}, {"frames", 2}});
+        const std::string refused = refusal(slow, op("duplicate_layers", {{"ids", Json::array({"v"})}, {"to_page", 2}}));
+        QVERIFY2(refused.find("a video layer is copied onto an animation of the same frame rate only") != std::string::npos, refused.c_str());
+        QVERIFY(wording::error(QString::fromStdString(refused)).contains(QStringLiteral("フレームレートの同じ")));
+        // (onto one of the same speed but shorter: the timeline as long as the row)
+        const core::Document brief = run(doc, Json{{"op", "set_animation"}, {"page", 2}, {"fps", 10}, {"frames", 2}});
+        const core::Document longer = run(brief, op("duplicate_layers", {{"ids", Json::array({"v"})}, {"to_page", 2}}));
+        QCOMPARE(core::anim::frames_of(longer.page(1)), core::anim::frames_of(doc.page(0)));
+    }
+
+    // PC6 review B P2-4: an artboard made of a video layer (artboard_from_layers) takes its row — the page's timeline with
+    // it, the altered cel named under its new id —, the page it came from losing the row with the folder; a smart object is
+    // not made of an animation folder or its cels (refused, in the window's words).
+    void videoLayersMovedOrRefused() {
+        core::Document doc = off_book();
+        const std::string cel = frames_of(doc)[1][1].get<std::string>();
+        const core::ApplyResult made = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("artboard_from_layers", {{"ids", Json::array({"v"})}})}),
+                                                                                    core::Actor("human:test"));
+        const core::Document& boards = made.doc;
+        QCOMPARE(boards.pages.size(), std::size_t(2));
+        const Json* anim = core::anim::spec(boards.page(1));
+        QVERIFY(anim != nullptr);
+        QCOMPARE(anim->at("tracks").size(), std::size_t(1));
+        const Json& track = anim->at("tracks")[0];
+        QVERIFY(core::is_video_row(track));
+        QCOMPARE(core::anim::frames_of(boards.page(1)), core::anim::frames_of(doc.page(0)));
+        QCOMPARE(core::anim::fps_of(boards.page(1)), core::anim::fps_of(doc.page(0)));
+        const std::string moved_cel = track["video"]["frames"][1][1].get<std::string>();
+        QVERIFY(moved_cel != cel);
+        QVERIFY(std::any_of(boards.page(1).layers.begin(), boards.page(1).layers.end(), [&](const core::Layer& l) { return l.id == moved_cel; }));
+        QCOMPARE(track["video"]["footage"], core::video_row(doc.page(0), Json("v"))->at("footage"));
+        QVERIFY(core::anim::spec(boards.page(0))->at("tracks").empty());
+        // (its footage box moved with the crop that made the artboard: the footage frame where the cel was)
+        const Json& box = track["video"]["placement_mm"];
+        const double cx = box[0].get<double>() + box[2].get<double>() / 2, cy = box[1].get<double>() + box[3].get<double>() / 2;
+        QVERIFY(near(at_mm(boards, 1, 3, cx, cy), kColours[2]));
+        QVERIFY(near(at_mm(boards, 1, 2, cx, cy), kColours[1]));
+        // (a smart object: refused, the folder and its cel alike)
+        for (const Json& ids : {Json::array({"v"}), Json::array({cel})}) {
+            const std::string refused = refusal(doc, op("smart_convert", {{"ids", ids}}));
+            QVERIFY2(refused.find("an animation folder or its cels (a video layer's too) cannot go into a smart object") != std::string::npos, refused.c_str());
+            QVERIFY(wording::error(QString::fromStdString(refused)).contains(QStringLiteral("スマートオブジェクトにできません")));
+        }
+    }
+
+    // PC6 review B P2-5: the page size ops move a video layer's footage box with everything else (the crop's offset; the
+    // image size's scale), so the footage and its altered cels stay together; a turn or a mirror of the page is refused (the
+    // footage is laid upright in its box), in the window's words.
+    void footageBoxMovesWithThePage() {
+        core::Document doc = off_book();
+        const Json was = core::video_row(doc.page(0), Json("v"))->at("placement_mm");
+        const core::ApplyResult cropped = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("crop_page", {{"rect", Json::array({5, 5, 60, 50})}})}),
+                                                                                       core::Actor("human:test"));
+        const Json& offset = cropped.results[0]["pages"][0]["offset_mm"];
+        const Json now = core::video_row(cropped.doc.page(0), Json("v"))->at("placement_mm");
+        for (int k = 0; k < 2; ++k) QVERIFY2(std::fabs(now[k].get<double>() - (was[k].get<double>() + offset[k].get<double>())) < 1e-3, now.dump().c_str());
+        QCOMPARE(now[2], was[2]);
+        QCOMPARE(now[3], was[3]);
+        const double cx = now[0].get<double>() + now[2].get<double>() / 2, cy = now[1].get<double>() + now[3].get<double>() / 2;
+        QVERIFY(near(at_mm(cropped.doc, 0, 3, cx, cy), kColours[2]));  // (the footage)
+        QVERIFY(near(at_mm(cropped.doc, 0, 2, cx, cy), kColours[1]));  // (the altered cel, the pixels moved)
+        const core::Document hidden = run(cropped.doc, op("set_video_layer", {{"folder", "v"}, {"show_altered", false}}));
+        QVERIFY(near(at_mm(hidden, 0, 2, cx, cy), kColours[1]));  // (the footage where the cel is)
+        // (画像解像度: twice as large, the box with it)
+        const core::Document larger = run(doc, op("resize_pages", {{"width_mm", 192}, {"height_mm", 144}}));
+        const Json big = core::video_row(larger.page(0), Json("v"))->at("placement_mm");
+        for (int k = 0; k < 4; ++k) QVERIFY2(std::fabs(big[k].get<double>() - 2 * was[k].get<double>()) < 1e-3, big.dump().c_str());
+        QVERIFY(!core::video_row(larger.page(0), Json("v"))->contains("transform"));
+        // (B2's P3-3: twice as wide, as high as it was — a footage that keeps its shape in its box is stretched with the cel,
+        // the row's transform: where the cel's right end is, the footage too)
+        {
+            const core::Document wide = run(doc, op("resize_pages", {{"width_mm", 192}, {"height_mm", 72}}));
+            const Json& row = *core::video_row(wide.page(0), Json("v"));
+            QVERIFY2(row.contains("transform"), row.dump().c_str());
+            QCOMPARE(row.at("placement_mm"), was);
+            QVERIFY(near(at_mm(wide, 0, 3, 57, 17.5), kColours[2]));  // (x 2 × 28.5: inside the stretched footage, past a 4:3 one)
+            QVERIFY(near(at_mm(wide, 0, 2, 57, 17.5), kColours[1]));
+            QVERIFY(near(at_mm(wide, 0, 3, 62, 17.5), kWhite));
+        }
+        // (turned, mirrored or at an angle — PhotoCraft's, PC6 —: the footage turns with the page, the row's transform;
+        // a box off the page's middle, so a footage left where it was would show elsewhere)
+        const core::Document off = doc;
+        const Json row_was = *core::video_row(off.page(0), Json("v"));
+        const auto through = [](const Json& t, double x, double y) {
+            return std::array<double, 2>{t[0].get<double>() * x + t[2].get<double>() * y + t[4].get<double>(),
+                                         t[1].get<double>() * x + t[3].get<double>() * y + t[5].get<double>()};
+        };
+        for (const Json& turn : {Json{{"turn", "90cw"}}, Json{{"turn", "90ccw"}}, Json{{"turn", "180"}}, Json{{"turn", "flip_h"}},
+                                 Json{{"turn", "flip_v"}}, Json{{"angle", 30}}}) {
+            const core::Document turned = run(off, op("rotate_pages", turn));
+            const Json& row = *core::video_row(turned.page(0), Json("v"));
+            QCOMPARE(row.at("placement_mm"), row_was.at("placement_mm"));
+            QVERIFY2(row.contains("transform"), turn.dump().c_str());
+            const auto c = through(row.at("transform"), 20, 17.5);  // (the box's middle, where the map takes it)
+            QVERIFY2(near(at_mm(turned, 0, 3, c[0], c[1]), kColours[2]), turn.dump().c_str());  // (the footage)
+            QVERIFY2(near(at_mm(turned, 0, 2, c[0], c[1]), kColours[1]), turn.dump().c_str());  // (the altered cel's pixels)
+            const core::Document shown = run(turned, op("set_video_layer", {{"folder", "v"}, {"show_altered", false}}));
+            QVERIFY2(near(at_mm(shown, 0, 2, c[0], c[1]), kColours[1]), turn.dump().c_str());
+            QVERIFY2(near(at_mm(turned, 0, 3, 20, 17.5), kWhite) || (std::fabs(c[0] - 20) < 10 && std::fabs(c[1] - 17.5) < 7.5), turn.dump().c_str());
+        }
+        // (turned back: the transform goes, the row as it was)
+        const core::Document there = run(off, op("rotate_pages", {{"turn", "180"}}));
+        QCOMPARE(*core::video_row(run(there, op("rotate_pages", {{"turn", "180"}})).page(0), Json("v")), row_was);
+        QCOMPARE(*core::video_row(run(run(off, op("rotate_pages", {{"turn", "flip_h"}})), op("rotate_pages", {{"turn", "flip_h"}})).page(0), Json("v")), row_was);
+        // (turned, then cropped: the crop after the turn, in the transform)
+        const core::Document quarter = run(off, op("rotate_pages", {{"turn", "90cw"}}));
+        const core::ApplyResult cut = core::CommandBus(render::ops_registry()).apply(quarter, Json::array({op("crop_page", {{"rect", Json::array({5, 5, 60, 60})}})}),
+                                                                                   core::Actor("human:test"));
+        {
+            const Json& row = *core::video_row(cut.doc.page(0), Json("v"));
+            QCOMPARE(row.at("placement_mm"), row_was.at("placement_mm"));
+            const auto c = through(row.at("transform"), 20, 17.5);
+            QVERIFY(near(at_mm(cut.doc, 0, 3, c[0], c[1]), kColours[2]));
+            // (B2's P3-1: the cel's pixels — moved by the page's pixels, apart from the transform — where the transform puts
+            // the box's middle: the order the maps are made one in, fixed; and the transform's value itself — the turn, then
+            // the crop's move)
+            QVERIFY(near(at_mm(cut.doc, 0, 2, c[0], c[1]), kColours[1]));
+            const Json& moved_by = cut.results[0]["pages"][0]["offset_mm"];
+            const Json& t = row.at("transform");
+            const Json& t0 = core::video_row(quarter.page(0), Json("v"))->at("transform");
+            for (int k = 0; k < 4; ++k) QCOMPARE(t[k], t0[k]);
+            QVERIFY(std::fabs(t[4].get<double>() - (t0[4].get<double>() + moved_by[0].get<double>())) < 1e-3);
+            QVERIFY(std::fabs(t[5].get<double>() - (t0[5].get<double>() + moved_by[1].get<double>())) < 1e-3);
+        }
+        // (a turn and a flip, which do not commute, and a crop at an angle: the footage and the cel where the transform says)
+        for (const std::vector<Json>& turns : {std::vector<Json>{Json{{"turn", "90cw"}}, Json{{"turn", "flip_h"}}},
+                                               std::vector<Json>{Json{{"turn", "flip_h"}}, Json{{"turn", "90cw"}}},
+                                               std::vector<Json>{Json{{"turn", "90cw"}}, Json{{"turn", "90cw"}}, Json{{"turn", "90ccw"}}}}) {
+            core::Document d = off;
+            for (const Json& turn : turns) d = run(d, op("rotate_pages", turn));
+            const auto c = through(core::video_row(d.page(0), Json("v"))->at("transform"), 20, 17.5);
+            QVERIFY2(near(at_mm(d, 0, 3, c[0], c[1]), kColours[2]), Json(turns).dump().c_str());
+            QVERIFY2(near(at_mm(d, 0, 2, c[0], c[1]), kColours[1]), Json(turns).dump().c_str());
+        }
+        {
+            const core::Document angled = run(off, op("crop_page", {{"rect", Json::array({4, 4, 60, 50})}, {"angle", 12}, {"trim", "fit"}, {"bleed_mm", 0}, {"margins", Json::array({0, 0, 0, 0})}}));
+            const Json& row = *core::video_row(angled.page(0), Json("v"));
+            QVERIFY(row.contains("transform"));
+            const auto c = through(row.at("transform"), 20, 17.5);
+            QVERIFY(near(at_mm(angled, 0, 3, c[0], c[1]), kColours[2]));
+            QVERIFY(near(at_mm(angled, 0, 2, c[0], c[1]), kColours[1]));
+        }
+        // (B2's P3-2: turned and turned back at an angle — the page grown twice —: a move alone is left, which is the box's:
+        // the transform gone, the footage where it was on the page)
+        {
+            const core::Document back_again = run(run(off, op("rotate_pages", {{"angle", 30}})), op("rotate_pages", {{"angle", -30}}));
+            const Json& row = *core::video_row(back_again.page(0), Json("v"));
+            QVERIFY2(!row.contains("transform"), row.dump().c_str());
+            const Json& box = row.at("placement_mm");
+            const double mx = box[0].get<double>() + box[2].get<double>() / 2, my = box[1].get<double>() + box[3].get<double>() / 2;
+            QVERIFY(near(at_mm(back_again, 0, 3, mx, my), kColours[2]));
+            QVERIFY(near(at_mm(back_again, 0, 2, mx, my), kColours[1]));
+        }
+        // (B2's P2-2: a box given after the turn is the page's as it is now — the transform taken away, the footage upright in it)
+        {
+            const core::Document placed = run(quarter, op("set_video_layer", {{"folder", "v"}, {"placement_mm", Json::array({5, 50, 20, 15})}}));
+            const Json& row = *core::video_row(placed.page(0), Json("v"));
+            QVERIFY(!row.contains("transform"));
+            QCOMPARE(row.at("placement_mm"), Json::array({5, 50, 20, 15}));
+            QVERIFY(near(at_mm(placed, 0, 3, 15, 57.5), kColours[2]));
+            QVERIFY(near(at_mm(placed, 0, 3, 4, 49), kWhite));
+            const core::Document trimmed = run(quarter, op("set_video_layer", {{"folder", "v"}, {"placement_mm", nullptr}}));
+            QVERIFY(!core::video_row(trimmed.page(0), Json("v"))->contains("transform"));
+        }
+        // (saved and read back: the transform kept, drawn the same; written out — a GIF, a .pcraft — turned too)
+        const fs::path dir = fspath(QStringLiteral("turned.genko"));
+        genko::test::write_project(quarter, dir);
+        QVERIFY(storage::read_file(dir / "project.json").find("\"transform\"") != std::string::npos);
+        const auto back = storage::load_document(dir);
+        QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+        QCOMPARE(*core::video_row(back.document.page(0), Json("v")), *core::video_row(quarter.page(0), Json("v")));
+        const auto c = through(core::video_row(quarter.page(0), Json("v"))->at("transform"), 20, 17.5);
+        QVERIFY(near(at_mm(back.document, 0, 3, c[0], c[1]), kColours[2]));
+        // (written out turned — a GIF of the frames, a .pcraft —: the book of the footage over its finished size, the size a GIF
+        // of the frames takes, turned a quarter: the footage in the middle, where a footage laid upright in its box of before
+        // would leave it white)
+        const core::Document full = run(run(video_book(), op("video_alter", {{"folder", "v"}, {"at", 2}})), op("rotate_pages", {{"turn", "90cw"}}));
+        const fs::path gif = fspath(QStringLiteral("turned-out/video.gif"));
+        fs::create_directories(gif.parent_path());
+        (void)render::anim::export_animation(full.page(0), gif, &full, 40, std::string("frames"));
+        {
+            const render::Image image = render::read_png(storage::read_file(gif / "frame_0003.png")).convert("RGB");
+            QVERIFY(near(image.getpixel(image.width() / 2, image.height() / 2), kColours[2]));
+        }
+        {
+            std::vector<std::string> notes;
+            const formats::Opened opened = formats::open_file(formats::pcraft_bytes(full, 0, {}, &notes), "turned.pcraft");
+            const render::Image drawn = render::render_page(opened.doc.page(0), 50, render::proof_options(), &opened.doc).image.convert("RGB");
+            QVERIFY(near(drawn.getpixel(drawn.width() / 2, drawn.height() / 2), kColours[0]));  // (its first frame's footage)
+        }
+        // (a book whose rows hold no transform — cropped, sized — writes none: the bytes of before)
+        genko::test::write_project(cropped.doc, fspath(QStringLiteral("cropped.genko")));
+        QVERIFY(storage::read_file(fspath(QStringLiteral("cropped.genko")) / "project.json").find("\"transform\"") == std::string::npos);
+    }
+
+    // PC6: the camera's keys (the page's mm) move with the page — cropped, sized, turned — as everything on it does.
+    void cameraMovesWithThePage() {
+        core::Document doc = run(book(), op("set_animation", {{"fps", 8}, {"frames", 4}}));
+        doc = run(doc, op("set_camera_key", {{"frame", 1}, {"rect", Json::array({10, 10, 40, 30})}}));
+        const auto rect_of = [](const core::Document& d) { return core::anim::spec(d.page(0))->at("camera")[0].at("rect"); };
+        const core::ApplyResult cut = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("crop_page", {{"rect", Json::array({5, 4, 60, 50})}})}),
+                                                                                   core::Actor("human:test"));
+        const Json& offset = cut.results[0]["pages"][0]["offset_mm"];
+        const Json moved = rect_of(cut.doc);
+        QVERIFY2(std::fabs(moved[0].get<double>() - (10 + offset[0].get<double>())) < 1e-3 && std::fabs(moved[1].get<double>() - (10 + offset[1].get<double>())) < 1e-3,
+                 moved.dump().c_str());
+        QCOMPARE(moved[2].get<double>(), 40.0);
+        QCOMPARE(moved[3].get<double>(), 30.0);
+        const Json big = rect_of(run(doc, op("resize_pages", {{"width_mm", 192}, {"height_mm", 144}})));
+        QCOMPARE(big, Json::array({20.0, 20.0, 80.0, 60.0}));
+        const Json turned = rect_of(run(doc, op("rotate_pages", {{"turn", "90cw"}})));  // (96 × 72: the page 72 wide after)
+        QCOMPARE(turned[2].get<double>(), 30.0);
+        QCOMPARE(turned[3].get<double>(), 40.0);
+        QVERIFY2(std::fabs(turned[0].get<double>() - (72 - 10 - 30)) < 1e-3 && std::fabs(turned[1].get<double>() - 10) < 1e-3, turned.dump().c_str());
+        // (the camera at that frame where the map takes it)
+        QVERIFY(core::anim::camera_at(cut.doc.page(0), 1).has_value());
     }
 
     void footageInterpretedReplacedRasterized() {

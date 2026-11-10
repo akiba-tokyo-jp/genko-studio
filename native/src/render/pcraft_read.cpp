@@ -10,7 +10,9 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <functional>
 #include <set>
+#include <tuple>
 #include <utility>
 
 #include "core/adjust.hpp"
@@ -24,6 +26,7 @@
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/layer_basics.hpp"
+#include "core/layer_styles.hpp"
 #include "core/lut3d.hpp"
 #include "core/masks.hpp"
 #include "core/ops_util.hpp"
@@ -39,6 +42,7 @@
 #include "render/ops_smart_parts.hpp"
 #include "render/pcraft_manifest.hpp"
 #include "render/pcraft_production.hpp"
+#include "render/pcraft_styles.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
@@ -46,6 +50,7 @@
 #include "render/smart_decode.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
+#include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "render/ops_type.hpp"
 #include "render/psd_text.hpp"
@@ -359,6 +364,9 @@ struct Ctx {
     const Json* text_styles = nullptr;
     psd_type::Sheets type_sheets;
     bool typed = false;
+    // (PC6, layer-styles@1: the document's global light, and whether a layer's style was read)
+    std::array<double, 2> light{core::kDefaultLightAngle, core::kDefaultLightAltitude};
+    bool styled = false;
     std::vector<std::string> fonts_missing;
     std::vector<std::pair<std::string, Json>> artboards;  // (PC5 I-c: a top-level group's id and its artboard)
 
@@ -988,17 +996,9 @@ core::Mask mask_of(Ctx& ctx, const Json& m, const std::string& name, std::option
     return mask;
 }
 
-// What a layer holds beyond Genko's (effects, Blend If, left-out channels, a label, a video's frames): said, left out.
+// What a layer holds beyond Genko's (left-out channels, a label, a video's frames): said, left out. (Its effects, fill
+// opacity and Blend If: take_style.)
 void note_extras(Ctx& ctx, const Json& m, const std::string& name) {
-    if (const Json* effects = optional_field(m, "effects")) {
-        const Json* items = optional_field(*effects, "items");
-        if ((items != nullptr && items->is_array() && !items->empty()) || optional_field(*effects, "psd_raw") != nullptr) {
-            ctx.notes.name("レイヤー効果は Genko で描けないため外しました", name);
-        }
-    }
-    if (const Json* blend_if = optional_field(m, "blend_if"); blend_if != nullptr && !(blend_if->is_object() && blend_if->value("ranges", Json::array()).empty())) {
-        ctx.notes.name("ブレンド条件（Blend If）は Genko に無いため外しました", name);
-    }
     // (PC5 I-a, blend-channels@1: a group's, or on a page whose mode has no channels to leave out — base_layer reads the rest)
     const Json& content = field(m, "content", "layer");
     const bool group = content.is_object() && content.value("kind", Json()) == Json("group");
@@ -1010,8 +1010,8 @@ void note_extras(Ctx& ctx, const Json& m, const std::string& name) {
     if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのほかのフレームは .pcraft に無いため、今のフレームをレイヤーにしました", name);  // (PC5 J-e2)
 }
 
-// The settings every layer has: its name, visibility, opacity (its fill opacity with it when it has no effects), blend,
-// clipping, locks, link, masks and the PSD blocks it carried.
+// The settings every layer has: its name, visibility, opacity, blend, clipping, locks, link, masks and the PSD blocks it
+// carried (its fill opacity: take_style).
 core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const Json& parent, bool hidden) {
     core::Layer layer;
     layer.id = core::new_id();
@@ -1024,9 +1024,8 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     if (const Json* id = optional_field(m, "id"); id != nullptr && (id->is_number_unsigned() || id->is_number_integer())) {
         ctx.layer_ids.emplace(id->dump(), layer.id);  // (PC5 J-a: the layer comps' states name it so)
     }
-    double opacity = std::clamp(number(field(m, "opacity", "layer"), "layer.opacity"), 0.0, 1.0);
-    const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
-    if (fill < 1.0) opacity *= fill;  // (its effects, which the fill opacity spares, are left out)
+    const double opacity = std::clamp(number(field(m, "opacity", "layer"), "layer.opacity"), 0.0, 1.0);
+    (void)number(field(m, "fill_opacity", "layer"), "layer.fill_opacity");  // (taken by take_style)
     layer.opacity = std::round(opacity * 1000.0) / 1000.0;
     const std::string blend = blend_from(field(m, "blend", "layer"));
     if (const auto mapped = genko_blend(blend)) {
@@ -1097,6 +1096,86 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     if (!keep.empty()) layer.native_psd = std::move(keep);
     note_extras(ctx, m, name);
     return layer;
+}
+
+// PC6 (render/pcraft_styles): how a style is read of this document — its pixels in mm, its colours sRGB, its patterns
+// the book's —, what it cannot hold said by `say`.
+StyleRead style_reading(Ctx& ctx, std::function<void(const std::string&)> say) {
+    StyleRead in;
+    in.mm = ctx.mm;
+    in.mode = ctx.mode;
+    in.rgb = [&ctx](const Json& c) { return rgb_ints(srgb_of(ctx, color_from(c))); };
+    in.pattern = [&ctx](const std::string& id, const std::string& pattern_name, double scale, double angle, bool link,
+                        const std::array<double, 2>& phase) -> std::optional<Json> {
+        const std::optional<std::string> book = book_pattern(ctx, id, pattern_name);
+        if (!book) return std::nullopt;
+        return Json{{"id", *book},
+                    {"scale", r4(std::clamp(scale * 100.0, core::kPatternScaleMin, core::kPatternScaleMax))},
+                    {"angle", r4(angle)},
+                    {"phase_mm", Json::array({r4(phase[0] * ctx.mm), r4(phase[1] * ctx.mm)})},
+                    {"link", link}};
+    };
+    in.say = std::move(say);
+    return in;
+}
+
+// PC6 (layer-styles@1, render/pcraft_styles): the layer's effects, fill opacity and Blend If as its style (core/
+// layer_styles.hpp) once its kind is known — what Genko's style cannot hold of them left out and said —; a folder's and a
+// correction layer's (Genko's take no style) fill opacity in their opacity, as before, their effects and Blend If left out
+// and said. (An effect not read is left out alone, Blend If not read alone: render/pcraft_styles.)
+void unread_style(Ctx& ctx, core::Layer& layer, double fill, const std::string& name);
+
+void take_style(Ctx& ctx, core::Layer& layer, const Json& m, const std::string& name) {
+    const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
+    if (!core::takes_layer_style(layer)) {
+        if (fill < 1.0) layer.opacity = std::round(layer.opacity * fill * 1000.0) / 1000.0;
+        const std::string what = layer.kind == core::LayerKind::Folder ? "グループ" : "補正レイヤー";
+        if (has_upstream_effects(m)) ctx.notes.name("Genko の" + what + "はレイヤー効果を持てないため、効果を外しました", name);
+        if (has_upstream_blend_if(m)) ctx.notes.name("Genko の" + what + "はブレンド条件（Blend If）を持てないため外しました", name);
+        return;
+    }
+    StyleRead in = style_reading(ctx, [&ctx, &name](const std::string& note) { ctx.notes.name(note, name); });
+    in.psd_raw_kept = true;
+    try {
+        Json style = style_from_upstream(m, in);
+        if (style.is_null()) return;
+        layer.style = std::move(style);
+        ctx.styled = true;
+        // (the review's P3-2: the effects' psd_raw — the PSD's lfx2 the effects were read from — the layer's PSD block, as a
+        // PSD's reader keeps it: written back as it was while the style is unchanged, by a PSD and a .pcraft)
+        const Json* fx = optional_field(m, "effects");
+        const Json* raw = fx != nullptr ? optional_field(*fx, "psd_raw") : nullptr;
+        const bool has = layer.native_psd && std::any_of(layer.native_psd->blocks.begin(), layer.native_psd->blocks.end(),
+                                                         [](const auto& b) { return b.first == "lfx2"; });  // (an lmfx beside it, as a PSD has)
+        bool kept = false;
+        if (raw != nullptr && raw->is_string() && !has && !(*layer.style)["effects"].empty() &&
+            (!layer.native_psd || layer.native_psd->blocks.size() < core::kPsdKeptMax)) {
+            try {
+                const core::Bytes bytes = ctx.load.kept_blob(raw->get<std::string>());
+                const std::string ref = core::bytes_ref(*bytes);
+                ctx.doc.native_files[ref] = bytes;
+                if (!layer.native_psd) layer.native_psd = core::PsdLayerKeep{};
+                layer.native_psd->blocks.emplace_back("lfx2", ref);
+                kept = true;
+            } catch (const Unreadable&) {
+            } catch (const core::Error& error) {
+                if (error.code() == "image_too_large") throw;
+            }
+        }
+        if (raw != nullptr && !kept) ctx.notes.name("レイヤー効果の PSD の元の設定は外しました（効果は読みました）", name);
+    } catch (const Unreadable&) {
+        unread_style(ctx, layer, fill, name);
+    } catch (const core::Error& error) {
+        if (error.code() != "value") throw;
+        unread_style(ctx, layer, fill, name);
+    }
+}
+
+// (the review's P2-2) A style not read as a whole: none, the fill opacity in the layer's opacity as before PC6, said.
+void unread_style(Ctx& ctx, core::Layer& layer, double fill, const std::string& name) {
+    layer.style.reset();
+    if (fill < 1.0) layer.opacity = std::round(layer.opacity * fill * 1000.0) / 1000.0;
+    ctx.notes.name("レイヤースタイルが読めないため効果とブレンド条件を外し、塗りの不透明度は不透明度に掛けました", name);
 }
 
 // The layer's own frame in pixels (upstream's compose fill_frame: a hide-all mask's painted area on the canvas, then the
@@ -1252,6 +1331,83 @@ std::optional<core::vector::ShapePart> shape_part(Ctx& ctx, const Json& d) {
     }
 }
 
+// --- a document read brought into a book (a .pcraft inside, a .pcraft placed) ------------------------------------------
+
+// (PC6: the styles a .pcraft inside brings past a kind's 512, as a PSD's reader says it: render/import_psd)
+inline constexpr const char* kStylesFull = "文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした（文字の見え方はそのまま）";
+
+// Does a page of the document read (or of its contents) hold a layer style?
+bool styles_read(const core::Document& doc) {
+    for (const core::smart::WrittenPage& written : core::smart::written_pages(doc)) {
+        for (const core::Layer& layer : written.page->layers) {
+            if (core::has_layer_style(layer)) return true;
+        }
+    }
+    return false;
+}
+
+// Each page of the document read and of its contents, to change (copied first where shared).
+void each_read_page(core::Document& doc, const std::function<void(core::Page&)>& change) {
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) change(doc.edit_page(i));
+    std::vector<std::string> ids;
+    for (const auto& [id, contents] : doc.smart_contents) {
+        if (contents && contents->kind == "page" && contents->page) ids.push_back(id);
+    }
+    for (const std::string& id : ids) change(doc.edit_contents_page(id));
+}
+
+// PC6 (layer-styles@1): the effects of the document read that take its global light, when it is not `light` (the book's
+// it is brought into), given the document's light as their own — so they look as they did (as a PSD's are read: render/
+// import_psd's style_from_record).
+void relight(core::Document& doc, const std::array<double, 2>& light) {
+    const std::array<double, 2> own = core::global_light(doc);
+    if (own == light) return;
+    // (a style's effects that took the light: their own now; whether one did)
+    const auto lit = [&](std::optional<Json>& style) {
+        if (!style || !style->is_object() || !style->contains("effects")) return false;
+        Json changed_style = *style;
+        bool changed = false;
+        for (Json& e : changed_style["effects"]) {
+            if (!e.is_object() || !e.value("global_light", false)) continue;
+            e["global_light"] = false;
+            e["angle"] = own[0];
+            if (e.contains("altitude")) e["altitude"] = own[1];
+            changed = true;
+        }
+        if (changed) style = core::layer_style_spec(changed_style);
+        return changed;
+    };
+    each_read_page(doc, [&](core::Page& page) {
+        for (core::Layer& layer : page.layers) {
+            if (!lit(layer.style) || !layer.native_psd) continue;
+            // (the review's P3-1: the PSD's effects block it kept takes the book's light — forgotten, the effects written from
+            // the style, as import_psd does when it relights)
+            std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
+            if (layer.native_psd->empty()) layer.native_psd.reset();
+        }
+        if (page.layer_comps) {  // (and its layer comps' appearances)
+            for (core::LayerComp& comp : page.layer_comps->comps)
+                for (core::CompLayerState& state : comp.layers)
+                    if (state.appearance) lit(state.appearance->style);
+            if (page.layer_comps->last_state)
+                for (core::CompLayerState& state : *page.layer_comps->last_state)
+                    if (state.appearance) lit(state.appearance->style);
+        }
+    });
+}
+
+// (PC6, review B's P2-1) The page of a document read brought into the book with what it names (core::smart::bring_contents)
+// and the text styles its type layers — and those of the contents in it — take (`styles`); the book names type@1 when
+// it keeps them. The OpError StyleCarry gives for a text past a record's ranges: the .pcraft not read (format).
+void bring_with_styles(core::Document& doc, const core::Document& from, core::Page& page, core::type_styles::StyleCarry& styles) {
+    try {
+        core::smart::bring_contents(doc, from, page, [&](core::Page& on) { styles.bring_page(on); });
+    } catch (const core::OpError& error) {
+        throw core::Error("format", std::string("the .pcraft's texts cannot be brought into the book (") + error.what() + ")");
+    }
+    core::type_text::add_feature(doc);
+}
+
 // A .pcraft inside a smart object of one, read within the outer read's limits (below).
 Read read_nested(std::string_view bytes, std::string_view title, const ReadLimits& limits, Tally& tally);
 
@@ -1272,10 +1428,16 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
         ctx.load.contents();
         Read read = read_nested(*bytes, file_name, inner, ctx.load.tally());
         for (std::string& note : read.notes) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + note);
+        // (PC6: its effects lit as they were under this document's light; its text styles the book's — review B's P2-1:
+        // core::type_styles::StyleCarry, those past 512 left out, said)
+        relight(read.doc, ctx.light);
+        if (styles_read(read.doc)) ctx.styled = true;
+        core::type_styles::StyleCarry styles(ctx.doc, read.doc.type_styles ? &*read.doc.type_styles : nullptr, true);
         core::Page page = read.doc.page(0);
         page.index = core::Num(std::int64_t{1});
         page.native_source.reset();
-        core::smart::bring_contents(ctx.doc, read.doc, page);
+        bring_with_styles(ctx.doc, read.doc, page, styles);
+        if (styles.dropped()) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + kStylesFull);
         auto contents = std::make_shared<core::SmartContents>();
         contents->kind = "page";
         contents->name = first_chars(file_name, core::smart::kNameMax);
@@ -1521,6 +1683,7 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
             read_layers(ctx, field(content, "children", "group"), Json(layer.id), shut, out);
             --ctx.groups;
         }
+        take_style(ctx, layer, m, name);
         out.push_back(std::move(layer));
         return;
     }
@@ -1605,6 +1768,7 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
     } else {
         throw Unreadable("a layer kind this build does not know (" + kind + ")");
     }
+    take_style(ctx, layer, m, name);
     out.push_back(std::move(layer));
 }
 
@@ -1810,6 +1974,16 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     }
     std::vector<core::Layer> layers;
     ctx.text_styles = optional_field(d, "text_styles");  // (PC5 G-e: what its text layers' styles are)
+    // (PC6, layer-styles@1: its global light — the book's once a style is read, below)
+    if (const Json* light = optional_field(d, "global_light")) {
+        try {
+            const double angle = std::clamp(number(field(*light, "angle", "global_light"), "global_light.angle"), -360.0, 360.0);
+            const double altitude = std::clamp(number(field(*light, "altitude", "global_light"), "global_light.altitude"), 0.0, 90.0);
+            ctx.light = core::global_light_of(Json{{"angle", angle}, {"altitude", altitude}});
+        } catch (const Unreadable&) {
+            ctx.notes.add("包括光源が読めないため、120°・30° にしました");
+        }
+    }
     read_layers(ctx, field(d, "layers", "document"), Json(nullptr), false, layers);
     ctx.page().layers = std::move(layers);
 
@@ -2056,6 +2230,12 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         production.mm = ctx.mm;
         production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
         production.layers = ctx.layer_ids;  // (PC5 J-a)
+        // (PC6, layer-styles@1: a layer comp's appearance's effects and fill opacity its style, as a layer's)
+        production.style = [&ctx](const Json& holder) {
+            Json style = style_from_upstream(holder, style_reading(ctx, [&ctx](const std::string& note) { ctx.notes.add("レイヤーカンプの" + note); }));
+            if (!style.is_null()) ctx.styled = true;
+            return style;
+        };
         if (ctx.load.limits().depth == 0) {  // (PC5 I-d: the variables, the book's — a .pcraft inside a smart object's left out, said)
             production.book = &ctx.doc;
             production.beside = ctx.load.limits().beside;
@@ -2087,6 +2267,8 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         ctx.notes.add("同梱の書体に無い書体は、名前を残して既定の書体で描きます（" + listed + (ctx.fonts_missing.size() > 10 ? "、…" : "") + "）");
     }
     if (ctx.typed || !ctx.type_sheets.added.empty()) core::type_text::add_feature(ctx.doc);
+    // (PC6, layer-styles@1: the document's global light the book's when a style was read — a book of none as before)
+    if (ctx.styled && ctx.light != std::array<double, 2>{core::kDefaultLightAngle, core::kDefaultLightAltitude}) ctx.doc.global_light = ctx.light;
 
     // the book as a book must be (what an op leaves is checked so too)
     try {
@@ -2102,6 +2284,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         core::validate_pattern_fills(ctx.doc);
         core::validate_psd_keep(ctx.doc);
         core::validate_file_info(ctx.doc);
+        core::validate_layer_styles(ctx.doc);  // (PC6)
     } catch (const core::Error& error) {
         if (error.code() == "not_yet_ported") throw;
         // (past a book's budget — its precise pixels, an ink raster — is too large, not broken)
@@ -2190,10 +2373,15 @@ std::string place_as_contents(core::Document& doc, std::string_view bytes, std::
     }
     Read read = kept ? std::move(*kept) : pcraft::read(bytes, stem, limits);
     for (std::string& note : read.notes) notes.push_back(std::move(note));
+    // (PC6: its effects lit as they were under its own light, the book's another; its text styles the book's — the
+    // review's P2-1)
+    relight(read.doc, core::global_light(doc));
+    core::type_styles::StyleCarry styles(doc, read.doc.type_styles ? &*read.doc.type_styles : nullptr, true);
     core::Page page = read.doc.page(0);
     page.index = core::Num(std::int64_t{1});
     page.native_source.reset();
-    core::smart::bring_contents(doc, read.doc, page);
+    bring_with_styles(doc, read.doc, page, styles);
+    if (styles.dropped()) notes.emplace_back(kStylesFull);
     auto contents = std::make_shared<core::SmartContents>();
     contents->kind = "page";
     contents->name = first_chars(core::utf8_replaced(name), core::smart::kNameMax);

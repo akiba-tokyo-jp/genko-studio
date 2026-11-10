@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -29,6 +30,7 @@
 #include "app/ask.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/stoppable.hpp"
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/anim.hpp"
@@ -639,37 +641,41 @@ void TimelinePanel::export_animation() {
         const double at_100 = across_mm / 25.4 * 100.0;
         if (at_100 > 0) dpi = static_cast<int>(std::clamp(std::ceil(100.0 * *width / at_100), 100.0, 600.0));
     }
-    QProgressDialog progress(QStringLiteral("ビデオをレンダリングしています…"), QStringLiteral("キャンセル"), 0,
-                             static_cast<int>(range[1] - range[0] + 1), this);
-    progress.setWindowTitle(QStringLiteral("ビデオをレンダリング"));
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(500);
-    const auto told = [&progress](std::int64_t done, std::int64_t) {
-        progress.setValue(static_cast<int>(done));
-        QCoreApplication::processEvents();
-        return !progress.wasCanceled();
-    };
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+    // (PC6, the review's P2-4: the frames drawn and written on a worker with its progress window and 中止 — app/stoppable.hpp —,
+    // the copies above all it reads; MP4's ffmpeg waited for there, stopped by 中止 too: render/movie.cpp)
+    const QPointer<TimelinePanel> alive(this);
+    const QPointer<MainWindow> host(window_);
+    const QString title = QStringLiteral("ビデオをレンダリング");
+    auto told = std::make_shared<StoppableTold>();
+    auto whole = std::make_shared<bool>(false);  // (written to its end: so even when 中止 came after it)
+    std::optional<bool> written;
     try {
-        render::anim::export_animation(shown, core::path_from_utf8(target.toStdString()), &book, dpi, fmt, true, "trim", width, range, speed,
-                                       told);
-    } catch (const core::Error& error) {
-        QApplication::restoreOverrideCursor();
-        progress.reset();
-        if (std::string_view(error.code()) == "cancelled") {
-            window_->flash(QStringLiteral("ビデオのレンダリングをやめました（何も書き出していません）"), 5000);
-            return;
-        }
-        ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
-        return;
+        written = run_stoppable(
+            this, title, QStringLiteral("ビデオをレンダリングしています…"),
+            [shown, book, dest = core::path_from_utf8(target.toStdString()), dpi, fmt, width, range, speed, told, whole](const std::function<bool()>& stopped) {
+                const auto step = [&stopped, told](std::int64_t done, std::int64_t total) {
+                    told->put(total <= 0 ? 1.0 : static_cast<double>(done) / static_cast<double>(total));
+                    return !stopped();
+                };
+                try {
+                    render::anim::export_animation(shown, dest, &book, dpi, fmt, true, "trim", width, range, speed, step);
+                } catch (const core::Error& error) {
+                    if (std::string_view(error.code()) == "cancelled") throw render::Cancelled();
+                    throw;
+                }
+                *whole = true;
+                return true;
+            },
+            told);
     } catch (const std::exception& error) {
-        QApplication::restoreOverrideCursor();
-        progress.reset();
-        ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
+        if (alive && host) ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
         return;
     }
-    QApplication::restoreOverrideCursor();
-    progress.reset();
+    if (!alive || !host) return;
+    if (!written && !*whole) {
+        window_->flash(QStringLiteral("ビデオのレンダリングをやめました（何も書き出していません）"), 5000);
+        return;
+    }
     QString said = QStringLiteral("アニメーションを書き出しました: %1").arg(target);
     if (const auto note = formats::ink_note(shown)) said += QStringLiteral("（") + QString::fromStdString(*note) + QStringLiteral("）");  // (color-mode@1)
     window_->flash(said, 5000);

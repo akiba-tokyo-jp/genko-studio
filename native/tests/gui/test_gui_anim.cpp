@@ -16,13 +16,17 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QTableWidget>
+#include <QTimer>
+#include <QApplication>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include "gui_support.hpp"
 #include "app/layer_panel.hpp"
@@ -595,6 +599,83 @@ private slots:
         QCOMPARE(s.page().layers.size(), layers);
         QVERIFY(!w->last_error().isEmpty());
         QVERIFY(w->timeline()->start->isVisible());
+    }
+
+    // PC6 (review C's P2-4, P3-4): ビデオをレンダリング… on a worker with its progress window over every window; MP4's ffmpeg
+    // (here one of the test's own that never ends) waited for there — 中止 stops it, nothing written, said; the window's
+    // close while it works is kept until the work is back, then the window closes. (POSIX: the test's ffmpeg a shell script)
+    void renderingStopsWhileFfmpegWorks() {
+#ifdef Q_OS_UNIX
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        w->show_dock(QStringLiteral("タイムライン"));
+        app::TimelinePanel* panel = w->timeline();
+        panel->start_animation();
+        QVERIFY(w->apply_ops(s.ball(30, w->target_layer()->id)));
+        w->session().save_now();
+        QVERIFY(s.saved());
+        const QString bin = s.tmp.path() + "/bin";
+        QVERIFY(QDir().mkpath(bin));
+        const QString started = bin + "/started";
+        {
+            QFile script(bin + "/ffmpeg");
+            QVERIFY(script.open(QIODevice::WriteOnly));
+            script.write(("#!/bin/sh\nsleep 120 &\necho $! > '" + started + "'\nwait\n").toUtf8());
+            script.close();
+            QVERIFY(script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        }
+        const QByteArray path_was = qgetenv("PATH");
+        qputenv("PATH", bin.toUtf8() + ":" + path_was);
+        s.answers.responder->exec = [](QDialog* dialog) {
+            return qobject_cast<app::RenderVideoDialog*>(dialog) != nullptr ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        const QString mp4 = s.tmp.path() + "/w.mp4";
+        s.answers.responder->save_path_filtered = [mp4](const QString&, const QString&, const QString&) {
+            return std::pair<QString, QString>(mp4, QStringLiteral("MP4 (*.mp4)"));
+        };
+        // (`then` given the work's progress window once ffmpeg is working)
+        const auto when_encoding = [started](std::function<void(QProgressDialog*)> then) {
+            auto* timer = new QTimer;
+            timer->setInterval(20);
+            QObject::connect(timer, &QTimer::timeout, timer, [timer, then, started] {
+                if (!QFile::exists(started)) return;
+                for (QWidget* top : QApplication::topLevelWidgets()) {
+                    auto* progress = qobject_cast<QProgressDialog*>(top);
+                    if (progress == nullptr || progress->objectName() != QStringLiteral("stoppable_progress")) continue;
+                    timer->stop();
+                    timer->deleteLater();
+                    then(progress);
+                    return;
+                }
+            });
+            timer->start();
+        };
+        bool pressed = false;
+        when_encoding([&](QProgressDialog* progress) {
+            pressed = true;
+            emit progress->canceled();
+        });
+        panel->export_button->click();
+        QVERIFY(pressed);
+        QVERIFY(!QFile::exists(mp4));
+        QVERIFY2(w->last_notice().contains(QStringLiteral("やめました")), qPrintable(w->last_notice()));
+        QVERIFY(QDir(s.tmp.path()).entryList({QStringLiteral("*.mp4*"), QStringLiteral(".*mp4*")}, QDir::Files | QDir::Hidden).isEmpty());
+        // the window's close while ffmpeg works
+        QVERIFY(QFile::remove(started));
+        bool closed = false;
+        when_encoding([&](QProgressDialog*) {
+            closed = true;
+            w->close();
+        });
+        panel->export_button->click();
+        qputenv("PATH", path_was);
+        QVERIFY(closed);
+        QVERIFY(w->isVisible());  // (its close left for when the work is back)
+        QVERIFY(!QFile::exists(mp4));
+        QTRY_VERIFY(!w->isVisible());
+#else
+        QSKIP("the test's own ffmpeg is a shell script (POSIX)");
+#endif
     }
 
     void timelapseRecordsAndExports() {

@@ -97,6 +97,9 @@ std::int64_t cache_pixels();
 std::int64_t cache_bytes();
 // Tests: the bytes each kind of picture remembered may hold together (0: the build's own, 512 MiB).
 void set_budget_for_testing(std::size_t bytes);
+// Tests: the bytes one picture alone may hold past that budget and still be remembered (0: the build's own, 1 GiB) — a
+// stack's whole past both is made a tile's part at a time (PC6, review C P2-3).
+void set_single_for_testing(std::size_t bytes);
 
 // How many times contents were drawn whole or a file decoded (not found in the caches), for tests.
 struct Counts {

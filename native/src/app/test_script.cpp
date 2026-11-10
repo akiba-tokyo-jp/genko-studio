@@ -23,6 +23,7 @@
 #include "app/pages_panel.hpp"
 #include "app/save_status.hpp"
 #include "core/json.hpp"
+#include "core/json_depth.hpp"
 #include "core/paths.hpp"
 #include "storage/fault.hpp"
 
@@ -381,7 +382,9 @@ bool start() {
         qWarning("GENKO_TEST_SCRIPT: cannot read %s", qPrintable(file));
         return false;
     }
-    Json script = Json::parse(in.readAll().toStdString(), nullptr, false);
+    const std::string text = in.readAll().toStdString();
+    // (PC6, the review of pc6-A's P3-7: deeper than any reader of it goes, as a file that is not a script)
+    Json script = core::too_deep(text) ? Json(nullptr) : Json::parse(text, nullptr, false);
     if (!script.is_object() || !script.contains("steps") || !script["steps"].is_array()) {
         qWarning("GENKO_TEST_SCRIPT: %s is not {\"steps\": [...]}", qPrintable(file));
         return false;

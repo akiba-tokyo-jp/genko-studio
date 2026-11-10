@@ -96,6 +96,12 @@ bool question(QWidget* parent, const QString& title, const QString& text) {
     return QMessageBox::question(parent, title, text) == QMessageBox::Yes;
 }
 
+bool question_default_no(QWidget* parent, const QString& title, const QString& text) {
+    if (shut()) return false;
+    if (const auto r = current(); r && r->question) return r->question(title, text);
+    return QMessageBox::question(parent, title, text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+}
+
 void warning(QWidget* parent, const QString& title, const QString& text) {
     if (shut()) return;
     if (const auto r = current(); r && r->warning) {

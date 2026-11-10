@@ -383,6 +383,17 @@ private slots:
         QCOMPARE(said.json["running"], Json(true));
         QCOMPARE(said.json["windows"], kept["windows"]);
         QCOMPARE(said.json["pid"], Json(me));
+        {  // (PC6, the review's P3-2: a session.json deeper than any reader of it goes — read as one that is not JSON, no crash)
+            QFile f(config + QStringLiteral("/session.json"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(QByteArray::fromStdString("{\"v\": 1, \"pid\": " + std::to_string(me) + ", \"deep\": " + std::string(500000, '[') + std::string(500000, ']') + "}"));
+        }
+        QCOMPARE(cli(config, {"session"}).json, (Json{{"running", false}}));
+        {
+            QFile f(config + QStringLiteral("/session.json"));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(QByteArray::fromStdString(kept.dump()));
+        }
         // a process gone: not running
         QProcess gone;
         gone.start(genko::test::genko_cli(), {QStringLiteral("--version")});
@@ -418,7 +429,16 @@ private slots:
         const std::string outside = (dir.path() + QStringLiteral("/backups")).toStdString();
         const std::string inside = (root + QStringLiteral("/logs/history.txt")).toStdString();
         QVERIFY(QDir().mkpath(dir.path() + QStringLiteral("/backups")) && QDir().mkpath(root + QStringLiteral("/logs")));
-        QCOMPARE(cli(config, {"prefs", "set", "--values", QString::fromStdString(Json{{"book.backupFolder", outside}, {"historyLog.filePath", inside}}.dump())}).code, 0);
+        // (PC6, the review's P3-1: カラー設定's working spaces and monitor profile hold a built-in name or an ICC file's path)
+        const std::string icc = (dir.path() + QStringLiteral("/profiles/私の RGB.icc")).toStdString();
+        const std::string icc_inside = (root + QStringLiteral("/profiles/gray.icc")).toStdString();
+        QCOMPARE(cli(config, {"prefs", "set", "--values",
+                              QString::fromStdString(Json{{"book.backupFolder", outside}, {"historyLog.filePath", inside}, {"colorSettings.workingRgb", icc},
+                                                          {"colorSettings.monitorProfile", icc}, {"colorSettings.workingGray", icc_inside},
+                                                          {"colorSettings.workingCmyk", "coated-cmyk"}}
+                                                         .dump())})
+                     .code,
+                 0);
         {
             QSettings ini(config + QStringLiteral("/settings.ini"), QSettings::IniFormat);
             ini.setValue(QStringLiteral("subview/images"), (dir.path() + QStringLiteral("/secret/reference.png")));
@@ -448,6 +468,11 @@ private slots:
         // (review P2-1: a path out of the root never said — in it, from the root; the app's memories refused by name too)
         QCOMPARE(got["prefs"]["book.backupFolder"], Json("(root の外)"));
         QCOMPARE(got["prefs"]["historyLog.filePath"], Json(QStringLiteral("logs/history.txt").toStdString()));
+        QCOMPARE(got["prefs"]["colorSettings.workingRgb"], Json("(root の外)"));
+        QCOMPARE(got["prefs"]["colorSettings.monitorProfile"], Json("(root の外)"));
+        QCOMPARE(got["prefs"]["colorSettings.workingGray"], Json("profiles/gray.icc"));
+        QCOMPARE(got["prefs"]["colorSettings.workingCmyk"], Json("coated-cmyk"));  // (a built-in name: as it is)
+        QVERIFY2(got.dump().find("私の") == std::string::npos, got.dump().c_str());
         QVERIFY2(got.dump().find(outside) == std::string::npos && got.dump().find(dir.path().toStdString()) == std::string::npos, got.dump().c_str());
         for (const char* memory : {"state", "state.subview.images", "state.ai.client"}) {
             got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", memory}});

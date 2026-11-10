@@ -500,6 +500,51 @@ private slots:
         QCOMPARE(played[1]["id"], Json(doc.page(0).layers.back().id));
         QCOMPARE(automate::aim_steps(doc, Json::array(), true, false), Json::array());
         QCOMPARE(thrown([&] { automate::aim_steps(doc, Json::array({Json{{"op", "add_page"}}}), true, false); }).first, std::string("steps"));
+        // (PC6 review of B's P2-B) an action played on each page of a book of two pages or more that makes a page among the
+        // book's — calculations into a new page, a channel copied to a new page, the channels split —: refused before
+        // anything is laid, as for_pages refuses it (the pages numbered then would be others by the next page's turn)
+        core::Document two = doc;
+        {
+            core::Page second = *doc.pages[0];
+            second.id = "pg_second";
+            second.index = core::Num(2);
+            two.pages.push_back(std::make_shared<core::Page>(std::move(second)));
+        }
+        const std::vector<Json> making{Json{{"op", "calculations"}, {"page", 1}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}, {"result", "page"}},
+                                       Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "red"}, {"to_page", "new"}}, Json{{"op", "split_channels"}, {"page", 1}}};
+        for (const Json& step : making) {
+            const auto [code, message] = thrown([&] { automate::aim_steps(two, Json::array({step}), true, true); });
+            QCOMPARE(code, std::string("steps"));
+            QVERIFY2(message.find("the steps are run page by page: ") != std::string::npos && message.find("cannot be repeated page by page") != std::string::npos,
+                     message.c_str());
+            // (B2's P2-1: on a picture of one page nothing is numbered again before it — played as before)
+            const Json once = automate::aim_steps(doc, Json::array({step}), true, true);
+            QCOMPARE(once.size(), std::size_t(1));
+            QCOMPARE(once[0]["page"], Json(1));
+        }
+        const Json into_channel = automate::aim_steps(
+            two, Json::array({Json{{"op", "calculations"}, {"page", 3}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}}}), true, true);
+        QCOMPARE(into_channel.size(), std::size_t(2));
+        QCOMPARE(into_channel[0]["page"], Json(1));
+    }
+
+    // (the review of PC6-B, B2's P2-1) A batch of a recorded action that splits a picture's channels: the picture is a book of
+    // one page, so the steps are played on it as before, and every page they make is written.
+    void recordedSplitOfOnePictureWritten() {
+        QTemporaryDir tmp;
+        const fs::path root = core::path_from_utf8(tmp.path().toStdString());
+        fs::create_directories(root / "in");
+        write(root / "in" / "a.png", png(8, 4));
+        automate::Output out;
+        out.folder = root / "out";
+        automate::Options options;
+        options.recorded = true;
+        const automate::Result result = automate::run({automate::Input{root / "in" / "a.png", false}}, Json::array({Json{{"op", "split_channels"}, {"page", 1}}}), out, options);
+        QVERIFY2(result.errors.empty(), result.json().dump().c_str());
+        QCOMPARE(result.files.size(), std::size_t(1));
+        const Json& outputs = result.files[0]["outputs"];
+        QVERIFY2(outputs.is_array() && outputs.size() >= 3, result.json().dump().c_str());  // (red, green and blue: a page each)
+        for (const Json& file : outputs) QVERIFY(fs::exists(core::path_from_utf8(file.get<std::string>())));
     }
 
     // The inputs: a folder's pictures by name (hidden files and other kinds left out, inner folders with recurse), a book.
@@ -616,6 +661,20 @@ private slots:
         out.format = "jpg";
         out.quality = 13;
         QCOMPARE(thrown([&] { automate::run(inputs.items, Json::array(), out, options); }).second, std::string("the quality is 0 to 12"));
+        // (PC6) stopped between the files of one input (画像プロセッサー's JPEG written, its PNG not yet): the JPEG kept and
+        // said — in `files`, "cancelled" in its row —, nothing more written
+        automate::ImageProcessor two;
+        two.formats = {"jpg", "png"};
+        const automate::Output both = automate::processor_output(two, root / "two");
+        options.cancelled = [&root] { return fs::exists(root / "two" / "JPEG" / "a.jpg"); };
+        result = automate::run({inputs.items[0]}, Json::array(), both, options);
+        QVERIFY(result.cancelled);
+        QCOMPARE(result.files.size(), std::size_t(1));
+        QCOMPARE(result.files[0]["cancelled"], Json(true));
+        QCOMPARE(result.files[0]["output"], Json(core::path_to_utf8(root / "two" / "JPEG" / "a.jpg")));
+        QVERIFY(!fs::exists(root / "two" / "PNG" / "a.png"));
+        QVERIFY(result.errors.empty());
+        options.cancelled = {};
     }
 
     // The books and folders guarded: an agent's book known (an unnamed caller is legacy:unknown there), a v1–v3 book
@@ -681,6 +740,31 @@ private slots:
         QCOMPARE(service::actions::load()["影"]["made"], Json("2026-10-28 12:00"));
         QVERIFY(!service::actions::remove("影"));
         QVERIFY(service::actions::load().empty());
+        // (PC6, the review's P3-2: an actions.json deeper than any reader of it goes — read as one that is not JSON, no crash)
+        {
+            std::ofstream out(service::actions::path(), std::ios::binary | std::ios::trunc);
+            out << R"({"影": {"ops": [{"op": "add_layer", "page": 1, "x": )" << std::string(500000, '[') << std::string(500000, ']') << "}]}}";
+        }
+        QVERIFY(service::actions::load().empty());
+        // (the review of pc6-A's P3-6: the next save keeps the file it could not read aside, as it was, before it writes)
+        const std::string unreadable = storage::read_file(service::actions::path());
+        QVERIFY(!service::actions::store("影", Json::array({Json{{"op", "add_layer"}, {"page", 1}}}), "2026-10-28 12:00"));
+        QCOMPARE(service::actions::load()["影"]["made"], Json("2026-10-28 12:00"));
+        std::vector<std::filesystem::path> aside;
+        for (const auto& entry : std::filesystem::directory_iterator(service::actions::path().parent_path())) {
+            if (entry.path().filename().string().starts_with("actions.json.unreadable-")) aside.push_back(entry.path());
+        }
+        QCOMPARE(aside.size(), std::size_t{1});
+        QVERIFY(storage::read_file(aside[0]) == unreadable);
+        // (a file it reads is written over as before: nothing more kept aside)
+        QVERIFY(!service::actions::remove("影"));
+        std::size_t kept = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(service::actions::path().parent_path())) {
+            if (entry.path().filename().string().starts_with("actions.json.unreadable-")) ++kept;
+        }
+        QCOMPARE(kept, std::size_t{1});
+        std::filesystem::remove(aside[0]);
+        std::filesystem::remove(service::actions::path());
     }
 
     // PC5 J-g: the PC5 ops in the recording — the pages an artboard makes, the book's variables, the questions left out;

@@ -65,6 +65,7 @@
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
 #include "app/settings_watch.hpp"
+#include "app/stoppable.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/icons.hpp"
 #include "app/theme.hpp"
@@ -1456,6 +1457,12 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     if (filter_working_) {
         filter_working_->request_stop();
         close_after_filter_ = true;
+        event->ignore();
+        return;
+    }
+    // (PC6, the review's P2-4: long work on a worker with its progress window — バッチ, コンタクトシート II, ビデオをレンダリング…,
+    // app/stoppable.hpp —: asked to stop, the window closed once it is back)
+    if (close_after_stoppable(this)) {
         event->ignore();
         return;
     }

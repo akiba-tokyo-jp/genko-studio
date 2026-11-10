@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "core/adjust.hpp"
+#include "core/anim.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/filters.hpp"
 #include "core/groups.hpp"
@@ -19,6 +20,7 @@
 #include "core/patterns.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/video.hpp"
 
 namespace genko::core {
 
@@ -780,10 +782,60 @@ void duplicate_layers(OpContext& c) {
     }
     Json made = Json::array();
     for (const Layer& copy : copies) made.push_back(copy.id);
+    // (video@1, PC6 review of B's P3-2: a video layer copied is a video layer — its row copied, the folder's and its altered
+    // cels' ids the copies'. Onto another page that is no animation: the page's timeline with it, as an artboard takes it.
+    // A folder of cels — the animation of before — is copied as before, without a track)
+    std::vector<Json> rows;
+    std::optional<Json> timing;
+    if (const Json* anim = anim::spec(from)) {
+        if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
+            for (const Json& track : *tracks) {
+                if (!is_video_row(track) || !track.contains("folder") || !track.at("folder").is_string()) continue;
+                const auto folder = renamed.find(track.at("folder").get<std::string>());
+                if (folder == renamed.end()) continue;
+                Json row = track;
+                row["folder"] = folder->second;
+                const auto cel_of = [&](Json& id) {
+                    if (!id.is_string()) return;
+                    const auto cel = renamed.find(id.get<std::string>());
+                    id = cel != renamed.end() ? Json(cel->second) : Json(nullptr);
+                };
+                for (Json& frame : row["video"]["frames"]) cel_of(frame[1]);
+                if (row.contains("cels") && row["cels"].is_array()) {  // (B2's P3-4: its exposure sheet too, though a video row's is empty)
+                    for (Json& cel : row["cels"])
+                        if (cel.is_array() && cel.size() >= 2) cel_of(cel[1]);
+                }
+                rows.push_back(std::move(row));
+            }
+        }
+        if (!rows.empty()) {
+            timing = *anim;
+            (*timing)["tracks"] = Json::array();
+            timing->erase("camera");
+            timing->erase("light_table");
+        }
+    }
+    // (onto a page that is an animation of another speed: its footage laid at this page's would run at another — B2's P3-4)
+    if (!rows.empty() && to != at) {
+        if (const Json* there = anim::spec(doc.page(to)); there != nullptr && anim::fps_of(doc.page(to)) != anim::fps_of(from)) {
+            throw OpError("a video layer is copied onto an animation of the same frame rate only (set the page's frame rate first)");
+        }
+    }
     Page& page = doc.edit_page(to);
     const std::size_t place = to == at ? top + 1 : page.layers.size();
     page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(place), std::make_move_iterator(copies.begin()),
                        std::make_move_iterator(copies.end()));
+    if (!rows.empty()) {
+        if (!page.extra.is_object()) page.extra = Json::object();
+        if (!page.extra.contains("anim") || !page.extra["anim"].is_object()) page.extra["anim"] = *timing;
+        Json& anim = page.extra["anim"];
+        if (!anim.contains("tracks") || !anim["tracks"].is_array()) anim["tracks"] = Json::array();
+        std::int64_t longest = 0;
+        for (const Json& row : rows) longest = std::max<std::int64_t>(longest, static_cast<std::int64_t>(row["video"]["frames"].size()));
+        for (Json& row : rows) anim["tracks"].push_back(std::move(row));
+        // (the timeline as long as the rows copied, as a video layer made lengthens it: 3000 frames at most)
+        if (anim::frames_of(page) < longest) anim["frames"] = std::min<std::int64_t>(longest, anim::kMaxFrames);
+    }
     c.report = Json{{"ids", std::move(made)}};
 }
 

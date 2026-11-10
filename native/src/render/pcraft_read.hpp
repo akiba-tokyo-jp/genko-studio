@@ -18,15 +18,19 @@
 //     as the PSD's), adjustment layers as correction layers, fill layers (a colour, a gradient, a pattern of the book's),
 //     shape layers as pen layers of one shape part, smart objects of an embedded file or .pcraft as smart objects (their
 //     smart filters PhotoCraft's commands this build reads: core::from_upstream), each with its masks, vector mask, link,
-//     locks, clipping, opacity and blend;
-//   - text layers as their pixels (upstream's picture of them), linked smart objects and what cannot be read as Genko's
-//     (a shape this build cannot hold, an embedded file it does not read) as their pixels too;
+//     locks, clipping, opacity and blend, and (PC6, layer-styles@1: render/pcraft_styles) its layer effects, fill opacity
+//     and Blend If as its style — the document's global light the book's —;
+//   - text layers as type layers (PC5 G-e: render/psd_type; one Genko's text cannot hold as its pixels), linked smart
+//     objects and what cannot be read as Genko's (a shape this build cannot hold, an embedded file it does not read) as
+//     their pixels;
 //   - its channels and Quick Mask (channels@1), saved, work and clipping paths (vector@1), guides (rulers of kind guide),
 //     patterns (patterns@1), colour table, duotone inks, ICC profile, XMP (file-info@1) and EXIF, the PSD's blocks and
 //     resources it carried (psd-keep@1); the page's native_source says it was a .pcraft;
-// and what Genko has no place for — layer effects, Blend If, left-out channels, layer comps, notes, slices, variables,
-// the timeline, measurements, text styles, a group's own opacity, blend and mask, labels, a video layer's frames — left
-// out and said in `notes` (in Japanese), never silently (the user's design 8-5 (a): PC5 takes them in as it adds them).
+// and what Genko has no place for — a group's and an adjustment layer's effects and Blend If, what a style of Genko's
+// cannot hold of upstream's (render/pcraft_styles), labels, a video layer's other frames — left out and said in `notes`
+// (in Japanese), never silently (the user's design 8-5 (a)). (PC5 took in the layer comps, notes, slices, variables, the
+// timeline, measurements and text styles: render/pcraft_production; a .pcraft inside brings its text styles into the
+// book's, PC6.)
 //
 // What is untrusted is checked before anything is made of it (ReadLimits; a .pcraft inside a smart object of one counts in
 // the outer's, and is read once however many layers show it):

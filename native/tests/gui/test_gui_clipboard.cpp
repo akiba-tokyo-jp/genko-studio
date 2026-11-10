@@ -163,6 +163,17 @@ private slots:
         QCOMPARE(studio.page().layers.size(), count + 3);
         QCOMPARE(studio.window->target_layer()->stroke_count(), std::size_t(1));
         QCOMPARE(studio.window->target_layer()->kind, core::LayerKind::Strokes);
+        // (PC6, review C's P3-2) Genko's items another program put there nested deeper than the control channel's lines (its
+        // brackets counted before it is read — nlohmann's copies and its writing go down them by recursion): never read, a
+        // word, nothing falls
+        auto* deep = new QMimeData;
+        deep->setData(QStringLiteral("application/x-genko-items+json"),
+                      QByteArray::fromStdString("{\"strokes\": [" + stroke.dump() + "], \"x\": " + std::string(200000, '[') + "0" +
+                                                std::string(200000, ']') + "}"));
+        QGuiApplication::clipboard()->setMimeData(deep);
+        studio.trigger("act_paste");
+        QCOMPARE(studio.page().layers.size(), count + 3);
+        QCOMPARE(studio.window->last_notice(), QStringLiteral("ペーストするものがありません（先にコピー）"));
         // nothing on either clipboard: a word
         QGuiApplication::clipboard()->clear();
         Studio fresh;

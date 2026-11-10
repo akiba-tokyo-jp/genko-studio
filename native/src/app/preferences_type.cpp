@@ -75,7 +75,7 @@ QWidget* type_page(QWidget* parent) {
     QObject::connect(table, &QPushButton::clicked, page, [page, table] {
         std::optional<std::vector<service::spell::Notation>> staged;
         if (table->property("genko_notations").isValid())
-            staged = service::spell::notations_of(core::Json::parse(table->property("genko_notations").toString().toStdString(), nullptr, false));
+            staged = service::spell::notations_of_text(table->property("genko_notations").toString().toStdString());
         NotationDialog dialog(page, staged);
         if (ask::exec(&dialog) == QDialog::Accepted)
             table->setProperty("genko_notations", QString::fromStdString(service::spell::notations_json(dialog.rows()).dump()));

@@ -269,8 +269,9 @@ std::optional<Page> with_plain_layers(const Page& page, const Document* doc);
 // show (and those inside them) and the files ops gave them come along, each under an id `doc` does not hold yet (the page's
 // smart objects then name it), and the files ops gave their smart filters (filters@1) and the patterns their fills name (patterns@1:
 // core::bring_patterns). The files of `from`'s assets are the
-// caller's to copy first (storage::copy_assets).
-void bring_contents(Document& doc, const Document& from, Page& page);
+// caller's to copy first (storage::copy_assets). `each` (PC6 review B P2-1): done to the page and to each contents page
+// brought, before it is kept (import_pages brings the type styles their type layers take: core::type_styles::StyleCarry).
+void bring_contents(Document& doc, const Document& from, Page& page, const std::function<void(Page&)>& each = {});
 
 // The same panels as a page's drawing takes them (their boxes, shapes, clipping and borders, and the panels in them).
 bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b);

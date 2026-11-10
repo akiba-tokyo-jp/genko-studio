@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/exif.hpp"
 #include "core/paths.hpp"
@@ -105,6 +106,12 @@ std::uint64_t hdr_work_bytes(std::uint32_t width, std::uint32_t height, std::uin
 
 void check_work(std::uint32_t width, std::uint32_t height, std::uint64_t shots_bytes, const HdrSettings& settings) {
     if (const std::uint64_t need = hdr_work_bytes(width, height, shots_bytes, settings); need > codecs::kAllocBudget) too_large(need);
+    // (PC6, review C P2-2: the 32-bit book's layer — RGBA floats — within the book's 1 GiB of precise pixels, before anything
+    // is merged; the work's 40 bytes a pixel above refuse such a size first, this said should that change)
+    if (settings.depth == 32 && 16 + std::uint64_t(width) * height * 16 > core::kColorRasterBookBytes) {
+        throw core::Error("image_too_large", "the 32-bit HDR picture would pass the book's 1 GiB of precise pixels (" + std::to_string(width) + "×" +
+                                                 std::to_string(height) + " pixels): choose 16 or 8 bits");
+    }
 }
 
 render::hdr::Tone hdr_tone(std::string_view method, const Json& settings) {
