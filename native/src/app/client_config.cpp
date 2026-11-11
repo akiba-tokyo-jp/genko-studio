@@ -146,7 +146,7 @@ void propose_json(Proposal& out, const QStringList& server) {
         }
         // (values that would not be written back as they are: Genko never changes such a file)
         if (!repairs.nonfinite.empty()) {
-            out.refusal = QStringLiteral("設定ファイルに、NaN・Infinity や 1e400 のような、ふつうの数で表せない数があります（%1）。Genko からは書き換えません")
+            out.refusal = QStringLiteral("設定ファイルに、NaN・Infinity や 1e400 のような、有限の数値で表せない数があります（%1）。Genko からは書き換えません")
                               .arg(QString::fromStdString(repairs.nonfinite.front()));
             return;
         }

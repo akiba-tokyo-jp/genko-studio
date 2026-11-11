@@ -92,33 +92,33 @@ QString value_kind(const QString& type) {
 // The refusals this build added (numbers that are not finite, the precise colour work, PhotoCraft's ops, the words of
 // errors from below the ops) in the person's words: before the families below, which would leave their keys in English.
 void add_this_builds_refusals(std::vector<Rule>& r) {
-    static const QString finite = QStringLiteral("は、ふつうの数で指定します（無限大や NaN は使えません）");
+    static const QString finite = QStringLiteral("は、有限の数値で指定してください（無限大や NaN は使えません）");
     // numbers that are not finite
     r.push_back(rule("angle must be a finite number", [](const QRegularExpressionMatch&) { return QStringLiteral("角度") + finite; }));
     r.push_back(rule(R"(gradient\.angle must be a finite number)",
                      [](const QRegularExpressionMatch&) { return QStringLiteral("トーンのグラデーションの角度") + finite; }));
     r.push_back(rule("width_mm must be a finite number", [](const QRegularExpressionMatch&) { return QStringLiteral("線の太さ") + finite; }));
-    r.push_back(rule("scaled width_mm must be a finite number", "倍率をかけた線の太さが、ふつうの数になりません（倍率を見直してください）"));
+    r.push_back(rule("scaled width_mm must be a finite number", "倍率をかけた線の太さが、有限の数値になりません（倍率を見直してください）"));
     r.push_back(rule("the page's (width_mm|height_mm) must be a finite number", [](const QRegularExpressionMatch& m) {
-        return QStringLiteral("ページの%1が、ふつうの数ではありません（無限大や NaN）。用紙の大きさを設定し直してください")
+        return QStringLiteral("ページの%1が、有限の数値ではありません（無限大や NaN）。用紙の大きさを設定し直してください")
             .arg(m.captured(1) == QLatin1String("width_mm") ? QStringLiteral("幅") : QStringLiteral("高さ"));
     }));
     r.push_back(rule("the page's lt_threshold must be a finite number",
-                     "このページの線画にするしきい値が、ふつうの数ではありません（無限大や NaN）。しきい値を設定し直してください"));
+                     "このページの線画にするしきい値が、有限の数値ではありません（無限大や NaN）。しきい値を設定し直してください"));
     r.push_back(rule("points and pressure must be finite numbers", [](const QRegularExpressionMatch&) { return QStringLiteral("線の点と筆圧") + finite; }));
     r.push_back(rule("stroke must contain only finite numbers", [](const QRegularExpressionMatch&) { return QStringLiteral("線の点や太さ") + finite; }));
     r.push_back(rule("the layout's guides must be finite",
-                     "ガイドレイアウトのガイドの位置が、ふつうの数になりません（列・行・マージンの数値を見直してください）"));
+                     "ガイドレイアウトのガイドの位置が、有限の数値になりません（列・行・マージンの数値を見直してください）"));
     r.push_back(rule("this effect's settings give lines that are not finite numbers",
-                     "この効果線の設定では、線の位置がふつうの数になりません（設定の数値を見直してください）"));
-    r.push_back(rule("to gives a pose that is not finite", "そのポーズでは、デッサン人形の位置がふつうの数になりません（動かす先を見直してください）"));
+                     "この効果線の設定では、線の位置が有限の数値になりません（設定の数値を見直してください）"));
+    r.push_back(rule("to gives a pose that is not finite", "そのポーズでは、デッサン人形の位置が有限の数値になりません（動かす先を見直してください）"));
     r.push_back(rule(R"(the 3D gives a line that is not on the page \(not finite\))",
-                     "3D から作る線の位置が、ふつうの数になりません（3D の位置・大きさ・向きを見直してください）"));
+                     "3D から作る線の位置が、有限の数値になりません（3D の位置・大きさ・向きを見直してください）"));
     r.push_back(rule(R"(ops must not hold NaN or Infinity \(at (.*)\))",
-                     "操作に NaN や無限大の数があります（\\1）。ふつうの数で指定してください（原稿は変わりません）"));
+                     "操作に NaN や無限大の数があります（\\1）。有限の数値で指定してください（原稿は変わりません）"));
     r.push_back(rule("material library contains nonfinite numbers",
                      "素材ライブラリの一覧に NaN や無限大の数があるため、読み込めません（一覧のファイルを直してください）"));
-    r.push_back(rule("cannot convert float to integer", "数が大きすぎるか、ふつうの数ではないため、整数にできません（無限大や NaN は使えません）"));
+    r.push_back(rule("cannot convert float to integer", "数が大きすぎるか、有限の数値ではないため、整数にできません（無限大や NaN は使えません）"));
     r.push_back(rule("center_mm is too far off the page", "貼り付ける位置が、ページから離れすぎています"));
     r.push_back(rule("the transform is too far off the page", "変形した先が、ページから離れすぎています（変形を小さくしてください）"));
     r.push_back(rule("the transform makes a line too wide", "変形すると線が太くなりすぎます（拡大を小さくしてください）"));
@@ -140,7 +140,7 @@ void add_this_builds_refusals(std::vector<Rule>& r) {
     r.push_back(rule(R"(the area is nested too deeply \(saved areas in a loop\?\))",
                      "範囲の入れ子が深すぎます（保存した選択範囲どうしが、互いを指していないか確かめてください）"));
     r.push_back(rule(R"(the area takes too much work \(more than (\S+) pixels of masks\))",
-                     "範囲の計算が多すぎます（マスクの画素が \\1 を超えます）。範囲の組み合わせを減らしてください"));
+                     "範囲の計算が多すぎます（マスクの画素数が \\1 を超えます）。範囲の組み合わせを減らしてください"));
     r.push_back(rule("the merged layer would hold too many shape parts", "結合したレイヤーのシェイプの部品が多くなりすぎるため、結合できません"));
     // the words of Python's own errors, below the ops
     r.push_back(rule(R"(AttributeError: '(\w+)' object has no attribute 'get')", [](const QRegularExpressionMatch& m) {
@@ -293,7 +293,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"((x_mm|y_mm|w_mm|h_mm|path|tail) must be a finite number)", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {{"x_mm", "台詞の横の位置"}, {"y_mm", "台詞の縦の位置"}, {"w_mm", "フキダシの幅"},
                                                           {"h_mm", "フキダシの高さ"}, {"path", "フキダシの形"}, {"tail", "しっぽの先"}};
-            return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+            return QStringLiteral("%1は、有限の数値で指定してください（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
         }));
         r.push_back(rule(R"(points needs \[x_mm, y_mm\])", "点は [x, y]（mm）の 2 つの数で指定します"));
         // M5 (core/ops_studio.cpp, render/placed.cpp, render/screentone.cpp): the studio's refusals in the C++ build only
@@ -304,7 +304,7 @@ const std::vector<Rule>& rules() {
                                  {"placement_mm", "画像の置き場所"}, {"face_box01", "顔の位置"}, {"pad_mm", "画像の余白"},
                                  {"rect_mm", "コマや領域の位置と大きさ"}, {"poly", "コマの角の位置"}, {"border_mm", "枠線の太さ"},
                                  {"curves", "コマの辺のふくらみ"}, {"corner_mm", "コマの角の丸み"}};
-                             return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+                             return QStringLiteral("%1は、有限の数値で指定してください（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
                          }));
         r.push_back(rule(R"(each of the bible's characters must be an object, not .*)",
                          "設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
@@ -919,7 +919,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
-        r.push_back(rule(R"(the file cannot be read \(it is not a regular file\))", "ふつうのファイルではないので読み込めません（デバイスやパイプは読みません）"));
+        r.push_back(rule(R"(the file cannot be read \(it is not a regular file\))", "通常のファイルではないので読み込めません（デバイスやパイプは読みません）"));
         // (a book of v1–v3, which this build does not write: storage::NeedsMigration)
         r.push_back(rule(R"(this book is in the version (\d+) format, which this build does not write; .*)", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("この原稿は古い形式（版 %1）なので、書き込めません。genko migrate で新しいフォルダーに v4 として写してから使ってください（元の原稿はそのまま残ります）")
@@ -981,7 +981,7 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("%1が大きすぎます（%2 MB まで）: %3").arg(files.value(m.captured(1), m.captured(1)), m.captured(2), m.captured(3));
         }));
         r.push_back(rule(R"(the (\S+) is a link or not a file: (.*))", [](const QRegularExpressionMatch& m) {
-            return QStringLiteral("%1がリンクか、ふつうのファイルではないため、読み込めません: %2").arg(files.value(m.captured(1), m.captured(1)), m.captured(2));
+            return QStringLiteral("%1がリンクか、通常のファイルではないため、読み込めません: %2").arg(files.value(m.captured(1), m.captured(1)), m.captured(2));
         }));
         r.push_back(rule(R"(the material library would be too large for the materials panel \(at most (\d+) MB\))",
                          "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（\\1 MB まで）"));
@@ -1567,7 +1567,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("(paper|trim|bleed_mm|margins) must be a finite number", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {{"paper", "用紙の大きさ"}, {"trim", "仕上がりの大きさ"},
                                                           {"bleed_mm", "裁ち落とし"}, {"margins", "基本枠の余白"}};
-            return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+            return QStringLiteral("%1は、有限の数値で指定してください（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
         }));
         r.push_back(rule("paper is too large: .*", "用紙が大きすぎて、ページの中身を新しい基本枠へ動かせません"));
         r.push_back(rule(R"(the paint layer on the new paper is too large \(.*\))",
@@ -1578,7 +1578,7 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("取り込む原稿の素材ファイル（%1）が大きすぎて取り込めません（1 ファイル %2 MiB まで）")
                 .arg(m.captured(1), QString::number(m.captured(2).toULongLong() / (1024 * 1024)));
         }));
-        r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
+        r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、有限の数値で指定してください（無限大や NaN は使えません）"));
         r.push_back(rule(R"(a (\w+) ruler needs (\d+) point\(s\))", "この定規には点が \\2 つ要ります"));
         r.push_back(rule("a perspective ruler has 1 to 3 vanishing points", "パース定規の消失点は 1〜3 つです"));
         r.push_back(rule("ratio must be above 0", "縦横の比は 0 より大きくします"));

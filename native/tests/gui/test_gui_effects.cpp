@@ -707,11 +707,11 @@ private slots:
         // (M5: the studio's refusals in the C++ build only, SPEC COMP-01a, as the person reads them)
         using genko::wording::error;
         QCOMPARE(error(std::string("ops[0] place_asset: placement_mm.x must be a finite number")),
-                 QStringLiteral("画像の置き場所は、ふつうの数で指定します（無限大や NaN は使えません）"));
+                 QStringLiteral("画像の置き場所は、有限の数値で指定してください（無限大や NaN は使えません）"));
         QCOMPARE(error(std::string("ops[0] import_candidates: face_box01 must be a finite number")),
-                 QStringLiteral("顔の位置は、ふつうの数で指定します（無限大や NaN は使えません）"));
+                 QStringLiteral("顔の位置は、有限の数値で指定してください（無限大や NaN は使えません）"));
         QCOMPARE(error(std::string("ops[0] set_layout: rect_mm.width must be a finite number")),
-                 QStringLiteral("コマや領域の位置と大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
+                 QStringLiteral("コマや領域の位置と大きさは、有限の数値で指定してください（無限大や NaN は使えません）"));
         QCOMPARE(error(std::string("ops[0] set_bible: each of the bible's characters must be an object, not 'c-a'")),
                  QStringLiteral("設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
         QCOMPARE(error(std::string("ops[0] place_asset: the asset's picture cannot be read (the file is too large)")),

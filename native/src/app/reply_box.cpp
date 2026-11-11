@@ -85,13 +85,13 @@ const QString kForeign = QStringLiteral("\x01foreign");
 QString check(const fs::path& path, QString& item, QString& text) {
     std::error_code ec;
     const fs::file_status status = fs::symlink_status(path, ec);
-    if (ec || !fs::is_regular_file(status)) return QStringLiteral("ふつうのファイルではありません");
+    if (ec || !fs::is_regular_file(status)) return QStringLiteral("通常のファイルではありません");
     std::string bytes;
     try {
         bytes = storage::read_file_bounded(path, kMaxFile);
     } catch (const core::Error& error) {
         if (error.code() == "memory") return QStringLiteral("大きすぎます（%1 KiB まで）").arg(kMaxFile / 1024);
-        if (error.code() == "format") return QStringLiteral("ふつうのファイルではありません");
+        if (error.code() == "format") return QStringLiteral("通常のファイルではありません");
         return QStringLiteral("読めません（%1）").arg(QString::fromStdString(error.what()));
     }
     Json data;

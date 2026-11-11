@@ -1371,9 +1371,9 @@ private slots:
         QCOMPARE(w::error(QStringLiteral("ops[0] add_line: text is required")), QStringLiteral("台詞の文字が要ります（空の台詞は置けません）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] move_line: a tail's to must be two numbers [x, y]")), QStringLiteral("しっぽの先は [x, y] の 2 つの数で指定します"));
         QCOMPARE(w::error(QStringLiteral("ops[0] move_line: x_mm must be a finite number")),
-                 QStringLiteral("台詞の横の位置は、ふつうの数で指定します（無限大や NaN は使えません）"));
+                 QStringLiteral("台詞の横の位置は、有限の数値で指定してください（無限大や NaN は使えません）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] add_line: path must be a finite number")),
-                 QStringLiteral("フキダシの形は、ふつうの数で指定します（無限大や NaN は使えません）"));
+                 QStringLiteral("フキダシの形は、有限の数値で指定してください（無限大や NaN は使えません）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] cut_balloon: points needs [x_mm, y_mm]")), QStringLiteral("点は [x, y]（mm）の 2 つの数で指定します"));
         QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern cannot be read: missing ), unterminated subpattern at position 0")),
                  QStringLiteral("正規表現が読めません"));

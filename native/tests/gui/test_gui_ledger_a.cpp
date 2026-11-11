@@ -427,7 +427,7 @@ private slots:
     void test_this_builds_refusals_read_in_japanese() {
         const std::vector<std::pair<QString, QString>> cases{
             // (no value)
-            {"ops[0] add_tone: angle must be a finite number", "角度は、ふつうの数で指定します（無限大や NaN は使えません）"},
+            {"ops[0] add_tone: angle must be a finite number", "角度は、有限の数値で指定してください（無限大や NaN は使えません）"},
             {"ops[0] merge_visible: flatten requires copy=false", "画像を統合するときは、新しいレイヤーに結合する指定を外してください"},
             {"ops[0] put_color_raster: color raster book budget exceeded",
              "高精度の画素が 1 冊の上限（1 GiB）を超えるため、置けません（高精度のレイヤーを減らしてください）"},
@@ -443,7 +443,7 @@ private slots:
             {"ops[3] set_tone: layer L7 is not a tone layer", "レイヤー（L7）はトーンのレイヤーではありません（トーンのレイヤーを選んでください）"},
             {"ops[0] fill_area: the area is made of too many areas (at most 64)", "範囲の組み合わせが多すぎます（64 個まで）"},
             {"ops[1] add_ruler: ops must not hold NaN or Infinity (at ops[1].points[0])",
-             "操作に NaN や無限大の数があります（ops[1].points[0]）。ふつうの数で指定してください（原稿は変わりません）"},
+             "操作に NaN や無限大の数があります（ops[1].points[0]）。有限の数値で指定してください（原稿は変わりません）"},
             {"ops[0] add_prim3d: duplicate 3D id box_2", "同じ ID の 3D がすでにあります（box_2）"},
             {"ops[0] paste: the area holds too many masks at once (more than 400000000.0 pixels)",
              "範囲が一度に使うマスクが多すぎます（400000000.0 画素を超えます）。範囲の組み合わせを減らしてください"},

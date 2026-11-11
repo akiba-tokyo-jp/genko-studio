@@ -477,8 +477,8 @@ private slots:
     void claudeDesktopFileRefused_data() {
         QTest::addColumn<QByteArray>("before");
         QTest::addColumn<QString>("refusal");
-        QTest::newRow("NaN") << QByteArray(R"({"a": NaN, "mcpServers": {}})") << QStringLiteral("ふつうの数で表せない数があります（/a）");
-        QTest::newRow("1e400") << QByteArray(R"({"mcpServers": {"x": {"timeout": 1e400}}})") << QStringLiteral("ふつうの数で表せない数があります（/mcpServers/x/timeout）");
+        QTest::newRow("NaN") << QByteArray(R"({"a": NaN, "mcpServers": {}})") << QStringLiteral("有限の数値で表せない数があります（/a）");
+        QTest::newRow("1e400") << QByteArray(R"({"mcpServers": {"x": {"timeout": 1e400}}})") << QStringLiteral("有限の数値で表せない数があります（/mcpServers/x/timeout）");
         QTest::newRow("beyond 64 bits") << QByteArray(R"({"id": 123456789012345678901234567890})") << QStringLiteral("64 ビットに収まらない大きな整数があります（/id）");
         QTest::newRow("a key twice") << QByteArray(R"({"mcpServers": {}, "mcpServers": {"x": {"command": "y"}}})") << QStringLiteral("同じ鍵（mcpServers）が二つ");
         QTest::newRow("a key twice inside") << QByteArray(R"({"mcpServers": {"genko": {"command": "a", "command": "b"}}})") << QStringLiteral("同じ鍵（command）が二つ");

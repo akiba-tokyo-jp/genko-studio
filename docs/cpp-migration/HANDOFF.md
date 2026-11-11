@@ -235,7 +235,7 @@
   - まっさらな Ubuntu 24.04 の容器への導入（PC6 の出口と同じ手順）は「ALL OK」。開き直した 8 ページの画素も同じ。
   - 製品のコード（native/src）の変更はコメントだけ。
 - 残り:
-  - wording::error が日本語にしない文言 102 件を gui/errors_not_in_japanese.json に載せた（減る方向だけを許す）。訳を足すかは未決。
+  - wording::error が日本語にしなかった文言 102 件は、利用者の指示（2026-11-11）ですべて自然な日本語の表示にした（wording.cpp の add_this_builds_refusals ほか）。許す一覧 errors_not_in_japanese.json は外し、test_every_error_reads_in_japanese は 1 件でも英語が残れば落ちる元の厳しさに戻した。CLI・MCP・HTTP の JSON の code と英語の error の文は変えていない。あわせて「ふつうの数」を「有限の数値」、「ふつうのファイル」を「通常のファイル」にそろえた。
   - render_memory_check（cgroup の上限での描画）と raster の put_raster の段の断り（壊れた JPEG・PSD の zip）は戻していない。
   - contract の試験は Windows ではまだ走らない（Windows の実機の受入と一緒に）。
 
