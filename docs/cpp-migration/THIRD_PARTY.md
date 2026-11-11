@@ -50,8 +50,8 @@
 
 | 名前 | ライセンス | 置き場所 |
 |---|---|---|
-| Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP | SIL OFL 1.1（OFL-1.1） | `src/genko/fonts/`（ライセンス文は `fonts/licenses/`） |
-| Lucide アイコン | ISC | `src/genko/app/lucide/` |
+| Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP | SIL OFL 1.1（OFL-1.1） | `native/resources/fonts/`（ライセンス文は `native/resources/fonts/licenses/`） |
+| Lucide アイコン | ISC | `native/resources/lucide/` |
 
 フォントは配布物に入れるが、PSD 等の出力ファイルへ埋め込まない（PSD-01）。
 
