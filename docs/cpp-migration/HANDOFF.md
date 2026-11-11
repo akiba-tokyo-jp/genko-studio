@@ -218,6 +218,27 @@
   - 保存していない原稿の 変数データセット… は、画像が合わせて 256 MiB を越えると断る（保存すれば 4 GiB まで）。
 - **次**: native/integration へ統合（この節の commit の後）。Windows の実機の build・受入（windows-debug・windows-release と、それを含む `--pair`）と配布は、利用者の決定（2026-10-15）のとおりマージ後に別の環境で。
 
+### main への統合と Python 版の削除（2026-11-11）
+- **利用者の決定 17（2026-11-11）**: Python 版は安定版として扱わない。native/integration を main にマージし、今の版（C++）を最新の版とする。README には Python 版から移行したことだけを書く（c12298b）。main の CI を止めた形（.github/disabled-workflows）は保ち、native.yml も同じ場所に置いた。
+- **利用者の決定 18（2026-11-11）**: Python 版のソースを main から消す。Python 版と突き合わせる試験もやめる。コマンドと文書は今の版（`genko …`）に書き換え、Python 版に合わせることはもうしない。
+- したこと（ブランチ remove-python）:
+  - C++ 版が使う資源（UI の書体・本文の書体とライセンス・lucide のアイコン・studio の layouts.json・vocab.json・手引き）を native/resources へ移した。
+  - src/・tests/（Python の試験）・pyproject.toml・uv.lock・Python の試験の workflow、Python 版を import する tools/migration の harness・tools/acceptance の確認を消した。
+  - Python 版を動かして比べていた契約試験 33 本と比較の関数を外した。比較に埋もれていた C++ 版だけの検査は、元の期待値のまま戻した。
+    - 新しい試験: e2e/test_refusals_e2e（数でない値・壊れた本の断り 64 件、人だけの操作、壊れた絵）、unit/test_ai_link。
+    - 既存の試験への追加: test_save_e2e・test_migrate_e2e（固定の v2 の本）・test_cli_e2e（studio の 101 段）・test_gui_ledger_a・test_contract_abr・render_cli・plugins・anim・export_cli・pipeline。
+  - 外の道具の試験（Pillow・psd-tools・MCP の SDK・上流 PhotoCraft の pcraft の検査）と、前に記録した固定データとの比較は残した。
+- 確かめたこと:
+  - Release を一から組んで、ctest 268 本すべて合格（test_soak_app 7,106 秒を含む）。
+  - tools/ci の試験 68 本合格。
+  - 配布物 genko-studio-0.1.0-linux-x86_64.tar.gz（sha256 `da608443691715d6d407b9f96d865a0e47e6c0c4d3aa94651d57e9159f31b66e`）のファイルの一覧は、消す前と同じ。
+  - まっさらな Ubuntu 24.04 の容器への導入（PC6 の出口と同じ手順）は「ALL OK」。開き直した 8 ページの画素も同じ。
+  - 製品のコード（native/src）の変更はコメントだけ。
+- 残り:
+  - wording::error が日本語にしない文言 102 件を gui/errors_not_in_japanese.json に載せた（減る方向だけを許す）。訳を足すかは未決。
+  - render_memory_check（cgroup の上限での描画）と raster の put_raster の段の断り（壊れた JPEG・PSD の zip）は戻していない。
+  - contract の試験は Windows ではまだ走らない（Windows の実機の受入と一緒に）。
+
 ### PC5 の設計と利用者の決定（2026-10-28、PC4 の出口の後に読取専用で）
 - 設計: 台帳の残りの 338 行すべて（PC5 が最後の工程で、行を後へ回せない）を 4 つの節に。G 文字（74 行: 文字レイヤー・文字ツール・組版と OpenType・右から左・文字／段落スタイル・パネル・スペルチェックと表記の点検・検索と置換・書体の置き換え・PSD と .pcraft の文字、約 69.5 人日）、H 表示・窓・環境設定（約 111 行: 画素の段と % の意味・ピクセルグリッド・32 bit のプレビュー・手のひら・スクリーンモード・ガイドとグリッドと単位・窓の区画と並べ方・パネル・ワークスペース・キーの組・メニュー・ツールバー・環境設定と API・取り消しとメモリをクリア・画素の縦横比・GPU と CPU の表示の一致、約 61 人日）、I レイヤー・アートボード・自動処理（61 行: レイヤーの基本の残り・グループとフレーム・アートボード・変数とデータセット・バッチ／ドロップレット／スクリプト／イベント／画像プロセッサー・プリント・コンタクトシート・画像アセット・自動整列／自動合成／Photomerge／スタック／統計・HDR Pro・写真の切り抜き、約 73.5 人日）、J 制作の補助（92 行: レイヤーカンプ・スライス・注釈・ものさし／カウント／計測・計測ログ・タイムライン・ビデオレイヤー・WASM のプラグイン・制御チャンネル・アクション、約 99.5 人日）。PC4 の出口の決定 4 つと tools/ci の直し（Z0、約 3 人日）。計約 306.5 人日。土台 PC5-0（Z0・G-0・H-0・I-0、続けて J-0）の後、4 つずつ 7 つの波。新しいライブラリ: WAMR（Apache-2.0 WITH LLVM-exception）・SheenBidi（Apache-2.0）・英語の辞書 SCOWL。GPL・FFmpeg・ML のモデル・新しい費用は要らない。新しい拡張: type@1・groups@1・image-assets@1・layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1・pixel-aspect@1。
 - 利用者の決定（PC4 の出口の報告で）: (1) genko review の HTML の「書き出し…」を今のメニュー名に直す。(2) ops_schema の glow の説明文を今のフィルター メニューの名前に（op・引数は変えない）。(3) 32 bit の PSD は線形の値で書く（読むときも対に）。(4) 16・32 bit のページで新しく作る層はページの深さ（add_layer の既定が変わる）。
