@@ -1,0 +1,1364 @@
+{
+ "note": "The batches this build refuses on purpose (SPEC COMP-01a), for test_refusals_e2e: a number that is not finite (text such as 'inf' or 'nan' taken for a number), a frame_id that is not a panel's id, a picture that cannot be drawn or read, a library picture outside the material library or through a link, a book import_pages cannot read, a paper too large for a page's pixels, what only a person holds changed by an agent. Each case: its steps ({ops, agent?}; or one step of ops and agent; the steps before the last succeed), the code its last step is refused with (cpp) and words its error holds (cpp_says), as the cases of book_cases.json, lines_cases.json and studio_cases.json of c12298b0 had them. The ids (panels 000000000018, 000000000026, 000000000029, 000000000045; lines 00000000002b, 000000000047) are the panels and lines of the book the test makes ('ids' says which); $A1 … are its pictures, $PAGESBOOK the book on disk, $SCRATCH the books import_pages cannot read; the material library (u-…) is the one the test writes into the config folder.",
+ "ids": {
+  "000000000026": "page 1, its first panel (a person's region, three candidates, the art adopted: cd_a2)",
+  "000000000029": "page 1, its second panel",
+  "000000000018": "page 4, its panel",
+  "000000000045": "page 6, its panel",
+  "00000000002b": "page 1, a line in its first panel",
+  "000000000047": "page 6, a line"
+ },
+ "cases": [
+  {
+   "n": "set_page_spec paper NaN not moved",
+   "group": "book",
+   "op": "set_page_spec",
+   "ops": [
+    {
+     "op": "set_page_spec",
+     "paper": [
+      "nan",
+      300
+     ],
+     "move": false
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "paper must be a finite number"
+  },
+  {
+   "n": "set_page_spec paper infinite not moved",
+   "group": "book",
+   "op": "set_page_spec",
+   "ops": [
+    {
+     "op": "set_page_spec",
+     "paper": [
+      300,
+      "inf"
+     ],
+     "move": false
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "paper must be a finite number"
+  },
+  {
+   "n": "set_page_spec margins NaN",
+   "group": "book",
+   "op": "set_page_spec",
+   "ops": [
+    {
+     "op": "set_page_spec",
+     "margins": [
+      10,
+      10,
+      "nan",
+      10
+     ],
+     "move": false
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "margins must be a finite number"
+  },
+  {
+   "n": "set_page_spec margins NaN moves a picture",
+   "group": "book",
+   "op": "set_page_spec",
+   "ops": [
+    {
+     "op": "set_page_spec",
+     "margins": [
+      10,
+      10,
+      "nan",
+      10
+     ]
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the basic frame must be a finite size"
+  },
+  {
+   "n": "set_page_spec paper far too large moves a picture",
+   "group": "book",
+   "op": "set_page_spec",
+   "ops": [
+    {
+     "op": "set_page_spec",
+     "paper": [
+      1e+300,
+      300
+     ]
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the paint layer on the new paper is too large"
+  },
+  {
+   "n": "import_pages from a newer book",
+   "group": "book",
+   "op": "import_pages",
+   "ops": [
+    {
+     "op": "import_pages",
+     "from": "$SCRATCH/newer.genko"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the other book cannot be read (project.json version 99 is newer than this build supports"
+  },
+  {
+   "n": "import_pages from JSON that is not a book",
+   "group": "book",
+   "op": "import_pages",
+   "ops": [
+    {
+     "op": "import_pages",
+     "from": "$SCRATCH/notbook.genko"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the other book cannot be read ("
+  },
+  {
+   "n": "import_pages from a book missing a picture",
+   "group": "book",
+   "op": "import_pages",
+   "ops": [
+    {
+     "op": "import_pages",
+     "from": "$SCRATCH/damaged.genko"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the other book cannot be read ("
+  },
+  {
+   "n": "add_line frame_id a number",
+   "group": "lines",
+   "op": "add_line",
+   "ops": [
+    {
+     "op": "add_line",
+     "page": 4,
+     "text": "台詞",
+     "frame_id": 5,
+     "x_mm": 1,
+     "y_mm": 1
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "frame_id must be a panel's id or null"
+  },
+  {
+   "n": "add_line x not finite",
+   "group": "lines",
+   "op": "add_line",
+   "ops": [
+    {
+     "op": "add_line",
+     "page": 4,
+     "text": "台詞",
+     "x_mm": "nan"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "x_mm must be a finite number"
+  },
+  {
+   "n": "add_line tail not finite",
+   "group": "lines",
+   "op": "add_line",
+   "ops": [
+    {
+     "op": "add_line",
+     "page": 4,
+     "text": "台詞",
+     "tail": [
+      "inf",
+      1
+     ]
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "tail must be a finite number"
+  },
+  {
+   "n": "add_line style not finite",
+   "group": "lines",
+   "op": "add_line",
+   "ops": [
+    {
+     "op": "add_line",
+     "page": 4,
+     "text": "台詞",
+     "style": {
+      "size_mm": "-inf"
+     }
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "style.size_mm must be a finite number"
+  },
+  {
+   "n": "add_line picture that cannot be drawn",
+   "group": "lines",
+   "op": "add_line",
+   "ops": [
+    {
+     "op": "add_line",
+     "page": 4,
+     "text": "台詞",
+     "style": {
+      "picture": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAADUlEQVRub3QgemxpYiBkYXRhGS8RbwAAAABJRU5ErkJggg=="
+     }
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "style picture: "
+  },
+  {
+   "n": "edit_line frame_id a number",
+   "group": "lines",
+   "op": "edit_line",
+   "ops": [
+    {
+     "op": "edit_line",
+     "id": "00000000002b",
+     "frame_id": 7
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "frame_id must be a panel's id or null"
+  },
+  {
+   "n": "cut_balloon point not finite",
+   "group": "lines",
+   "op": "cut_balloon",
+   "ops": [
+    {
+     "op": "cut_balloon",
+     "id": "00000000002b",
+     "points": [
+      [
+       "nan",
+       2
+      ]
+     ]
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "style.cuts.points must be a finite number"
+  },
+  {
+   "n": "move_line y not finite",
+   "group": "lines",
+   "op": "move_line",
+   "ops": [
+    {
+     "op": "move_line",
+     "id": "000000000047",
+     "y_mm": "inf"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "y_mm must be a finite number"
+  },
+  {
+   "n": "set_balloon_path not finite",
+   "group": "lines",
+   "op": "set_balloon_path",
+   "ops": [
+    {
+     "op": "set_balloon_path",
+     "id": "00000000002b",
+     "path": [
+      [
+       1,
+       1
+      ],
+      [
+       9,
+       "nan"
+      ],
+      [
+       5,
+       9
+      ],
+      [
+       9,
+       9
+      ]
+     ]
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "must be a finite number"
+  },
+  {
+   "n": "stamp_material lettering frame_id a number",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 4,
+     "material_id": "sfx-ドーン",
+     "frame_id": 5
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "frame_id must be a panel's id or null"
+  },
+  {
+   "n": "stamp_material lettering x not finite",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 4,
+     "material_id": "sfx-ドーン",
+     "x_mm": "nan"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "x_mm must be a finite number"
+  },
+  {
+   "n": "stamp_material library lettering of an infinite width",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 4,
+     "material_id": "u-let-infinite"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "x_mm must be a finite number"
+  },
+  {
+   "n": "stamp_material picture balloon outside the library and no line",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-outside",
+     "line_id": "nope"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "unsafe material image source"
+  },
+  {
+   "n": "stamp_material picture balloon not a picture",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-text",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "not a readable image"
+  },
+  {
+   "n": "stamp_material picture balloon outside the library",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-outside",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "unsafe material image source"
+  },
+  {
+   "n": "stamp_material picture balloon by a whole path",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-whole-path",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "material image must be inside the material library"
+  },
+  {
+   "n": "stamp_material picture balloon outside the library and missing",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-outside-missing",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "unsafe material image source"
+  },
+  {
+   "n": "stamp_material picture balloon by a whole path and missing",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-whole-path-missing",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "material image must be inside the material library"
+  },
+  {
+   "n": "stamp_material picture balloon through a link",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-link",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "unsafe material image source"
+  },
+  {
+   "n": "stamp_material picture balloon through a link to nothing",
+   "group": "lines",
+   "op": "stamp_material",
+   "ops": [
+    {
+     "op": "stamp_material",
+     "page": 1,
+     "material_id": "u-pic-dangling",
+     "line_id": "00000000002b"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "unsafe material image source"
+  },
+  {
+   "n": "set_studio style replaced by a text",
+   "group": "studio",
+   "op": "set_studio",
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": "plain"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  },
+  {
+   "n": "import_candidates face not finite",
+   "group": "studio",
+   "op": "import_candidates",
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 6,
+     "frame_id": "000000000045",
+     "candidates": [
+      {
+       "asset": "$A3",
+       "px": [
+        64,
+        48
+       ],
+       "origin": {
+        "kind": "agent"
+       },
+       "face_box01": [
+        "inf",
+        0,
+        1,
+        1
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "face_box01 must be a finite number"
+  },
+  {
+   "n": "adopt_candidate scale not finite",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "scale": "inf"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.x must be a finite number"
+  },
+  {
+   "n": "adopt_candidate a JPEG cut short",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$JX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a BMP cut short",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a GIF cut short",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$GX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PNG cut short",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$CUT",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate no picture",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BAD",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PNG with a broken header",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$CRC",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a decompression bomb",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BOMB",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PSD cut short",
+   "group": "studio",
+   "op": "adopt_candidate",
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$PSDX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "set_placement scale not finite",
+   "group": "studio",
+   "op": "set_placement",
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "scale": "nan"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.x must be a finite number"
+  },
+  {
+   "n": "place_asset a PNG cut short",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$CUT"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a JPEG cut short",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$JX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a BMP cut short",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$BX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a GIF cut short",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$GX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a PSD cut short",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$PSDX"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset box not finite",
+   "group": "studio",
+   "op": "place_asset",
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A1",
+     "placement_mm": [
+      1,
+      2,
+      "inf",
+      4
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.width must be a finite number"
+  },
+  {
+   "n": "set_layout rect not finite",
+   "group": "studio",
+   "op": "set_layout",
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       "inf",
+       1
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "rect_mm.width must be a finite number"
+  },
+  {
+   "n": "set_bible characters",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-a"
+      },
+      {
+       "name": "b"
+      }
+     ],
+     "constraints": [
+      "x",
+      1,
+      null
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible characters with a text",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-a"
+      },
+      "b"
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not 'b'"
+  },
+  {
+   "n": "set_bible characters a dict",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": {
+      "c-a": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not 'c-a'"
+  },
+  {
+   "n": "set_bible characters as pairs",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      [
+       [
+        "id",
+        "c-a"
+       ]
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not [['id', 'c-a']]"
+  },
+  {
+   "n": "set_bible then a character op",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      "c-a"
+     ]
+    },
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-b"
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "ops[0] set_bible: each of the bible's characters must be an object, not 'c-a'"
+  },
+  {
+   "n": "set_panel regions by an agent",
+   "group": "studio",
+   "op": "set_panel",
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "regions": [
+       {
+        "id": "rg_x",
+        "kind": "face",
+        "rect_mm": [
+         1,
+         2,
+         3,
+         4
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can set a panel's regions with set_panel"
+  },
+  {
+   "n": "set_panel unset regions by an agent",
+   "group": "studio",
+   "op": "set_panel",
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "unset": [
+      "regions"
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can set a panel's regions with set_panel"
+  },
+  {
+   "n": "set_bible dropping an approved character by an agent",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible locking a character by an agent",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-new",
+       "name": "新",
+       "locked": true
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible another sheet for an approved character by an agent",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ"
+      },
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": true,
+       "refs": [
+        {
+         "asset": "$S2",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible unlocking by an agent",
+   "group": "studio",
+   "op": "set_bible",
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": false,
+       "refs": [
+        {
+         "asset": "$S1",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "upsert_character locking a character by an agent",
+   "group": "studio",
+   "op": "upsert_character",
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-yuki",
+      "name": "ユキ",
+      "locked": true
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "upsert_character a new one locked by an agent",
+   "group": "studio",
+   "op": "upsert_character",
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-new",
+      "name": "新",
+      "locked": true
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "delete_character approved by an agent",
+   "group": "studio",
+   "op": "delete_character",
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-ken",
+     "force": true
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can delete an approved character (c-ken)"
+  },
+  {
+   "n": "set_ticket on a request for approval by an agent",
+   "group": "studio",
+   "op": "set_ticket",
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "000000000a0c",
+     "status": "done"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a request for approval (ticket 000000000a0c)"
+  },
+  {
+   "n": "set_studio unfixing the style by an agent",
+   "group": "studio",
+   "op": "set_studio",
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": {
+      "locked": null
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  },
+  {
+   "n": "set_studio replacing the style by an agent",
+   "group": "studio",
+   "op": "set_studio",
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": "plain"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  }
+ ]
+}

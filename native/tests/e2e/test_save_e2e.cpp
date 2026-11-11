@@ -11,12 +11,14 @@
 //   - the revision never comes back: edit, Undo, edit — the old base revision is refused (AC-SAVE 11);
 //   - two processes, the OS lock, an older Genko's lock file, many writers at once (AC-SAVE 7);
 //   - a folder that cannot be written; a v1–v3 book is never written (exit 3);
+//   - `genko new` makes a book at revision 1 and never one over a book (code "exists"), nor one of a paper there is not;
 //   - after a save and a new process, the text, ruby, lines, pressure and coordinates are all there (AC-SAVE 1).
 
 #include <QtTest>
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <filesystem>
@@ -502,6 +504,43 @@ private slots:
         QCOMPARE(ink->strokes->items[0]->pressure, std::vector<double>({0.2, 0.9, 0.5}));
         QCOMPARE(ink->strokes->items[0]->points[1].x, 60.25);
         QCOMPARE(ink->strokes->items[1]->rgb.value(), std::vector<std::int64_t>({200, 10, 10}));
+    }
+    // `genko new`: each way of naming the paper, the pages, the title and the episode makes a book at revision 1 with
+    // nothing wrong in it (--plain prints its path alone); a paper there is not: exit 1, the papers there are said,
+    // nothing made; never over a book (exit 1, code "exists").
+    void newNeverOverABook() {
+        const std::vector<QStringList> variants{{}, {"--b4", "--pages", "3", "--title", "題名", "--episode", "2"},
+                                                {"--paper", "b5"}, {"--paper", "webtoon", "--pages", "1"}, {"--webtoon"},
+                                                {"--preset", "Shueisha"}, {"--plain"}};
+        int n = 0;
+        for (const QStringList& variant : variants) {
+            const QString dest = tmp_.path() + QStringLiteral("/new-%1.genko").arg(n++);
+            const auto made = run_genko(QStringList{"new", dest} + variant);
+            QVERIFY2(made.exit_code == 0, qPrintable(variant.join(' ') + ": " + made.out + made.err));
+            if (variant.contains("--plain")) {
+                QCOMPARE(made.out, dest.toUtf8() + "\n");
+            } else {
+                const Json reply = one_line(made.out);
+                QCOMPARE(reply["path"].get<std::string>(), dest.toStdString());
+                QVERIFY2(reply["snapshot"].is_object(), made.out.constData());
+            }
+            const Json project = genko::test::read_json(dest + "/project.json");
+            QCOMPARE(project["revision"], Json(1));
+            QCOMPARE(genko::test::book_problems(dest), std::string());
+        }
+        // a wrong paper: exit 1, the papers there are said, nothing made
+        const QString wrong_dest = tmp_.path() + "/new-wrong.genko";
+        const auto wrong = run_genko({"new", wrong_dest, "--paper", "a3"});
+        QCOMPARE(wrong.exit_code, 1);
+        QVERIFY2(wrong.err.contains("--paper must be one of b4, b5, a5, a4, webtoon"), wrong.err.constData());
+        QVERIFY(!QFileInfo::exists(wrong_dest));
+        // never over a book: the book as it was
+        const QString first = tmp_.path() + "/new-0.genko";
+        const auto before = genko::test::tree_hashes(first);
+        const auto again = run_genko({"new", first});
+        QCOMPARE(again.exit_code, 1);
+        QCOMPARE(one_line(again.out)["code"], Json("exists"));
+        QVERIFY(genko::test::tree_hashes(first) == before);
     }
 };
 

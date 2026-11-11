@@ -1,5 +1,4 @@
-// The ops of M2-O1 through core::CommandBus, without Python (their words and results against Python's apply_ops:
-// test_contract_ops). For every op: a batch that succeeds and does what it says, with the book it was given left as
+// The ops of M2-O1 through core::CommandBus. For every op: a batch that succeeds and does what it says, with the book it was given left as
 // it was and only the pages it changes copied (the others stay shared); the same batch as a dry run; a batch that
 // fails and leaves the book as it was; and, for an op on a page, the page locked by a person refusing an AI. Then
 // the rules of strict_gates, one by one, and what this build refuses where Python goes on and breaks the book (one

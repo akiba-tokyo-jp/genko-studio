@@ -1,7 +1,7 @@
 // core::CommandBus and the M1 ops (set_note, set_meta, name_ok, lock_page, unlock_page, set_autosave, add_page,
 // delete_page): Python's behaviour and messages ("ops[i] <op>: <reason> ‖ <op> takes {…}"), the page locks and the
 // person-only gate, the warnings after a batch, the batch that fails leaving the book as it was, and the pages that
-// stay shared with the book they came from. (The same batches against Python's apply_ops: test_contract_save.)
+// stay shared with the book they came from.
 
 #include <QTemporaryDir>
 #include <QtTest>
@@ -569,7 +569,7 @@ private slots:
 
     // The line ops are core's; a picture in a line's style is looked at by the drawing ops' check (Pillow's Image.open
     // and verify()), so core's own bus refuses one with not_yet_ported, after reading its base64 as Python does, and the
-    // bus of the whole build takes it. (The ops against Python: test_contract_lines.)
+    // bus of the whole build takes it. (The lines' refusals through the command line: e2e/test_refusals_e2e.)
     void linePictures() {
         const std::string png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGM8ISf3n4GBgYGJAQoAHxICB2m00JwAAAAASUVORK5CYII=";
         const Json batch = Json::array({Json::object({{"op", "add_line"}, {"page", 1}, {"text", "絵"}, {"style", {{"picture", png}}}})});

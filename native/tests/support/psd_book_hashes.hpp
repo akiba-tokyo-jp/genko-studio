@@ -2,9 +2,7 @@
 
 // The image-way PSD (the default PSD) of each page of the PSD book (native/tests/data/psd_text_book.json) at 150 dpi:
 // the sha256 of each file. Pages 2-4 as e146b96's genko wrote them; page 1 since M5①, where the book's
-// 「大きな声で約束する」 has its rubies on 「声」 and 「約束」 — the same bytes as the reference Python's PSD of that page
-// (test_contract_psd_text's imageWayIsPythons holds them so). test_psd_text's imageWayIsAsBefore holds this build to
-// all four.
+// 「大きな声で約束する」 has its rubies on 「声」 and 「約束」. test_psd_text's imageWayIsAsBefore holds this build to all four.
 namespace genko::test {
 
 inline constexpr const char* kPsdBookImageWay[4] = {

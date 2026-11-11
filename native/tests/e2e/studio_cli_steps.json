@@ -1,0 +1,990 @@
+{
+ "note": "The steps of `genko studio` for test_cli_e2e's studioCommandLineAsProcesses (the command line's job of service_cases.json of c12298b0): each a process of its own in the root ($root), with GENKO_USER and a config folder of its own; a step {write, text | base64} writes a file under the root first. Each process ends in time without crashing with the exit code given (0, 1 or 3; 2 only for arguments the command line does not take), and prints one JSON object or nothing. The last step takes leases on two work items (next with claim): each held for 600 s from then.",
+ "env": {
+  "GENKO_USER": "leaf"
+ },
+ "steps": [
+  {
+   "write": "in/bible.json",
+   "text": "{\n  \"title\": \"夏の午後の約束\",\n  \"logline\": \"5年前の約束を果たすため、幼馴染が夏の屋上に来る。\",\n  \"plot\": \"転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。\",\n  \"themes\": [\n    \"約束\",\n    \"再会\"\n  ],\n  \"characters\": [\n    {\n      \"id\": \"hina\",\n      \"name\": \"日向ひな\",\n      \"role\": \"heroine\",\n      \"age\": 16,\n      \"look\": {\n        \"hair\": \"肩までのストレート、横に流した前髪\",\n        \"hair_value\": \"beta\",\n        \"eyes\": \"大きく、やや垂れ目\",\n        \"build\": \"細身\",\n        \"height_cm\": 156,\n        \"outfits\": [\n          {\n            \"id\": \"default\",\n            \"desc\": \"半袖のセーラー服\"\n          }\n        ],\n        \"marks\": [\n          \"左側に星形の髪留め\"\n        ],\n        \"silhouette\": \"髪留め + 前髪\"\n      },\n      \"speech\": {\n        \"first_person\": \"わたし\",\n        \"tone\": \"丁寧語まじり\"\n      },\n      \"tokens_en\": \"a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip\"\n    },\n    {\n      \"id\": \"sora\",\n      \"name\": \"天野ソラ\",\n      \"role\": \"hero\",\n      \"age\": 16,\n      \"look\": {\n        \"hair\": \"短い癖毛\",\n        \"hair_value\": \"white\",\n        \"eyes\": \"切れ長\",\n        \"build\": \"やや長身\",\n        \"height_cm\": 172,\n        \"outfits\": [\n          {\n            \"id\": \"default\",\n            \"desc\": \"学ランの前を開けている\"\n          }\n        ],\n        \"marks\": [],\n        \"silhouette\": \"癖毛 + 開いた学ラン\"\n      },\n      \"speech\": {\n        \"first_person\": \"俺\",\n        \"tone\": \"ぶっきらぼう\"\n      },\n      \"tokens_en\": null\n    }\n  ],\n  \"locations\": [\n    {\n      \"id\": \"loc_rooftop\",\n      \"name\": \"校舎の屋上\",\n      \"desc\": \"フェンスと給水塔のある屋上\",\n      \"times\": [\n        \"sunset\"\n      ]\n    }\n  ],\n  \"style\": {\n    \"notes\": [\n      \"背景は描き込みすぎない\"\n    ]\n  },\n  \"constraints\": [\n    \"台詞・効果音を画像に描かない\"\n  ]\n}"
+  },
+  {
+   "write": "in/script.json",
+   "text": "{\n  \"scenes\": [\n    {\n      \"id\": \"sc_01\",\n      \"summary\": \"ひなが屋上に上がる\",\n      \"location_id\": \"loc_rooftop\",\n      \"time\": \"sunset\",\n      \"beats\": [\n        {\n          \"id\": \"b01\",\n          \"kind\": \"action\",\n          \"speaker_id\": null,\n          \"text\": \"夕方の屋上。ひなが扉を開ける\",\n          \"emotion\": \"緊張\",\n          \"page\": 1,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b02\",\n          \"kind\": \"narration\",\n          \"speaker_id\": null,\n          \"text\": \"5年前の今日、ここで約束した\",\n          \"emotion\": \"郷愁\",\n          \"page\": 1,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b03\",\n          \"kind\": \"monologue\",\n          \"speaker_id\": \"hina\",\n          \"text\": \"…来るわけないよね\",\n          \"emotion\": \"諦め\",\n          \"page\": 1,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b04\",\n          \"kind\": \"action\",\n          \"speaker_id\": null,\n          \"text\": \"誰もいない屋上。フェンスの向こうに夕日\",\n          \"emotion\": \"寂しさ\",\n          \"page\": 2,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b05\",\n          \"kind\": \"dialogue\",\n          \"speaker_id\": \"sora\",\n          \"text\": \"遅いぞ\",\n          \"emotion\": \"照れ\",\n          \"page\": 2,\n          \"reveal\": true\n        },\n        {\n          \"id\": \"b06\",\n          \"kind\": \"action\",\n          \"speaker_id\": null,\n          \"text\": \"給水塔の上にソラが座っている\",\n          \"emotion\": \"驚き\",\n          \"page\": 2,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b07\",\n          \"kind\": \"dialogue\",\n          \"speaker_id\": \"hina\",\n          \"text\": \"…やっぱり来てくれたんだ\",\n          \"emotion\": \"安堵\",\n          \"page\": 3,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b08\",\n          \"kind\": \"dialogue\",\n          \"speaker_id\": \"sora\",\n          \"text\": \"約束しただろ\",\n          \"emotion\": \"照れ\",\n          \"page\": 3,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b09\",\n          \"kind\": \"dialogue\",\n          \"speaker_id\": \"hina\",\n          \"text\": \"うん…約束したから\",\n          \"emotion\": \"喜び\",\n          \"page\": 4,\n          \"reveal\": false\n        },\n        {\n          \"id\": \"b10\",\n          \"kind\": \"action\",\n          \"speaker_id\": null,\n          \"text\": \"二人並んで夕日を見る\",\n          \"emotion\": \"静けさ\",\n          \"page\": 4,\n          \"reveal\": false\n        }\n      ]\n    }\n  ]\n}"
+  },
+  {
+   "write": "in/p001.json",
+   "text": "{\n  \"page\": 1,\n  \"turn_role\": \"normal\",\n  \"template\": null,\n  \"tiers\": [\n    {\n      \"h\": 0.35,\n      \"cols\": [\n        {\n          \"slot\": \"p1\",\n          \"w\": 1.0,\n          \"rows\": null\n        }\n      ]\n    },\n    {\n      \"h\": 0.65,\n      \"cols\": [\n        {\n          \"slot\": \"p2\",\n          \"w\": 0.55,\n          \"rows\": null\n        },\n        {\n          \"slot\": \"p3\",\n          \"w\": 0.45,\n          \"rows\": null\n        }\n      ]\n    }\n  ],\n  \"panels\": [\n    {\n      \"slot\": \"p1\",\n      \"shot\": \"LS\",\n      \"angle\": \"high\",\n      \"location_id\": \"loc_rooftop\",\n      \"time\": \"sunset\",\n      \"characters\": [\n        {\n          \"id\": \"hina\",\n          \"pose\": \"扉を開ける\",\n          \"expression\": \"緊張\",\n          \"facing\": \"left\",\n          \"pos\": \"right\",\n          \"scale\": 0.4\n        }\n      ],\n      \"action\": \"屋上の扉を開ける\",\n      \"emotion\": \"緊張\",\n      \"fx\": [],\n      \"emphasis\": 0.3,\n      \"cross\": false,\n      \"beat_ids\": [\n        \"b01\",\n        \"b02\"\n      ],\n      \"lines\": [\n        {\n          \"beat_id\": \"b02\",\n          \"balloon\": \"narration\",\n          \"breaks\": [\n            \"5年前の今日\",\n            \"ここで約束した\"\n          ]\n        }\n      ]\n    },\n    {\n      \"slot\": \"p2\",\n      \"shot\": \"MS\",\n      \"angle\": \"eye\",\n      \"location_id\": \"loc_rooftop\",\n      \"time\": \"sunset\",\n      \"characters\": [\n        {\n          \"id\": \"hina\",\n          \"pose\": \"立ち止まる\",\n          \"expression\": \"不安\",\n          \"facing\": \"left\",\n          \"pos\": \"center\",\n          \"scale\": 0.8\n        }\n      ],\n      \"action\": \"屋上を見回す\",\n      \"emotion\": \"不安\",\n      \"fx\": [],\n      \"emphasis\": 0.4,\n      \"cross\": false,\n      \"beat_ids\": [],\n      \"lines\": []\n    },\n    {\n      \"slot\": \"p3\",\n      \"shot\": \"CU\",\n      \"angle\": \"eye\",\n      \"location_id\": \"loc_rooftop\",\n      \"time\": \"sunset\",\n      \"characters\": [\n        {\n          \"id\": \"hina\",\n          \"pose\": \"うつむく\",\n          \"expression\": \"諦め\",\n          \"facing\": \"left\",\n          \"pos\": \"center\",\n          \"scale\": 0.9\n        }\n      ],\n      \"action\": \"うつむく\",\n      \"emotion\": \"諦め\",\n      \"fx\": [],\n      \"emphasis\": 0.5,\n      \"cross\": false,\n      \"beat_ids\": [\n        \"b03\"\n      ],\n      \"lines\": [\n        {\n          \"beat_id\": \"b03\",\n          \"balloon\": \"thought\",\n          \"breaks\": [\n            \"…来るわけ\",\n            \"ないよね\"\n          ]\n        }\n      ]\n    }\n  ]\n}"
+  },
+  {
+   "write": "in/ops.json",
+   "text": "{\n  \"ops\": [\n    {\n      \"op\": \"set_note\",\n      \"page\": 1,\n      \"note\": \"メモ\"\n    }\n  ]\n}"
+  },
+  {
+   "write": "in/bad.json",
+   "text": "{oops"
+  },
+  {
+   "write": "in/list.json",
+   "text": "[\n  1,\n  2\n]"
+  },
+  {
+   "write": "in/call_status.json",
+   "text": "{}"
+  },
+  {
+   "write": "in/call_inspect.json",
+   "text": "{\n  \"target\": \"page\",\n  \"page\": 1\n}"
+  },
+  {
+   "write": "in/call_bad.json",
+   "text": "{\n  \"nope\": 1\n}"
+  },
+  {
+   "write": "in/tool.json",
+   "text": "{\n  \"label\": \"手元の道具\",\n  \"sizes_px\": [\n    [\n      512,\n      768\n    ]\n  ],\n  \"supports\": {\n    \"edit\": false\n  }\n}"
+  },
+  {
+   "cli": [],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "nothing"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "init",
+    "$root/demo.genko",
+    "--title",
+    "CLI の本",
+    "--pages",
+    "3"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "init",
+    "$root/demo.genko"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "init",
+    "$root/x.genko",
+    "--pages",
+    "many"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "init",
+    "$root/x.genko",
+    "--spec",
+    "doujin-b5"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "status",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "status",
+    "$root/demo.genko",
+    "--session",
+    "bad session!"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "status",
+    "$root/none.genko"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "next",
+    "$root/demo.genko",
+    "--limit",
+    "2"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "next",
+    "$root/demo.genko",
+    "--lim",
+    "1"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "inspect",
+    "$root/demo.genko",
+    "page",
+    "--page",
+    "1"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "inspect",
+    "$root/demo.genko",
+    "rules"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "set-bible",
+    "$root/demo.genko",
+    "$root/in/bible.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "set-bible",
+    "$root/demo.genko",
+    "$root/in/bible.json",
+    "--commit",
+    "--agent",
+    "ai:hermes",
+    "--session",
+    "9204"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "set-script",
+    "$root/demo.genko",
+    "$root/in/missing.json",
+    "--commit"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "set-script",
+    "$root/demo.genko",
+    "$root/in/bad.json",
+    "--commit"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "set-script",
+    "$root/demo.genko",
+    "-",
+    "--commit"
+   ],
+   "stdin": "{\"scenes\": [{\"id\": \"sc_01\", \"summary\": \"ひなが屋上に上がる\", \"location_id\": \"loc_rooftop\", \"time\": \"sunset\", \"beats\": [{\"id\": \"b01\", \"kind\": \"action\", \"speaker_id\": null, \"text\": \"夕方の屋上。ひなが扉を開ける\", \"emotion\": \"緊張\", \"page\": 1, \"reveal\": false}, {\"id\": \"b02\", \"kind\": \"narration\", \"speaker_id\": null, \"text\": \"5年前の今日、ここで約束した\", \"emotion\": \"郷愁\", \"page\": 1, \"reveal\": false}, {\"id\": \"b03\", \"kind\": \"monologue\", \"speaker_id\": \"hina\", \"text\": \"…来るわけないよね\", \"emotion\": \"諦め\", \"page\": 1, \"reveal\": false}, {\"id\": \"b04\", \"kind\": \"action\", \"speaker_id\": null, \"text\": \"誰もいない屋上。フェンスの向こうに夕日\", \"emotion\": \"寂しさ\", \"page\": 2, \"reveal\": false}, {\"id\": \"b05\", \"kind\": \"dialogue\", \"speaker_id\": \"sora\", \"text\": \"遅いぞ\", \"emotion\": \"照れ\", \"page\": 2, \"reveal\": true}, {\"id\": \"b06\", \"kind\": \"action\", \"speaker_id\": null, \"text\": \"給水塔の上にソラが座っている\", \"emotion\": \"驚き\", \"page\": 2, \"reveal\": false}, {\"id\": \"b07\", \"kind\": \"dialogue\", \"speaker_id\": \"hina\", \"text\": \"…やっぱり来てくれたんだ\", \"emotion\": \"安堵\", \"page\": 3, \"reveal\": false}, {\"id\": \"b08\", \"kind\": \"dialogue\", \"speaker_id\": \"sora\", \"text\": \"約束しただろ\", \"emotion\": \"照れ\", \"page\": 3, \"reveal\": false}, {\"id\": \"b09\", \"kind\": \"dialogue\", \"speaker_id\": \"hina\", \"text\": \"うん…約束したから\", \"emotion\": \"喜び\", \"page\": 4, \"reveal\": false}, {\"id\": \"b10\", \"kind\": \"action\", \"speaker_id\": null, \"text\": \"二人並んで夕日を見る\", \"emotion\": \"静けさ\", \"page\": 4, \"reveal\": false}]}]}",
+   "exit": 1
+  },
+  {
+   "cli": [
+    "submit-name",
+    "$root/demo.genko",
+    "$root/in/p001.json",
+    "--commit"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "submit-name",
+    "$root/demo.genko",
+    "$root/in/p001.json",
+    "--commit",
+    "--replace"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "record-review",
+    "$root/demo.genko",
+    "--page",
+    "1",
+    "--score",
+    "0.9",
+    "--notes",
+    "よし"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "record-review",
+    "$root/demo.genko",
+    "--page",
+    "x"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "record-review",
+    "$root/demo.genko"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "apply",
+    "$root/demo.genko",
+    "$root/in/ops.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "apply",
+    "$root/demo.genko",
+    "$root/in/ops.json",
+    "--commit"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "apply",
+    "$root/demo.genko",
+    "$root/in/list.json"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "request-approval",
+    "$root/demo.genko",
+    "--pages",
+    "1-2,3",
+    "--note",
+    "見て"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "request-approval",
+    "$root/demo.genko",
+    "--pages",
+    "x"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "request-approval",
+    "$root/demo.genko",
+    "--gate",
+    "export"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "tickets",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tickets",
+    "$root/demo.genko",
+    "--all"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "name",
+    "--pages",
+    "1"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "name",
+    "--pages",
+    "1",
+    "--as",
+    "ai:agent"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "name",
+    "--pages",
+    "1",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "art"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "sheet",
+    "--character",
+    "hina",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "approve",
+    "$root/demo.genko",
+    "sheet",
+    "--character",
+    "hina",
+    "--candidate",
+    "c1",
+    "--face",
+    "a,b",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "revoke",
+    "$root/demo.genko",
+    "name",
+    "--pages",
+    "1",
+    "--reason",
+    "やり直し",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "comment",
+    "$root/demo.genko",
+    "直して",
+    "--page",
+    "1",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "comment",
+    "$root/demo.genko",
+    "直して",
+    "--page",
+    "9",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "close-ticket",
+    "$root/demo.genko",
+    "nope",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "reopen-ticket",
+    "$root/demo.genko",
+    "nope",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "chat-approval",
+    "$root/demo.genko",
+    "off",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "chat-approval",
+    "$root/demo.genko",
+    "maybe"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "reject",
+    "$root/demo.genko",
+    "nope",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "proposals",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "proposals",
+    "$root/demo.genko",
+    "--all"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "status"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "status",
+    "$root/in/call_status.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "inspect",
+    "$root/in/call_inspect.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "inspect",
+    "$root/in/call_bad.json"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "inspect",
+    "$root/in/list.json"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "projects"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "undo"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "stats",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "audit",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "adopt-drafts",
+    "$root/demo.genko"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "tools",
+    "list"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "example"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "set"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "tools",
+    "set",
+    "openai:gpt-image-1"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "set",
+    "local:sd",
+    "--file",
+    "$root/in/tool.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "set",
+    "other",
+    "--file",
+    "$root/in/list.json"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "tools",
+    "list"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "remove",
+    "local:sd"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "tools",
+    "remove",
+    "local:sd"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "list"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "esr"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "genko",
+    "--command",
+    "x {in} {out}"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "bad name",
+    "--command",
+    "x {in} {out}"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "esr",
+    "--command",
+    "esr -i {in}"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "esr",
+    "--command",
+    "esr 'unclosed {in} {out}"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "esr",
+    "--command",
+    "realesrgan -i {in} -o \"{out}\" -s {scale}",
+    "--scales",
+    "2,4",
+    "--label",
+    "Real-ESRGAN"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "upscaler",
+    "add",
+    "w2x",
+    "--command",
+    "waifu2x {in} {out}",
+    "--scales",
+    "x"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "upscaler",
+    "list"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "upscaler",
+    "remove",
+    "esr"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "upscaler",
+    "remove",
+    "esr"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "inspect",
+    "$root/in/call_status.json"
+   ],
+   "exit": 1
+  },
+  {
+   "write": "in/scan.png",
+   "base64": "iVBORw0KGgoAAAANSUhEUgAAASgAAAGkCAAAAACnHudmAAAEQUlEQVR4nO3cwW7aQBhG0d9V3v+V6aJqFWgrHQjg2HPvjlVGR/NFwgK2y5T0Y+8DHKWgsKCwoLCgsKCwoLCgsKCwoLCgsI/PL7a9TvFd+/RGuBuFBYV93Lzuqcufrv8RdaOwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoLCgsKCwoDCGWv27fLffrvp/29pfvWKoy8y2LUzlN2rmMtu61+oeqN/Xakmr+6Bm3QneDTWLTvARqCUn+BjUrDfBh6FmsQl+BWqpCX4NataZ4JehZpEJPgNqiQk+B2rOP8GnQc3JJ/hMqFNP8LlQc94JPh1qTjrBV0CdcoKvgZrzTfBlUHOyCb4S6lQTfC3UnGeCL4eak0zwHVCnmOB7oOb4E3wb1Bx8gu+EOvQE3ws1x53g26HmoBPcA+rXtdrlDz/ebh8kO9iF6hN3WlBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQ2O0PRBztdxveVjcKCwrbjvbTH3vVjcKCwoLCgsKCwoLCgsKCwoLCgsKunh7s/ujg0/up3c8yc3WebhQWFHb74G7Hhwl/jW3nBxvX5+lGYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWFBYUFhQWEfN6+3XU7x777TWbpRWlDYdtn7BAepG4UFhQWFBYUFhQWFBYUFhQWFBYX9BMgZSZDYnUy4AAAAAElFTkSuQmCC"
+  },
+  {
+   "write": "in/pic.png",
+   "base64": "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAvklEQVR4nMXQsQ3EIAyF4QczUGeIzEGRITIgRYbIHExyBZKF0IUzju1zZVef/If73HOp17HBd0JKqW3OdiQvl5pL9YMBXMfW835wG2c79odn9jjcbtlHmHhr+zsM++yPMIyzz2DiLezfMGyys2AYZOfCxGvZazD0si/DUMougYknW8DLYbx7/RVMvMBWgCHKrgNjPbsaTDzTVobBzq4Pg5fdBCZ+YhvCmGa3hfGc3RwmfrDDfe4+Nv7ycZs++wcq6nR2uvv5JwAAAABJRU5ErkJggg=="
+  },
+  {
+   "write": "in/truth.json",
+   "text": "{\n  \"align\": \"auto\",\n  \"pages\": [\n    {\n      \"scan\": \"scan.png\",\n      \"panels\": [\n        [\n          10,\n          10,\n          100,\n          50\n        ]\n      ]\n    }\n  ]\n}"
+  },
+  {
+   "cli": [
+    "render",
+    "$root/demo.genko",
+    "--page",
+    "1",
+    "--max-px",
+    "128"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "render",
+    "$root/demo.genko",
+    "--page",
+    "1",
+    "--mode",
+    "proof",
+    "--max-px",
+    "128",
+    "--frame",
+    "nope"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "render",
+    "$root/demo.genko",
+    "--page",
+    "9"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "render",
+    "$root/demo.genko"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "import-image",
+    "$root/demo.genko",
+    "$root/in/pic.png"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "import-image",
+    "$root/demo.genko",
+    "$root/in/none.png"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "import-name",
+    "$root/demo.genko",
+    "$root/in/scan.png",
+    "--start-page",
+    "2",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "import-name",
+    "$root/demo.genko",
+    "$root/in/scan.png",
+    "--align",
+    "x"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "import-name",
+    "$root/demo.genko",
+    "$root/in/scan.png",
+    "--start-page",
+    "7"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "analyze",
+    "$root/demo.genko",
+    "--page",
+    "2",
+    "--params",
+    "{\"min_gutter_mm\": 1}"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "analyze",
+    "$root/demo.genko",
+    "--page",
+    "1"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "analyze",
+    "$root/demo.genko",
+    "--page",
+    "2",
+    "--params",
+    "{bad"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "proposals",
+    "$root/demo.genko"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "accept",
+    "$root/demo.genko",
+    "nope",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "export",
+    "$root/demo.genko",
+    "--out",
+    "$root/out",
+    "--format",
+    "png",
+    "--as",
+    "human:leaf"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "export",
+    "$root/demo.genko",
+    "--out",
+    "$root/out",
+    "--format",
+    "gif"
+   ],
+   "exit": 2
+  },
+  {
+   "cli": [
+    "review",
+    "$root/demo.genko",
+    "--out",
+    "$root/review/r.html"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "eval-atari",
+    "$root/in/truth.json"
+   ],
+   "exit": 0
+  },
+  {
+   "cli": [
+    "eval-atari",
+    "$root/in/none.json"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "eval-sample",
+    "$root/demo.genko",
+    "--out",
+    "$root/eval"
+   ],
+   "exit": 1
+  },
+  {
+   "cli": [
+    "eval-score",
+    "$root/eval",
+    "$root/in/none.csv"
+   ],
+   "exit": 1
+  },
+  {
+   "write": "in/call_next.json",
+   "text": "{\"limit\": 2, \"claim\": true}"
+  },
+  {
+   "cli": [
+    "call",
+    "$root/demo.genko",
+    "next",
+    "$root/in/call_next.json"
+   ],
+   "exit": 0
+  }
+ ]
+}

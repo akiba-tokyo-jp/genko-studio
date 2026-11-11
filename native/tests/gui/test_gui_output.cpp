@@ -1062,8 +1062,7 @@ private slots:
         s.act("act_checks")->trigger();
         app::CheckPanel* panel = s.window->checks();
         QVERIFY(s.dock(QStringLiteral("点検"))->isVisible());
-        // Python's report (formats/checks is held to it by test_contract_checks), listed as Python lists it: the stopping
-        // ones first, then by page; "<mark> <page> ページ ・ <message>"
+        // the report (formats/checks), listed with the stopping ones first, then by page; "<mark> <page> ページ ・ <message>"
         const Json report = formats::checks::book(s.doc(), s.session->path());
         QCOMPARE(report["errors"].get<int>(), 1);
         QCOMPARE(report["warnings"].get<int>(), 2);

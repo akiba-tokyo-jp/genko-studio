@@ -1,5 +1,4 @@
-// The ops of M3-A1 through core::CommandBus with render::ops_registry, without Python (their words, books and pictures
-// against Python's apply_ops: test_contract_raster_ops). For every op: a batch that succeeds and does what it says,
+// The ops of M3-A1 through core::CommandBus with render::ops_registry. For every op: a batch that succeeds and does what it says,
 // with the book it was given left as it was and only the pages it changes copied; the same batch as a dry run; a
 // batch that fails and leaves the book as it was; and, for an op on a page, the page locked by a person refusing an
 // AI. Then the rules of strict_gates for these ops; Undo and Redo of a saved change through the journal; a book saved

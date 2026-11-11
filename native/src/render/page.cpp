@@ -3510,8 +3510,8 @@ int mm_to_px(double mm, int dpi) {
 
 Box rect_px(const core::Rect& rect, int dpi) {
     // (its edges still as mm_to_px, at least 1: a frame's box, and the clip of a picture placed with nothing to clip it to — the
-    // paper —, so counting its left and top edge at 0 changes pages with margins too: a picture placed past the paper —
-    // test_contract_studio's placed book, test_contract_service's atari scan. Not changed — decision 15 is for the edges of
+    // paper —, so counting its left and top edge at 0 changes pages with margins too: a picture placed past the paper, a
+    // scan larger than the page. Not changed — decision 15 is for the edges of
     // a page without margin: SPEC 「切る範囲の辺」)
     const int x = mm_to_px(rect.x.value(), dpi);
     const int y = mm_to_px(rect.y.value(), dpi);

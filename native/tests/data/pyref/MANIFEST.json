@@ -6,6 +6,7 @@
     "gif/": "Pillow 12.3.0 fixed reference; original first/transparent/gray generators and prepare-gif-variant.py local, offset, extensions, interlace-animation, edges; prepare-gif-errors.py (saved V1 generation commands and hashes)",
     "gif/mixed-state.json": "PYTHONPATH=src /opt/pyref/bin/python tools/migration/gif_state_reference.py --write (fixed Pillow 12.3.0 inputs)"
   },
+  "generators_note": "The commands above are kept as they were run. What they name (tools/migration/pyref_harness.py, tools/migration/render_harness.py, tools/migration/gif_state_reference.py, and src/ of PYTHONPATH=src) is no longer in this tree (c12298b0 still has it), so they cannot be run again here: these files are fixed data, checked by their sha256 below.",
   "python": "3.12.3",
   "pillow": "12.3.0",
   "baseline": "src/genko at the M0 baseline (1b7b1d7)",

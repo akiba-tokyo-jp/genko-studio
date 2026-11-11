@@ -1256,8 +1256,7 @@ private slots:
 
     // A PSD without what this build does not read (a file of psd-tools' layers alone, this build's own PSD) keeps nothing:
     // no native_psd, no psd-keep@1, no layer id or lock written — and the PSD of the book is the same bytes when the book
-    // is saved and read back (Python's bytes of a book of no psd-keep@1 are compared in test_contract_export and
-    // test_contract_studio).
+    // is saved and read back.
     void aPsdOfNothingUnknownKeepsNothing() {
         namespace core = genko::core;
         const genko::formats::Opened opened = genko::formats::open_file(keep_file("deep-rgb16.psd"), "deep-rgb16.psd");

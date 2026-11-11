@@ -4,7 +4,7 @@
 // table) — and their drawing: the black share of each
 // screen in print and the grey in proof, effect lines inside their panel, a part of a page drawn alone the same as
 // the whole page cut, a tone layer alone, black and white with a dot screen; numpy's random numbers and sums, and the
-// dot screen's ranks. The exact pixels against Python are in contract/test_contract_tone_render.cpp.
+// dot screen's ranks.
 //
 // (The ops are written as JSON with $NAME for the ids made at run time: moc reads raw strings as code, so each one
 // keeps its braces balanced.)

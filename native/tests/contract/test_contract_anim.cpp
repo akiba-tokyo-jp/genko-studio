@@ -3,6 +3,7 @@
 //  - PC5 J-e1's timeline@1 — set_animation's work area and fps of 0.5..120 (anim_cases.json's timeline_cases), a range
 //    of the frames and another speed written out, `genko export --format animation --work-area`, `genko render --frame`,
 //    `genko inspect --timeline`;
+//  - the animation's page drawn as its first frame; the time-lapse recorded and written out;
 //  - a camera rect that is not finite is refused.
 
 #include <QtTest>
@@ -257,6 +258,62 @@ private slots:
     // (without it, all the frames as before; --work-area only for an animation); `genko render --frame 3` draws the page at
     // frame 3 (the frame in its JSON; one past the frames or a page that is not an animation refused); `genko inspect
     // --timeline` says its timeline.
+    // The animation's page drawn as its first frame: the cels not shown are left out (every cel drawn at once is another
+    // picture), the sheet's cel at frame 1 (c2 in af, none in bf), and the page drawn the same as its frame 1.
+    void drawnAsTheFirstFrame() {
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        genko::core::Document doc = genko::core::new_episode("動き", genko::core::Num(1), 2, genko::core::PageSpec::a4_mono());
+        for (const Json& step : genko::core::parse_python_json(kSteps)) {
+            doc = bus.apply(doc, step["ops"], genko::core::Actor(step.value("agent", std::string("human:作者"))), false).doc;
+        }
+        const genko::core::Page& page = doc.page(1);
+        QVERIFY(genko::core::anim::is_animation(page));
+        QCOMPARE(genko::core::anim::cel_at(page, Json("af"), 1), Json("c2"));
+        QCOMPARE(genko::core::anim::cel_at(page, Json("bf"), 1), Json());
+        genko::render::RenderOptions as_it_is;
+        as_it_is.at_frame = true;  // (every cel at once)
+        const auto framed = genko::render::render_page(page, 100, {}, &doc).image;
+        const auto every = genko::render::render_page(page, 100, as_it_is, &doc).image;
+        QVERIFY(genko::test::pixel_diff(framed, every).pixels > 500);
+        const auto first = genko::render::render_page(genko::core::anim::at_frame(page, 1), 100, as_it_is, &doc).image;
+        QCOMPARE(genko::test::pixel_diff(framed, first).pixels, 0);
+    }
+
+    // The time-lapse (set_timelapse): a book of two pages with a line on page 2, five changes saved through `genko apply`
+    // — a stroke, a note, the same note again (nothing changed: no frame), the title —: four frames recorded, each a
+    // picture whose long side is about 720 px; written out as a GIF of four frames.
+    void timelapseRecorded() {
+        const QString book = path("lapse.genko");
+        const auto made = genko::test::run_genko({"new", book, "--pages", "2"});
+        QVERIFY2(made.finished && made.exit_code == 0, (made.out + made.err).constData());
+        const char* const steps[] = {
+            R"([{"op": "add_line", "page": 2, "text": "台詞です", "x_mm": 50, "y_mm": 50}])",
+            R"([{"op": "set_timelapse", "on": true}])",
+            R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 20], [80, 90]]}])",
+            R"([{"op": "set_note", "page": 2, "note": "x"}])",
+            R"([{"op": "set_note", "page": 2, "note": "x"}])",
+            R"([{"op": "set_meta", "title": "記録"}])",
+        };
+        for (const char* ops : steps) {
+            const QString file = path("lapse-ops.json");
+            genko::test::write_bytes(file, ops);
+            const auto done = genko::test::run_genko({"apply", book, file});
+            QVERIFY2(done.finished && done.exit_code == 0, (QByteArray(ops) + ": " + done.out + done.err).constData());
+        }
+        const fs::path dir = genko::storage::path_from_utf8(book.toStdString());
+        const std::vector<Json> frames = genko::render::timelapse::frames(dir);
+        QCOMPARE(frames.size(), std::size_t{4});
+        for (const Json& item : frames) {
+            const auto file = genko::render::timelapse::folder(dir) / genko::storage::path_from_utf8(item["file"].get<std::string>());
+            const genko::render::Size size = genko::render::open_image(genko::storage::read_file(file)).size();
+            QVERIFY2(std::abs(std::max(size.width, size.height) - 720) <= 10, item.dump().c_str());  // (the long side about 720 px)
+        }
+        int written = 0;
+        genko::render::timelapse::export_timelapse(dir, genko::storage::path_from_utf8(path("lapse.gif").toStdString()), std::nullopt, 12, std::nullopt,
+                                                   std::nullopt, 2.0, &written);
+        QCOMPARE(written, 4);
+    }
+
     void workAreaWrittenOut() {
         const genko::core::CommandBus bus(genko::render::ops_registry());
         genko::core::Document made = genko::core::new_episode("動き", genko::core::Num(1), 2, genko::core::PageSpec::a4_mono());

@@ -881,7 +881,7 @@ private slots:
     // The rest of decision 15's mistake (the coordinator's reading of the user's 直しなさい: every edge of a page without margin
     // counted at least 1): two pages side by side cut to their trims (render_spread), a jacket's part cut out (front_of,
     // 本の形でプレビュー) and the preview's badges (service::annotate) — at 0 for an edge at 0 mm. A page with margins as before
-    // (test_contract_render compares its spreads and jackets with Python's, byte for byte). (rect_px is left as Python's: SPEC.)
+    // (rect_px is left as Python's: SPEC.)
     void edgesOfSpreadsCoversAndPreviews() {
         const auto rect = [](double x, double y, double w, double h) { return core::Rect{core::Num(x), core::Num(y), core::Num(w), core::Num(h)}; };
         // a paper that is the page (no bleed, no paper beyond the finished size: as a picture's page is)

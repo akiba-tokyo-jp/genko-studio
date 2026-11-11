@@ -151,8 +151,8 @@ Image adjusted(const Image& rgba, const core::Adjustment& adjustment) {
 }
 
 // arr[..., :3].astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32): numpy's matmul loop adds the
-// three products in order, each product and each sum rounded to float32 (no fused multiply-add: checked against
-// numpy for every colour whose luminance is next to 128, test_contract_raster_ops filterEdges)
+// three products in order, each product and each sum rounded to float32 (no fused multiply-add: it was checked against
+// numpy for every colour whose luminance is next to 128)
 float luminance(unsigned char r, unsigned char g, unsigned char b) {
     const float red = static_cast<float>(r) * 0.299f;
     const float green = static_cast<float>(g) * 0.587f;

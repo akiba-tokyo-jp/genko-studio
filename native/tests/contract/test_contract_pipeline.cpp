@@ -31,6 +31,7 @@
 
 #include "core/json.hpp"
 #include "core/pyops.hpp"
+#include "core/studio.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
@@ -151,6 +152,43 @@ std::string pipeline_problem(const Json& book, const Json& run, const QString& r
     return {};
 }
 
+// The candidates' ids made from no random id — Genko's enlargement's and a derived picture's: "cd_" and 10 digits of
+// content_hash of the source's asset and the settings (StudioService.upscale, .derive) —, each made again from what the
+// book says of it: "" when each is that, else the first that is not. `count` gets how many there are.
+std::string content_ids_problem(const Json& book, int& count) {
+    count = 0;
+    for (const Json& page : book["pages"]) {
+        for (const Json* frame : leaves_of(page)) {
+            const Json panel = frame->value("panel", Json::object());
+            const Json candidates = panel.is_object() ? panel.value("candidates", Json::array()) : Json::array();
+            for (const Json& c : candidates) {
+                const Json origin = c.value("origin", Json::object());
+                const std::string tool = origin.value("tool_id", Json("")).is_string() ? origin.value("tool_id", std::string()) : std::string();
+                const Json* parent = candidate(panel, c.value("parent", Json()));
+                if (origin.value("kind", Json()) != Json("genko") || parent == nullptr) continue;
+                std::set<std::string> made;
+                const auto id_of = [](const Json& value) { return "cd_" + genko::core::content_hash(value).substr(7, 10); };
+                if (c.value("mode", Json()) == Json("upscale") && tool.rfind("genko:upscale:", 0) == 0) {
+                    const Json marker = c.value("upscaled", Json::object());
+                    const Json scale = marker.value("scale", Json());
+                    made.insert(id_of(Json::object({{"upscale", marker.value("method", Json())}, {"from", parent->value("asset", Json())}, {"scale", scale}})));
+                    if (scale.is_number_float() && std::floor(scale.get<double>()) == scale.get<double>()) {
+                        made.insert(id_of(Json::object({{"upscale", marker.value("method", Json())}, {"from", parent->value("asset", Json())},
+                                                        {"scale", static_cast<std::int64_t>(scale.get<double>())}})));
+                    }
+                } else if (c.value("mode", Json()) == Json("derive") && tool.rfind("genko:", 0) == 0) {
+                    made.insert(id_of(Json::object({{"derive", tool.substr(6)}, {"from", parent->value("asset", Json())}, {"params", origin.value("params", Json())}})));
+                } else {
+                    continue;
+                }
+                if (!made.contains(c.value("id", std::string()))) return "candidate " + c.value("id", Json()).dump() + " is not made from its source and settings";
+                ++count;
+            }
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 // The time the test has (CMakeLists: ctest's TIMEOUT 7200 s, QTEST_FUNCTION_TIMEOUT 7100 s): the making has 2300 s (the
@@ -217,6 +255,18 @@ private slots:
             problem = std::string("the book or the records are not as the making leaves them: ") + error.what();
         }
         QVERIFY2(problem.empty(), problem.c_str());
+        // the candidates Genko made from others: their ids made from the source and the settings
+        int made_here = 0;
+        const std::string ids = content_ids_problem(book, made_here);
+        QVERIFY2(ids.empty(), ids.c_str());
+        // finish_page's preview, once for each of the eight pages; the book whole at its last revision
+        std::set<int> finished;
+        for (const Json& call : made["calls"]) {
+            if (call.value("tool", std::string()) == "finish_page" && call.contains("images") && !call["images"].empty()) finished.insert(call["args"]["page"].get<int>());
+        }
+        QCOMPARE(static_cast<int>(finished.size()), 8);
+        QCOMPARE(genko::test::book_problems(dir + "/root/" + kProject), std::string());
+        qInfo("%d candidates made by Genko from others, the book at revision %lld", made_here, static_cast<long long>(doc.revision));
 
         // what was written out: the person's PDF and eight TIFFs, the agent's proof
         QStringList written;

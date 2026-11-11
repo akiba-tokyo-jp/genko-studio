@@ -2292,7 +2292,7 @@ Image warped_letters(const Image& image, const Json& corners) {
     // the null vector of eight equations, from numpy.linalg.svd, over h[2][2]); here the same eight equations with
     // h[2][2] = 1 are solved by Gaussian elimination with partial pivoting. The coefficients agree to about 1e-13, not
     // bit for bit (OpenBLAS's LAPACK cannot be reproduced), so a few of the bicubic samples can come out a level or two
-    // apart: test_contract_text compares these pictures within ARCHITECTURE.md §9.
+    // apart (within ARCHITECTURE.md §9).
     const double w = image.width();
     const double h = image.height();
     std::vector<std::array<double, 2>> dst;

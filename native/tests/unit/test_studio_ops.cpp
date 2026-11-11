@@ -4,7 +4,7 @@
 // person doing each; an approved
 // character that is gone recorded as an approval gone (core::gate_changes); a count past 64 bits refused; pages an op
 // only looks at left shared with the book they came from (no copy for a change that is not made); a set of thousands
-// of pinned keys kept in O(n log n). (Each op against Python: test_contract_studio.)
+// of pinned keys kept in O(n log n). (Through the command line: e2e/test_refusals_e2e.)
 
 #include <QtTest>
 

@@ -1,0 +1,286 @@
+{
+ "note": "This build's words for AI と作る (app/ai_link, app/links), fixed for test_ai_link wordsAtTheirEdges: the minutes in words (ago), an actor's name (ai_name), the AIs that wrote the book of the test and the status line at each time (at: [recent_ai, status_words]), a book one AI wrote, one no AI wrote and no book (alone), the first request for three books and none (requests), what is a link (links).",
+ "agos": {
+  "0": "0 分前",
+  "1": "1 分前",
+  "59": "59 分前",
+  "60": "1 時間前",
+  "61": "1 時間前",
+  "119": "1 時間前",
+  "120": "2 時間前",
+  "2879": "47 時間前",
+  "2880": "2 日前",
+  "2881": "2 日前",
+  "10000": "6 日前"
+ },
+ "names": {
+  "ai:hermes/9204": "hermes（9204）",
+  "ai:hermes": "hermes",
+  "ai:x/": "x",
+  "human:leaf": "human:leaf",
+  "": "",
+  "ai:": "",
+  "ai:a/b/c": "a（b/c）"
+ },
+ "at": {
+  "1700.5": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 0,
+     "working": true
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 4,
+     "working": true
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 12,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 28,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 作業中 ほか 3",
+    true
+   ]
+  ],
+  "1750.5": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 1,
+     "working": true
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 5,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 13,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 29,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 作業中 ほか 3",
+    true
+   ]
+  ],
+  "1750.0": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 1,
+     "working": true
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 5,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 12,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 29,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 作業中 ほか 3",
+    true
+   ]
+  ],
+  "1999.0": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 5,
+     "working": true
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 9,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 17,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 33,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 作業中 ほか 3",
+    true
+   ]
+  ],
+  "2000.5": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 5,
+     "working": false
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 9,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 17,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 33,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 5 分前 ほか 3",
+    false
+   ]
+  ],
+  "2000.6": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 5,
+     "working": false
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 9,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 17,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 33,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 5 分前 ほか 3",
+    false
+   ]
+  ],
+  "5300.0": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 60,
+     "working": false
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 64,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 72,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 88,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 1 時間前 ほか 3",
+    false
+   ]
+  ],
+  "200000.0": [
+   [
+    {
+     "actor": "ai:hermes",
+     "minutes_ago": 3305,
+     "working": false
+    },
+    {
+     "actor": "ai:claude-desktop",
+     "minutes_ago": 3309,
+     "working": false
+    },
+    {
+     "actor": "ai:hermes/9204",
+     "minutes_ago": 3317,
+     "working": false
+    },
+    {
+     "actor": "ai:old",
+     "minutes_ago": 3333,
+     "working": false
+    }
+   ],
+   [
+    "AI: hermes 2 日前 ほか 3",
+    false
+   ]
+  ]
+ },
+ "alone": [
+  [
+   {
+    "actor": "ai:hermes/9204",
+    "minutes_ago": 2,
+    "working": true
+   }
+  ],
+  [
+   "AI: hermes（9204） 作業中",
+   true
+  ],
+  [
+   "AI と作る",
+   false
+  ],
+  [
+   "AI と作る",
+   false
+  ]
+ ],
+ "requests": [
+  "Genko の「b.genko」で、4 ページの短い漫画を作ってください。まず genko://guide/skill を読んで手順に従い、企画書と脚本を作ったら私に見せてください。決めることは承認箱で聞いてください。",
+  "Genko の「日本語の原稿.genko」で、4 ページの短い漫画を作ってください。まず genko://guide/skill を読んで手順に従い、企画書と脚本を作ったら私に見せてください。決めることは承認箱で聞いてください。",
+  "Genko の「rel.genko」で、4 ページの短い漫画を作ってください。まず genko://guide/skill を読んで手順に従い、企画書と脚本を作ったら私に見せてください。決めることは承認箱で聞いてください。",
+  "Genko の「新しい原稿」で、4 ページの短い漫画を作ってください。まず genko://guide/skill を読んで手順に従い、企画書と脚本を作ったら私に見せてください。決めることは承認箱で聞いてください。"
+ ],
+ "links": {
+  "genko://use-style?id=x": true,
+  "GENKO:x": true,
+  " genko://x": false,
+  "": false,
+  "http://x": false,
+  "genko": false
+ }
+}

@@ -49,6 +49,18 @@ class PolicyTests(unittest.TestCase):
         self.assertNotIn('linux-debug', m)
         self.assertNotIn('test_contract_psd', m['linux-asan']['tests'])
         self.assertIn('test_raster_ops', m['linux-asan']['tests'])
+        # (raster_ops' own branch: the selection's and the masks' tests, which no other drawing file's change brings)
+        for name in ('test_contract_select', 'test_contract_masks', 'test_masks'):
+            self.assertIn(name, m['linux-asan']['tests'])
+        other = {r['preset']: r for r in self.plan(['native/src/render/tones.cpp'], 'integration')['matrix']['include']}
+        for name in ('test_contract_select', 'test_contract_masks', 'test_masks'):
+            self.assertNotIn(name, other['linux-asan']['tests'])
+
+    def test_safety_tests_are_registered(self):
+        # (every test the plans always take is one CMake registers: a test removed or renamed is not dropped unseen)
+        inv = policy.inventory(ROOT)
+        self.assertLessEqual(policy.SAFETY, inv['normal'] | inv['contract'])
+        self.assertIn('test_refusals_e2e', policy.SAFETY)
 
     def test_core_change_escalates_full_sanitizers(self):
         p = self.plan(['native/src/core/pynum.cpp'], 'integration')

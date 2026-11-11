@@ -48,8 +48,8 @@ private slots:
         QCOMPARE(copied.page(0).layers.size(),std::size_t(3));
     }
 
-    // The precise colour work's own keys (merge_visible's flatten) are not in Python's public list (`genko schema`,
-    // test_contract_cli): they are taken, and not reported as ignored; a key no op takes still is.
+    // The precise colour work's own keys (merge_visible's flatten) are not in the public list (`genko schema`): they
+    // are taken, and not reported as ignored; a key no op takes still is.
     void nativeKeysAreNotReportedAsIgnored() {
         auto doc=core::new_episode("拡張キー",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
         auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();

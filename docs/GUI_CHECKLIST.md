@@ -1,8 +1,8 @@
 # GUI の手動チェックリスト（M7）
 
-自動試験（`tests/test_m7_gui.py`、offscreen）では確かめられない、人の目と手の確認。結果は `docs/eval/` に日付で残す。
+自動試験（`native/tests/gui/` の `test_gui_*`、offscreen）では確かめられない、人の目と手の確認。結果は `docs/eval/` に日付で残す。
 
-準備: エージェント（または `tests/agents` の偽エージェント）で、ネーム承認の依頼・設定画の候補・1 ページ分の作画候補・相談がある状態のプロジェクトを用意し、`genko app PROJ` で開く。
+準備: エージェント（または `native/tests/support/agents` の偽エージェント）で、ネーム承認の依頼・設定画の候補・1 ページ分の作画候補・相談がある状態のプロジェクトを用意し、`genko app PROJ` で開く。
 
 ## 起動と表示
 

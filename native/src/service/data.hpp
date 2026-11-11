@@ -4,7 +4,7 @@
 
 #include "core/json.hpp"
 
-// The studio's own data files (Python's genko/studio/layouts.json, vocab.json and guide/*.md), embedded as they are.
+// The studio's own data files (native/resources/studio: layouts.json, vocab.json and guide/*.md), embedded as they are.
 
 namespace genko::service::data {
 

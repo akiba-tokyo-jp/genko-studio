@@ -348,6 +348,89 @@ private slots:
 
     // --- tests/test_f2.py -------------------------------------------------------------------------------------------
 
+    // test_every_error_reads_in_japanese: every message the ops and the book's own modules refuse with (OpError,
+    // ApplyError and PyValueError thrown with words that start with a literal — read from this build's sources: the files
+    // below; each part that is not a literal written 3) reads in Japanese through wording::error — no English word of four
+    // letters or more left (names without a Japanese form aside), but the ones gui/errors_not_in_japanese.json names (not
+    // in Japanese yet; that list only shrinks); and the "ops[i] op: " lead is taken off first.
+    void test_every_error_reads_in_japanese() {
+        const QString src = genko::test::repo_root() + QStringLiteral("/native/src/");
+        const QStringList sources = {"api/cli.cpp", "app/session.cpp", "core/brushes.cpp", "core/command_bus.cpp", "core/frames.cpp", "core/mannequin.cpp", "core/ops_anim.cpp", "core/ops_arrange.cpp", "core/ops_book.cpp", "core/ops_bookpages.cpp", "core/ops_color.cpp", "core/ops_frames.cpp", "core/ops_layers.cpp", "core/ops_lines.cpp", "core/ops_pages.cpp", "core/ops_rulers.cpp", "core/ops_schema.cpp", "core/ops_strokes.cpp", "core/ops_util.cpp", "core/ops_vector.cpp", "core/rulers.cpp", "formats/export.cpp", "render/colour.cpp", "render/effects.cpp", "render/materials.cpp", "render/ops_3d.cpp", "render/ops_effects.cpp", "render/ops_tones.cpp", "render/plugins.cpp", "render/raster_ops.cpp", "render/selection.cpp", "render/timelapse.cpp", "render/tones.cpp", "render/warp.cpp"};
+        static const QRegularExpression thrown(QStringLiteral("throw (?:core::)?(?:OpError|ApplyError|PyValueError)\\((?=\\s*\")"));
+        std::set<QString> messages;
+        for (const QString& name : sources) {
+            QFile file(src + name);
+            QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(name));
+            const QString text = QString::fromUtf8(file.readAll());
+            for (auto it = thrown.globalMatch(text); it.hasNext();) {
+                // the first argument: its string literals, and 3 for each part between them that is not one
+                qsizetype at = it.next().capturedEnd();
+                int depth = 1;
+                QString message, between;
+                bool literal = false;
+                const auto flush = [&] {
+                    QString rest = between;
+                    rest.remove(QLatin1Char('+')).remove(QLatin1Char(' ')).remove(QLatin1Char('\n'));
+                    if (!rest.isEmpty()) message += QLatin1Char('3');
+                    between.clear();
+                };
+                while (at < text.size() && depth > 0) {
+                    const QChar c = text[at];
+                    if (c == QLatin1Char('"')) {
+                        flush();
+                        literal = true;
+                        for (++at; at < text.size() && text[at] != QLatin1Char('"'); ++at) {
+                            if (text[at] == QLatin1Char('\\') && at + 1 < text.size()) {
+                                ++at;
+                                message += text[at] == QLatin1Char('n') ? QStringLiteral("\n") : QString(text[at]);
+                            } else {
+                                message += text[at];
+                            }
+                        }
+                        ++at;
+                        continue;
+                    }
+                    if (c == QLatin1Char('(')) ++depth;
+                    if (c == QLatin1Char(')') && --depth == 0) break;
+                    if (c == QLatin1Char(',') && depth == 1) break;  // (the code after the words)
+                    between += c;
+                    ++at;
+                }
+                flush();
+                if (literal) messages.insert(message);
+            }
+        }
+        QVERIFY2(messages.size() > 400, qPrintable(QString::number(messages.size())));
+        static const QRegularExpression japanese(QStringLiteral("[ぁ-んァ-ヶ一-龥]"));
+        static const QRegularExpression english(QStringLiteral("[A-Za-z]{4,}"));
+        // (the messages not in Japanese yet, by name: gui/errors_not_in_japanese.json — none of them one the test read before)
+        const Json known = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/native/tests/gui/errors_not_in_japanese.json")).at("messages");
+        std::set<QString> not_yet;
+        for (const Json& m : known) not_yet.insert(QString::fromStdString(m.get<std::string>()));
+        QStringList left, stale;
+        int read = 0;
+        for (const QString& message : messages) {
+            if (japanese.match(message).hasMatch()) continue;  // (already Japanese)
+            QString shown = wording::error(message);
+            for (const char* name : {"Genko", "CMYK", "TIFF", "WebP", "ffmpeg"}) shown.remove(QString::fromLatin1(name));  // (no Japanese form)
+            const bool english_left = english.match(shown).hasMatch();
+            if (not_yet.contains(message)) {
+                if (!english_left) stale << message + QStringLiteral(" (now ") + wording::error(message) + QStringLiteral(")");
+                continue;
+            }
+            ++read;
+            if (english_left) left << message + QStringLiteral(" → ") + wording::error(message);
+        }
+        for (const QString& message : not_yet) {
+            if (!messages.contains(message)) stale << message + QStringLiteral(" (no longer in the sources)");
+        }
+        QVERIFY2(left.isEmpty(), qPrintable(QStringLiteral("%1 in English:\n").arg(left.size()) + left.join(QStringLiteral("\n"))));
+        QVERIFY2(stale.isEmpty(), qPrintable(QStringLiteral("to take off errors_not_in_japanese.json:\n") + stale.join(QStringLiteral("\n"))));
+        QVERIFY2(read > 300, qPrintable(QString::number(read)));
+        // through the op's lead too
+        QVERIFY(wording::error(QStringLiteral("ops[2] fill: nothing to fill there (the click is on a line)")).startsWith(QStringLiteral("線の上なので塗れません")));
+    }
+
     // test_a_person_alone_inks_before_the_name_is_approved: a book drawn alone takes lines on the ink layer before any
     // name is approved (by the layer's id and by its role); a book made with agents (strict_gates) keeps the order and
     // says why in Japanese: 「AI と進める原稿」.

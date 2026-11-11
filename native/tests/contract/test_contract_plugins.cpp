@@ -6,6 +6,8 @@
 
 #include <QtTest>
 
+#include <QCryptographicHash>
+
 #include <QDir>
 #include <QElapsedTimer>
 #include <QTemporaryDir>
@@ -173,10 +175,20 @@ private slots:
         QCOMPARE(std::get<2>(asked[0]), 0.0);
         QCOMPARE(std::get<3>(asked[0]), 1.0);
         QCOMPARE(std::get<4>(asked[0]), 1.0);
-        for (const char* params : {"{}", R"({"amount": 0.4})"}) {
-            const genko::render::Image got = plugins::run("plugin:sepia", picture(), genko::core::parse_python_json(params));
+        // its pictures, every pixel: fixed (the sha256 of the RGBA pixels), sepia at full strength and at 0.4 (not the same)
+        const std::pair<const char*, const char*> runs[] = {{"{}", "3eec2de282e1eada58599f7a07a3c91593453ac7aacd238569516793ab04a10d"}, {R"({"amount": 0.4})", "b61ad00b2dd40e74141857433b71e319290730bd3887393ccd71fa707c037251"}};
+        std::vector<std::string> pixels;
+        for (const auto& [params, digest] : runs) {
+            const genko::render::Image got = plugins::run("plugin:sepia", picture(), genko::core::parse_python_json(params)).convert("RGBA");
             QCOMPARE(got.size(), picture().size());
+            pixels.push_back(got.tobytes());
+            QCOMPARE(QCryptographicHash::hash(QByteArray::fromStdString(got.tobytes()), QCryptographicHash::Sha256).toHex().toStdString(),
+                     std::string(digest));
+            const auto at = reinterpret_cast<const unsigned char*>(pixels.back().data()) + (30 * got.width() + 30) * 4;
+            if (pixels.size() == 1) QVERIFY2(at[0] > at[2], params);  // (the blue square sepia: more red than blue)
         }
+        QVERIFY(pixels[0] != pixels[1]);
+        QVERIFY(pixels[1] != picture().tobytes());
         // through filter_raster on a paint layer
         genko::core::Document doc = genko::core::new_episode("p", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
         const genko::core::CommandBus bus(genko::render::ops_registry());

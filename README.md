@@ -40,7 +40,7 @@ genko inspect ./demo.genko
 genko apply ./demo.genko ops.json
 genko render ./demo.genko --page 1 --out p1.png
 genko export ./demo.genko ./out --format tiff
-genko serve --port 8765
+genko serve --root . --port 8765
 ```
 
 Export formats: png, tiff, pdf, strip, psd, psb, epub, pack, webtoon, sns, cmyk, layers, kindle, timelapse, animation, pcraft.

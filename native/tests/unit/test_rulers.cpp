@@ -1,7 +1,7 @@
-// Rulers without the Python reference (M3-B): the snapping of core::rulers for every kind (the cases of Python's
+// Rulers (M3-B): the snapping of core::rulers for every kind (the cases of Python's
 // test_w10_rulers, test_j2, test_j6 and test_m14), and the ruler ops through the CommandBus — each op's success, its
 // refusals (the book unchanged), the page lock, dry-run, Undo and Redo through the journal, and the book saved and
-// read again. The exact numbers against Python are in contract/test_contract_rulers.cpp.
+// read again.
 
 #include <QtTest>
 

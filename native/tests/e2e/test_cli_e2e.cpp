@@ -1,13 +1,20 @@
 // The genko command line end to end: what `genko inspect` prints and returns for books it cannot read, as Python's
 // genko/__main__.py does ({"ok": false, "error": …} on stdout; exit 2 for a book from a newer Genko, 1 for the rest),
-// usage errors, --ascii, --stroke and `genko schema`.
+// usage errors, --ascii, --stroke and `genko schema`; `genko studio` step by step, each a process of its own.
 
 #include <QtTest>
 
+#include <QDir>
+#include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <chrono>
+#include <map>
 #include <string>
+
+#include "core/base64.hpp"
 
 #include "testsupport.hpp"
 
@@ -169,6 +176,89 @@ private slots:
         QVERIFY2(genko::test::strict_equal(out["ops"], file, &where), where.c_str());
         QCOMPARE(out["ops"].size(), std::size_t{168});
         QVERIFY(r.out.startsWith("{\"ok\": true, \"ops\": [{\"op\": \"split_frame\""));
+    }
+    // `genko studio`, each step a process of its own (e2e/studio_cli_steps.json: this build's executable, as people run
+    // it, in the root, the step's stdin given): every process started and ended in its time without crashing, with the
+    // step's exit code (0, 1 or 3; 2 only for arguments the command line does not take), printing one JSON object or
+    // nothing; the leases it took hold their item for 600 s from then (studio/claims/…: "expires"), and no name under the
+    // root has a ":" (Windows takes none).
+    void studioCommandLineAsProcesses() {
+        const Json file = genko::test::read_json(genko::test::repo_root() + "/native/tests/e2e/studio_cli_steps.json");
+        const QString root = tmp_.path() + "/studio-cli";
+        const QString config = tmp_.path() + "/studio-cli-config";
+        QDir().mkpath(root);
+        QProcessEnvironment env;
+        env.insert(QStringLiteral("GENKO_CONFIG_DIR"), config);
+        for (const auto& [key, value] : file["env"].items()) env.insert(QString::fromStdString(key), QString::fromStdString(value.get<std::string>()));
+        const auto with_root = [&root](std::string text) {
+            const std::string put = root.toStdString();
+            for (std::size_t at = text.find("$root"); at != std::string::npos; at = text.find("$root", at + put.size())) text.replace(at, 5, put);
+            return text;
+        };
+        const auto now = [] { return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count(); };
+        int ran_steps = 0;
+        int usage = 0;
+        int leases = 0;
+        std::map<int, int> exits;
+        for (std::size_t n = 0; n < file["steps"].size(); ++n) {
+            const Json& step = file["steps"][n];
+            if (step.contains("write")) {
+                const QString target = root + "/" + QString::fromStdString(step["write"].get<std::string>());
+                QDir().mkpath(QFileInfo(target).path());
+                genko::test::write_bytes(target, step.contains("base64") ? genko::core::a2b_base64(step["base64"].get<std::string>())
+                                                                         : step["text"].get<std::string>());
+                continue;
+            }
+            QStringList args{QStringLiteral("studio")};
+            for (const Json& a : step["cli"]) args << QString::fromStdString(with_root(a.get<std::string>()));
+            const double started = now();
+            const genko::test::Run ran = genko::test::run_genko(args, env, QByteArray::fromStdString(step.value("stdin", std::string())), root);
+            const double ended = now();
+            const std::string what = "step " + std::to_string(n) + " " + genko::core::dump_python(step).substr(0, 300) + "\n  the process: " +
+                                     ran.described().toStdString();
+            QVERIFY2(ran.started && ran.finished && !ran.crashed, what.c_str());
+            const int expected = step.at("exit").get<int>();
+            QVERIFY2(expected == 0 || expected == 1 || expected == 2 || expected == 3, what.c_str());
+            QVERIFY2(ran.exit_code == expected, (what + "\n  exit " + std::to_string(expected) + " expected").c_str());
+            ++exits[ran.exit_code];
+            usage += ran.exit_code == 2 ? 1 : 0;
+            // what it printed: one JSON object, or nothing
+            const QByteArray printed = ran.out.trimmed();
+            if (!printed.isEmpty()) {
+                Json out;
+                try {
+                    out = genko::core::parse_python_json(ran.out.toStdString());
+                } catch (const std::exception& error) {
+                    QFAIL((what + "\n  stdout is not JSON: " + error.what()).c_str());
+                }
+                QVERIFY2(out.is_object(), what.c_str());
+                if (ran.exit_code != 0) QVERIFY2(out.value("ok", true) == false, what.c_str());
+            }
+            // the leases taken or renewed by the step: for 600 s from then
+            QDirIterator it(root, QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                const QString claim = it.next();
+                if (!claim.contains(QStringLiteral("/studio/claims/")) || !claim.endsWith(QStringLiteral(".json"))) continue;
+                const Json lease = genko::core::parse_python_json(genko::test::read_bytes(claim));
+                const double expires = lease.at("expires").get<double>();
+                if (expires < started + 600 - 1) continue;  // (taken by an earlier step)
+                QVERIFY2(expires <= ended + 600 + 0.001, (what + "\n  " + claim.toStdString() + ": expires after the lease").c_str());
+                ++leases;
+            }
+            ++ran_steps;
+        }
+        // no name with a ":"
+        QDirIterator all(root, QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        QStringList colons;
+        while (all.hasNext()) {
+            const QString found = all.next();
+            if (QFileInfo(found).fileName().contains(QLatin1Char(':'))) colons << found;
+        }
+        QVERIFY2(colons.isEmpty(), qPrintable(colons.join('\n')));
+        qInfo("genko studio as processes: %d steps (%d exit 0, %d exit 1, %d usage errors, %d exit 3), %d leases", ran_steps, exits[0],
+              exits[1], usage, exits[3], leases);
+        QCOMPARE(ran_steps, 101);
+        QVERIFY(leases >= 2);
     }
 };
 

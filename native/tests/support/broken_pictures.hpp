@@ -1,0 +1,52 @@
+#pragma once
+
+// Small pictures shared by the tests of placed pictures (unit/test_placed, e2e/test_refusals_e2e): whole ones and the
+// same cut short in their pixels, Photoshop files, a WebP and a file this build does not read.
+
+namespace genko::test::pictures {
+
+// 9×6 pictures as Pillow writes them, and the same cut short in their pixels: Image.open(…).size is (9, 6) for each,
+// load() fails on the cut ones ("image file is truncated"; a JPEG, a BMP and a GIF are read by their header and their
+// pixels apart, a PNG's chunks before its pixels the same).
+struct Sample {
+    const char* name;
+    const char* whole;
+    const char* cut;
+};
+const Sample kSamples[] = {
+    {"JPEG",
+     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAGAAkDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDz+4WTTle4hkLRZG6KQk9TyQfXmmf27a/885vyH+NFFevhMLRxuChiMRHmneSvs2ko2va13ru9fM+qr16mGxMqVF2jZO3re9r7ei0P/9k=",
+     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAGAAkDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDz+w=="},
+    {"BMP",
+     "Qk3eAAAAAAAAADYAAAAoAAAACQAAAAYAAAABABgAAAAAAKgAAADEDgAAxA4AAAAAAAAAAAAAHh7IHh7IHh7IHh7IHh7IHh7I/wAA/wAA/wAAAB4eyB4eyB4eyB4eyB4eyP8AAP8AAP8AAB4eyAAeHsgeHsgeHsj/AAD/AAD/AAD/AAAeHsgeHsgAHh7IHh7I/wAA/wAA/wAAHh7IHh7IHh7IHh7IAP8AAP8AAP8AAP8AAB4eyB4eyB4eyB4eyB4eyAAeHsj/AAAeHsgeHsgeHsgeHsgeHsgeHsgeHsgA",
+     "Qk3eAAAAAAAAADYAAAAoAAAACQAAAAYAAAABABgAAAAAAKgAAADEDgAAxA4AAAAAAAAAAAAAHh7IHh7IHh7IHh7IHh7IHh7I/wAA/wAA/wAAAB4eyB4eyB4eyB4eyB4eyP8AAP8AAP8AAB4eyAAeHsgeHsgeHsj/AAD/AAD/AAD/AAAeHsgeHsgAHh7IHh7I/wAA/wAA/wAAHh7IHh7IHh7IHh7IAP8AAP8AAP8AAP8AAB4eyB4="},
+    {"GIF", "R0lGODdhCQAGAIIAAMwAAMwzAMwAM8wzMwAA/wAAAAAAAAAAACwAAAAACQAGAAAIIgAHEAgggKBBAggJDCC4cACAhAULMkyoEIDDiwkHXDyIMCAAOw==",
+     "R0lGODdhCQAGAIIAAMwAAMwzAMwAM8wzMwAA/wAAAAAAAAAAACwAAAAACQAGAAAIIgAHEAgggKBBAggJDCC4cACAhAULMkyoEA=="},
+    {"PNG",
+     "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAGCAIAAACepSOSAAAAMklEQVR4nGNkYGCQw4FYGDQYGBgEsSK4nBImQpYzRkUdaHIuDAwuDAxpEAamXCgMdQAAPsEJHEGEH+8AAAAASUVORK5CYII=",
+     "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAGCAIAAACepSOSAAAAMklEQVR4nGNkYGCQw4FYGDQYGBgEsSK4nBImQpYz"},
+};
+
+// Photoshop files of 9×6 with no layers and their merged picture: RGB, the same cut short in
+// its merged picture (Image.open reads its size, load() fails), and one of Lab colours (Pillow opens it; this build does
+// not turn Lab into RGB yet).
+const char* const kPsdRgb =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAMAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAKAAYACgAKAAYACgAGAAoACgAG"
+    "AAoABgAKAAoABgAKAAoIX1lpeHSEkp2gCFttb3WHiJOfq/2m/csA8AhrbHKGh5qiqqcIc3WEgZCWoLKy/cf97AARCGl4fYSMmKKhr/2g/cUA6gh3dIiVl6Gj"
+    "rb0IfXyGkZihr7bD/cH95gALCIaSkpiiqLe5yP2a/b8A5AiEi42TorKwu8cIgZGcmay1ssXF/bv94AAFCJOSp7CywL7Szgial6usvsHQ2eI=";
+const char* const kPsdCut =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAMAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAKAAYACgAKAAYACgAGAAoACgAG"
+    "AAoABgAKAAoABgAKAAoIX1lpeHSEkp2gCFttb3WHiJOfq/2m/csA8AhrbHKGh5qiqqcIc3WEgZCWoLKy/cf97AARCGl4fYSMmKKhr/2g/cUA6gh3dIiVl6Gj"
+    "rb0IfXyGkZihr7bD/cH95gALCIaSkpiiqLe5yP2a/b8A5AiEi42TorKwu8cIgZGcmay1ssXF/bv94AAFCJOSp7CywL4=";
+const char* const kPsdLab =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAkAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAGAAoACgAGAAoABgAKAAoABgAK"
+    "AAoACgAKAAYACgAKAAYIBQgXIiooOjlK/c398gAXCAsbHSI1OzpGWwgLIScuNUJAU1n97v0TADgIIhwmMjtGUlhc/cf97AARCBAnIy43RUpXWggeKigzR1Ba"
+    "Vl/96P0NADIIHzc6OkdbXmRvCCQ1NkROW1pteQglMTY/SlNSYmkIIjI8Q0pUWGJr/eL9BwAsCDE8TE5RY2RwfQgxSEpPWWxyc4P9A/0oAE0=";
+
+// A WebP, 2×2, as Pillow writes one (opened since M6).
+const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
+// The start of a JPEG 2000 file, which Pillow opens and this build does not read (M7: a recorded limit — a PPM until
+// PC4 F-a, which reads Netpbm; TIFFs in planes are read since M7).
+const char* const kUnreadPicture = "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=";
+
+}  // namespace genko::test::pictures

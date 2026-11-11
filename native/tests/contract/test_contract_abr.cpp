@@ -274,6 +274,20 @@ private slots:
         render::brushes::save_to_library(config, "my_b", Json{{"label", "B"}, {"base", "maru"}, {"width_mm", 1}, {"rgb", Json::array({255, 255, 255})}, {"spacing", 0.25}});
         render::brushes::save_to_library(config, "my_c", Json{{"label", "\"引用\"\n改行"}, {"base", "gpen"}, {"min_pressure", 1e-05}});
         render::brushes::save_to_library(config, "my_b", std::nullopt);
+        // what is kept: my_a and my_c as they were given, my_b forgotten; the file as this build writes it
+        const Json loaded = render::brushes::load_library(config);
+        QCOMPARE(loaded, (Json{{"my_a", Json{{"label", "細い線"}, {"base", "gpen"}, {"width_mm", 0.35}, {"opacity", 0.8}, {"taper", true}}},
+                             {"my_c", Json{{"label", "\"引用\"\n改行"}, {"base", "gpen"}, {"min_pressure", 1e-05}}}}));
+        QCOMPARE(loaded["my_a"]["label"], Json("細い線"));
+        QCOMPARE(loaded["my_a"]["width_mm"], Json(0.35));
+        QCOMPARE(loaded["my_c"]["label"], Json("\"引用\"\n改行"));
+        {
+            std::ifstream file(render::brushes::library_path(config), std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            QCOMPARE(QString::fromStdString(text), QString::fromUtf8("{\n \"brushes\": {\n  \"my_a\": {\n   \"label\": \"細い線\",\n   \"base\": \"gpen\",\n   \"width_mm\": 0.35,\n"
+                                                               "   \"opacity\": 0.8,\n   \"taper\": true\n  },\n  \"my_c\": {\n   \"label\": \"\\\"引用\\\"\\n改行\",\n"
+                                                               "   \"base\": \"gpen\",\n   \"min_pressure\": 1e-05\n  }\n }\n}"));
+        }
         // a file that is not JSON: an empty library; but never written over
         std::ofstream(render::brushes::library_path(config), std::ios::binary | std::ios::trunc) << "{not json";
         QCOMPARE(render::brushes::load_library(config), Json::object());

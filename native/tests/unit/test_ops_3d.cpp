@@ -1,5 +1,4 @@
-// The 3D ops without the Python reference (the same batches against Python's apply_ops: test_contract_3d_ops,
-// test_contract_3d_random and test_contract_3d_cli): for each op a batch that succeeds and what it leaves, input it
+// The 3D ops: for each op a batch that succeeds and what it leaves, input it
 // refuses with the book left as it was, a page another agent has locked, strict_gates where the op draws on a
 // printed layer, dry runs, Undo and Redo through the journal, the book saved and read back; what the C++ build refuses
 // where Python would keep a broken book; the pose library; 3D guides drawn in the proof and the name, never printed.
@@ -443,8 +442,7 @@ private slots:
         }
     }
 
-    // What Python would keep and the C++ build refuses (docs/cpp-migration/SPEC.md §2; the same inputs through
-    // Python: test_contract_3d_ops safeSideRefusals).
+    // What this build refuses on purpose (docs/cpp-migration/SPEC.md §2).
     void safeSideRefusals() {
         const double inf = std::numeric_limits<double>::infinity();
         const auto refused = [&](Json op, const std::string& reason) {
@@ -560,7 +558,7 @@ private slots:
         QCOMPARE(error_of(street, ops(R"([{"op": "trace_prims", "page": 1, "layer_id": "pen", "ids": ["s"]}])")), std::string("(applied)"));
     }
 
-    // The pose library (the same steps against Python: test_contract_3d_geometry posesFile).
+    // The pose library.
     void poseLibrary() {
         QTemporaryDir config;
         QVERIFY(config.isValid());
@@ -625,7 +623,7 @@ private slots:
         }
     }
 
-    // A few of the numbers the geometry rests on (all of it against Python: test_contract_3d_geometry).
+    // A few of the numbers the geometry rests on.
     void geometryBasics() {
         QCOMPARE(genko::core::py_remainder(5.5, 2.0), -0.5);  // (math.remainder: to the nearest, halves to even)
         QCOMPARE(genko::core::py_remainder(7.0, 2.0), -1.0);

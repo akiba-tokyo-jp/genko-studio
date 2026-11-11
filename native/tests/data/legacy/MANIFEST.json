@@ -2,10 +2,20 @@
  "commits": {
   "v1": "5b54b42",
   "v2": "3210633",
-  "v3": "1b7b1d7030d4188d7ebd5e398d010b3ed98b220f"
+  "v3": "1b7b1d7030d4188d7ebd5e398d010b3ed98b220f",
+  "v2-upgraded": "c12298b0"
  },
  "files": {
   "book-v1.genko/project.json": "ecce0d99f8f0fe5f617a810e75c51223f48c804c192f8727f62c71357753e9a4",
+  "book-v2-upgraded.genko/assets/0f/0fc670edf8c7731cb49a7a07ac4b836c5e573c92f62c5eaf4876d05bf0b95206.strokes.json": "0fc670edf8c7731cb49a7a07ac4b836c5e573c92f62c5eaf4876d05bf0b95206",
+  "book-v2-upgraded.genko/assets/56/567665eed8bafa25840828f8e3e9c600f49d7f28986153b839aae8ac9740d0b7.project.json": "567665eed8bafa25840828f8e3e9c600f49d7f28986153b839aae8ac9740d0b7",
+  "book-v2-upgraded.genko/assets/84/84e95fb1d42be4954e14d82a4b3c8a697cb28a1fa3f999b3448d5d2a1a93d6b7.png": "84e95fb1d42be4954e14d82a4b3c8a697cb28a1fa3f999b3448d5d2a1a93d6b7",
+  "book-v2-upgraded.genko/assets/bf/bf3447b4168777e3293a0fd850d17bf9c8506271c66acee2c6c3dbbb0c077be8.project.json": "bf3447b4168777e3293a0fd850d17bf9c8506271c66acee2c6c3dbbb0c077be8",
+  "book-v2-upgraded.genko/pages/001/bg.png": "84e95fb1d42be4954e14d82a4b3c8a697cb28a1fa3f999b3448d5d2a1a93d6b7",
+  "book-v2-upgraded.genko/project.json": "567665eed8bafa25840828f8e3e9c600f49d7f28986153b839aae8ac9740d0b7",
+  "book-v2-upgraded.genko/project.v2.bak.json": "bf3447b4168777e3293a0fd850d17bf9c8506271c66acee2c6c3dbbb0c077be8",
+  "book-v2-upgraded.genko/studio/audit.jsonl": "5e16da6d3ee1533340381babf6a044e24c91809cfbb012ec10a9b80aaf8bfd96",
+  "book-v2-upgraded.genko/studio/journal.jsonl": "16042d1ceaf12dc7eac96192c948f716caca32517df828042aa4d25eb17c7b52",
   "book-v2.genko/pages/001/bg.png": "84e95fb1d42be4954e14d82a4b3c8a697cb28a1fa3f999b3448d5d2a1a93d6b7",
   "book-v2.genko/project.json": "bf3447b4168777e3293a0fd850d17bf9c8506271c66acee2c6c3dbbb0c077be8",
   "book-v3.genko/assets/0e/0e715a88346d4bf022e8d055ee28c2cde7c1ce5e1e024590959bf98259926eca.project.json": "0e715a88346d4bf022e8d055ee28c2cde7c1ce5e1e024590959bf98259926eca",
@@ -17,5 +27,8 @@
   "book-v3.genko/project.json": "6b551ca22f9cf5fdc7fdb9a33a969559e01b03344af81e82dd79f68a7d1e84ba",
   "book-v3.genko/studio/audit.jsonl": "02bfb550d0bc29bba73f7916ba61e449e15ff37e0bced27dbc0434384c8b4a3d",
   "book-v3.genko/studio/journal.jsonl": "e9d4b4b2eb40768bad2b50c46427dcea37f796d482b89d62c5b1bc7ea771a4de"
+ },
+ "notes": {
+  "v2-upgraded": "book-v2.genko converted in place by the older Genko of that commit (read, then written into the same folder: version 3, its v2 project.json kept as project.v2.bak.json, pages/001/bg.png left where it was): a book people still have, made once and kept as it is (test_migrate_e2e upgradedV2HistoryStaysReachable)."
  }
 }

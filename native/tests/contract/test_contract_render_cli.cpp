@@ -1,5 +1,5 @@
-// `genko render`'s refusals: a page that is not there is an error in JSON (exit 1) and writes nothing; usage errors
-// exit with 2.
+// `genko render`'s refusals: an extension there is no format for and a page that is not there are errors in JSON
+// (exit 1) and write nothing; usage errors exit with 2.
 
 #include <QtTest>
 
@@ -32,6 +32,15 @@ private slots:
     }
 
     void errors() {
+        // an extension there is no format for: an error in JSON, nothing written
+        const QString unknown = scratch_.path() + QStringLiteral("/x.unknown");
+        const auto bad = cpp({"render", book_, "--page", "1", "--mode", "name", "--out", unknown});
+        QCOMPARE(bad.exit_code, 1);
+        const Json b = genko::core::parse_python_json(bad.out.toStdString());
+        QCOMPARE(b.value("ok", Json()), Json(false));
+        QCOMPARE(b.value("error", std::string()), std::string("unknown file extension: .unknown"));
+        QCOMPARE(b.value("code", std::string()), std::string("value"));
+        QVERIFY(!QFile::exists(unknown));
         // a page that is not there: an error in JSON
         const QString nowhere = scratch_.path() + QStringLiteral("/missing.png");
         const auto none = cpp({"render", book_, "--page", "99", "--out", nowhere});

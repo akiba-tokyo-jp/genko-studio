@@ -418,11 +418,8 @@ private slots:
     }
 
     // The image way (the default) is Python's PSD, unchanged by PSD-01: the fixture book's pages are the bytes the build
-    // before the editable PSD wrote (their sha256, below: written by e146b96's genko, whose image way test_contract_export
-    // holds to Python's, and the same as Python's own for the book without what only this build has —
-    // test_contract_psd_text's imageWayIsPythons; page 1's since M5①, where the book's「大きな声で約束する」has its rubies
-    // on「声」and「約束」, the same as Python's there, which imageWayIsPythons holds too: psd_book_hashes.hpp), with no
-    // text layer and no group.
+    // before the editable PSD wrote (their sha256, below: written by e146b96's genko; page 1's since M5①, where the
+    // book's「大きな声で約束する」has its rubies on「声」and「約束」: psd_book_hashes.hpp), with no text layer and no group.
     void imageWayIsAsBefore() {
         const auto& files = image_way();
         QCOMPARE(files.size(), std::size_t{4});

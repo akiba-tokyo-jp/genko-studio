@@ -361,8 +361,8 @@ private slots:
         QCOMPARE(line_of(payload, "L1")["ruby_runs"], Json::array());
     }
 
-    // A book of Python's (book-v3: ruby_runs) is written as before: no ruby_spans, no feature; its ruby drawn as before
-    // (test_contract_render). The feature is a known one: a book with it opens for writing.
+    // A book of Python's (book-v3: ruby_runs) is written as before: no ruby_spans, no feature; its ruby drawn as before.
+    // The feature is a known one: a book with it opens for writing.
     void pythonBooksStayAsTheyWere() {
         const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(genko::test::test_data("legacy/book-v3.genko").toStdString()));
         const Json payload = payload_of(loaded.document, tmp_);

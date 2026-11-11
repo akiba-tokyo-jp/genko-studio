@@ -73,7 +73,7 @@ genko app
 genko new ./demo.genko --title 試作 --pages 8
 genko inspect ./demo.genko
 genko apply ./demo.genko ops.json
-genko serve --port 8765
+genko serve --root . --port 8765
 genko export ./demo.genko ./out --format tiff --json
 ```
 

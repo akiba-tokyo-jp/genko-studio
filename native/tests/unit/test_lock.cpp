@@ -1,7 +1,6 @@
 // project.lock (storage::ProjectLock): the OS lock between two locks of one process and between processes, its
 // content (Python's: token, agent, pid, host, acquired_at; "released" after), an older Genko's content, the
-// converter's lock that neither makes nor writes the file, and acquire() with a timeout. (Against Python's
-// genko.lock.ProjectLock: test_contract_save.)
+// converter's lock that neither makes nor writes the file, and acquire() with a timeout.
 
 #include <QtTest>
 

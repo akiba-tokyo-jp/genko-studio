@@ -4,14 +4,16 @@
 // an asset; Undo and Redo into the old history right after the conversion and after a new edit (an AI cannot undo an
 // approval); an asset only the old history refers to; a book being written meanwhile (source_changed), held by
 // another process (source_locked), needing repairs (refused, then accepted); versions and folders refused; Unicode,
-// spaces and long paths; CRLF project.json; GC after a conversion.
+// spaces and long paths; CRLF project.json; GC after a conversion; a v2 book an older Genko converted to v3 in place.
 
 #include <QtTest>
 
 #include <QDir>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 
@@ -210,6 +212,39 @@ private slots:
         QCOMPARE(via_redo, 1);
         QCOMPARE(audit[0]["rev"], Json(3));  // (the old line is still first, as it was)
         QVERIFY(!audit[0].contains("v"));
+    }
+
+    // A v2 book an older Genko converted to v3 in place (legacy/book-v2-upgraded.genko: its v2 project.json kept as
+    // project.v2.bak.json, pages/001/bg.png where it was): converted with its history whole, the picture of pages/ an
+    // asset of the v2 book's background, the backup kept in legacy/ byte for byte; Undo goes back to the v2 book, its
+    // background the same bytes; Redo, and nothing is wrong with the book.
+    void upgradedV2HistoryStaysReachable() {
+        const QString book = copy_of("v2-upgraded", "upgraded.genko");
+        QVERIFY(QFileInfo::exists(book + "/project.v2.bak.json"));
+        QCOMPARE(project(book)["version"], Json(3));
+        const auto before = genko::test::tree_hashes(book);
+        const QString cpp = tmp_.path() + "/upgraded-v4.genko";
+        const auto r = run_genko({"migrate", book, cpp});
+        QVERIFY2(r.exit_code == 0, r.out.constData());
+        QVERIFY(genko::test::tree_hashes(book) == before);
+        const Json report = one_line(r.out);
+        QCOMPARE(report["history"]["consistent"], Json(true));
+        QCOMPARE(report["map_entries"], Json(1));
+        QCOMPARE(report["assets"]["pages"].size(), std::size_t{1});
+        const std::string bg = genko::test::read_bytes(book + "/pages/001/bg.png");
+        QCOMPARE(report["assets"]["pages"][0]["ref"].get<std::string>(), AssetStore::ref(bg));
+        QCOMPARE(genko::test::read_bytes(cpp + "/legacy/project.v2.bak.json"), genko::test::read_bytes(book + "/project.v2.bak.json"));
+        // Undo the conversion: the v2 book, its picture from pages/ now an asset with the same bytes
+        QCOMPARE(run_genko({"undo", cpp}).exit_code, 0);
+        const auto loaded = genko::storage::load_document(to_path(cpp));
+        QVERIFY(loaded.report.clean());
+        const auto& page = loaded.document.page(0);
+        const auto bg_layer = std::find_if(page.layers.begin(), page.layers.end(),
+                                           [](const auto& layer) { return layer.role == genko::core::LayerRole::Bg; });
+        QVERIFY(bg_layer != page.layers.end() && bg_layer->raster_png);
+        QCOMPARE(*bg_layer->raster_png, bg);
+        QCOMPARE(run_genko({"redo", cpp}).exit_code, 0);
+        QCOMPARE(genko::test::book_problems(cpp), std::string());
     }
 
     void assetOnlyTheOldHistoryNeeds() {

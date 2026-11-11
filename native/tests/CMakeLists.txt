@@ -77,7 +77,7 @@ genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_c
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # color-model@1 (SPEC.md COLOR-03): the built-in ICC profiles, the colour model's JSON, GKIR version 2, the conversions
-# between modes and depths, assign_profile and convert_profile, their refusals,.
+# between modes and depths, assign_profile and convert_profile, their refusals.
 genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
            LABELS unit TIMEOUT 600)
 
@@ -86,7 +86,7 @@ genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_su
 genko_test(test_quantize SOURCES unit/test_quantize.cpp DEPS genko_test_support genko_render LABELS unit)
 
 # 色の校正・色域外警告・カラー設定 (SPEC.md COLOR-03, PC1b): render/proof against PhotoCraft's own tests, a picture's own
-# profile, set_text_gamma and the letters drawn in it,.
+# profile, set_text_gamma and the letters drawn in it.
 genko_test(test_proof SOURCES unit/test_proof.cpp DEPS genko_test_support genko_render_ops genko_storage genko_formats ZLIB::ZLIB LABELS unit TIMEOUT 600)
 
 # color-mode@1 (SPEC.md COLOR-02): CMYK and Lab pages — GKIR, the colour mode, the ink rules, the ink
@@ -114,7 +114,7 @@ genko_test(test_select_color SOURCES unit/test_select_color.cpp DEPS genko_test_
 genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC3 B2 (SPEC.md COLOR-06): a layer's mask applied and made from the transparency, a linked mask moved with its layer,
 # outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
-# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages,.
+# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages.
 genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC3 B4 (SPEC.md COLOR-06「修復」): the fills (PhotoCraft's poisson.rs, inpaint.rs and content_aware.rs tests) and the
 # retouching ops (retouch_cmds/tests.rs: Clone Stamp, Healing Brush, Spot Healing, History Brush, Content-Aware Fill) on
@@ -257,12 +257,12 @@ genko_test(test_slices SOURCES unit/test_slices.cpp DEPS genko_test_support genk
 # asset, the PSD's tone codecs, the .cube export).
 genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # PC2c (COLOR-04): the local corrections (PhotoCraft's algo/tone.rs tests; filter_raster's shadows_highlights,
-# replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten,.
+# replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten.
 genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC4 節 D (COLOR-08): フィルター's engine (render/fx: PhotoCraft's own tests of its filter core, the same bytes whatever
 # the tiling and threads, the three ways, a page of inks' ways, 200 and 600 dpi, the budget, stopping, a heavy filter told,
 # the preview's copy, the new ops' frames) and its kinds' table (settings, presets, .pcraft's commands, places, filters@1,
-# the catalogue),.
+# the catalogue).
 genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 3000)
 set_property(TEST test_fx APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
@@ -335,7 +335,7 @@ genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_su
 genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
-# steps are spent, groups more than 200 deep refused, replace_text refused without a change;.
+# steps are spent, groups more than 200 deep refused, replace_text refused without a change.
 genko_test(test_pyre SOURCES unit/test_pyre.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # TEXT-01 (ruby-layout@1): a line's ruby held by place — the table of edits (data/ruby_cases.json), the ops' refusals,
 # the feature, the book read back, the official export stopped while a ruby needs review; and drawn — by place as
@@ -684,7 +684,7 @@ genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS
            LABELS contract TIMEOUT 1800)
 # Native filter plugins (COMP-04's native extension, this build only: docs/PLUGIN_NATIVE.md) with a small program of the
 # test tree as the plugin: listed without running, chosen with consent, a picture filtered, and the refusals (plugin.json
-# that cannot be used, a missing program, a crash, too much written back, too slow);.
+# that cannot be used, a missing program, a crash, too much written back, too slow).
 add_executable(genko_test_native_plugin support/native_test_plugin.cpp)
 genko_target_flags(genko_test_native_plugin)
 genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
@@ -720,10 +720,13 @@ target_link_libraries(test_contract_wasm_plugins PRIVATE genko_api)
 # (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
 set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
 
-genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e)
+genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 900)
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_migrate_e2e SOURCES e2e/test_migrate_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_ops_e2e SOURCES e2e/test_ops_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
+# What this build refuses on purpose (e2e/refusal_cases.json: numbers that are not finite, pictures it cannot read,
+# books import_pages cannot read, what only a person holds), through the bus and `genko apply`, nothing written.
+genko_test(test_refusals_e2e SOURCES e2e/test_refusals_e2e.cpp DEPS genko_test_support genko_render_ops LABELS e2e TIMEOUT 1200)
 # `genko mcp` and `genko serve` where an agent must not get through and where this build draws its own lines (M5③).
 genko_test(test_mcp_api_e2e SOURCES e2e/test_mcp_api_e2e.cpp DEPS genko_test_support genko_render Qt6::Network LABELS e2e TIMEOUT 1800)
 
@@ -733,6 +736,8 @@ if(GENKO_BUILD_APP)
   # the disposable material preview cache alone (keys, restarts, corrupt files, budgets, originals kept)
   genko_test(test_material_preview_cache SOURCES unit/test_material_preview_cache.cpp DEPS genko_app LABELS unit)
   genko_test(test_migration SOURCES unit/test_migration.cpp DEPS genko_app LABELS unit)
+  # AI と作る without windows: presence, the status line's words, `genko mcp`'s tool log, the reply drafts kept
+  genko_test(test_ai_link SOURCES unit/test_ai_link.cpp DEPS genko_app genko_test_support LABELS unit TIMEOUT 600)
   # (about 60 s in Release; under ASan about 270 s, close to the 300 it had: a guard against a hang, as the GUI tests near it)
   genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app ZLIB::ZLIB GUI TIMEOUT 1800)
   # the layer panel: its list, buttons, settings, menus (several at once, masks, effects), fill and correction layers,

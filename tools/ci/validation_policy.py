@@ -12,7 +12,7 @@ SAFETY = {
     'test_json', 'test_model', 'test_storage', 'test_lock', 'test_journal',
     'test_command_bus', 'test_transaction', 'test_session', 'test_save_e2e',
     'test_migrate_e2e', 'test_gui_save', 'test_app_e2e', 'test_cli_e2e',
-    'test_gui_layout',
+    'test_gui_layout', 'test_refusals_e2e',
 }
 
 
@@ -60,11 +60,12 @@ def make_plan(paths, phase, root, gpu=False):
             name = Path(path).stem
             related |= {n for n in inv['normal'] if any(k in n for k in ('image', 'png', 'render', 'stroke', 'raster', 'ops', 'pynum', 'pyrandom'))}
             if name in ('raster_ops', 'selection'):
-                related |= {n for n in all_tests if 'raster' in n}
+                # (the selection's and the masks' tests too: they draw through raster_ops and selection)
+                related |= {n for n in all_tests if any(k in n for k in ('raster', 'select', 'mask'))}
             elif any(k in name for k in ('tone', 'effect', 'ruler')):
-                related |= {n for n in all_tests if any(k in n for k in ('tone', 'ruler', 'm3_mixed'))}
+                related |= {n for n in all_tests if any(k in n for k in ('tone', 'ruler'))}
             elif any(k in name for k in ('3d', 'mannequin')):
-                related |= {n for n in all_tests if '3d' in n or 'm3_mixed' in n}
+                related |= {n for n in all_tests if '3d' in n}
             else:
                 broad = True
                 reasons.append('共有描画経路')
@@ -123,7 +124,7 @@ def make_plan(paths, phase, root, gpu=False):
                          'tests': sorted(selected), 'excluded_contracts': excluded})
     else:
         tier = 'documents'
-        reasons.append('文書・Python専用変更: nativeビルドなし')
+        reasons.append('文書だけの変更: nativeビルドなし')
     return {'schema': 1, 'phase': phase, 'tier': tier, 'paths': paths,
             'reasons': sorted(set(reasons)), 'matrix': {'include': rows},
             'has_native': bool(rows), 'performance_separate': True,

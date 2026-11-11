@@ -8,6 +8,7 @@ from pathlib import Path
 
 DBG = "/src/build/linux-debug/src/api/genko"
 REL = "/src/build/linux-release/src/api/genko"
+LOCK_HELPER = "/src/build/linux-release/tests/genko_lock_helper"
 results = []
 
 
@@ -113,7 +114,18 @@ st = json.loads((book / "project.json").read_text(encoding="utf-8"))
 check("AI cannot undo an approval (even with --force)", c != 0 and c2 != 0 and st["pages"][0]["name_ok"] is True,
       f"undo={c} {o} force={c2} {o2}")
 
-# 4) 旧原稿の変換: 原本は無変更、変換後に旧履歴まで Undo できる、version 4・世代は増える
+# 4) 別のプロセスが project.lock を持っている間は書かない
+book = work / "lock.genko"
+shutil.copytree(base, book)
+holder = subprocess.Popen([LOCK_HELPER, str(book), "human:other"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+held = holder.stdout.readline().strip()
+rb = json.loads((book / "project.json").read_text(encoding="utf-8"))["revision"]
+c, o, e = run(REL, "apply", str(book), "-", "--agent", "human:a", inp=json.dumps([{"op": "set_note", "page": 1, "note": "z"}]))
+ra = json.loads((book / "project.json").read_text(encoding="utf-8"))["revision"]
+holder.stdin.close(); holder.wait()
+check("another process's lock blocks the writer", held == "locked" and c != 0 and ra == rb, f"held={held} code={c} out={o}")
+
+# 5) 旧原稿の変換: 原本は無変更、変換後に旧履歴まで Undo できる、version 4・世代は増える
 for v in ("v1", "v2", "v3"):
     src = work / f"src-{v}.genko"
     shutil.copytree(f"/src/native/tests/data/legacy/book-{v}.genko", src)
@@ -140,7 +152,7 @@ for v in ("v1", "v2", "v3"):
         detail += f" undone={undone} redo={cr} revs={revs}"
     check(f"migrate {v}", ok, detail)
 
-# 5) v3 原稿に直接書こうとすると、書き換えずに変換を案内する
+# 6) v3 原稿に直接書こうとすると、書き換えずに変換を案内する
 src = work / "direct-v3.genko"
 shutil.copytree("/src/native/tests/data/legacy/book-v3.genko", src)
 h0 = tree_hash(src)
@@ -148,7 +160,7 @@ c, o, e = run(REL, "apply", str(src), "-", "--agent", "human:a", inp=json.dumps(
 check("v3 book is not written (needs_migration)", c == 3 and tree_hash(src) == h0 and not (src / "project.lock").exists(),
       f"code={c} out={o}")
 
-# 6) Release 版は GENKO_FAULT を無視する
+# 7) Release 版は GENKO_FAULT を無視する
 book = work / "release-fault.genko"
 shutil.copytree(base, book)
 c, o, e = run(REL, "apply", str(book), "-", "--agent", "human:a", env={"GENKO_FAULT": "project:crash"},
