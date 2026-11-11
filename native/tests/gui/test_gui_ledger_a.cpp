@@ -351,8 +351,8 @@ private slots:
     // test_every_error_reads_in_japanese: every message the ops and the book's own modules refuse with (OpError,
     // ApplyError and PyValueError thrown with words that start with a literal — read from this build's sources: the files
     // below; each part that is not a literal written 3) reads in Japanese through wording::error — no English word of four
-    // letters or more left (names without a Japanese form aside), but the ones gui/errors_not_in_japanese.json names (not
-    // in Japanese yet; that list only shrinks); and the "ops[i] op: " lead is taken off first.
+    // letters or more left (names without a Japanese form aside), not one of them left out; and the "ops[i] op: " lead is
+    // taken off first.
     void test_every_error_reads_in_japanese() {
         const QString src = genko::test::repo_root() + QStringLiteral("/native/src/");
         const QStringList sources = {"api/cli.cpp", "app/session.cpp", "core/brushes.cpp", "core/command_bus.cpp", "core/frames.cpp", "core/mannequin.cpp", "core/ops_anim.cpp", "core/ops_arrange.cpp", "core/ops_book.cpp", "core/ops_bookpages.cpp", "core/ops_color.cpp", "core/ops_frames.cpp", "core/ops_layers.cpp", "core/ops_lines.cpp", "core/ops_pages.cpp", "core/ops_rulers.cpp", "core/ops_schema.cpp", "core/ops_strokes.cpp", "core/ops_util.cpp", "core/ops_vector.cpp", "core/rulers.cpp", "formats/export.cpp", "render/colour.cpp", "render/effects.cpp", "render/materials.cpp", "render/ops_3d.cpp", "render/ops_effects.cpp", "render/ops_tones.cpp", "render/plugins.cpp", "render/raster_ops.cpp", "render/selection.cpp", "render/timelapse.cpp", "render/tones.cpp", "render/warp.cpp"};
@@ -403,32 +403,63 @@ private slots:
         QVERIFY2(messages.size() > 400, qPrintable(QString::number(messages.size())));
         static const QRegularExpression japanese(QStringLiteral("[ぁ-んァ-ヶ一-龥]"));
         static const QRegularExpression english(QStringLiteral("[A-Za-z]{4,}"));
-        // (the messages not in Japanese yet, by name: gui/errors_not_in_japanese.json — none of them one the test read before)
-        const Json known = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/native/tests/gui/errors_not_in_japanese.json")).at("messages");
-        std::set<QString> not_yet;
-        for (const Json& m : known) not_yet.insert(QString::fromStdString(m.get<std::string>()));
-        QStringList left, stale;
+        QStringList left;
         int read = 0;
         for (const QString& message : messages) {
             if (japanese.match(message).hasMatch()) continue;  // (already Japanese)
             QString shown = wording::error(message);
-            for (const char* name : {"Genko", "CMYK", "TIFF", "WebP", "ffmpeg"}) shown.remove(QString::fromLatin1(name));  // (no Japanese form)
-            const bool english_left = english.match(shown).hasMatch();
-            if (not_yet.contains(message)) {
-                if (!english_left) stale << message + QStringLiteral(" (now ") + wording::error(message) + QStringLiteral(")");
-                continue;
+            for (const char* name : {"Genko", "CMYK", "TIFF", "WebP", "ffmpeg", "PhotoCraft", "WebAssembly"}) {
+                shown.remove(QString::fromLatin1(name));  // (no Japanese form)
             }
             ++read;
-            if (english_left) left << message + QStringLiteral(" → ") + wording::error(message);
-        }
-        for (const QString& message : not_yet) {
-            if (!messages.contains(message)) stale << message + QStringLiteral(" (no longer in the sources)");
+            if (english.match(shown).hasMatch()) left << message + QStringLiteral(" → ") + wording::error(message);
         }
         QVERIFY2(left.isEmpty(), qPrintable(QStringLiteral("%1 in English:\n").arg(left.size()) + left.join(QStringLiteral("\n"))));
-        QVERIFY2(stale.isEmpty(), qPrintable(QStringLiteral("to take off errors_not_in_japanese.json:\n") + stale.join(QStringLiteral("\n"))));
-        QVERIFY2(read > 300, qPrintable(QString::number(read)));
+        QVERIFY2(read > 400, qPrintable(QString::number(read)));
         // through the op's lead too
         QVERIFY(wording::error(QStringLiteral("ops[2] fill: nothing to fill there (the click is on a line)")).startsWith(QStringLiteral("線の上なので塗れません")));
+    }
+
+    // test_this_builds_refusals_read_in_japanese: the refusals this build added (numbers that are not finite, the precise
+    // colour work, PhotoCraft's ops, the words of Python's errors below the ops) in the person's words, as the screens
+    // show them — the values they carry (numbers, ids, places in the ops, the kind of value) kept in the Japanese, the
+    // lead taken off.
+    void test_this_builds_refusals_read_in_japanese() {
+        const std::vector<std::pair<QString, QString>> cases{
+            // (no value)
+            {"ops[0] add_tone: angle must be a finite number", "角度は、ふつうの数で指定します（無限大や NaN は使えません）"},
+            {"ops[0] merge_visible: flatten requires copy=false", "画像を統合するときは、新しいレイヤーに結合する指定を外してください"},
+            {"ops[0] put_color_raster: color raster book budget exceeded",
+             "高精度の画素が 1 冊の上限（1 GiB）を超えるため、置けません（高精度のレイヤーを減らしてください）"},
+            {"ops[0] add_layer: pattern makes a fill layer (kind: fill)", "パターンを使えるのは塗りつぶしレイヤーだけです（種類を塗りつぶしにしてください）"},
+            {"ops[0] set_stage: name is not OK", "ネームが承認されていないため、作画に進めません（先にネームを承認してください）"},
+            {"ops[0] set_nombre: unknown nombre position", "ノンブルの位置は、下の真ん中・下の外側・上の外側・外側の真ん中のどれかです"},
+            {"ops[0] define_brush: format must be photocraft (upstream's brush settings) or genko",
+             "ブラシの設定の形式は、PhotoCraft の設定か Genko の設定のどちらかです"},
+            {"ops[0] define_brush: paper must be an object or null", "紙質は、設定のまとまり（オブジェクト）か「なし」で指定します"},
+            {"tuple.index(x): x not in tuple", "マッチング方法は、知覚的・彩度・相対的な色域を維持・絶対的な色域を維持から選びます"},
+            // (with values)
+            {"ops[0] pose_mannequin: 3D box_1 is not a mannequin", "3D（box_1）はデッサン人形ではありません（ポーズを付けられるのはデッサン人形だけです）"},
+            {"ops[3] set_tone: layer L7 is not a tone layer", "レイヤー（L7）はトーンのレイヤーではありません（トーンのレイヤーを選んでください）"},
+            {"ops[0] fill_area: the area is made of too many areas (at most 64)", "範囲の組み合わせが多すぎます（64 個まで）"},
+            {"ops[1] add_ruler: ops must not hold NaN or Infinity (at ops[1].points[0])",
+             "操作に NaN や無限大の数があります（ops[1].points[0]）。ふつうの数で指定してください（原稿は変わりません）"},
+            {"ops[0] add_prim3d: duplicate 3D id box_2", "同じ ID の 3D がすでにあります（box_2）"},
+            {"ops[0] paste: the area holds too many masks at once (more than 400000000.0 pixels)",
+             "範囲が一度に使うマスクが多すぎます（400000000.0 画素を超えます）。範囲の組み合わせを減らしてください"},
+            {"not enough values to unpack (expected 2, got 1)", "値が足りません（2 つ要る所に 1 つしかありません）"},
+            {"AttributeError: 'list' object has no attribute 'get'", "設定のまとまり（{…} の形）が要る所に、別の種類の値（リスト）が書かれています"},
+            {"ops[0] ['a']: TypeError: unhashable type: 'list'", "操作の名前は文字で書きます（別の種類の値（リスト）は使えません）"},
+            {"ops[2] list_pages: list_pages is a question: ask it alone, not with ops that change the book",
+             "問い合わせ（list_pages）は、原稿を変える操作と一緒には使えません"},
+            {"ops[0] add_stroke: the brush picture sha256:abc: it is not 1 to 2500 pixels a side",
+             "ブラシの先端の画像（sha256:abc）を使えません（縦横 1〜2500 画素の画像ではありません）"},
+            {"ops[0] fill: the page has what this build does not draw yet (placed): a fill cannot see it; fill by an area or a panel instead",
+             "このページには、この版の Genko ではまだ描けないもの（配置した画像）があるため、塗る所を見分けられません。範囲かコマを指定して塗ってください"},
+            {"Exceeds the limit (4300 digits) for integer string conversion: value has 5000 digits; use sys.set_int_max_str_digits() to increase the limit",
+             "数の桁が多すぎます（5000 桁。整数は 4300 桁までです）"},
+        };
+        for (const auto& [message, words] : cases) QCOMPARE(wording::error(message), words);
     }
 
     // test_a_person_alone_inks_before_the_name_is_approved: a book drawn alone takes lines on the ink layer before any

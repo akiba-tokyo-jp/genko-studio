@@ -198,8 +198,8 @@ private slots:
             {"the paper's picture has no pixels", QStringLiteral("紙質の画像に画素がありません")},
             {"the book has no paper picture sha256:" + std::string(64, 'b') + " (give the picture as png)",
              QStringLiteral("この原稿には、その紙質の画像がありません（画像を読み込み直してください）")},
-            {"a paper needs its picture: png (base64) or asset (sha256:…)", QStringLiteral("紙質には画像が要ります（png か asset で指定します）")},
-            {"a paper takes its picture once: png or asset, not both", QStringLiteral("紙質の画像は png か asset のどちらか一つで指定します")},
+            {"a paper needs its picture: png (base64) or asset (sha256:…)", QStringLiteral("紙質には画像が要ります（画像のデータか、原稿の素材の画像を指定してください）")},
+            {"a paper takes its picture once: png or asset, not both", QStringLiteral("紙質の画像は、画像のデータか原稿の素材の画像の、どちらか一つで指定します")},
             {"paper density must be between 0 and 1", QStringLiteral("紙質の濃さは 0〜1 の間で決めます")},
             {"paper scale must be between 0.1 and 10", QStringLiteral("紙質の倍率は 0.1〜10 の間で決めます")},
             {"paper rotation must be between -360 and 360", QStringLiteral("紙質の回転は -360〜360 の間で決めます")},
@@ -209,8 +209,8 @@ private slots:
             {"paper flip_y must be true or false", QStringLiteral("紙質の反転・濃淡の反転は true か false で決めます")},
             {"paper seed must be a whole number between 0 and 2147483647", QStringLiteral("紙質の乱数の種は 0〜2147483647 の整数で決めます")},
             {"paper has an unknown setting: colour", QStringLiteral("紙質に知らない設定があります（colour）")},
-            {"paper asset must be an asset ref (sha256:<64 hex>)", QStringLiteral("紙質の画像（asset）は sha256: と 64 桁の 16 進数で指定します")},
-            {"paper must be an object or null", QStringLiteral("紙質は設定のまとまり（オブジェクト）か null で指定します")},
+            {"paper asset must be an asset ref (sha256:<64 hex>)", QStringLiteral("紙質の画像は、原稿の素材の画像を sha256: と 64 桁の 16 進数で指定します")},
+            {"paper must be an object or null", QStringLiteral("紙質は、設定のまとまり（オブジェクト）か「なし」で指定します")},
             // (drawing with a paper whose picture is not there: a book's or one's own brush — each has its own way out)
             {"the paper picture sha256:" + std::string(64, 'c') + " is not known here (its book's brushes are not read)",
              QStringLiteral("紙質の画像が見つかりません（原稿の素材が欠けているなら、原稿の assets フォルダーに画像を戻すまで、そのブラシでは描けません。"

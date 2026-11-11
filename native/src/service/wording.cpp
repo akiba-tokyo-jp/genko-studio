@@ -82,9 +82,170 @@ QString expand(const QString& replacement, const QRegularExpressionMatch& m) {
     return out;
 }
 
+// A Python type's name (py_type_name: str, list, …) in words, for the refusals that name the kind of value given.
+QString value_kind(const QString& type) {
+    static const QHash<QString, QString> words = {{"str", "文字列"}, {"int", "整数"}, {"float", "小数"}, {"bool", "真偽値"},
+                                                  {"list", "リスト"}, {"dict", "設定のまとまり"}, {"NoneType", "空の値"}};
+    return words.value(type, type);
+}
+
+// The refusals this build added (numbers that are not finite, the precise colour work, PhotoCraft's ops, the words of
+// errors from below the ops) in the person's words: before the families below, which would leave their keys in English.
+void add_this_builds_refusals(std::vector<Rule>& r) {
+    static const QString finite = QStringLiteral("は、ふつうの数で指定します（無限大や NaN は使えません）");
+    // numbers that are not finite
+    r.push_back(rule("angle must be a finite number", [](const QRegularExpressionMatch&) { return QStringLiteral("角度") + finite; }));
+    r.push_back(rule(R"(gradient\.angle must be a finite number)",
+                     [](const QRegularExpressionMatch&) { return QStringLiteral("トーンのグラデーションの角度") + finite; }));
+    r.push_back(rule("width_mm must be a finite number", [](const QRegularExpressionMatch&) { return QStringLiteral("線の太さ") + finite; }));
+    r.push_back(rule("scaled width_mm must be a finite number", "倍率をかけた線の太さが、ふつうの数になりません（倍率を見直してください）"));
+    r.push_back(rule("the page's (width_mm|height_mm) must be a finite number", [](const QRegularExpressionMatch& m) {
+        return QStringLiteral("ページの%1が、ふつうの数ではありません（無限大や NaN）。用紙の大きさを設定し直してください")
+            .arg(m.captured(1) == QLatin1String("width_mm") ? QStringLiteral("幅") : QStringLiteral("高さ"));
+    }));
+    r.push_back(rule("the page's lt_threshold must be a finite number",
+                     "このページの線画にするしきい値が、ふつうの数ではありません（無限大や NaN）。しきい値を設定し直してください"));
+    r.push_back(rule("points and pressure must be finite numbers", [](const QRegularExpressionMatch&) { return QStringLiteral("線の点と筆圧") + finite; }));
+    r.push_back(rule("stroke must contain only finite numbers", [](const QRegularExpressionMatch&) { return QStringLiteral("線の点や太さ") + finite; }));
+    r.push_back(rule("the layout's guides must be finite",
+                     "ガイドレイアウトのガイドの位置が、ふつうの数になりません（列・行・マージンの数値を見直してください）"));
+    r.push_back(rule("this effect's settings give lines that are not finite numbers",
+                     "この効果線の設定では、線の位置がふつうの数になりません（設定の数値を見直してください）"));
+    r.push_back(rule("to gives a pose that is not finite", "そのポーズでは、デッサン人形の位置がふつうの数になりません（動かす先を見直してください）"));
+    r.push_back(rule(R"(the 3D gives a line that is not on the page \(not finite\))",
+                     "3D から作る線の位置が、ふつうの数になりません（3D の位置・大きさ・向きを見直してください）"));
+    r.push_back(rule(R"(ops must not hold NaN or Infinity \(at (.*)\))",
+                     "操作に NaN や無限大の数があります（\\1）。ふつうの数で指定してください（原稿は変わりません）"));
+    r.push_back(rule("material library contains nonfinite numbers",
+                     "素材ライブラリの一覧に NaN や無限大の数があるため、読み込めません（一覧のファイルを直してください）"));
+    r.push_back(rule("cannot convert float to integer", "数が大きすぎるか、ふつうの数ではないため、整数にできません（無限大や NaN は使えません）"));
+    r.push_back(rule("center_mm is too far off the page", "貼り付ける位置が、ページから離れすぎています"));
+    r.push_back(rule("the transform is too far off the page", "変形した先が、ページから離れすぎています（変形を小さくしてください）"));
+    r.push_back(rule("the transform makes a line too wide", "変形すると線が太くなりすぎます（拡大を小さくしてください）"));
+    r.push_back(rule("from and to of the gradient are too far apart or off the page",
+                     "グラデーションの始めと終わりの点が離れすぎているか、ページから外れすぎています"));
+    // the bounds of the precise colours, the areas and the files
+    r.push_back(rule("color raster book budget exceeded",
+                     "高精度の画素が 1 冊の上限（1 GiB）を超えるため、置けません（高精度のレイヤーを減らしてください）"));
+    r.push_back(rule("high-precision merge pixel budget exceeded",
+                     "ページが大きすぎて、高精度のレイヤーを結合できません（解像度を下げるか、用紙を小さくしてください）"));
+    r.push_back(rule("copies is too large", "対称定規の写しの数が大きすぎます（2〜32 で指定します）"));
+    r.push_back(rule("rgb values are too large", "線の色の値が大きすぎます（0〜255 で指定します）"));
+    r.push_back(rule("kind is at most 40 characters", "ブラシの種類の名前は 40 文字までです"));
+    r.push_back(rule(R"(Exceeds the limit \(4300 digits\) for integer string conversion: value has (\d+) digits.*)",
+                     "数の桁が多すぎます（\\1 桁。整数は 4300 桁までです）"));
+    r.push_back(rule(R"(the area holds too many masks at once \(more than (\S+) pixels\))",
+                     "範囲が一度に使うマスクが多すぎます（\\1 画素を超えます）。範囲の組み合わせを減らしてください"));
+    r.push_back(rule(R"(the area is made of too many areas \(at most (\d+)\))", "範囲の組み合わせが多すぎます（\\1 個まで）"));
+    r.push_back(rule(R"(the area is nested too deeply \(saved areas in a loop\?\))",
+                     "範囲の入れ子が深すぎます（保存した選択範囲どうしが、互いを指していないか確かめてください）"));
+    r.push_back(rule(R"(the area takes too much work \(more than (\S+) pixels of masks\))",
+                     "範囲の計算が多すぎます（マスクの画素が \\1 を超えます）。範囲の組み合わせを減らしてください"));
+    r.push_back(rule("the merged layer would hold too many shape parts", "結合したレイヤーのシェイプの部品が多くなりすぎるため、結合できません"));
+    // the words of Python's own errors, below the ops
+    r.push_back(rule(R"(AttributeError: '(\w+)' object has no attribute 'get')", [](const QRegularExpressionMatch& m) {
+        return QStringLiteral("設定のまとまり（{…} の形）が要る所に、別の種類の値（%1）が書かれています").arg(value_kind(m.captured(1)));
+    }));
+    r.push_back(rule(R"((?:ops\[\d+\] .*: )?TypeError: unhashable type: '(\w+)')", [](const QRegularExpressionMatch& m) {
+        return QStringLiteral("操作の名前は文字で書きます（別の種類の値（%1）は使えません）").arg(value_kind(m.captured(1)));
+    }));
+    r.push_back(rule("Unknown format code 'd' for object of type 'float'", "ページの番号が整数ではありません（原稿のページの番号を整数に直してください）"));
+    r.push_back(rule("cannot identify image file .*", "画像を読み込めません（壊れているか、読めない形式の画像です）"));
+    r.push_back(rule(R"(dictionary update sequence element #(\d+) has length (\d+); 2 is required)",
+                     "設定は {項目: 値} か、[項目, 値] の組の並びで指定します（番号 \\1 の組に値が \\2 つあります。組は 2 つの値です）"));
+    r.push_back(rule("embedded null byte", "名前やパスに使えない文字（NUL 文字）が入っています"));
+    r.push_back(rule("expected non-negative integer", "乱数の種は 0 以上の整数で指定します"));
+    r.push_back(rule(R"(max\(\) arg is an empty sequence)", "書き出すページがありません（本文のページを足してください）"));
+    r.push_back(rule(R"((?:max|min)\(\) iterable argument is empty)", "点が 1 つもないため、形の大きさを決められません（点を指定してください）"));
+    r.push_back(rule(R"(not enough values to unpack \(expected (\d+), got (\d+)\))", "値が足りません（\\1 つ要る所に \\2 つしかありません）"));
+    r.push_back(rule("string argument should contain only ASCII characters",
+                     "画像のデータに使えない文字（全角の文字など）が入っています（画像を読み込み直してください）"));
+    r.push_back(rule(R"(tuple\.index\(x\): x not in tuple)", "マッチング方法は、知覚的・彩度・相対的な色域を維持・絶対的な色域を維持から選びます"));
+    r.push_back(rule("unpack", "トーンをずらす量は [x, y] の 2 つの数（mm）で指定します"));
+    // 3D and mannequins
+    r.push_back(rule("3D (.+) is not a mannequin", "3D（\\1）はデッサン人形ではありません（ポーズを付けられるのはデッサン人形だけです）"));
+    r.push_back(rule("duplicate 3D id (.+)", "同じ ID の 3D がすでにあります（\\1）"));
+    r.push_back(rule("a mannequin's height must be above 0", "デッサン人形の身長は 0 より大きくします"));
+    r.push_back(rule(R"(rot is \[tip, turn, lean\])", "3D の向きは [上下の傾き, 左右の向き, 横の傾き] の 3 つの数で指定します"));
+    // layers, the precise colours and the plugins
+    r.push_back(rule("a filter plugin works on 8-bit paint layers, not on a layer of precise colours",
+                     "フィルターのプラグインは 8 bit のペイントレイヤーにだけ使えます（高精度のレイヤーには使えません）"));
+    r.push_back(rule("a folder cannot be grouped with a layer in it", "フォルダーを、その中のレイヤーと一緒にグループにはできません（中のレイヤーを選択から外してください）"));
+    r.push_back(rule("a placed layer cannot receive strokes", "配置した画像のレイヤーには描けません（レイヤー → ラスタライズ で画素にしてから描きます）"));
+    r.push_back(rule("flatten requires copy=false", "画像を統合するときは、新しいレイヤーに結合する指定を外してください"));
+    r.push_back(rule("high-precision vector conversion requires preserve_precision: true",
+                     "高精度のレイヤーをペンのレイヤーにするには、高精度を保つ指定が要ります"));
+    r.push_back(rule("high-precision vector source style is not supported yet",
+                     "マスク・効果・トーン・線などの付いた高精度のレイヤーは、まだペンのレイヤーにできません（先にそれらを外してください）"));
+    r.push_back(rule("ids must not repeat", "並び順に同じレイヤーが 2 度あります（レイヤーは 1 度ずつ指定します）"));
+    r.push_back(rule(R"(layer (\S+) is not a tone layer)", "レイヤー（\\1）はトーンのレイヤーではありません（トーンのレイヤーを選んでください）"));
+    r.push_back(rule(R"(layer (\S+) not found)", "レイヤー（\\1）が見つかりません（消されたか、別のページのものです）"));
+    r.push_back(rule("no layers to merge", "結合するレイヤーがありません"));
+    r.push_back(rule(R"(pattern makes a fill layer \(kind: fill\))", "パターンを使えるのは塗りつぶしレイヤーだけです（種類を塗りつぶしにしてください）"));
+    r.push_back(rule(R"(the book has no pattern (\S+) \(add_pattern puts one in\))", "原稿にパターン（\\1）がありません（先に パターンを定義 で加えてください）"));
+    r.push_back(rule(R"(the page has what this build does not draw yet \((.*)\): a fill cannot see it; fill by an area or a panel instead)",
+                     [](const QRegularExpressionMatch& m) {
+                         return QStringLiteral("このページには、この版の Genko ではまだ描けないもの（%1）があるため、塗る所を見分けられません。範囲かコマを指定して塗ってください")
+                             .arg(unported_element(m.captured(1)));
+                     }));
+    r.push_back(rule("name is not OK", "ネームが承認されていないため、作画に進めません（先にネームを承認してください）"));
+    r.push_back(rule("pages must be all, body or a list of page numbers", "ページは、すべて・本文・ページ番号の並びのどれかで指定します"));
+    // painting: the brushes, the gradients, pasting
+    r.push_back(rule(R"(background_rgb is \[r, g, b\], whole numbers 0\.\.255)", "背景色は [R, G, B]（0〜255 の整数 3 つ）で指定します"));
+    r.push_back(rule(R"(blend is one of the blends \(normal, multiply, screen, …\))", "描画モードの指定が正しくありません（通常・乗算・スクリーンなどから選びます）"));
+    r.push_back(rule("brush engine must be dabs", "ブラシの描き方の設定が正しくありません（ダブのブラシとして読めません）"));
+    r.push_back(rule(R"(engine must be dabs \(or null: the brush draws as before\))", "ブラシの描き方は、ダブのブラシにするか、元の描き方に戻すかのどちらかです"));
+    r.push_back(rule(R"(format must be photocraft \(upstream's brush settings\) or genko)", "ブラシの設定の形式は、PhotoCraft の設定か Genko の設定のどちらかです"));
+    r.push_back(rule("flow is a number between 0 and 1", "流量は 0〜1 の数で指定します"));
+    r.push_back(rule(R"(mix and blend do not go together \(a blend paints the pixels the mixing reads\))",
+                     "混合ブラシの混ぜる設定と描画モードは一緒に使えません（描画モードを「通常」にしてください）"));
+    r.push_back(rule(R"(this brush erases \(its dabs' erase\): erase with it by erase's brush, not add_stroke)",
+                     "このブラシは消すためのブラシです（消しゴムツールで使ってください）"));
+    r.push_back(rule(R"(the book has no brush picture (\S+) \(give the picture as png\))",
+                     "原稿に、そのブラシの先端の画像（\\1）がありません（画像を読み込み直してください）"));
+    r.push_back(rule("the brush picture (\\S+): (.*)", [](const QRegularExpressionMatch& m) {
+        static const QRegularExpression side(QRegularExpression::anchoredPattern(QStringLiteral(R"(it is not 1 to (\d+) pixels a side)")));
+        QString why = m.captured(2);
+        if (why == QLatin1String("it is not a PNG picture")) {
+            why = QStringLiteral("PNG の画像ではありません");
+        } else if (why == QLatin1String("it is not a grey picture of 8 or 16 bits")) {
+            why = QStringLiteral("8 bit か 16 bit のグレーの画像ではありません");
+        } else if (const auto s = side.match(why); s.hasMatch()) {
+            why = QStringLiteral("縦横 1〜%1 画素の画像ではありません").arg(s.captured(1));
+        } else {
+            why = inner(why);
+        }
+        return QStringLiteral("ブラシの先端の画像（%1）を使えません（%2）").arg(m.captured(1), why);
+    }));
+    r.push_back(rule("opacity is 0\\.\\.1", "不透明度は 0〜1 の数で指定します"));
+    r.push_back(rule("reverse must be true or false", "グラデーションの逆方向は、オンかオフ（真偽値）で指定します"));
+    r.push_back(rule(R"(center_mm is \[x_mm, y_mm\])", "貼り付ける位置（中心）は [x, y]（mm）の 2 つの数で指定します"));
+    r.push_back(rule("items' patterns is a list of patterns.*", "貼り付ける内容のパターンの指定が正しくありません（パターンの並びで指定します）"));
+    r.push_back(rule("items' shapes is a list of shape parts", "貼り付ける内容のシェイプの指定が正しくありません（シェイプの部品の並びで指定します）"));
+    r.push_back(rule(R"(items: a patch needs a box \[x, y, w, h\] \(mm\) and a png \(a picture, base64\))",
+                     "貼り付ける画像には、枠 [x, y, w, h]（mm）と画像（png）が要ります"));
+    r.push_back(rule("mask must be follow or stay", "変形するときのレイヤーマスクは、一緒に動かすか、そのまま残すかのどちらかです"));
+    // the materials
+    r.push_back(rule("cannot read built-in materials", "内蔵の素材を読み込めません（Genko を入れ直してください）"));
+    r.push_back(rule("material image must be inside the material library", "素材の画像は、素材ライブラリの中のものを指定します"));
+    r.push_back(rule("material image size must be positive", "素材の画像の大きさは 0 より大きくします"));
+    r.push_back(rule("unsafe material image source", "素材の画像の場所が安全ではないため、読み込めません（素材ライブラリの中の画像を指定してください）"));
+    // the book's settings: the guide layout, the nombre, the export
+    r.push_back(rule("from is paper, trim or frame", "ガイドレイアウトの基準は、用紙・仕上がり・基本枠のどれかです"));
+    r.push_back(rule("give columns, rows or a margin_mm", "ガイドレイアウトには、列・行・マージンのどれかを指定します"));
+    r.push_back(rule(R"(margin_mm is a number or \[top, left, bottom, right\])", "マージンは 1 つの数か、[上, 左, 下, 右] の 4 つの数（mm）で指定します"));
+    r.push_back(rule("nombre settings must be an object", "原稿のノンブルの設定が壊れています（ノンブルを設定し直してください）"));
+    r.push_back(rule("unknown nombre position", "ノンブルの位置は、下の真ん中・下の外側・上の外側・外側の真ん中のどれかです"));
+    r.push_back(rule("format must be one of webp, gif, png, mp4", "書き出す形式は WebP・GIF・PNG・MP4 のどれかです"));
+    // the paper's picture given as base64 (before the paper's own words below, which name the formats it reads)
+    r.push_back(rule(R"(the paper's picture cannot be read \(png must be the picture file in base64\))",
+                     "紙質の画像を読めません（画像のデータが壊れています。画像を読み込み直してください）"));
+}
+
 const std::vector<Rule>& rules() {
     static const std::vector<Rule> table = [] {
         std::vector<Rule> r;
+        add_this_builds_refusals(r);
         r.push_back(rule(R"(brush (\S+) must be between (\S+) and (\S+))", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {{"width_mm", "太さ"}, {"min_pressure", "弱い筆圧での太さ"},
                                                           {"gamma", "筆圧の効き方"}, {"opacity", "不透明度"},
@@ -100,8 +261,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the paper's picture file is too large.*)", "紙質の画像のファイルが大きすぎます（64 MB まで）"));
         r.push_back(rule("the paper's picture has no pixels", "紙質の画像に画素がありません"));
         r.push_back(rule(R"(the book has no paper picture .*)", "この原稿には、その紙質の画像がありません（画像を読み込み直してください）"));
-        r.push_back(rule(R"(a paper needs its picture.*)", "紙質には画像が要ります（png か asset で指定します）"));
-        r.push_back(rule(R"(a paper takes its picture once.*)", "紙質の画像は png か asset のどちらか一つで指定します"));
+        r.push_back(rule(R"(a paper needs its picture.*)", "紙質には画像が要ります（画像のデータか、原稿の素材の画像を指定してください）"));
+        r.push_back(rule(R"(a paper takes its picture once.*)", "紙質の画像は、画像のデータか原稿の素材の画像の、どちらか一つで指定します"));
         r.push_back(rule(R"(paper (density|scale|rotation) must be between (\S+) and (\S+))", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {{"density", "濃さ"}, {"scale", "倍率"}, {"rotation", "回転"}};
             return QStringLiteral("紙質の%1は %2〜%3 の間で決めます").arg(names.value(m.captured(1)), m.captured(2), m.captured(3));
@@ -112,8 +273,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("paper (flip_x|flip_y|invert) must be true or false", "紙質の反転・濃淡の反転は true か false で決めます"));
         r.push_back(rule(R"(paper seed must be a whole number between 0 and (\d+))", "紙質の乱数の種は 0〜\\1 の整数で決めます"));
         r.push_back(rule(R"(paper has an unknown setting: (.*))", "紙質に知らない設定があります（\\1）"));
-        r.push_back(rule(R"(paper asset must be an asset ref.*)", "紙質の画像（asset）は sha256: と 64 桁の 16 進数で指定します"));
-        r.push_back(rule("paper must be an object or null", "紙質は設定のまとまり（オブジェクト）か null で指定します"));
+        r.push_back(rule(R"(paper asset must be an asset ref.*)", "紙質の画像は、原稿の素材の画像を sha256: と 64 桁の 16 進数で指定します"));
+        r.push_back(rule("paper must be an object or null", "紙質は、設定のまとまり（オブジェクト）か「なし」で指定します"));
         r.push_back(rule(R"(the paper picture \S+ is not known here.*)",
                          "紙質の画像が見つかりません（原稿の素材が欠けているなら、原稿の assets フォルダーに画像を戻すまで、そのブラシでは描けません。"
                          "自分のブラシなら、ブラシの詳細で紙質の画像を読み込み直せます）"));
@@ -174,7 +335,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a ruby span's base .* is not the text at .*", "ルビの親文字が、その位置の本文と違います"));
         r.push_back(rule("a ruby span that needs review keeps its base.*", "要確認のルビには、元の親文字が要ります"));
         r.push_back(rule("rubies overlap: .*", "ルビの親文字が重なっています（ひとつの字に振れるルビはひとつです）"));
-        r.push_back(rule("give the rubies as ruby_spans or as ruby_runs, not both", "ルビは ruby_spans か ruby_runs のどちらかで指定します"));
+        r.push_back(rule("give the rubies as ruby_spans or as ruby_runs, not both", "ルビは、本文の位置で振る指定と、親文字と読みの組で振る指定の、どちらか一つにします"));
         r.push_back(rule("a ruby's font must be .*", "ルビの書体は、書体の名前（gothic・mincho など）か書体のファイルで指定します"));
         r.push_back(rule("a ruby's scale must be between 0.25 and 0.8", "ルビの大きさは、本文の 0.25〜0.8 字の間の数で決めます"));
         r.push_back(rule("a ruby's align must be head, center or tail", "ルビの揃えは、先頭（head）・中央（center）・末尾（tail）から選びます"));
@@ -814,6 +975,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the picture is a link or not a file.*", "画像がリンクかファイルではないので読みません"));
         r.push_back(rule("the pack\\.json is too large \\(at most 16 MB\\).*", "素材パックの pack.json が大きすぎます（16 MB まで）"));
         r.push_back(rule("the pack\\.json is a link or not a file.*", "素材パックの pack.json がリンクかファイルではないので読みません"));
+        // (the materials' files by any other name: the words below, the file kept)
+        static const QHash<QString, QString> files = {{"picture", "画像"}, {"pack.json", "素材パックの一覧（pack.json）"}};
+        r.push_back(rule(R"(the (\S+) is too large \(at most (\d+) MB\): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("%1が大きすぎます（%2 MB まで）: %3").arg(files.value(m.captured(1), m.captured(1)), m.captured(2), m.captured(3));
+        }));
+        r.push_back(rule(R"(the (\S+) is a link or not a file: (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("%1がリンクか、ふつうのファイルではないため、読み込めません: %2").arg(files.value(m.captured(1), m.captured(1)), m.captured(2));
+        }));
         r.push_back(rule(R"(the material library would be too large for the materials panel \(at most (\d+) MB\))",
                          "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（\\1 MB まで）"));
         r.push_back(rule(R"(the material folders would be too large for the materials panel \(at most (\d+) MB\))",
@@ -1216,7 +1385,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(pages (\S+) and (\S+) are not next to each other)", "\\1 ページと \\2 ページは隣り合っていないので、見開きになりません"));
         r.push_back(rule(R"(pages (\S+) and (\S+) are two sides of one leaf, not a spread)",
                          "\\1 ページと \\2 ページは 1 枚の紙の表と裏なので、見開きになりません"));
-        r.push_back(rule("preset must be one of b4, b5, a5, a4, webtoon", "原稿用紙は B4・B5・A5・A4・縦読み（Webtoon）から選びます"));
+        r.push_back(rule("preset must be one of b4, b5, a5, a4, webtoon", "原稿用紙は B4・B5・A5・A4・縦読みから選びます"));
         r.push_back(rule(R"(the other book has no page (\d+))", "取り込む原稿に \\1 ページはありません"));
         r.push_back(rule("the adjustment cannot be used: .*", "その補正の数値は使えません"));
         r.push_back(rule("the layer has no marks to trace", "このレイヤーには線にできる絵がありません"));
@@ -1978,7 +2147,7 @@ QString reason(const QString& text) { return inner(text); }
 
 QString error(const QString& message) {
     QString text = message.trimmed();
-    static const QRegularExpression prefix(QStringLiteral(R"(^ops\[\d+\] [a-z_]+: )"));
+    static const QRegularExpression prefix(QStringLiteral(R"(^ops\[\d+\] [a-z_0-9]+: )"));
     text.replace(prefix, QString());
     static const QRegularExpression usage(QStringLiteral(R"(^(.*?)(?: ‖ unknown keys: (.*?))? ‖ ([a-z_0-9]+) takes (\{.*\})$)"),
                                           QRegularExpression::DotMatchesEverythingOption);
