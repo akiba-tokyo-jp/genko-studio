@@ -360,6 +360,7 @@ void split_frame(OpContext& c) {
     } else {
         // (Python's page.split_frame looks the panel up by the id as it was given, not as a str)
         if (!frame_id.is_string()) throw OpKeyError(py_repr(frame_id));
+        target.split.reset();  // (a leaf's stale cut line, left by an older merge: the line remembered is this split's)
         std::tie(a, b) = page.split_frame(target_id, axis, Num(ratio), Num(gutter));
         remember_split(target);
     }

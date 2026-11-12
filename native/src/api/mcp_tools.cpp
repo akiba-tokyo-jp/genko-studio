@@ -210,7 +210,7 @@ const std::vector<ToolSpec>& table() {
         knobs（どれも 0〜1。省くとプリセットの値）: slant 斜め・bleed 断ち切り・split コマ内分割・big 大ゴマ率・overlap 重ね・overflow はみ出し・frameless 枠なし。
         focus: 見せ場にするコマの番号（読み順で 1 から）。そのコマがいちばん大きくなる。
         崩す: base に案の skeleton、または base_page=true で今のページの段組を元に、variation（0〜1、既定 0.3）だけ変えた案（コマ数は元のまま）。
-        plan に下書きのネーム計画を渡すと、各案に骨組みを入れた plan が付き、そのまま submit_name に出せる（コマ数を省くと plan のコマ数ちょうど）。
+        plan に下書きのネーム計画（name_plan@1 の形、256 KiB まで）を渡すと、各案に骨組みを入れた plan が付き、そのまま submit_name に出せる（コマ数を省くと plan のコマ数ちょうど）。
         返す: seed、ideas [{skeleton {tiers, insets?, panels}, summary, panels, pattern, largest, reading_order, like_pages（前後のページと
         似ている＝layout_repeats になりやすい）, plan?}]、around（前後のページの段組）、dropped（振るいで除いた案の数と理由）。
         案の slot は読み順に p1, p2, …。plan の中で案に無い slot のコマは外れる（plan_dropped・警告 plan_panels_dropped）。

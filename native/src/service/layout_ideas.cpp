@@ -1367,8 +1367,13 @@ Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::st
     // the plan's panels of the skeleton's slots, in the plan's order; those of other slots left out (and told)
     if (out.contains("panels") && out["panels"].is_array()) {
         for (const Json& p : out["panels"]) {
+            if (!p.is_object()) {  // (not a panel: left out, and told as it was written)
+                if (dropped != nullptr) dropped->push_back(core::dump_python(p));
+                continue;
+            }
             const Json slot = core::py_get(p, "slot");
-            const bool kept = std::any_of(given_panels.begin(), given_panels.end(), [&slot](const Json& g) { return core::py_get(g, "slot") == slot; });
+            const bool kept = std::any_of(given_panels.begin(), given_panels.end(),
+                                          [&slot](const Json& g) { return g.is_object() && core::py_get(g, "slot") == slot; });
             if (kept) {
                 panels.push_back(p);
             } else if (dropped != nullptr) {
@@ -1377,6 +1382,7 @@ Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::st
         }
     }
     for (const Json& given : core::iterate(given_panels)) {
+        if (!given.is_object()) continue;
         const Json slot = core::py_get(given, "slot");
         std::size_t at = panels.size();
         for (std::size_t i = 0; i < panels.size(); ++i) {
