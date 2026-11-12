@@ -812,7 +812,7 @@ constexpr const char* kNotInContents[] = {
     "act_flip_canvas_v", "act_crop", "act_trim", "act_reveal_all", "act_crop_tool",
     // panels
     "act_frame", "act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection", "act_gutters", "act_border", "act_corner",
-    "act_no_border", "act_bleed", "act_border_colour", "act_border_detail", "act_template", "act_save_template", "act_reset_shape",
+    "act_no_border", "act_bleed", "act_border_colour", "act_border_detail", "act_template", "act_komawari", "act_save_template", "act_reset_shape",
     "act_ruler_frame",
     // lines
     "act_text", "act_story_editor", "act_replace", "act_line_type", "act_balloon_pen", "act_line_edit", "act_line_delete", "act_line_wrap",

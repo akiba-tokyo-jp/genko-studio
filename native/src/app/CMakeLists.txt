@@ -46,6 +46,7 @@ genko_library(genko_app
     pages_panel.cpp
     navigator.cpp
     templates.cpp
+    komawari_dialog.cpp
     dialogs.cpp
     save_status.cpp
     ime.cpp

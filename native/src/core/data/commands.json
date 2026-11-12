@@ -220,6 +220,7 @@
 {"id":"act_split_v","name":"コマを縦に割る（左右に分ける）","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":["Ctrl+Shift+V"]},"checkable":false,"tool":false},
 {"id":"act_edit_commandbar","name":"コマンドバーを変える…","old_names":[],"menu":["ウィンドウ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_frame","name":"コマ割り","old_names":[],"menu":["ツール"],"keys":{"photoshop":["K"],"genko":["F"]},"checkable":true,"tool":true},
+{"id":"act_komawari","name":"コマ割りの案を出す…","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_frame_numbers","name":"コマ番号（読み順）を表示","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},
 {"id":"act_gutters","name":"コマ間隔の設定…","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_contact_sheet","name":"コンタクトシート II…","old_names":[],"menu":["ファイル","自動処理"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},

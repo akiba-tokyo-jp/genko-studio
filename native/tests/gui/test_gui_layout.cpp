@@ -60,6 +60,7 @@
 #include "app/fit_preview.hpp"
 #include "app/help.hpp"
 #include "app/history_panel.hpp"
+#include "app/komawari_dialog.hpp"
 #include "app/icons.hpp"
 #include "app/ime.hpp"
 #include "app/main_window.hpp"
@@ -235,6 +236,12 @@ int probe(int argc, char** argv) {
         auto doc = std::make_shared<const core::Document>(new_doc(2));
         app::TemplateDialog dialog(nullptr, doc, 0, "human:tester");
         out << look_at(QStringLiteral("template"), &dialog, QSize(720, 520), buttons_of(&dialog, true)).dump() << "\n";
+        // コマ割りの案を出す… (コマ割り K2): its buttons in sight, its settings and its batch reachable
+        app::KomawariDialog ideas(nullptr, doc, 0, "human:tester");
+        std::vector<Seen> seen = buttons_of(&ideas, true);
+        for (QWidget* field : std::vector<QWidget*>{ideas.preset, ideas.panels, ideas.seed, ideas.new_batch, ideas.list(), ideas.vary, ideas.back})
+            seen.push_back(Seen{field->objectName().isEmpty() ? QStringLiteral("field") : field->objectName(), field, false});
+        out << look_at(QStringLiteral("komawari"), &ideas, QSize(1000, 680), seen).dump() << "\n";
     }
     {
         app::SaveStatus status;
@@ -491,7 +498,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 21);  // (PC5 H-c: main-4up, main-6up)
+        QCOMPARE(windows, 22);  // (PC5 H-c: main-4up, main-6up; コマ割り K2: komawari)
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

@@ -468,7 +468,8 @@ private slots:
         // (and PC5 H-f's 16: 編集 → 最後の状態を切り替え (act_toggle_last_state), メモリをクリア ▸ 5 (act_purge_undo, act_purge_clipboard,
         // act_purge_histories, act_purge_all, act_purge_video_cache) — test_gui_output —, 表示 → ピクセル縦横比 ▸ 9 (act_pixel_aspect_custom
         // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 804＋16)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{820});
+        // (and コマ割り K2's 1: ページ → コマ → コマ割りの案を出す… (act_komawari) — test_gui_komawari: 820＋1)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{821});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

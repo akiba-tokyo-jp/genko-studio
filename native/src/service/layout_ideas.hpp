@@ -50,6 +50,14 @@ struct Knobs {
     std::optional<double> frameless;  // 枠なし
 };
 
+// What a request that leaves them out gets from a preset: its numbers of panels and of tiers, and every knob (群 K2:
+// the window starts its knobs there).
+struct PresetDefaults {
+    int min_panels = 0, max_panels = 0, min_tiers = 0, max_tiers = 0;
+    Knobs knobs;  // every one set
+};
+PresetDefaults preset_defaults(Preset preset);
+
 struct Request {
     double frame_w_mm = 180;  // the page's basic frame (komawari::frame_size)
     double frame_h_mm = 270;

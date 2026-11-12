@@ -1040,6 +1040,7 @@ private:
     void toggle_bleed();
     void frame_to_selection();
     void templates_dialog();
+    void komawari_dialog();  // コマ割りの案を出す… (コマ割り K2: app/komawari_dialog.hpp)
     void save_template();
     void add_page();
     void del_page();

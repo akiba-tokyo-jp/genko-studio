@@ -926,6 +926,17 @@ std::string_view preset_key(Preset preset) {
     return "standard";
 }
 
+PresetDefaults preset_defaults(Preset preset) {
+    const Params p = params_of(preset);
+    PresetDefaults out;
+    out.min_panels = p.min_n;
+    out.max_panels = p.max_n;
+    out.min_tiers = p.min_t;
+    out.max_tiers = p.max_t;
+    out.knobs = Knobs{p.slant, p.bleed, p.split, p.big, p.overlap, p.overflow, p.frameless};
+    return out;
+}
+
 std::string_view preset_label(Preset preset) {
     switch (preset) {
         case Preset::Talk: return "会話";

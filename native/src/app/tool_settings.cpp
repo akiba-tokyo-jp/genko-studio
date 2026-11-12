@@ -102,6 +102,7 @@ const std::map<QString, QString>& shorts() {
         {QStringLiteral("コマを縦に割る（左右に分ける）"), QStringLiteral("縦に割る（左右に）")},
         {QStringLiteral("コマを結合（割る前に戻す）"), QStringLiteral("結合（割る前に戻す）")},
         {QStringLiteral("テンプレートでコマを割る…"), QStringLiteral("テンプレートで割る…")},
+        {QStringLiteral("コマ割りの案を出す…"), QStringLiteral("案を出す…")},
         {QStringLiteral("選んだコマの枠線の太さ…"), QStringLiteral("枠線の太さ…")},
         {QStringLiteral("選んだコマの枠線をなくす"), QStringLiteral("枠線をなくす")},
         {QStringLiteral("選んだコマを断ち切りにする（紙の端まで）"), QStringLiteral("断ち切りにする")},

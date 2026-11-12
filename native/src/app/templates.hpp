@@ -17,6 +17,11 @@
 // it has (merge_frame, split_frame, cut_frame, set_frame) as one change, so one Undo takes it back: the cuts are made
 // on a copy of the book first, and the ids they gave are given again when the change is applied (Session::apply's
 // ids), so every op of the change names the panels the ones before it made.
+//
+// コマ割り K2: a person's template is laid on the page's own basic frame (a page of the other side has it elsewhere), and
+// a panel set into another (差し込み・重ね, komawari@1: a node of drawn panels holding one panel and one over it) is
+// made again with add_frame's "into" — so a layout from コマ割りの案を出す… is kept and laid again as it was; other drawn
+// panels are set as they are (set_layout).
 
 namespace genko::app::templates {
 

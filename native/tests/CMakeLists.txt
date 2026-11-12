@@ -930,6 +930,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_camera_raw SOURCES gui/test_gui_camera_raw.cpp support/raw_testgen.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
   genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app genko_test_support GUI TIMEOUT 1200)
+  # コマ割り K2 (SPEC LAYOUT-01): ページ → コマ → コマ割りの案を出す… — 12 ideas drawn on worker threads, the same batch from
+  # the same seed, the exact number of panels, variations and ガチャに戻る, an idea laid as real panels (one Undo, saved and
+  # read back), the question first, the layout kept as a template and laid again (an inset's page, drawn panels)
+  genko_test(test_gui_komawari SOURCES gui/test_gui_komawari.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
   # processes (AC-SAVE 1, 8); `genko` alone
   genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)

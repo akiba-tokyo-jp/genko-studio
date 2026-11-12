@@ -1508,6 +1508,15 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 - `layout::CompiledLayout apply_idea(Work&, page_index, skeleton, agent, replace)`: 今の apply_layout の道で当てる。白紙でなければ replace で clear_page。AI（ai:…）は人が承認したネームのページを変えない（ほかの関門は command bus のまま）。
 - `std::optional<Json> komawari::skeleton_of_page(doc, page)`（今のページ → 骨組み。描いたコマは無し）、`shape_of_plan`・`shape_of_page`・`reading_slots`・測り方（size_ratio・plain_grid・reading_break・smallest_side・narrowest_gap・largest・share・difference・describe）、`monotony(doc, page, plan, script)`・`book_monotony(doc, script)`。
 - 速さ: 12 案の束を描かずに数 ms（目安 50 ms）。
+- `PresetDefaults preset_defaults(Preset)`（群 K2 で足した）: プリセットのコマ数・段数の範囲と、つまみ 7 つの値。窓はつまみをここから始め、プリセットと同じ値のつまみは要求に書かない（書かない要求と同じ束になる）。
+
+**窓「コマ割りの案を出す…」（群 K2。app/komawari_dialog）**
+- 入口: ページ → コマ の「テンプレートでコマを割る…」の次（`act_komawari`、キーなし）と、コマ割りツールの設定（「案を出す…」）。
+- 左に設定（プリセット・コマ数〔指定なし／1〜8 ちょうど〕・段数の範囲・見せ場のコマ・束の数〔5・12・24、既定 12〕・つまみ 7 つ・seed の欄と「コピー」「貼り付け」・「新しい束」）、右に案の絵（今のページをその案で割った小さな絵。裏のスレッドで 2 本まで描き、窓はすぐ開く）・案の言葉（describe）・変異の列（元〔選んだ案／今のページのコマ割り〕・変異度・「これを元に変異」・「ガチャに戻る」）。下に「このページに当てる」「やめる」。
+- 設定を変えると、同じ seed で束を出し直す（同じ設定と seed は同じ束）。seed の欄で Enter か「貼り付け」で、その seed の束（変異中は同じ元の変異）。Enter で案を当てることはない。
+- 「ガチャに戻る」は、最初に変異する前の束と、そのとき選んでいた案に戻す（変異の変異の後でも）。今のページが描いたコマのときは「今のページのコマ割り」を元にできない。
+- 当てる: clear_page と apply_idea の op を 1 つの変更（ids つき）にまとめ、テンプレートの窓と同じ確かめ（コマや台詞のあるページは「N ページのコマと台詞を消して、コマ割りの案で割り直します」）の後、人の操作として apply_ops で当てる。元に戻す 1 回で戻る。関門はテンプレートの窓と同じ（command bus のまま）。
+- 当てたコマ割りは「今のコマ割りをテンプレートに残す…」で残せ、テンプレートの窓から当て直せる。自分のテンプレートは当てるページの基本枠に合わせて置き（反対側のページでもずれない）、差し込み・重ね（宿主のコマ 1 つと over のコマ 1 つの節）は add_frame の into で作り直す。ほかの描いたコマは今までどおり set_layout で置く。
 
 **既存の本との互換**: 拡張のキーを書かない計画は、前と同じ op（split_frame・set_frame・set_spread）・コマ・保存のバイトになる（submit_name は fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。input_hash も前と同じ）。`over` は true のときだけ書き、そのときだけ `features` に `komawari@1` を加える（schema-v4.md「コマの重ね」）ので、前の本は同じに開き・描かれ・保存される。komawari@1 のある本を前の版で開くと、未知の拡張として読取専用になる。
 
