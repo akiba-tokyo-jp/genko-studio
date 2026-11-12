@@ -1507,6 +1507,20 @@ private slots:
         QVERIFY(contains_py(request_for(ep)["avoid"], Json("色")));
     }
 
+    // コマ割り K3 (the review's P3-4): the drawing guide this build serves (genko://guide/drawing, inspect target=drawing)
+    // is the one shipped beside the skill for Hermes and for Claude Code, byte for byte (line ends aside).
+    void drawingCopiesMatchThePackagedOne() {
+        const auto lf = [](std::string text) {
+            for (std::size_t at = text.find("\r\n"); at != std::string::npos; at = text.find("\r\n", at)) text.erase(at, 1);
+            return text;
+        };
+        const std::string packaged = lf(genko::service::data::drawing());
+        QVERIFY(!packaged.empty());
+        const fs::path integrations = utf8_path(genko::test::repo_root()) / "integrations";
+        QVERIFY(lf(genko::storage::read_file(integrations / "hermes" / "genko-manga" / "drawing.md")) == packaged);
+        QVERIFY(lf(genko::storage::read_file(integrations / "claude-code" / "skills" / "genko-manga" / "drawing.md")) == packaged);
+    }
+
     // test_claude_code_skill_copy_matches_the_packaged_skill: the skill shipped for Claude Code is the packaged one with
     // Claude Code's tool names (mcp__genko__…), and its MCP example starts `genko mcp` as an agent (ai:…).
     void claudeCodeSkillCopyMatchesThePackagedSkill() {

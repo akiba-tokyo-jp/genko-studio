@@ -24,6 +24,7 @@
 #include "core/pyops.hpp"
 #include "render/page.hpp"
 #include "service/book.hpp"
+#include "service/briefs.hpp"
 #include "service/komawari_shape.hpp"
 #include "service/layout.hpp"
 #include "service/layout_ideas.hpp"
@@ -32,6 +33,7 @@
 #include "service/wording.hpp"
 #include "service/worklist.hpp"
 #include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "studio/schemas.hpp"
@@ -874,6 +876,139 @@ private slots:
         Work odd_book = blank_book(3);
         odd_book.doc.edit_page(1).index = Num(2.5);
         (void)komawari::book_monotony(odd_book.doc, Json::object());
+    }
+
+    // コマ割り K3 (the review's P2-1): a panel merged back keeps no cut line, and a straight split remembers its own —
+    // the old one (a slanted cut's, or an earlier straight split's) was left on the node before, so move_gutter, the
+    // gutters inspect gives, the page's skeleton and the monotony warnings read the layout before it.
+    void aSplitAfterAMergeRemembersItsOwnLine() {
+        {
+            Work work = blank_book();
+            const std::string root = work.doc.page(0).frames.front().id;
+            const auto line_y = [&work]() {
+                const auto line = genko::core::cut_line(work.doc.page(0).frames.front());
+                return line ? std::pair<double, double>{line->p0.y.value(), line->p1.y.value()} : std::pair<double, double>{-1, -1};
+            };
+            work.apply(parsed(R"([{"op": "split_frame", "page": 1, "axis": "horizontal", "ratio": 0.3, "tilt_mm": 12}])"), "human:t");
+            const std::string top = work.doc.page(0).frames.front().children.at(0).id;
+            work.apply(Json::array({Json::object({{"op", "merge_frame"}, {"page", 1}, {"frame_id", top}})}), "human:t");
+            QVERIFY(!work.doc.page(0).frames.front().split.has_value());  // (a leaf keeps no line)
+            work.apply(parsed(R"([{"op": "split_frame", "page": 1, "axis": "horizontal", "ratio": 0.6}])"), "human:t");
+            const genko::core::Frame& node = work.doc.page(0).frames.front();
+            const auto [y0, y1] = line_y();
+            QCOMPARE(y0, y1);  // (straight: the slant is gone)
+            const double between = (node.children[0].rect.y + node.children[0].rect.height).value() / 2 + node.children[1].rect.y.value() / 2;
+            QVERIFY2(std::fabs(y0 - between) < 0.01, (std::to_string(y0) + " " + std::to_string(between)).c_str());
+            // a leaf's stale line from a book saved before: the straight split writes its own over it
+            Work old = blank_book();
+            genko::core::Frame& leaf = old.doc.edit_page(0).frames.front();
+            leaf.split = parsed(R"({"a": [0.0, 0.2], "b": [1.0, 0.25], "gutter_mm": 7.0})");
+            old.apply(parsed(R"([{"op": "split_frame", "page": 1, "axis": "horizontal", "ratio": 0.6}])"), "human:t");
+            const auto kept = genko::core::cut_line(old.doc.page(0).frames.front());
+            QVERIFY(kept && kept->p0.y == kept->p1.y);
+            QVERIFY(std::fabs(kept->p0.y.value() - y0) < 0.01);
+            (void)root;
+        }
+        // through submit_name replace: a slanted layout, then a straight one with another first tier
+        QTemporaryDir dir;
+        const auto fixture = [](const char* name) {
+            QFile file(QStringLiteral(GENKO_REPO_ROOT "/native/tests/fixtures/studio/demo4/") + QString::fromLatin1(name));
+            if (!file.open(QIODevice::ReadOnly)) return Json();
+            return Json::parse(file.readAll().toStdString());
+        };
+        genko::service::StudioService agent(dir.path().toStdString(), "ai:test");
+        QVERIFY(agent.call("create_project", Json::array({"demo.genko", "demo", 4}), Json::object()).ok);
+        QVERIFY(agent.call("set_bible", Json::array({"demo.genko", fixture("bible.json")}), Json::object({{"commit", true}})).ok);
+        QVERIFY(agent.call("set_script", Json::array({"demo.genko", fixture("script.json")}), Json::object({{"commit", true}})).ok);
+        Json plan = fixture("p001.json");
+        plan["tiers"] = parsed(R"([{"h": 0.3, "tilt_mm": 12, "cols": [{"slot": "p1", "w": 1.0}]}, {"h": 0.7, "cols": [{"slot": "p2", "w": 0.5}, {"slot": "p3", "w": 0.5}]}])");
+        QVERIFY(agent.call("submit_name", Json::array({"demo.genko", plan}), Json::object({{"commit", true}})).ok);
+        const std::string book = dir.path().toStdString() + "/demo.genko";
+        const Json slanted = *genko::storage::load_document(book).document.page(0).frames.front().split;
+        plan["tiers"] = parsed(R"([{"h": 0.55, "cols": [{"slot": "p1", "w": 1.0}]}, {"h": 0.45, "cols": [{"slot": "p2", "w": 0.5}, {"slot": "p3", "w": 0.5}]}])");
+        const genko::service::ToolResult replaced = agent.call("submit_name", Json::array({"demo.genko", plan}), Json::object({{"commit", true}, {"replace", true}}));
+        QVERIFY2(replaced.ok, replaced.to_dict().dump().c_str());
+        Document doc = genko::storage::load_document(book).document;
+        const genko::core::Page& page = doc.page(0);
+        const genko::core::Frame& node = page.frames.front();
+        const auto line = genko::core::cut_line(node);
+        QVERIFY(line && line->p0.y == line->p1.y);
+        const double between = (node.children[0].rect.y + node.children[0].rect.height).value() / 2 + node.children[1].rect.y.value() / 2;
+        QVERIFY2(std::fabs(line->p0.y.value() - between) < 0.01, (std::to_string(line->p0.y.value()) + " " + std::to_string(between)).c_str());
+        // the skeleton reads the layout as it is now (no slant, the first tier's height)
+        const auto skeleton = komawari::skeleton_of_page(doc, page);
+        QVERIFY(skeleton.has_value());
+        QVERIFY2(!(*skeleton)["tiers"][0].contains("tilt_mm"), skeleton->dump().c_str());
+        QVERIFY2(std::fabs((*skeleton)["tiers"][0]["h"].get<double>() - 0.55) < 0.02, skeleton->dump().c_str());
+        // the gutters inspect gives, and move_gutter from the line as it is
+        const Json gutters = genko::service::briefs::gutter_brief(page);
+        QCOMPARE(gutters[0]["frame_id"], Json(node.id));
+        QCOMPARE(gutters[0]["from_mm"][1], gutters[0]["to_mm"][1]);
+        QVERIFY(std::fabs(gutters[0]["from_mm"][1].get<double>() - between) < 0.1);
+        const double top_height = node.children[0].rect.height.value();
+        Work moved{doc, Json::array()};
+        moved.apply(Json::array({Json::object({{"op", "move_gutter"}, {"page", 1}, {"frame_id", node.id}, {"index", 0}, {"delta_mm", 5}})}), "human:t");
+        const genko::core::Frame& after = moved.doc.page(0).frames.front();
+        QVERIFY2(std::fabs(after.children[0].rect.height.value() - (top_height + 5)) < 0.05, std::to_string(after.children[0].rect.height.value()).c_str());
+        const auto moved_line = genko::core::cut_line(after);
+        QVERIFY(moved_line && moved_line->p0.y == moved_line->p1.y);
+        // undone (the journal's own copy): the slanted line comes back as it was saved
+        const genko::service::ToolResult undone = agent.call("undo", Json::array({"demo.genko"}), Json::object());
+        QVERIFY2(undone.ok, undone.to_dict().dump().c_str());
+        QCOMPARE(genko::storage::load_document(book).document.page(0).frames.front().split->dump(), slanted.dump());
+    }
+
+    // コマ割り K3 (the review's P2-3): the tool layout_ideas says, for each idea, the neighbouring pages it is alike to —
+    // exactly those whose panels as they are differ from the idea by kRepeatAtMost or less (layout_repeats' measure) —
+    // and the tool reads only (the book's bytes as they were).
+    void likePagesAreTheNeighboursAlike() {
+        QTemporaryDir dir;
+        const auto fixture = [](const char* name) {
+            QFile file(QStringLiteral(GENKO_REPO_ROOT "/native/tests/fixtures/studio/demo4/") + QString::fromLatin1(name));
+            if (!file.open(QIODevice::ReadOnly)) return Json();
+            return Json::parse(file.readAll().toStdString());
+        };
+        genko::service::StudioService agent(dir.path().toStdString(), "ai:test");
+        QVERIFY(agent.call("create_project", Json::array({"demo.genko", "demo", 4}), Json::object()).ok);
+        QVERIFY(agent.call("set_bible", Json::array({"demo.genko", fixture("bible.json")}), Json::object({{"commit", true}})).ok);
+        QVERIFY(agent.call("set_script", Json::array({"demo.genko", fixture("script.json")}), Json::object({{"commit", true}})).ok);
+        // pages 1 and 3: a big panel on top and two below
+        const Json tiers = parsed(R"([{"h": 0.6, "cols": [{"slot": "p1", "w": 1.0}]}, {"h": 0.4, "cols": [{"slot": "p2", "w": 0.5}, {"slot": "p3", "w": 0.5}]}])");
+        Json first = fixture("p001.json");
+        first["tiers"] = tiers;
+        QVERIFY(agent.call("submit_name", Json::array({"demo.genko", first}), Json::object({{"commit", true}})).ok);
+        Json third = fixture("p003.json");
+        Json extra = third["panels"][1];
+        extra["slot"] = "p3";
+        extra["lines"] = Json::array();
+        extra["beat_ids"] = Json::array();
+        third["panels"].push_back(extra);
+        third["tiers"] = tiers;
+        QVERIFY(agent.call("submit_name", Json::array({"demo.genko", third}), Json::object({{"commit", true}})).ok);
+        const std::string book = dir.path().toStdString() + "/demo.genko";
+        const std::string saved = genko::storage::read_file(book + "/project.json");
+        const Document doc = genko::storage::load_document(book).document;
+        const auto [fw, fh] = komawari::frame_size(doc.page(1).spec);
+        const auto one = komawari::shape_of_page(doc, doc.page(0));
+        const auto three = komawari::shape_of_page(doc, doc.page(2));
+        QVERIFY(one && three);
+        int alike = 0, unlike = 0;
+        for (const char* seed : {"a", "b", "c", "d", "e", "f"}) {
+            const genko::service::ToolResult r =
+                agent.call("layout_ideas", Json::array({"demo.genko", 2}), Json::object({{"panels", 3}, {"preset", "standard"}, {"seed", seed}, {"knobs", parsed(R"({"slant": 0, "bleed": 0, "overlap": 0, "overflow": 0, "frameless": 0, "split": 0})")}}));
+            QVERIFY2(r.ok, r.to_dict().dump().c_str());
+            QCOMPARE(r.data["around"].size(), std::size_t(2));
+            for (const Json& idea : r.data["ideas"]) {
+                const komawari::Shape shape = komawari::shape_of_plan(idea["skeleton"], fw, fh);
+                Json expected = Json::array();
+                if (komawari::difference(shape, *one) <= komawari::kRepeatAtMost) expected.push_back(1);
+                if (komawari::difference(shape, *three) <= komawari::kRepeatAtMost) expected.push_back(3);
+                QCOMPARE(idea["like_pages"], expected);
+                (expected.empty() ? unlike : alike) += 1;
+            }
+        }
+        QVERIFY2(alike > 0 && unlike > 0, (std::to_string(alike) + " alike, " + std::to_string(unlike) + " not").c_str());
+        QVERIFY(genko::storage::read_file(book + "/project.json") == saved);
     }
 
 private:

@@ -32,6 +32,7 @@ constexpr std::string_view kInstructions = R"(Genko は漫画原稿のシステ�
 Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
 進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
+コマ割りは緩急で決める（規則の「コマ割りの緩急」）。layout_ideas でそのページの案の束を出して選び、崩してから submit_name に出す。
 作画: generation_request で依頼パックを受け取る → 自分の画像ツールで生成し、返された inbox フォルダに保存 →
 take_panel_art（取り込み・採用・足りなければ拡大・顔と人物の位置の報告を 1 回で）。2 枚以上を比べるときだけ import_images → candidates → review_candidates → adopt。
 作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（既定は png）。
@@ -190,8 +191,50 @@ const std::vector<ToolSpec>& table() {
          {{"project", Kind::Str, false, std::nullopt}, {"script", Kind::Dict, false, std::nullopt}, {"commit", Kind::Bool, false, Json(false)}, {"session", Kind::Str, true, Json()}}},
         {"submit_name",
          R"(1ページのネーム計画（name_plan@1）を検査・コマ割り・写植し、プレビュー画像を返す。
-        commit=true で保存。すでにネームがあるページを作り直すときは replace=true。)",
-         {{"project", Kind::Str, false, std::nullopt}, {"plan", Kind::Dict, false, std::nullopt}, {"commit", Kind::Bool, false, Json(false)}, {"replace", Kind::Bool, false, Json(false)}, {"session", Kind::Str, true, Json()}}},
+        commit=true で保存。すでにネームがあるページを作り直すときは replace=true。
+        コマ割りの書き方（どれも任意。形は inspect target=schemas）: tiers[]・cols[]・rows[] の gap_mm（その後ろの境目の間 0〜100 mm）と
+        tilt_mm（その後ろの境目の斜め −80〜80 mm。横の境目は右端が下がる向き、縦の境目は下端が右へ寄る向きが正）、panels[] の bleed（断ち切り）・
+        border_mm（枠線 0〜5 mm、0 で枠なし）・overflow（true で絵が枠で切れない＝はみ出し）、計画の insets [{slot, on, rect: [x, y, 幅, 高さ]
+        （基本枠の 0〜1）}]（on のコマの中に収めれば差し込み、境目をまたげば重ね。insets のコマも panels に指示を書き、8 コマに数える）。
+        layout_ideas の案の skeleton（tiers・insets・panels の bleed / border_mm / overflow）はそのまま入る（template は null）。
+        単調なコマ割りには警告が返る（止めない）: layout_repeats（3 ページ続けて同じか似た段組）、layout_flat（コマの大きさの差が小さい）、
+        reveal_beat_small（見せ場の beat のコマが小さい）、book_without_accent（本に斜めも断ち切りも無い）。)",
+         {{"project", Kind::Str, false, std::nullopt},
+          {"plan", Kind::Dict, false, std::nullopt,
+           R"({"description": "name_plan@1: {page, turn_role, template | tiers, panels, spread?, title?, tier_gap_mm?, col_gap_mm?, insets?}。tiers: [{h, gap_mm?, tilt_mm?, cols: [{slot, w, gap_mm?, tilt_mm?, rows?: [{slot, h, gap_mm?, tilt_mm?}]}]}]（段は上から、列は右から）。panels: [{slot, shot, angle, characters, lines, …, bleed?, slant?, border_mm?, overflow?}]。insets: [{slot, on, rect: [x, y, w, h]}]（基本枠の 0〜1）"})"},
+          {"commit", Kind::Bool, false, Json(false)}, {"replace", Kind::Bool, false, Json(false)}, {"session", Kind::Str, true, Json()}}},
+        {"layout_ideas",
+         R"(1 ページのコマ割りの案の束（既定 12 案）を出す。読むだけで、本は変えない。同じ引数と seed なら同じ束になる（seed を省くと新しい seed を返す）。
+        panels でコマ数をちょうど（1〜8）、または min_panels・max_panels で範囲。段数は min_tiers・max_tiers（1〜6）。count は案の数（1〜48）。
+        preset: talk（会話）/ standard（標準。既定）/ action（アクション）/ showcase（見せゴマ・扉）。
+        knobs（どれも 0〜1。省くとプリセットの値）: slant 斜め・bleed 断ち切り・split コマ内分割・big 大ゴマ率・overlap 重ね・overflow はみ出し・frameless 枠なし。
+        focus: 見せ場にするコマの番号（読み順で 1 から）。そのコマがいちばん大きくなる。
+        崩す: base に案の skeleton、または base_page=true で今のページの段組を元に、variation（0〜1、既定 0.3）だけ変えた案（コマ数は元のまま）。
+        plan に下書きのネーム計画（name_plan@1 の形、256 KiB まで）を渡すと、各案に骨組みを入れた plan が付き、そのまま submit_name に出せる（コマ数を省くと plan のコマ数ちょうど）。
+        返す: seed、ideas [{skeleton {tiers, insets?, panels}, summary, panels, pattern, largest, reading_order, like_pages（前後のページと
+        似ている＝layout_repeats になりやすい）, plan?}]、around（前後のページの段組）、dropped（振るいで除いた案の数と理由）。
+        案の slot は読み順に p1, p2, …。plan の中で案に無い slot のコマは外れる（plan_dropped・警告 plan_panels_dropped）。
+        振るい（dropped）: 無難な格子・大きさの差が小さい割り（layout_flat と同じ基準）・読み順の崩れ・小さすぎるコマ・狭すぎる間・似た案。
+        自分で入れるとき: tiers と insets をそのまま、template は null、panels は slot ごとに skeleton の bleed・border_mm・overflow を足し、slant は null にして指示と台詞を書く。
+        人が承認したページは submit_name が断る（警告 name_approved）。)",
+         {{"project", Kind::Str, false, std::nullopt},
+          {"page", Kind::Int, false, std::nullopt},
+          {"panels", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 8, "description": "コマ数ちょうど"})"},
+          {"min_panels", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 8})"},
+          {"max_panels", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 8})"},
+          {"min_tiers", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 6})"},
+          {"max_tiers", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 6})"},
+          {"preset", Kind::Str, true, Json(), R"({"description": "talk / standard / action / showcase（会話・標準・アクション・見せゴマ／扉でもよい）"})"},
+          {"knobs", Kind::Dict, true, Json(),
+           R"({"properties": {"slant": {"type": "number", "minimum": 0, "maximum": 1, "description": "斜め"}, "bleed": {"type": "number", "minimum": 0, "maximum": 1, "description": "断ち切り"}, "split": {"type": "number", "minimum": 0, "maximum": 1, "description": "コマ内分割"}, "big": {"type": "number", "minimum": 0, "maximum": 1, "description": "大ゴマ率"}, "overlap": {"type": "number", "minimum": 0, "maximum": 1, "description": "重ね"}, "overflow": {"type": "number", "minimum": 0, "maximum": 1, "description": "はみ出し"}, "frameless": {"type": "number", "minimum": 0, "maximum": 1, "description": "枠なし"}}})"},
+          {"seed", Kind::Str, true, Json(), R"({"description": "同じ束をもう一度出すときは返された seed（例 km-0123456789abcdef）"})"},
+          {"count", Kind::Int, false, Json(12), R"({"minimum": 1, "maximum": 48})"},
+          {"base", Kind::Dict, true, Json(), R"({"description": "変異の元: 案の skeleton {tiers, insets?, panels}"})"},
+          {"base_page", Kind::Bool, false, Json(false), R"({"description": "true: 今のページの段組を変異の元にする"})"},
+          {"variation", Kind::Float, true, Json(), R"({"minimum": 0, "maximum": 1, "description": "変異度（既定 0.3）"})"},
+          {"focus", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 8, "description": "見せ場のコマ（読み順の番号）"})"},
+          {"plan", Kind::Dict, true, Json(), R"({"description": "下書きのネーム計画（name_plan@1）: 各案を入れた plan が返る"})"},
+          {"session", Kind::Str, true, Json()}}},
         {"take_panel_art",
          R"(コマ 1 つの絵を 1 回で入れる: 依頼（request_id）の画像を取り込み、採用し、原稿の解像度に足りなければ拡大して
         採用し直し、regions があれば顔と人物の位置を報告する（report_regions と同じ形）。image は import_images の 1 件と
@@ -285,6 +328,10 @@ Json input_schema(const ToolSpec& tool) {
             Json with = Json::object({{"default", *p.fallback}});
             for (const auto& [key, value] : schema.items()) with[key] = value;
             schema = std::move(with);
+        }
+        if (!p.schema.empty()) {  // (C++: more of the property's schema — K3's layout_ideas, submit_name's plan)
+            const Json more = Json::parse(p.schema);
+            for (const auto& [key, value] : more.items()) schema[key] = value;
         }
         properties[std::string(p.name)] = std::move(schema);
         if (!p.fallback) required.push_back(std::string(p.name));
@@ -746,9 +793,9 @@ namespace {
 
 // genko/mcp/server.py READ_ONLY: tools that never write (no book-in-use warning, no presence).
 bool read_only(std::string_view tool) {
-    static constexpr std::array<std::string_view, 15> kNames{"projects", "status", "next", "inspect", "render", "candidates", "preflight", "check",
+    static constexpr std::array<std::string_view, 16> kNames{"projects", "status", "next", "inspect", "render", "candidates", "preflight", "check",
                                                              "tickets", "proposals", "review_page", "export", "export_proof", "export_status",
-                                                             "style_catalog"};
+                                                             "style_catalog", "layout_ideas"};
     return std::find(kNames.begin(), kNames.end(), tool) != kNames.end();
 }
 
@@ -878,6 +925,9 @@ Call mapping(std::string_view tool, const Json& v) {
         args({"project", "script", "commit"});
     } else if (tool == "submit_name") {
         args({"project", "plan", "commit", "replace"});
+    } else if (tool == "layout_ideas") {
+        args({"project", "page", "panels", "min_panels", "max_panels", "min_tiers", "max_tiers", "preset", "knobs", "seed", "count", "base",
+              "base_page", "variation", "focus", "plan"});
     } else if (tool == "take_panel_art") {
         args({"project", "request_id", "image", "regions", "upscale", "method", "crop01"});
     } else if (tool == "style_catalog") {

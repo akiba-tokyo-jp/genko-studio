@@ -15,7 +15,7 @@ native/
     formats/  PNG/TIFF/PDF/PSD/EPUB/Kindle/strip/webtoon/SNS/pack/layers/timelapse/animation、PSD/PSB/ABR 読込
     studio/   スタジオの op 以外の部品：同席・道具の記録・作業の確保・依頼フォルダー・画像生成の道具の一覧・入力スキーマ・
               原稿から読む state（スタジオの op ＝企画・脚本・ネーム・依頼・候補・採用・領域・仕上げ・承認・相談は core の op）
-    service/  スタジオの道具（StudioService・HumanService：エージェントと人が呼ぶ 41 の道具と人だけの承認・正式な書き出し）と
+    service/  スタジオの道具（StudioService・HumanService：エージェントと人が呼ぶ 42 の道具と人だけの承認・正式な書き出し）と
               その部品（依頼と下絵の案内・取り込み・アタリ・点検・確認ページ・バックグラウンドの仕事・高解像度化・評価）、
               利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ。自動処理の土台（PC5 I-0、SPEC AUTO-01：
               オートアクションの置き場 actions、手順の読みと実行器 automate、スクリプトイベントの表 script_events。CLI とアプリが呼び、

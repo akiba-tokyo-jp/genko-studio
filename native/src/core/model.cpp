@@ -360,6 +360,7 @@ Frame& Page::merge_frame(std::string_view frame_id) {
     if (parent == nullptr) throw Error("value", "cannot merge the root frame");
     parent->children.clear();
     parent->split_axis.reset();
+    parent->split.reset();  // (komawari@1 K3: a leaf has no cut line; a stale one misled move_gutter, relayout and the skeleton)
     return *parent;
 }
 

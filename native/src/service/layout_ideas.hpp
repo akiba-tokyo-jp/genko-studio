@@ -108,7 +108,7 @@ std::uint64_t seed_value(std::string_view text);
 // A name plan with the skeleton's layout put in: its tiers, insets and gaps (the template dropped), and each panel's
 // layout keys (bleed, border_mm, overflow; slant cleared — the tiers' tilt_mm say it) set on the plan's panel of that
 // slot (added for a slot it has no panel for). The plan's panels of slots the skeleton does not have are left out, their
-// slots put in `dropped` when it is given.
+// slots put in `dropped` when it is given (an element that is not an object is left out too, its JSON text in `dropped`).
 Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::string>* dropped = nullptr);
 
 // Apply a skeleton to a page of `work` through layout::apply_layout: the page must be blank, or `replace` clears it

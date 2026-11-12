@@ -105,10 +105,15 @@ mcp_servers:
 
 `genko mcp` is part of `genko`; nothing else is installed. The skill for Hermes is `integrations/hermes/genko-manga/SKILL.md`.
 
-Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / panel / studio / schemas / rules / snapshot), `render` (a page, one panel with `frame_id`, or `kind` compare / guides), `import_image`, `set_bible`, `set_script`, `submit_name`, `apply_ops` (allow-listed ops only), `record_review`, `request_approval` (gate name / art / sheet / export), `tickets`, `generation_request`, `import_images`, `candidates`, `review_candidates`, `adopt`, `request_fix`, `report_regions`, `finish_page`, `preflight`, `export_proof`, `review_page`, `ask_human`. Resources: `genko://guide/skill`, `genko://guide/manga-rules`, `genko://ops` (the ops `apply_ops` accepts).
+Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / panel / studio / schemas / rules / snapshot), `render` (a page, one panel with `frame_id`, or `kind` compare / guides), `import_image`, `set_bible`, `set_script`, `submit_name`, `layout_ideas` (a batch of layout ideas for a page; reads only), `apply_ops` (allow-listed ops only), `record_review`, `request_approval` (gate name / art / sheet / export), `tickets`, `generation_request`, `import_images`, `candidates`, `review_candidates`, `adopt`, `request_fix`, `report_regions`, `finish_page`, `preflight`, `export_proof`, `review_page`, `ask_human`. Resources: `genko://guide/skill`, `genko://guide/manga-rules`, `genko://ops` (the ops `apply_ops` accepts).
 
 - Writing tools default to `commit: false`: they return `issues` (`{code, severity, path, message, hint}`, `path` is a JSON pointer into your input) and a preview. Fix what `path` points at, then send `commit: true`.
 - Name plan tiers run top to bottom; the cols inside a tier are listed right to left.
+- Lay a page out by its beats, not by a template name (the templates are examples): the heaviest beat gets the largest
+  panel (3 to 6 tenths of the basic frame), the reveal opens an even page (the turn), the eye enters top right and
+  leaves bottom left, and a page does not repeat its neighbours' tiers. Slants for motion, bleeds for scale, insets for
+  a reaction in the same moment, overflow for force, no border for memories and quiet, wide gaps for time passing.
+  The rules (`inspect target=rules`, "コマ割りの緩急") say it in full.
 - Everything the agent writes lives in project.json (M3): the bible (`episode.bible` + `studio.bible_doc`), the script (`studio.script`), each page's name plan and self-checks (`page.plan`), each panel's brief, candidates and adoption (`frame.panel`), and tickets. Projects from M0 with `studio/drafts/` are moved in with `genko studio adopt-drafts PROJECT`.
 
 The same tools from the shell (project is a path):
@@ -119,7 +124,32 @@ genko studio set-bible demo.genko bible.json --commit
 genko studio set-script demo.genko script.json --commit
 genko studio submit-name demo.genko p001.json --commit
 genko studio next demo.genko
+genko studio layout-ideas demo.genko --page 2 --panels 4 --preset action --focus 1 --seed km-00000000000000a2 --plan p002.json
 ```
+
+### Layout ideas and the layout keys (komawari@1, SPEC LAYOUT-01)
+
+- `layout_ideas {project, page, panels | min_panels+max_panels, min_tiers, max_tiers, preset (talk | standard | action |
+  showcase), knobs {slant, bleed, split, big, overlap, overflow, frameless: 0..1}, seed, count (default 12, up to 48),
+  base (an idea's skeleton) | base_page: true, variation (0..1, default 0.3), focus (the panel to make the largest),
+  plan (your draft name plan)}` reads the book and changes nothing. The same arguments and seed give the same batch.
+  It returns `{page, request, seed, ideas: [{skeleton {tiers, insets?, panels}, summary, panels, pattern, largest,
+  reading_order, like_pages, plan?}], tried, dropped, around, name_approved}`. `like_pages`: the neighbouring pages the
+  idea is alike to (it would make `layout_repeats` likelier). Given `plan`, each idea carries `plan`, the draft with the
+  idea's layout put in (template null, tiers and insets, each panel's bleed / border_mm / overflow, slant null; the
+  draft's panels whose slot the idea has not are left out and listed in `plan_dropped`, warning
+  `plan_panels_dropped`), ready for `submit_name`; without a count of panels the ideas have exactly the plan's panels. A page a person approved gets the
+  warning `name_approved` (submit_name refuses it).
+- Layout keys of name_plan@1 (all optional; a plan without them is kept and hashed as before): each tier, col and row
+  `gap_mm` (the gap after it, 0–100) and `tilt_mm` (the slant of the border after it, −80–80; a horizontal border's
+  right end lower, a vertical border's bottom end further right, is positive); panels `border_mm` (0–5, 0 frameless)
+  and `overflow` (true: the art is not clipped by the border); the plan's `insets: [{slot, on, rect: [x, y, w, h]}]`
+  (in the basic frame, 0..1; inside `on` an inset, across a border an overlap; counted among the 8 panels).
+- submit_name warns (never stops) of a dull layout after its other issues: `layout_repeats` (three pages running alike:
+  change this page's tiers, where the large panel is, how many panels), `layout_flat` (3 panels or more, the largest
+  under 1.5 times the smallest: make the heaviest beat large), `reveal_beat_small` (the reveal beat's panel under 3
+  tenths of the frame: make it the large panel, or bleed it), `book_without_accent` (4 pages or more with panels and no
+  slant nor bleed anywhere).
 
 Human only:
 
@@ -328,7 +358,7 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   return `gutters` [{frame_id, index, width_mm, direction, from_mm, to_mm}] for move_gutter, which carries the lines along.
 - name_plan@1 gains page `spread` and `title`, panel `props`, `bleed`, `slant` (mm, the border to the next panel) and
   `sfx_at` ([x, y] 0..1: sound effects go there). Templates reveal_bleed, reveal_top, finale_bleed, action_slant,
-  title_top (with their bleed / slant / title slot). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,
+  title_top (with their bleed / slant / title slot; examples to start from, see layout_ideas). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,
   finale_small, title_missing, author_missing, unknown_font.
 - fx words (native/src/service/fxwords.hpp): effects, manga marks by the first reported face, rain streaks (layer 効果（仕上げ）),
   or words for the art request. fx and emphasis go into the prompt. Props' references and the previous panel of the
