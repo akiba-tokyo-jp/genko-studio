@@ -12,6 +12,7 @@
 #include "service/blocking.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
+#include "service/komawari_shape.hpp"
 #include "service/layout.hpp"
 #include "service/text.hpp"
 
@@ -50,7 +51,9 @@ render::Image annotate(const render::Image& image, const core::Page& page, int d
     std::vector<std::string> slots_by_order;
     if (core::py_truthy(plan)) {
         for (const Json& p : core::iterate(core::py_get(plan, "panels", Json::array()))) panels.set(core::py_get(p, "slot"), p);
-        if (core::truthy_at(plan, "tiers")) {
+        if (core::truthy_at(plan, "insets")) {  // (komawari@1: the insets read beside their hosts)
+            slots_by_order = komawari::reading_slots(plan);
+        } else if (core::truthy_at(plan, "tiers")) {
             slots_by_order = layout::slots_in_order(plan["tiers"]);
         } else if (core::truthy_at(plan, "template")) {
             slots_by_order = layout::slots_in_order(layout::resolve_tiers(plan));

@@ -77,8 +77,12 @@ bool bleed_shape_mask(Draw& draw, const core::Page& page, const core::Frame& fra
 std::optional<Image> clip_mask(const core::Page& page, Size size, int dpi, const Box& area);
 // render._draw_frame_mask over `area`.
 Image frame_mask(const core::Page& page, const core::Frame& frame, Size size, int dpi, const Box& area);
-// render._draw_frames onto the RGB picture `part` of the box `area`.
+// render._draw_frames onto the RGB picture `part` of the box `area`. (komawari@1: the borders under a panel that lies
+// over the others are hidden by it.)
 void draw_frames(Image& part, const Box& area, const core::Page& page, Size size, int dpi);
+// komawari@1: over `area`, 255 except where a panel that lies over the others is (0), `own` aside — what art placed in
+// a panel below keeps.
+Image over_panels_cut(const core::Page& page, const core::Frame* own, Size size, int dpi, const Box& area);
 void draw_border(Draw& draw, const std::vector<PointMM>& points, double width_mm, int dpi, const core::Json* style,
                  std::string_view seed);
 std::vector<std::vector<PointMM>> dashes(const std::vector<PointMM>& points, double on, double off);

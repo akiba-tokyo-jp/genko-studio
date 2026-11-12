@@ -17,6 +17,7 @@
 #include "service/book.hpp"
 #include "service/briefs.hpp"
 #include "service/genreq.hpp"
+#include "service/komawari_shape.hpp"
 #include "service/preview.hpp"
 #include "service/pyfmt.hpp"
 #include "service/service_util.hpp"
@@ -308,6 +309,19 @@ std::string review_html(const std::filesystem::path& project, int max_px) {
             const std::string pid = py_str(util::item(proposal, "id"));
             parts += cmd("genko studio accept " + proj + " " + pid, "確定（コマンド）") + cmd("genko studio reject " + proj + " " + pid + " --note 理由", "却下（コマンド）") +
                      "</div></div>";
+        }
+    }
+    // komawari@1 (K1): the warnings of a dull layout, the book as it is (warnings: nothing is stopped)
+    {
+        const auto script = studio::script(episode);
+        const auto dull = komawari::book_monotony(episode, script ? *script : Json::object());
+        if (!dull.empty()) {
+            parts += "<h2>コマ割りの緩急（" + std::to_string(dull.size()) + " 件の注意）</h2><ul>";
+            for (const auto& [page, issue] : dull) {
+                const std::string where = page > 0 ? std::to_string(page) + " ページ: " : std::string();
+                parts += "<li>" + escape(where + issue.message) + (issue.hint.empty() ? "" : "<br><span class='muted'>" + escape(issue.hint) + "</span>") + "</li>";
+            }
+            parts += "</ul>";
         }
     }
     // character sheets

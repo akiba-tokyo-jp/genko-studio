@@ -1452,6 +1452,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("this layer cannot (be painted on|take pen lines).*", "このレイヤーには描けません。ペン・ペイント・トーンのレイヤーを選びます"));
         r.push_back(rule("layer not found|layer id or role required", "レイヤーが見つかりません"));
         r.push_back(rule("a panel is at least 4 mm across", "コマは 4 mm 以上の大きさにします"));
+        // komawari@1 (K1): 差し込み・重ね
+        r.push_back(rule("into is the id of a panel", "差し込む先は、コマの ID で指定します"));
+        r.push_back(rule(R"(into takes one panel \(not a split\))", "差し込めるのはコマの中だけです（割った線の親には差し込めません）"));
+        r.push_back(rule("the drawn panel does not touch the panel it goes into", "差し込むコマが、差し込む先のコマに掛かっていません"));
+        r.push_back(rule(R"(only a panel \(not a split\) lies over the others)", "ほかのコマに重ねられるのはコマだけです（割った線の親は重ねられません）"));
         r.push_back(rule("no two line ends near the trace are close enough to join.*", "なぞった所に、つなげるほど近い線の端がありません（つなぐ距離を広げる）"));
         r.push_back(rule("the trace must start and end on the same line.*", "描き直すときは、同じ線の上から描き始めて、その線の上で終えます"));
         r.push_back(rule("no line of this layer is near the trace", "なぞった所の近くに、このレイヤーの線がありません"));

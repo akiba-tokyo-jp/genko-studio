@@ -23,6 +23,7 @@
 #include "core/pyops.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
+#include "service/komawari_shape.hpp"
 #include "service/layout.hpp"
 #include "service/letter.hpp"
 #include "service/lint.hpp"
@@ -214,6 +215,7 @@ ToolResult StudioService::submit_name(const Json& a) {
     Json plan = studio::fill_nulls(a["plan"], schema);
     std::vector<Issue> issues = studio::validate(plan, schema);
     if (!plan.is_object()) core::raise_attribute_error(plan, "get");
+    plan = studio::unfill_extensions(plan, a["plan"]);  // (komawari@1: a plan without K1's keys is kept as before them)
     append(issues, briefs::props_by_id(plan, *bible));
     if (studio::has_errors(issues)) return ToolResult(false, Json::object({{"committed", false}}), issues);
     const bool tall = doc.spec.height_mm > core::Num(2) * doc.spec.width_mm;
@@ -225,6 +227,8 @@ ToolResult StudioService::submit_name(const Json& a) {
     auto [compiled, more] = compile_name(work, page_index, plan, *bible, *script, replace, actor_);
     append(issues, more);
     if (!compiled || studio::has_errors(issues)) return ToolResult(false, Json::object({{"committed", false}}), issues);
+    // komawari@1 (C): 単調さの警告 — after the others, never a stop
+    append(issues, komawari::monotony(doc, page_index, plan, *script));
     Json panels = Json::object();
     for (const auto& [slot, rect] : compiled->leaf_rects_mm) {
         panels[slot] = Json::array({core::py_round(rect[0], 1).json(), core::py_round(rect[1], 1).json(), core::py_round(rect[2], 1).json(),

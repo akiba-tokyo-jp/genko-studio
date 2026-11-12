@@ -424,6 +424,8 @@ genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support ge
 # M7 (the ledger counted against the C++ tree): the checks the ledger asked for that no other C++ test made
 genko_test(test_ledger_service_a SOURCES unit/test_ledger_service_a.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+# komawari@1 (コマ割り K1): the name plan's layout keys, add_frame into/over, the batch of layout ideas, the monotony warnings.
+genko_test(test_layout_ideas SOURCES unit/test_layout_ideas.cpp DEPS genko_service LABELS unit)
 genko_test(test_ledger_service_b SOURCES unit/test_ledger_service_b.cpp DEPS genko_test_support genko_service genko_api LABELS unit TIMEOUT 2400)
 set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=2300000")
 # import_psd (M4②b) and the PSD reader on the PSD and PSB files of psd_cases.json: hostile files refused without the

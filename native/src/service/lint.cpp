@@ -9,6 +9,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "service/fxwords.hpp"
+#include "service/komawari_shape.hpp"
 #include "service/pyfmt.hpp"
 #include "service/result.hpp"
 #include "service/text.hpp"
@@ -119,7 +120,8 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
     if (shares.empty()) return {};
     std::vector<std::string> order;
     try {
-        order = layout::slots_in_order(layout::resolve_tiers(plan));
+        // (komawari@1: a plan with insets reads them beside their hosts)
+        order = core::truthy_at(plan, "insets") ? komawari::reading_slots(plan) : layout::slots_in_order(layout::resolve_tiers(plan));
     } catch (const layout::LayoutError&) {
         return {};
     }

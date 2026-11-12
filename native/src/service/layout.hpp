@@ -25,6 +25,9 @@ inline constexpr double kTierGutterMm = 7.0;
 inline constexpr double kColGutterMm = 3.0;
 inline constexpr double kSumTolerance = 0.02;
 inline constexpr std::size_t kMaxPanels = 8;
+// komawari@1 (コマ割り K1): the most a border slants (tilt_mm: one end against the other) and a panel's thickest border
+inline constexpr double kMaxTiltMm = 80.0;
+inline constexpr double kMaxBorderMm = 5.0;
 
 // layout.LayoutError (an ApplyError): "<path>: <message>", with the two kept apart.
 class LayoutError : public core::ApplyError {

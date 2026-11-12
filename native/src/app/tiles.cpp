@@ -60,7 +60,7 @@ bool same_frames(const std::vector<core::Frame>& a, const std::vector<core::Fram
         const core::Frame& y = b[i];
         if (x.id != y.id || !same_rect(x.rect, y.rect) || x.split_axis != y.split_axis || x.clip != y.clip || x.bleed != y.bleed ||
             x.border_mm != y.border_mm || !same_points(x.poly, y.poly) || x.split != y.split || x.custom != y.custom ||
-            x.curves != y.curves || x.line != y.line || x.corner_mm != y.corner_mm || !same_frames(x.children, y.children)) {
+            x.curves != y.curves || x.line != y.line || x.corner_mm != y.corner_mm || x.over != y.over || !same_frames(x.children, y.children)) {
             return false;
         }
     }

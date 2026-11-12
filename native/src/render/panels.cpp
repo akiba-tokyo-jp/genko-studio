@@ -305,18 +305,20 @@ void bleed_border(Image& part, const Box& area, const core::Page& page, Size siz
 
 }  // namespace
 
-void draw_frames(Image& part, const Box& area, const core::Page& page, Size size, int dpi) {
+namespace {
+
+void draw_frame_border(Image& part, const Box& area, const core::Page& page, Size size, int dpi, const core::Frame* frame) {
     const Ink ink{20, 20, 20};
-    for (const core::Frame* frame : page.leaf_frames()) {
+    {
         const int width_px = std::max(1, mm_to_px(frame->border_mm, dpi));
-        if (frame->border_mm <= 0) continue;  // a panel without a border
+        if (frame->border_mm <= 0) return;  // a panel without a border
         const core::Json* style = style_of(*frame);
         const bool has_style = truthy(style);
         const auto shape = core::bleed_poly(page, frame);
         const bool rounded = core::rounded(*frame);
         if (frame->bleed && (rounded || (has_style && (styled_kind(style) || truthy(get(style, "rgb")))))) {
             bleed_border(part, area, page, size, *frame, dpi, style);
-            continue;
+            return;
         }
         PageCanvas canvas(part, area, size);
         Draw& draw = canvas.draw();
@@ -361,6 +363,45 @@ void draw_frames(Image& part, const Box& area, const core::Page& page, Size size
         }
         canvas.commit();
     }
+}
+
+}  // namespace
+
+void draw_frames(Image& part, const Box& area, const core::Page& page, Size size, int dpi) {
+    const auto leaves = page.leaf_frames();
+    const bool any_over = std::any_of(leaves.begin(), leaves.end(), [](const core::Frame* frame) { return frame->over; });
+    if (!any_over) {  // (every book before komawari@1: the borders in reading order, as they were drawn)
+        for (const core::Frame* frame : leaves) draw_frame_border(part, area, page, size, dpi, frame);
+        return;
+    }
+    // komawari@1: the borders of the panels below first; under a panel that lies over the others (差し込み・重ね) the
+    // picture is put back as it was before them, then that panel's own border is drawn
+    const Image before = part.copy();
+    for (const core::Frame* frame : leaves) {
+        if (!frame->over) draw_frame_border(part, area, page, size, dpi, frame);
+    }
+    Image under = Image::create("L", Size{area.width(), area.height()}, Ink(0));
+    {
+        PageCanvas canvas(under, area, size);
+        for (const core::Frame* frame : leaves) {
+            if (frame->over) draw_panel_area(canvas.draw(), page, *frame, dpi);
+        }
+        canvas.commit();
+    }
+    part.paste(before, Point{0, 0}, &under);
+    for (const core::Frame* frame : leaves) {
+        if (frame->over) draw_frame_border(part, area, page, size, dpi, frame);
+    }
+}
+
+Image over_panels_cut(const core::Page& page, const core::Frame* own, Size size, int dpi, const Box& area) {
+    Image keep = Image::create("L", Size{area.width(), area.height()}, Ink(255));
+    PageCanvas canvas(keep, area, size);
+    for (const core::Frame* frame : page.leaf_frames()) {
+        if (frame->over && frame != own) fill_frame(canvas.draw(), *frame, dpi, 0);
+    }
+    canvas.commit();
+    return keep;
 }
 
 void draw_crop_marks(Draw& draw, const core::Page& page, int dpi) {

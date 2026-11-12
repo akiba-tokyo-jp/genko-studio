@@ -90,7 +90,7 @@ bool same_points(const std::optional<std::vector<Point>>& a, const std::optional
 bool same_frame(const Frame& a, const Frame& b) {
     return a.id == b.id && a.rect.x == b.rect.x && a.rect.y == b.rect.y && a.rect.width == b.rect.width &&
            a.rect.height == b.rect.height && a.split_axis == b.split_axis && a.clip == b.clip && a.bleed == b.bleed &&
-           a.border_mm == b.border_mm && same_points(a.poly, b.poly) && a.curves == b.curves && a.corner_mm == b.corner_mm &&
+           a.border_mm == b.border_mm && same_points(a.poly, b.poly) && a.curves == b.curves && a.corner_mm == b.corner_mm && a.over == b.over &&
            a.line == b.line && a.panel == b.panel && same_frames(a.children, b.children);
 }
 

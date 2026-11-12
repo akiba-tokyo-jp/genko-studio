@@ -10,6 +10,7 @@
 #include "service/data.hpp"
 #include "service/pyfmt.hpp"
 #include "service/result.hpp"
+#include "service/wording.hpp"
 
 namespace genko::service::layout {
 
@@ -140,9 +141,87 @@ std::optional<std::string> leaf(const Json& part) {
     return core::py_str(slot);
 }
 
+// komawari@1: what one entry (a tier, column or row) of the plan says about the border after it — its gap (gap_mm) and
+// its slant (tilt_mm) — when it says it (none: the plan's gap, and the panel's slant).
+struct Border {
+    std::optional<double> gap;
+    std::optional<double> tilt;
+};
+
+Border border_after(const Json& entry) {
+    Border out;
+    const Json gap_value = core::py_get(entry, "gap_mm");
+    if (!gap_value.is_null()) out.gap = core::to_float(gap_value);
+    const Json tilt_value = core::py_get(entry, "tilt_mm");
+    if (!tilt_value.is_null()) out.tilt = core::to_float(tilt_value);
+    return out;
+}
+
+std::vector<Border> borders_of(const std::vector<Json>& entries) {
+    std::vector<Border> out;
+    for (const Json& entry : entries) out.push_back(border_after(entry));
+    return out;
+}
+
+// komawari@1: an entry's own border after it (gap_mm, tilt_mm), as a page can hold it; on the last entry there is none.
+void check_border(std::vector<studio::Issue>& issues, const Json& entry, const std::string& path, bool last, const std::string& label) {
+    const Json gap_value = core::py_get(entry, "gap_mm");
+    if (!gap_value.is_null()) {
+        if (!gap_value.is_number() || !(core::to_float(gap_value) >= 0 && core::to_float(gap_value) <= 100)) {
+            issues.push_back(error("layout_gap_range", path + "/gap_mm", "gap_mm は 0〜100 mm（今 " + core::py_str(gap_value) + "）"));
+        } else if (last) {
+            issues.push_back(warning("layout_border_unused", path + "/gap_mm", "最後の" + label + "の gap_mm は使われない（次との間を決める鍵）",
+                                     "間を変えたい境目の前の" + label + "に書く"));
+        }
+    }
+    const Json tilt_value = core::py_get(entry, "tilt_mm");
+    if (!tilt_value.is_null()) {
+        if (!tilt_value.is_number() || !(std::abs(core::to_float(tilt_value)) <= kMaxTiltMm)) {
+            issues.push_back(error("layout_tilt_range", path + "/tilt_mm",
+                                   "tilt_mm は -" + fixed(kMaxTiltMm, 0) + "〜" + fixed(kMaxTiltMm, 0) + " mm（今 " + core::py_str(tilt_value) + "）"));
+        } else if (last) {
+            issues.push_back(warning("layout_border_unused", path + "/tilt_mm", "最後の" + label + "の tilt_mm は使われない（次との境目を斜めにする鍵）",
+                                     "斜めにしたい境目の前の" + label + "に書く"));
+        }
+    }
+}
+
+// komawari@1: the panels set in another's place (差し込み・重ね): their slots, the panel each goes into, and where.
+void check_insets(std::vector<studio::Issue>& issues, Seen& seen, const Json& plan) {
+    const Json insets = core::py_get(plan, "insets");
+    if (insets.is_null()) return;
+    if (!insets.is_array()) {
+        issues.push_back(error("layout_insets", "/insets", "insets は配列（[{slot, on, rect}]）"));
+        return;
+    }
+    const Seen hosts = seen;  // (the panels of the tiers: an inset goes into one of them)
+    for (std::size_t i = 0; i < insets.size(); ++i) {
+        const Json& inset = insets[i];
+        const std::string path = "/insets/" + std::to_string(i);
+        if (!inset.is_object()) {
+            issues.push_back(error("layout_insets", path, "差し込みは {slot, on, rect}"));
+            continue;
+        }
+        check_slot(issues, seen, core::py_get(inset, "slot"), path + "/slot");
+        const Json on = core::py_get(inset, "on");
+        if (!on.is_string() || !seen_has(hosts, on.get<std::string>())) {
+            issues.push_back(error("layout_inset_host", path + "/on", "差し込む先（on）の " + core::py_str(on) + " が段組のコマにない"));
+        }
+        const Json rect = core::py_get(inset, "rect");
+        bool fits = rect.is_array() && rect.size() == 4 && std::all_of(rect.begin(), rect.end(), [](const Json& v) { return v.is_number(); });
+        if (fits) {
+            const double x = core::to_float(rect[0]), y = core::to_float(rect[1]), w = core::to_float(rect[2]), h = core::to_float(rect[3]);
+            fits = x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= 1 + 1e-9 && y + h <= 1 + 1e-9;
+        }
+        if (!fits) {
+            issues.push_back(error("layout_inset_rect", path + "/rect", "rect は基本枠の中の [x, y, w, h]（基本枠の幅・高さを 1 とした割合）"));
+        }
+    }
+}
+
 std::vector<std::string> split_sequence(Work& work, const Json& page_index, const std::string& frame_id, const std::vector<Json>& ratios,
                                         const std::string& axis, double gutter, const std::string& agent, CompiledLayout& out,
-                                        const std::string& path, const std::vector<double>& tilts) {
+                                        const std::string& path, const std::vector<double>& tilts, const std::vector<Border>& borders = {}) {
     if (ratios.size() == 1) return {frame_id};
     const bool horizontal = axis == "horizontal";
     std::vector<Num> nums;
@@ -150,26 +229,51 @@ std::vector<std::string> split_sequence(Work& work, const Json& page_index, cons
     const core::Frame& frame = find_frame(work.doc, page_index, frame_id);
     const Num total = core::py_sum(nums);
     const double extent = (horizontal ? frame.rect.height : frame.rect.width).value();
-    const double usable = extent - gutter * static_cast<double>(ratios.size() - 1);
+    // each border's gap: the entry's own (komawari@1), else the plan's
+    std::vector<double> gaps;
+    bool own_gaps = false;
+    for (std::size_t index = 0; index + 1 < ratios.size(); ++index) {
+        const bool own = index < borders.size() && borders[index].gap.has_value();
+        own_gaps = own_gaps || own;
+        gaps.push_back(own ? *borders[index].gap : gutter);
+    }
+    double usable = extent - gutter * static_cast<double>(ratios.size() - 1);  // (a plan without its own gaps: as before)
+    if (own_gaps) {
+        usable = extent;
+        for (const double g : gaps) usable -= g;
+    }
     std::vector<double> spans;
     for (const Num& r : nums) spans.push_back(usable * r.value() / total.value());
     std::vector<std::string> parts;
     std::string remaining = frame_id;
     for (std::size_t index = 0; index + 1 < spans.size(); ++index) {
         const core::Rect rect = find_frame(work.doc, page_index, remaining).rect;
-        const double rest_extent = (horizontal ? rect.height : rect.width).value() - gutter;
+        const double rest_extent = (horizontal ? rect.height : rect.width).value() - gaps[index];
         const double ratio = horizontal ? spans[index] / rest_extent : (rest_extent - spans[index]) / rest_extent;
+        const bool own_tilt = index < borders.size() && borders[index].tilt.has_value();
+        const double tilt = own_tilt ? *borders[index].tilt : (!tilts.empty() ? tilts[index] : 0.0);
         Json op = Json::object();
         op["op"] = "split_frame";
         op["page"] = page_index;
         op["frame_id"] = remaining;
         op["axis"] = axis;
         op["ratio"] = ratio;
-        op["gutter_mm"] = gutter;
-        if (!tilts.empty() && std::abs(tilts[index]) > 1e-6) op["tilt_mm"] = core::py_round(tilts[index], 2);
+        op["gutter_mm"] = gaps[index];
+        if (std::abs(tilt) > 1e-6) op["tilt_mm"] = core::py_round(tilt, 2);
         out.source_map.emplace_back(out.ops.size(), path + "/" + std::to_string(index));
         out.ops.push_back(op);
-        work.apply(Json::array({op}), agent);
+        if (own_tilt || own_gaps) {
+            // (komawari@1: a border the plan shapes itself — what does not fit is the plan's, in its words)
+            if (!(ratio > 0 && ratio < 1)) throw LayoutError(path + "/" + std::to_string(index), "間（gap_mm）が広すぎて、コマが入らない");
+            try {
+                work.apply(Json::array({op}), agent);
+            } catch (const core::ApplyError& e) {
+                throw LayoutError(path + "/" + std::to_string(index) + (own_tilt ? "/tilt_mm" : "/gap_mm"),
+                                  wording::error(std::string(e.what())).toStdString());
+            }
+        } else {
+            work.apply(Json::array({op}), agent);
+        }
         const core::Frame& split = find_frame(work.doc, page_index, remaining);
         if (split.children.size() != 2) throw core::PyValueError("not enough values to unpack (expected 2, got " + std::to_string(split.children.size()) + ")");
         if (horizontal) {
@@ -218,12 +322,16 @@ std::vector<studio::Issue> check_tiers(const Json& plan) {
                 const std::vector<Json> row_list = core::iterate(rows);
                 for (std::size_t ri = 0; ri < row_list.size(); ++ri) {
                     check_slot(issues, seen, core::subscript(row_list[ri], "slot"), cpath + "/rows/" + std::to_string(ri) + "/slot");
+                    check_border(issues, row_list[ri], cpath + "/rows/" + std::to_string(ri), ri + 1 == row_list.size(), "行");
                 }
             } else {
                 check_slot(issues, seen, core::subscript(col, "slot"), cpath + "/slot");
             }
+            check_border(issues, col, cpath, ci + 1 == col_list.size(), "列");
         }
+        check_border(issues, tier, tpath, ti + 1 == tier_list.size(), "段");
     }
+    check_insets(issues, seen, plan);
     if (seen.size() > kMaxPanels) {
         issues.push_back(error("layout_too_many", base, "コマが " + std::to_string(seen.size()) + " 個ある（1ページ " + std::to_string(kMaxPanels) + " 個まで）"));
     }
@@ -240,6 +348,16 @@ std::vector<studio::Issue> check_tiers(const Json& plan) {
     for (const auto& [slot, where] : seen) {
         if (std::find(panel_slots.begin(), panel_slots.end(), slot) == panel_slots.end()) {
             issues.push_back(error("panel_missing", where, "コマ " + slot + " の指示（panels）がない"));
+        }
+    }
+    // komawari@1: a panel's border (border_mm: 0 は枠なし)
+    const std::vector<Json> panel_list = core::iterate(core::py_get(plan, "panels", Json::array()));
+    for (std::size_t pi = 0; pi < panel_list.size(); ++pi) {
+        const Json border = core::py_get(panel_list[pi], "border_mm");
+        if (border.is_null()) continue;
+        if (!border.is_number() || !(core::to_float(border) >= 0 && core::to_float(border) <= kMaxBorderMm)) {
+            issues.push_back(error("panel_border_range", "/panels/" + std::to_string(pi) + "/border_mm",
+                                   "border_mm は 0〜" + fixed(kMaxBorderMm, 0) + " mm（0 で枠なし。今 " + core::py_str(border) + "）"));
         }
     }
     return issues;
@@ -323,8 +441,9 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
     std::vector<double> tier_tilts;
     for (const Json& tier : tier_list) tier_tilts.push_back(slant_of(leaf(tier)));
     const std::string root_id = work.doc.page(find_page(work.doc, page_index)).frames.at(0).id;
+    const core::Rect basic_frame = work.doc.page(find_page(work.doc, page_index)).frames.at(0).rect;  // (insets are placed in it)
     const std::vector<std::string> tier_ids =
-        split_sequence(work, page_index, root_id, column(tiers, "h"), "horizontal", tier_gap, agent, out, base, tier_tilts);
+        split_sequence(work, page_index, root_id, column(tiers, "h"), "horizontal", tier_gap, agent, out, base, tier_tilts, borders_of(tier_list));
     const auto put_slot = [&out](const std::string& slot, const std::string& frame_id) {
         for (auto& [key, value] : out.slot_to_frame) {
             if (key == slot) {
@@ -340,7 +459,7 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
         std::vector<double> col_tilts;
         for (const Json& col : col_list) col_tilts.push_back(slant_of(leaf(col)));
         const std::vector<std::string> col_ids = split_sequence(work, page_index, tier_ids[ti], column(cols, "w"), "vertical", col_gap, agent, out,
-                                                                base + "/" + std::to_string(ti) + "/cols", col_tilts);
+                                                                base + "/" + std::to_string(ti) + "/cols", col_tilts, borders_of(col_list));
         for (std::size_t ci = 0; ci < col_list.size() && ci < col_ids.size(); ++ci) {
             const Json rows = core::py_get(col_list[ci], "rows");
             if (core::py_truthy(rows)) {
@@ -352,11 +471,40 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
                 }
                 const std::vector<std::string> row_ids =
                     split_sequence(work, page_index, col_ids[ci], column(rows, "h"), "horizontal", tier_gap, agent, out,
-                                   base + "/" + std::to_string(ti) + "/cols/" + std::to_string(ci) + "/rows", row_tilts);
+                                   base + "/" + std::to_string(ti) + "/cols/" + std::to_string(ci) + "/rows", row_tilts, borders_of(row_list));
                 for (std::size_t ri = 0; ri < row_list.size() && ri < row_ids.size(); ++ri) put_slot(core::py_str(core::subscript(row_list[ri], "slot")), row_ids[ri]);
             } else {
                 put_slot(core::py_str(core::subscript(col_list[ci], "slot")), col_ids[ci]);
             }
+        }
+    }
+    // komawari@1: the panels set in another's place (差し込み・重ね), over the others, read with the panel they go into
+    const Json insets = core::py_get(plan, "insets");
+    if (insets.is_array()) {
+        const core::Rect frame = basic_frame;
+        for (std::size_t i = 0; i < insets.size(); ++i) {
+            const Json& inset = insets[i];
+            const std::string path = "/insets/" + std::to_string(i);
+            const std::string* host = out.frame_of(core::py_str(core::py_get(inset, "on")));
+            if (host == nullptr) throw LayoutError(path + "/on", "差し込む先のコマがない");
+            const Json& rect = inset["rect"];
+            const double fw = frame.width.value(), fh = frame.height.value();
+            Json op = Json::object({{"op", "add_frame"},
+                                    {"page", page_index},
+                                    {"rect", Json::array({core::py_round(frame.x.value() + core::to_float(rect[0]) * fw, 2),
+                                                          core::py_round(frame.y.value() + core::to_float(rect[1]) * fh, 2),
+                                                          core::py_round(core::to_float(rect[2]) * fw, 2), core::py_round(core::to_float(rect[3]) * fh, 2)})},
+                                    {"into", *host},
+                                    {"over", true}});
+            out.source_map.emplace_back(out.ops.size(), path);
+            out.ops.push_back(op);
+            try {
+                work.apply(Json::array({op}), agent);
+            } catch (const core::ApplyError& e) {
+                throw LayoutError(path, wording::error(std::string(e.what())).toStdString());
+            }
+            const Json chosen = work.doc.page(find_page(work.doc, page_index)).selected_frame_id;  // (add_frame chose the new panel)
+            put_slot(core::py_str(core::py_get(inset, "slot")), core::py_str(chosen));
         }
     }
     Json extra = Json::array();
@@ -364,6 +512,18 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
         if (const std::string* frame_id = out.frame_of(slot)) {
             extra.push_back(Json::object({{"op", "set_frame"}, {"page", page_index}, {"frame_id", *frame_id}, {"bleed", true}}));
         }
+    }
+    // komawari@1: each panel's border (border_mm; 0 は枠なし) and whether its art runs past it (overflow: はみ出し)
+    for (const Json& panel : core::iterate(core::py_or(core::py_get(plan, "panels"), Json::array()))) {
+        const Json border = core::py_get(panel, "border_mm");
+        const Json overflow = core::py_get(panel, "overflow");
+        if (border.is_null() && overflow.is_null()) continue;
+        const std::string* frame_id = out.frame_of(core::py_str(core::py_get(panel, "slot")));
+        if (frame_id == nullptr) continue;
+        Json op = Json::object({{"op", "set_frame"}, {"page", page_index}, {"frame_id", *frame_id}});
+        if (!border.is_null()) op["border_mm"] = core::to_float(border);
+        if (!overflow.is_null()) op["clip"] = !core::py_truthy(overflow);
+        extra.push_back(std::move(op));
     }
     if (core::truthy_at(plan, "spread")) {  // (見開き: this page and the next one are one picture)
         extra.push_back(Json::object({{"op", "set_spread"}, {"page", page_index}, {"with", (core::to_num(page_index) + Num(1)).json()}}));

@@ -8,6 +8,8 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/komawari.hpp"
+#include "core/smart.hpp"
 
 namespace genko::core {
 
@@ -425,6 +427,21 @@ std::vector<const Frame*> reading_order(std::vector<const Frame*> children, bool
 }
 
 bool is_free(const Frame& node) { return node.split_axis && *node.split_axis == kFreeSplit; }
+
+namespace {
+bool any_over(const Frame& frame) {
+    if (frame.over) return true;
+    return std::any_of(frame.children.begin(), frame.children.end(), [](const Frame& child) { return any_over(child); });
+}
+}  // namespace
+
+bool uses_over_panels(const Document& doc) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        for (const Frame& root : written.page->frames)
+            if (any_over(root)) return true;
+    }
+    return false;
+}
 
 std::vector<Point> clip_half(std::span<const Point> points, const Point& p0, const Point& p1, bool keep_left,
                              double offset) {

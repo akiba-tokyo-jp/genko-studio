@@ -135,15 +135,47 @@ Json name_plan_v1() {
                             {{"props", nullable(arr(kStr))},
                              {"bleed", nullable(kBool)},
                              {"slant", nullable(kNum)},
-                             {"sfx_at", nullable(arr(kNum))}});
-    const Json tiers = nullable(arr(obj({{"h", kNum},
-                                         {"cols", arr(obj({{"slot", kStr}, {"w", kNum}, {"rows", nullable(arr(obj({{"slot", kStr}, {"h", kNum}})))}}))}})));
+                             {"sfx_at", nullable(arr(kNum))},
+                             // komawari@1 (K1): 枠なし (border_mm 0) and はみ出し (overflow: the art runs past the border)
+                             {"border_mm", nullable(kNum)},
+                             {"overflow", nullable(kBool)}});
+    // komawari@1 (K1): each tier, column and row may set the border after it — its gap (gap_mm) and its slant (tilt_mm)
+    const Props border = {{"gap_mm", nullable(kNum)}, {"tilt_mm", nullable(kNum)}};
+    const Json row = more(obj({{"slot", kStr}, {"h", kNum}}), border);
+    const Json col = more(obj({{"slot", kStr}, {"w", kNum}, {"rows", nullable(arr(row))}}), border);
+    const Json tiers = nullable(arr(more(obj({{"h", kNum}, {"cols", arr(col)}}), border)));
+    // komawari@1 (K1): panels set in another's place, over the others (差し込み・重ね): rect in the basic frame (0..1)
+    const Json insets = nullable(arr(obj({{"slot", kStr}, {"on", kStr}, {"rect", arr(kNum)}})));
     return more(obj({{"page", kInt},
                      {"turn_role", enumeration({"normal", "reveal", "hook"})},
                      {"template", nullable(kStr)},
                      {"tiers", tiers},
                      {"panels", arr(panel)}}),
-                {{"spread", nullable(kBool)}, {"title", nullable(kBool)}, {"tier_gap_mm", nullable(kNum)}, {"col_gap_mm", nullable(kNum)}});
+                {{"spread", nullable(kBool)}, {"title", nullable(kBool)}, {"tier_gap_mm", nullable(kNum)}, {"col_gap_mm", nullable(kNum)},
+                 {"insets", insets}});
+}
+
+const std::vector<std::string>& name_plan_extensions() {
+    static const std::vector<std::string> keys = {"gap_mm", "tilt_mm", "border_mm", "overflow", "insets"};
+    return keys;
+}
+
+Json without_unset(const Json& filled, const Json& given, const std::vector<std::string>& keys) {
+    if (filled.is_object() && given.is_object()) {
+        Json out = Json::object();
+        for (const auto& [key, value] : filled.items()) {
+            const bool unset = !given.contains(key) && value.is_null() && std::find(keys.begin(), keys.end(), key) != keys.end();
+            if (unset) continue;
+            out[key] = given.contains(key) ? without_unset(value, given[key], keys) : value;
+        }
+        return out;
+    }
+    if (filled.is_array() && given.is_array() && filled.size() == given.size()) {
+        Json out = Json::array();
+        for (std::size_t i = 0; i < filled.size(); ++i) out.push_back(without_unset(filled[i], given[i], keys));
+        return out;
+    }
+    return filled;
 }
 
 // --- jsonschema_lite --------------------------------------------------------------------------------------------------
@@ -279,6 +311,8 @@ const Json& schema(std::string_view name) {
     if (name == "name_plan@1") return name_plan;
     throw core::Error("key", core::py_repr_str(name));
 }
+
+Json unfill_extensions(const Json& filled, const Json& given) { return without_unset(filled, given, name_plan_extensions()); }
 
 Json fill_nulls(const Json& data, const Json& schema) {
     const Json* type = core::get(schema, "type");

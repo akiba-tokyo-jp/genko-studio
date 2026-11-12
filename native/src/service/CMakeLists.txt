@@ -40,6 +40,8 @@ genko_library(genko_service
     blocking.cpp
     fxwords.cpp
     layout.cpp
+    komawari_shape.cpp
+    layout_ideas.cpp
     letter.cpp
     lint.cpp
     preflight.cpp

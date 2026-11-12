@@ -15,7 +15,39 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画（この節が最新）
+## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12（この節が最新）
+
+### 利用者の決定（2026-11-12）
+- 生成 AI がコマ割りをすると無難な格子しか出ない。これを直すため、次の 4 つを全部入れる。
+  - **A 書ける形を広げる**: ネーム計画（submit_name の tiers・template）で、コマの中のコマ（差し込み・重ね）、はみ出し（枠で切らない）、枠なし、コマごとの間の広さ、自由な割り線を書けるようにする。
+  - **B 手引き**: 手引きを、定型の名前でなく緩急で教える形に書き直す（別の群）。
+  - **C 単調さの検査**: 提出したネームに単調さの警告を返す（止めない）。
+  - **コマ割りの案の束**: 利用者が参考に挙げたコマ割りジェネレーター（tools.oyasumi-gamedev.com/komawari。乱数で束を出す）の考え方を Genko に作る。そのコードは読まない・写さない。考え方だけを使い、一から作る。コマ数をちょうど指定できる（1〜8。kMaxPanels=8 は変えない）、段数の範囲・プリセット（会話・標準・アクション・見せゴマ／扉）・つまみ（斜め・断ち切り・コマ内分割・大ゴマ率・重ね・はみ出し・枠なし）、**12 案の束**（数は引数、既定 12）、seed で同じ束、1 案か今のページを元にした変異（変異度）、振るい（無難すぎる格子・読み順の崩れ・小さすぎるコマ・狭すぎる間・束の中で似た案を除く）、当てると本物のコマ（apply_layout の道）。
+- 群: K1 が土台（core・service）、K2 が GUI、K3 が MCP の道具。K2・K3 は K1 の API（SPEC LAYOUT-01「GUI・MCP 向けの API」）を使う。
+
+### 群 K1（土台。ブランチ komawari-core、main 8362d5fc から）
+- 設計: SPEC.md LAYOUT-01（骨組みのキー・生成の手順・プリセットとつまみ・振るい・変異・警告の code と文言・API・互換）、schema-v4.md「コマの重ね（komawari@1）」。
+- A（ネーム計画の拡張。どれも任意のキーで、書かなければ前と同じ）:
+  - 段・列・行の `gap_mm`・`tilt_mm`（その後ろの境目の間と斜め）、panels の `border_mm`（0 で枠なし）・`overflow`（はみ出し）、計画の `insets`（差し込み・重ね）。name_plan@1 の schema にも足した（strict のまま、どれも null 可）。
+  - check_tiers の検査と apply_layout の当て方を両方直した。当て方は今の op の組み合わせ（split_frame の gutter_mm・tilt_mm、add_frame、set_frame）。
+  - core は重ね・差し込みをそのままでは表せなかった（add_frame は根を描いたコマの節にするので、差し込んだコマがページ全体の後に読まれ、下のコマの枠線も重なって見える）。そこで拡張した:
+    - コマの `over`（true だけ保存、`komawari@1` の拡張として features に載る）。
+    - `add_frame` の `into`（宿主のコマの場所を描いたコマの節にして、宿主と並べる。読み順は宿主のそばで位置の順）と `over`。
+    - `set_frame`・`set_layout` の木の `over`。
+    - 描き方: over のコマの下では、ほかのコマの枠線と、ほかのコマに置いた絵が隠れる（render/panels.cpp の draw_frames、render/placed.cpp）。
+  - submit_name は、fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。拡張のキーを書かない計画は、計画の保存・input_hash まで前と同じ。
+- 生成（service/layout_ideas.{hpp,cpp}）と、測り方を 1 か所に置いた service/komawari_shape.{hpp,cpp}（形・振るいの基準・違いの点数・今のページの骨組み・単調さの警告）。乱数は xoshiro256**（splitmix64 で種を混ぜる）で、std の分布は使わない。
+- C: submit_name に単調さの警告を足した（止めない）。code は layout_repeats・layout_flat・reveal_beat_small・book_without_accent。review.html にも、本の今のコマについて「コマ割りの緩急」として並べる。
+- 試験: unit/test_layout_ideas 17 本（同じ seed で同じ束の sha・コマ数ちょうど 1〜8×4 プリセット・振るい・見せ場・当てて保存・読み戻し・今のページからの骨組み・変異・速さ・要求の断り・前と同じ op とバイトの sha・新しいキーの形と検査・add_frame into・重ねの下の枠線が消える描画・単調さの警告・submit_name の道）。12 案の束は描かずに約 1 ms（4 束 48 案で 3 ms）。関係する試験（R1）: test_model・test_storage・test_ops・test_studio_ops・test_command_bus・test_placed・test_contract_storage（参照 Python が無い 3 本は前からの SKIP）・test_service・test_ledger_service_a・b・c・test_gui_ledger_a の test_every_error_reads_in_japanese・test_gui_ledger_c、すべて合格。
+- 直したもの（関係する試験で見つけた）: 公開の op の一覧 docs/ops.schema.json に add_frame の into・over、set_frame の over を足した。単調さの警告は、ほかの issue の後に足す（承認済みの断り name_approved が先頭のまま）。
+- 直さなかった物（K2・K3 か後の群へ）:
+  - GUI（K2）: 案の束の窓、変異、当てる操作。app/templates.cpp は描いたコマの節（free）を持つ「自分のテンプレート」をまだ当て直せない（差し込みのあるページを残すとこれに当たる）。
+  - MCP（K3）: 案の束の道具。submit_name の説明文と手引き（B）に新しいキーを書くこと。
+  - 重ねの下で隠すのは、枠線と、コマに置いた絵（clip_to frame・bleed）だけ。スマートオブジェクトをコマで切った絵と、ページ全体の層の絵は、重ねのコマの下でも見える。over のコマ同士の上下は決めていない。
+  - 自由な割り線は直線（位置と傾き）まで。曲がった線・折れ線は今の手の操作（set_frame curves・poly）のまま。
+  - 拡張のキーを書かない計画が「前と同じバイト」になることは、新しいコードで op を書き出して手で当てた結果と比べ、sha を固定した。前のコード（8362d5fc）で組み直して比べることはしていない（core の model.hpp を変えたので、組み直しが全体に及ぶため）。
+
+## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 
 ### 利用者の決定
 - （2026-10-16）PhotoCraft の台帳 `docs/cpp-migration/photocraft/feature-ledger.json` の **全 961 行**を、この移行で取り込む（Windows の作業の前）。2026-10-06 の決定（DECISIONS.json: 漫画原稿へ統合し C++ 版の原稿形式を広げる、原本は変えない、未対応の版では編集を断る。カラー制作 COLOR-01）はそのまま。

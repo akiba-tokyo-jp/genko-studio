@@ -32,6 +32,7 @@
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
+#include "core/komawari.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
 #include "core/image_assets.hpp"
@@ -130,6 +131,7 @@ Json frame_json(const core::Frame& frame) {
     }
     if (truthy(frame.line)) out["line"] = *frame.line;
     if (frame.corner_mm != 0.0) out["corner_mm"] = frame.corner_mm;
+    if (frame.over) out["over"] = true;  // (komawari@1: only when set, so a book without it is written as before)
     return out;
 }
 
@@ -667,6 +669,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_pixel_aspect(doc);
     std::erase(features, std::string(core::kPixelAspectFeature));
     if (core::uses_pixel_aspect(doc)) features.emplace_back(core::kPixelAspectFeature);
+    // komawari@1 (コマ割り K1): a panel over the others (差し込み・重ね), named while a panel has it
+    std::erase(features, std::string(core::kKomawariFeature));
+    if (core::uses_over_panels(doc)) features.emplace_back(core::kKomawariFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

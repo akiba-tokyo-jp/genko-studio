@@ -40,6 +40,7 @@
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
+#include "core/komawari.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -92,9 +93,11 @@ constexpr std::array<std::string_view, 8> kBrushKeys{"rgb", "width_mm", "stabili
                                                      "kind", "background_rgb"};
 constexpr std::array<std::string_view, 3> kBibleKeys{"plot", "characters", "constraints"};
 constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"};
-constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
+constexpr std::array<std::string_view, 15> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
                                                       "children", "panel", "poly", "split", "custom", "curves",
-                                                      "line", "corner_mm"};
+                                                      "line", "corner_mm",
+                                                      // komawari@1 (K1)
+                                                      "over"};
 constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
@@ -520,6 +523,7 @@ core::Frame Reader::read_frame(const Json& data, const std::string& at) {
     }
     frame.line = dict_if_dict(data, "line");
     frame.corner_mm = to_float_or(data, "corner_mm", 0.0, at);
+    frame.over = to_bool(data, "over", false);  // (komawari@1)
     check_keys(data, kFrameKeys, at, "frame");
     return frame;
 }
@@ -2136,7 +2140,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 I-f (core/image_assets.hpp)
            feature == core::kImageAssetsFeature ||
            // PC5 H-f (core/pixel_aspect.hpp)
-           feature == core::kPixelAspectFeature;
+           feature == core::kPixelAspectFeature ||
+           // komawari@1 (core/komawari.hpp)
+           feature == core::kKomawariFeature;
 }
 
 int project_version(const Json& payload) {
