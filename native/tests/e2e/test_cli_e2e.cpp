@@ -260,6 +260,56 @@ private slots:
         QCOMPARE(ran_steps, 101);
         QVERIFY(leases >= 2);
     }
+
+    // コマ割り K3 (SPEC LAYOUT-01): `genko studio layout-ideas` — the tool layout_ideas from the shell: the same seed
+    // prints the same batch, exactly the panels asked for, the knobs as JSON and a draft plan from a file (each idea
+    // carrying its plan), the book left as it was; a preset it does not know is a usage error (exit 2), a count past
+    // the tool's range a refusal (exit 1); `genko studio call … layout_ideas` takes it by name too.
+    void studioLayoutIdeas() {
+        const QString root = tmp_.path() + "/layout-ideas";
+        QDir().mkpath(root);
+        const QString book = root + "/b.genko";
+        QCOMPARE(genko_run({"studio", "init", book, "--pages", "4"}).exit_code, 0);
+        const QByteArray before = genko::test::read_bytes(book + "/project.json").c_str();
+        const QStringList asked{"studio", "layout-ideas", book, "--page", "2", "--panels", "3", "--preset", "action", "--seed", "km-00000000000000a2"};
+        const auto first = genko_run(asked);
+        const auto again = genko_run(asked);
+        QVERIFY2(first.exit_code == 0, first.out.constData());
+        QCOMPARE(first.out, again.out);
+        const Json batch = one_line(first.out);
+        QCOMPARE(batch["ok"], Json(true));
+        QCOMPARE(batch["seed"], Json("km-00000000000000a2"));
+        QCOMPARE(batch["request"]["preset"], Json("action"));
+        QVERIFY(batch["ideas"].is_array() && !batch["ideas"].empty() && batch["ideas"].size() <= 12);
+        for (const Json& idea : batch["ideas"]) QCOMPARE(idea["panels"], Json(3));
+        // knobs as JSON, a draft plan from a file (its 3 panels), a count
+        const QString plan = root + "/p002.json";
+        write(plan, QByteArray::fromStdString(genko::test::read_bytes(genko::test::repo_root() + "/native/tests/fixtures/studio/demo4/p002.json")));
+        const auto knobbed = genko_run({"studio", "layout-ideas", book, "--page", "2", "--knobs", R"({"slant": 0.9, "bleed": 0})", "--plan", plan, "--count", "5",
+                                        "--focus", "1", "--seed", "k"});
+        QVERIFY2(knobbed.exit_code == 0, knobbed.out.constData());
+        const Json kb = one_line(knobbed.out);
+        QCOMPARE(kb["request"]["knobs"]["slant"], Json(0.9));
+        QCOMPARE(kb["request"]["panels"], Json(3));
+        QVERIFY(!kb["ideas"].empty() && kb["ideas"].size() <= 5);
+        for (const Json& idea : kb["ideas"]) {
+            QCOMPARE(idea["largest"], Json("p1"));
+            QCOMPARE(idea["plan"]["page"], Json(2));
+            QCOMPARE(idea["plan"]["tiers"], idea["skeleton"]["tiers"]);
+        }
+        // the tool by name
+        const QString args = root + "/args.json";
+        write(args, R"({"page": 2, "panels": 3, "preset": "action", "seed": "km-00000000000000a2"})");
+        const auto called = genko_run({"studio", "call", book, "layout_ideas", args});
+        QVERIFY2(called.exit_code == 0, called.out.constData());
+        QCOMPARE(one_line(called.out)["ideas"], batch["ideas"]);
+        // refused: a preset it does not know (usage), a count past 48 (the tool's words)
+        QCOMPARE(genko_run({"studio", "layout-ideas", book, "--page", "2", "--preset", "loud"}).exit_code, 2);
+        const auto many = genko_run({"studio", "layout-ideas", book, "--page", "2", "--count", "49"});
+        QCOMPARE(many.exit_code, 1);
+        QCOMPARE(one_line(many.out)["issues"][0]["code"], Json("layout_ideas_invalid"));
+        QCOMPARE(QByteArray(genko::test::read_bytes(book + "/project.json").c_str()), before);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCliE2e)

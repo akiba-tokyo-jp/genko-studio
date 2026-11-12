@@ -46,8 +46,18 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
 - `plan_page`: `mcp__genko__inspect`（target `page`）でそのページの beat を読み、ネーム計画を書いて `mcp__genko__submit_name`。
-  - 見せ場は大きく: めくってすぐの見せ場は `template` の `reveal_top`・`reveal_bleed`、締めのページは `finale_bleed`、動きのある場面は `action_slant`。
-  - コマの `bleed: true` で断ち切り（紙の端まで）、`slant`（mm）で次のコマとの境を斜めに。ページの `spread: true` で次のページと見開き。コマの間の広さはページの `tier_gap_mm`（段の間、既定 7）と `col_gap_mm`（横に並ぶコマの間、既定 3）。できたあとで動かすときは inspect page の `gutters`（frame_id と index）を move_gutter に渡す。
+  - コマ割りは緩急で決める（詳しくは `inspect` の `rules`「コマ割りの緩急」）:
+    - beat の重さでコマの大きさを決める。いちばん重い beat に基本枠の 3〜6 割、軽い beat は小さく（まとめてもよい）。全部同じ大きさにしない。
+    - めくり（偶数ページの先頭）に見せ場の大ゴマ。奇数ページの最後は引き。
+    - 視線は右上から入り左下へ抜ける。大ゴマは流れの途中で目を止める所に。
+    - 前のページと段の数・大ゴマの位置・コマの数を変える。
+    - 斜め（`tilt_mm`・`slant`）は動きと衝撃、断ち切り（`bleed`）は広がりと迫力、重ね・差し込み（`insets`）は同じ瞬間の反応、はみ出し（`overflow`）は枠を破る勢い、枠なし（`border_mm: 0`）は回想と静けさ、広い間（`gap_mm` 10〜15）は時間の経過。会話のページに斜めは使わない。
+    - 定型（`template` の `reveal_top`・`reveal_bleed`・`finale_bleed`・`action_slant` など）は例。そのまま並べず、`tiers` に書き直して崩す。
+  - 案の束から選ぶ: `mcp__genko__layout_ideas`（`page`、下書きの `plan`、`preset` は talk / standard / action / showcase、見せ場のコマの番号 `focus`）で 12 案が出る。
+    `summary` と `like_pages`（前後のページと似ている案）を見て選び、よい案は `base` に `skeleton` を入れて `variation` で崩した束を出す（今のページを崩すなら `base_page: true`）。
+    選んだ案の `plan` をそのまま `submit_name` に送り、プレビューを見て自分で直す。`plan` を渡さなかったときは `tiers`・`insets` をそのまま入れ、`template` を null にし、`panels` の slot ごとに `skeleton.panels` の `bleed`・`border_mm`・`overflow` を足す。
+  - 境目ごとの間と斜めは段・列・行の `gap_mm`・`tilt_mm`（その後ろの境目）。ページの `spread: true` で次のページと見開き。コマの間の既定はページの `tier_gap_mm`（段の間、既定 7）と `col_gap_mm`（横に並ぶコマの間、既定 3）。できたあとで動かすときは inspect page の `gutters`（frame_id と index）を move_gutter に渡す。
+  - 単調さの警告（止めない。直してから進む）: `layout_repeats`（3 ページ続けて似た段組 → このページの段の数・大ゴマの位置を変える）、`layout_flat`（コマの大きさの差が小さい → 重い beat を大きく）、`reveal_beat_small`（見せ場のコマが小さい → 大ゴマか断ち切り）、`book_without_accent`（本に斜めも断ち切りも無い → 見せ場や動きのページで使う）。
   - 1 ページ目を扉にするなら `title: true`（`template` は `title_top` か `reveal_bleed`）。題名と作者名が入る。
   - `fx` の言葉（雨・汗・集中線・水しぶきなど。知らない言葉は警告が出る）は仕上げで Genko が描くか、絵の依頼文に入る。`emphasis` も依頼文に入る。
   - 効果音（balloon `sfx`）は、コマの `sfx_at`（音の出どころ、コマの中の 0..1 の [x, y]）の近くに置かれる。
@@ -65,7 +75,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
       `dotted_box`（点線の囲み）。しっぽは付かない。
     - 要点だけ大きく・太く: `{太|心地よさのこと}`・`{大|…}`（台詞の中の一部）。1 つのフキダシで 1 か所まで。
     - 短い返事（「はい」「え？」）は短いまま。長い台詞は 2 つのフキダシに分ける（同じ人なら並べて置かれる）。
-- `review_name`: `submit_name` の返事に付いた画像で、読み順の迷い・窮屈なコマ・弱いめくりを確かめる（見返すときだけ `mcp__genko__render`）。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`（`input_hash` は作業項目の値）。
+- `review_name`: `submit_name` の返事に付いた画像で、読み順の迷い・窮屈なコマ・弱いめくり・大きさの差の無い割りを確かめる（見返すときだけ `mcp__genko__render`）。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`（`input_hash` は作業項目の値）。
 - 承認の依頼はまとめて出す: ネームと作画は `pages` に複数のページ、設定画は `character_ids` に複数の人物を入れて 1 回で。
 - `revise_page`: 人間の指示（`comments`）に従って `submit_name` を `replace: true` で送り直す。
 

@@ -64,7 +64,7 @@ constexpr std::string_view kAgentOps[] = {
 
 constexpr std::string_view kAgentTools[] = {
     "adopt", "analyze_name", "apply_ops", "ask_human", "candidates", "check", "derive", "export", "export_proof",
-    "export_status", "finish_page", "generation_request", "import_image", "import_images", "import_name", "inspect", "next",
+    "export_status", "finish_page", "generation_request", "import_image", "import_images", "import_name", "inspect", "layout_ideas", "next",
     "preflight", "proposals", "propose_lines", "record_chat_approval", "record_review", "render", "report_regions",
     "request_approval", "request_fix", "resolve_ticket", "review_candidates", "review_page", "set_bible", "set_script",
     "status", "style_catalog", "submit_name", "take_panel_art", "tickets", "undo", "upscale", "use_style"};

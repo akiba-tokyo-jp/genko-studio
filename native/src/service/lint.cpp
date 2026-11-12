@@ -140,7 +140,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
     std::vector<Issue> out;
     if (core::py_get(plan, "turn_role") == Json("reveal") && !order.empty() && share(shares, order[0]) < 0.3) {
         out.push_back(warning("reveal_small", "/tiers", "めくってすぐの見せ場なのに、最初のコマがページの3割より小さい",
-                              "template の reveal_top・reveal_bleed・splash を使うか、最初の段を大きくして bleed（断ち切り）にする"));
+                              "最初の段をページの3割以上にして bleed（断ち切り）にする（layout_ideas の focus 1 で案を出せる。定型なら reveal_top・reveal_bleed・splash が例）"));
     }
     for (const auto& [slot, item] : panels) {
         double weight = 0;
@@ -153,7 +153,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
         }
         if (weight >= 0.8 && share(shares, core::py_str(slot)) < 0.3) {
             out.push_back(warning("emphasis_small", "/panels/" + std::to_string(item.first) + "/emphasis", "強調の高いコマ " + core::py_str(slot) + " がページの3割より小さい",
-                                  "大きい段に置くか、bleed（断ち切り）や slant（斜め）で目立たせる"));
+                                  "大きい段に置くか、bleed（断ち切り）や tilt_mm・slant（斜め）で目立たせる（layout_ideas の focus にそのコマの番号）"));
         }
     }
     if (page == page_count && !order.empty() && !tall) {  // (a tall strip ends by scrolling, not with a page's last panel)
@@ -173,7 +173,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
         }
         if (share(shares, last) < 0.35 && !(core::truthy_at(panel, "bleed") || template_bleed)) {
             out.push_back(warning("finale_small", "/tiers", "最後のページの最後のコマが小さく、断ち切りでもない（余韻が弱い）",
-                                  "template の finale_bleed を使うか、最後の段を大きくして bleed にする"));
+                                  "最後の段を大きくして bleed（断ち切り）にする（定型なら finale_bleed が例）"));
         }
     }
     return out;

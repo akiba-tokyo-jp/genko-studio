@@ -66,6 +66,7 @@ genko_library(genko_service
     service_write.cpp
     studio_art.cpp
     studio_atari.cpp
+    studio_komawari.cpp
     studio_output.cpp
     tool_table.cpp
     human_service.cpp

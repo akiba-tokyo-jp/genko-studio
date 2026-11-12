@@ -33,6 +33,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -379,7 +380,7 @@ const char* const kTools[] = {"projects", "create_project", "status", "next", "i
                               "import_images", "candidates", "review_candidates", "adopt", "request_fix", "report_regions",
                               "finish_page", "preflight", "export_proof", "check", "undo", "export", "record_chat_approval",
                               "export_status", "upscale", "derive", "import_name", "analyze_name", "propose_lines", "proposals",
-                              "review_page", "ask_human", "set_bible", "set_script", "submit_name", "take_panel_art", "style_catalog",
+                              "review_page", "ask_human", "set_bible", "set_script", "submit_name", "layout_ideas", "take_panel_art", "style_catalog",
                               "use_style", "apply_ops", "record_review", "request_approval", "tickets", "resolve_ticket"};
 
 }  // namespace
@@ -409,7 +410,7 @@ class TestMcpApiE2e : public QObject {
     }
 
 private slots:
-    // The server is an agent's: a person's actor is refused before anything is served; the 41 tools hold none of a
+    // The server is an agent's: a person's actor is refused before anything is served; the 42 tools hold none of a
     // person's (approvals, the chat switch, revocations, comments, proposals, tickets, the official export).
     void onlyAnAgentsTools() {
         const QString dir = fresh("tools");
@@ -445,6 +446,179 @@ private slots:
             }
             QCOMPARE(message["jsonrpc"], Json("2.0"));
         }
+    }
+
+    // コマ割り K3 (SPEC LAYOUT-01): the tool layout_ideas through MCP — listed, with its arguments' schema and the layout
+    // keys in submit_name's words; the same seed gives the same batch, an exact count gives exactly that many panels (a
+    // draft plan's own count when none is given), and the book is not changed by it; an idea's plan goes through
+    // submit_name as it is, a plan with every layout key too; three dull pages running are warned of (after the other
+    // issues, never stopped); a page a person approved is said so, and submit_name still refuses to change it.
+    void layoutIdeasThroughMcp() {
+        const QString dir = fresh("komawari");
+        const QString book = dir + "/root/k.genko";
+        const QString demo = genko::test::repo_root() + "/native/tests/fixtures/studio/demo4/";
+        const auto fixture = [&demo](const char* name) { return genko::test::read_json(demo + QString::fromLatin1(name)); };
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        // listed: the arguments' schema (knobs' properties) and the layout keys written where an agent reads them
+        Json listed = mcp.request(1, "tools/list");
+        Json ideas_tool, submit_tool;
+        for (const Json& t : listed["result"]["tools"]) {
+            if (t["name"] == Json("layout_ideas")) ideas_tool = t;
+            if (t["name"] == Json("submit_name")) submit_tool = t;
+        }
+        QVERIFY(ideas_tool.is_object() && submit_tool.is_object());
+        const Json& props = ideas_tool["inputSchema"]["properties"];
+        for (const char* key : {"project", "page", "panels", "min_panels", "max_panels", "min_tiers", "max_tiers", "preset", "knobs", "seed", "count",
+                                "base", "base_page", "variation", "focus", "plan", "session"}) {
+            QVERIFY2(props.contains(key), key);
+        }
+        QCOMPARE(ideas_tool["inputSchema"]["required"], Json::array({"project", "page"}));
+        QCOMPARE(props["count"]["default"], Json(12));
+        for (const char* knob : {"slant", "bleed", "split", "big", "overlap", "overflow", "frameless"}) QVERIFY2(props["knobs"]["properties"].contains(knob), knob);
+        const std::string words = str(submit_tool["description"]) + str(submit_tool["inputSchema"]["properties"]["plan"]["description"]);
+        for (const char* key : {"gap_mm", "tilt_mm", "border_mm", "overflow", "insets", "layout_ideas", "layout_repeats", "layout_flat", "reveal_beat_small",
+                                "book_without_accent"}) {
+            QVERIFY2(words.find(key) != std::string::npos, key);
+        }
+
+        QCOMPARE(Mcp::text(mcp.call("create_project", Json::object({{"name", "k.genko"}, {"title", "t"}, {"pages", 4}})))["ok"], Json(true));
+        QCOMPARE(Mcp::text(mcp.call("set_bible", Json::object({{"project", "k.genko"}, {"bible", fixture("bible.json")}, {"commit", true}})))["ok"], Json(true));
+        QCOMPARE(Mcp::text(mcp.call("set_script", Json::object({{"project", "k.genko"}, {"script", fixture("script.json")}, {"commit", true}})))["ok"], Json(true));
+
+        // the same seed, the same batch; exactly the panels asked for; the book as it was
+        const auto before = book_tree(book);
+        const Json asked = Json::object({{"project", "k.genko"}, {"page", 2}, {"panels", 4}, {"preset", "action"}, {"seed", "km-00000000000000a2"}});
+        const Json first = Mcp::text(mcp.call("layout_ideas", asked));
+        const Json again = Mcp::text(mcp.call("layout_ideas", asked));
+        QVERIFY2(first["ok"] == Json(true), genko::core::dump_python(first).c_str());
+        QCOMPARE(first["seed"], Json("km-00000000000000a2"));
+        QCOMPARE(first["request"]["count"], Json(12));
+        QVERIFY(first["ideas"].is_array() && !first["ideas"].empty() && first["ideas"].size() <= 12);
+        QCOMPARE(genko::core::dump_python(first["ideas"]), genko::core::dump_python(again["ideas"]));
+        for (const Json& idea : first["ideas"]) {
+            QCOMPARE(idea["panels"], Json(4));
+            QCOMPARE(idea["reading_order"].size(), std::size_t(4));
+            QVERIFY(idea["skeleton"].contains("tiers") && idea["skeleton"].contains("panels") && idea["like_pages"].is_array());
+            QVERIFY(!idea.contains("plan"));
+        }
+        const Json other = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"panels", 4}, {"preset", "action"},
+                                                                             {"seed", "km-00000000000000a3"}})));
+        QVERIFY(genko::core::dump_python(other["ideas"]) != genko::core::dump_python(first["ideas"]));
+        // every count 1..8, exactly
+        for (int n = 1; n <= 8; ++n) {
+            const Json batch = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 3}, {"panels", n}, {"seed", "s" + std::to_string(n)},
+                                                                                 {"count", 4}})));
+            QVERIFY2(batch["ok"] == Json(true) && !batch["ideas"].empty(), std::to_string(n).c_str());
+            for (const Json& idea : batch["ideas"]) QCOMPARE(idea["panels"], Json(n));
+        }
+        // a request it does not take: refused with where and why, in Japanese
+        const Json refused = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"panels", 9}})));
+        QCOMPARE(refused["ok"], Json(false));
+        QCOMPARE(refused["issues"][0]["code"], Json("layout_ideas_invalid"));
+        QCOMPARE(refused["issues"][0]["path"], Json("/panels"));
+        QVERIFY2(genko::core::dump_python(refused).find("コマ数は 1〜8") != std::string::npos, genko::core::dump_python(refused).c_str());
+        QCOMPARE(Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"base_page", true}})))["issues"][0]["code"], Json("base_unusable"));
+        QVERIFY2(book_tree(book) == before, tree_diff(before, book_tree(book)).c_str());
+
+        // three dull pages running: warned of after the other issues, saved all the same
+        const Json grid = Json::parse(R"([{"h": 0.333, "cols": [{"slot": "p1", "w": 1.0}]}, {"h": 0.333, "cols": [{"slot": "p2", "w": 1.0}]},
+                                         {"h": 0.334, "cols": [{"slot": "p3", "w": 1.0}]}])");
+        const auto dull = [&grid](Json plan) {
+            plan["template"] = nullptr;
+            plan["tiers"] = grid;
+            plan.erase("insets");
+            return plan;
+        };
+        const std::set<std::string> monotony{"layout_repeats", "layout_flat", "reveal_beat_small", "book_without_accent"};
+        Json third_page = fixture("p003.json");
+        Json extra = third_page["panels"][1];
+        extra["slot"] = "p3";
+        extra["lines"] = Json::array();
+        extra["beat_ids"] = Json::array();
+        third_page["panels"].push_back(extra);
+        std::vector<Json> replies;
+        for (const Json& plan : {dull(fixture("p001.json")), dull(fixture("p002.json")), dull(third_page)}) {
+            replies.push_back(Mcp::text(mcp.call("submit_name", Json::object({{"project", "k.genko"}, {"plan", plan}, {"commit", true}, {"replace", true}}))));
+            QVERIFY2(replies.back()["ok"] == Json(true) && replies.back()["committed"] == Json(true), genko::core::dump_python(replies.back()).c_str());
+        }
+        std::vector<std::string> codes;
+        for (const Json& issue : replies.back()["issues"]) codes.push_back(str(issue["code"]));
+        QVERIFY2(std::find(codes.begin(), codes.end(), "layout_repeats") != codes.end(), genko::core::dump_python(replies.back()["issues"]).c_str());
+        QVERIFY2(std::find(codes.begin(), codes.end(), "layout_flat") != codes.end(), genko::core::dump_python(replies.back()["issues"]).c_str());
+        bool seen_monotony = false;
+        for (const std::string& code : codes) {
+            if (monotony.contains(code)) seen_monotony = true;
+            else QVERIFY2(!seen_monotony, ("an issue after the monotony warnings: " + code).c_str());
+        }
+        for (const Json& issue : replies.back()["issues"]) {
+            if (monotony.contains(str(issue["code"]))) QCOMPARE(issue["severity"], Json("warning"));
+        }
+        // a draft plan: ideas of its 3 panels, each idea's plan submitted as it is
+        const auto unchanged = book_tree(book);
+        const Json draft = fixture("p002.json");
+        const Json drafted = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"plan", draft}, {"focus", 3},
+                                                                               {"preset", "showcase"}, {"seed", "km-00000000000000b7"}})));
+        QVERIFY2(drafted["ok"] == Json(true) && !drafted["ideas"].empty(), genko::core::dump_python(drafted).c_str());
+        for (const Json& idea : drafted["ideas"]) {
+            QCOMPARE(idea["panels"], Json(3));
+            QCOMPARE(idea["largest"], Json("p3"));
+            QCOMPARE(idea["plan"]["template"], Json());
+            QCOMPARE(idea["plan"]["tiers"], idea["skeleton"]["tiers"]);
+            QCOMPARE(idea["plan"]["panels"].size(), std::size_t(3));
+        }
+        QVERIFY2(book_tree(book) == unchanged, tree_diff(unchanged, book_tree(book)).c_str());
+        const Json picked = drafted["ideas"][0];
+        const Json submitted = Mcp::text(mcp.call("submit_name", Json::object({{"project", "k.genko"}, {"plan", picked["plan"]}, {"commit", true}, {"replace", true}})));
+        QVERIFY2(submitted["ok"] == Json(true) && submitted["committed"] == Json(true), genko::core::dump_python(submitted).c_str());
+        QCOMPARE(submitted["reading_order"], picked["reading_order"]);
+        for (const Json& issue : submitted["issues"]) QVERIFY2(issue["severity"] != Json("error"), genko::core::dump_python(issue).c_str());
+        // the page as it is, varied: the same 3 panels
+        const Json varied = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"base_page", true}, {"variation", 0.5},
+                                                                              {"seed", "v1"}, {"count", 6}})));
+        QVERIFY2(varied["ok"] == Json(true) && !varied["ideas"].empty(), genko::core::dump_python(varied).c_str());
+        for (const Json& idea : varied["ideas"]) QCOMPARE(idea["panels"], Json(3));
+        QVERIFY(varied["request"].contains("base"));
+
+        // every layout key in one plan: gaps and slants, no border, overflow, an inset
+        Json keyed = fixture("p004.json");
+        keyed["template"] = nullptr;
+        keyed["tiers"] = Json::parse(R"([{"h": 0.45, "gap_mm": 11, "tilt_mm": 12, "cols": [{"slot": "p1", "w": 1.0}]},
+                                          {"h": 0.55, "cols": [{"slot": "p2", "w": 1.0}]}])");
+        keyed["insets"] = Json::parse(R"([{"slot": "p3", "on": "p2", "rect": [0.05, 0.62, 0.4, 0.33]}])");
+        keyed["panels"][0]["border_mm"] = 0;
+        keyed["panels"][1]["overflow"] = true;
+        keyed["panels"][1]["bleed"] = true;
+        const Json laid = Mcp::text(mcp.call("submit_name", Json::object({{"project", "k.genko"}, {"plan", keyed}, {"commit", true}})));
+        QVERIFY2(laid["ok"] == Json(true) && laid["committed"] == Json(true), genko::core::dump_python(laid).c_str());
+        QCOMPARE(laid["reading_order"], Json::array({"p1", "p2", "p3"}));
+        const std::string stored = genko::test::read_bytes(book + "/project.json");
+        for (const char* key : {"\"insets\"", "\"tilt_mm\"", "\"border_mm\"", "\"overflow\""}) QVERIFY2(stored.find(key) != std::string::npos, key);
+
+        // the neighbours as they are, and an idea as plain as they are said to be alike to them
+        const Json beside = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"base_page", true}, {"variation", 0.1},
+                                                                              {"seed", "flat"}, {"count", 4}})));
+        QVERIFY2(beside["ok"] == Json(true) && !beside["ideas"].empty(), genko::core::dump_python(beside).c_str());
+        QCOMPARE(beside["around"].size(), std::size_t(2));
+        QCOMPARE(beside["around"][0]["page"], Json(1));
+
+        // a page a person approved: the batch says so, the book is not changed, and submit_name still refuses
+        mcp.lines();
+        QCOMPARE(genko::test::run_genko({"studio", "approve", book, "name", "--pages", "1", "--as", "human:owner"}).exit_code, 0);
+        const auto approved = book_tree(book);
+        Mcp after(dir + "/root", dir + "/config");
+        after.initialize();
+        const Json told = Mcp::text(after.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 1}, {"plan", fixture("p001.json")},
+                                                                             {"seed", "km-00000000000000c1"}})));
+        QVERIFY2(told["ok"] == Json(true) && !told["ideas"].empty(), genko::core::dump_python(told).c_str());
+        QCOMPARE(told["name_approved"], Json(true));
+        QCOMPARE(told["issues"][0]["code"], Json("name_approved"));
+        QCOMPARE(told["issues"][0]["severity"], Json("warning"));
+        const Json kept = Mcp::text(after.call("submit_name", Json::object({{"project", "k.genko"}, {"plan", told["ideas"][0]["plan"]}, {"commit", true}, {"replace", true}})));
+        QCOMPARE(kept["ok"], Json(false));
+        QVERIFY2(genko::core::dump_python(kept).find("name_approved") != std::string::npos, genko::core::dump_python(kept).c_str());
+        after.lines();
+        QVERIFY2(book_tree(book) == approved, tree_diff(approved, book_tree(book)).c_str());
     }
 
     // An agent's refusals through MCP leave the book as it was: a gate op, a page lock, the person's switch for chat

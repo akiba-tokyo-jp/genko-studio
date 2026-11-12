@@ -1509,6 +1509,14 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 - `std::optional<Json> komawari::skeleton_of_page(doc, page)`（今のページ → 骨組み。描いたコマは無し）、`shape_of_plan`・`shape_of_page`・`reading_slots`・測り方（size_ratio・plain_grid・reading_break・smallest_side・narrowest_gap・largest・share・difference・describe）、`monotony(doc, page, plan, script)`・`book_monotony(doc, script)`。
 - 速さ: 12 案の束を描かずに数 ms（目安 50 ms）。
 
+**AI 向けの道具（群 K3）**
+- MCP の道具 `layout_ideas`（道具の表 kAgentTools に足した。42 道具。読むだけで本を変えない: 道具の記録 tools.jsonl だけが書かれ、presence・book_in_use は無い）。引数: `project`・`page`（必須）、`panels`（ちょうど）か `min_panels`・`max_panels`、`min_tiers`・`max_tiers`、`preset`、`knobs`、`seed`（文字列）、`count`（既定 12）、`base`（案の skeleton）か `base_page: true`（今のページを `komawari::skeleton_of_page` で骨組みにする。白紙・描いたコマは `base_unusable`）、`variation`、`focus`、`plan`（下書きのネーム計画）。コマ数を書かずに `plan` を渡すと、`plan` のコマ数ちょうど。
+- 返り値: `{ok, page, request（request_to_json）, seed, ideas: [{skeleton, summary, panels, pattern, largest, reading_order, like_pages, plan?}], tried, dropped, around, name_approved, issues}`。`like_pages` は前後のページ（今のコマ）のうち、違いの点数が kRepeatAtMost 以下のページ。`plan` は `merge_into_plan(skeleton, plan)` に `page` を入れたもので、そのまま submit_name に出せる。`around` は前後のページの `describe`。
+- 断り: 要求が通らないときは `layout_ideas_invalid`（LayoutError の path と文）、`base` と `base_page` の両方は `base_twice`、無いページは `no_page`。警告: 人が承認したページは `name_approved`（変えるのは submit_name が断る。人の承認したページを AI が変えない規則は submit_name の側で効く）、束が count に届かないときは `layout_ideas_few`。
+- MCP の inputSchema は、この道具と submit_name の plan に、プロパティの説明（knobs の各つまみ、範囲）を足した（ToolParam::schema。ほかの道具は前のまま）。submit_name の説明文に拡張のキーと単調さの警告の code を書いた。
+- CLI: `genko studio layout-ideas BOOK --page N [--panels N | --min-panels --max-panels] [--min-tiers --max-tiers] [--preset talk|standard|action|showcase] [--knobs JSON] [--seed S] [--count N] [--base FILE | --base-page] [--variation V] [--focus N] [--plan FILE]`（`genko studio call BOOK layout_ideas ARGS.json` も）。HTTP の API（genko serve）には studio の道具の入口が無いので足さない（MCP の Streamable HTTP では同じ道具が出る）。
+- 手引き（B）: manga_rules.md に「コマ割りの緩急」「コマ割りの案の束（layout_ideas）」「単調さの警告」を足し、SKILL.md の plan_page を緩急で教える形にした。定型は例。
+
 **既存の本との互換**: 拡張のキーを書かない計画は、前と同じ op（split_frame・set_frame・set_spread）・コマ・保存のバイトになる（submit_name は fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。input_hash も前と同じ）。`over` は true のときだけ書き、そのときだけ `features` に `komawari@1` を加える（schema-v4.md「コマの重ね」）ので、前の本は同じに開き・描かれ・保存される。komawari@1 のある本を前の版で開くと、未知の拡張として読取専用になる。
 
 ## 7. 利用者向け改善

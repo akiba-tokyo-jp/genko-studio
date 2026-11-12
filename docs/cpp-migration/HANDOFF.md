@@ -42,10 +42,25 @@
 - 直したもの（関係する試験で見つけた）: 公開の op の一覧 docs/ops.schema.json に add_frame の into・over、set_frame の over を足した。単調さの警告は、ほかの issue の後に足す（承認済みの断り name_approved が先頭のまま）。
 - 直さなかった物（K2・K3 か後の群へ）:
   - GUI（K2）: 案の束の窓、変異、当てる操作。app/templates.cpp は描いたコマの節（free）を持つ「自分のテンプレート」をまだ当て直せない（差し込みのあるページを残すとこれに当たる）。
-  - MCP（K3）: 案の束の道具。submit_name の説明文と手引き（B）に新しいキーを書くこと。
+  - MCP（K3）: 案の束の道具。submit_name の説明文と手引き（B）に新しいキーを書くこと。→ 群 K3 で済んだ（下）。
   - 重ねの下で隠すのは、枠線と、コマに置いた絵（clip_to frame・bleed）だけ。スマートオブジェクトをコマで切った絵と、ページ全体の層の絵は、重ねのコマの下でも見える。over のコマ同士の上下は決めていない。
   - 自由な割り線は直線（位置と傾き）まで。曲がった線・折れ線は今の手の操作（set_frame curves・poly）のまま。
   - 拡張のキーを書かない計画が「前と同じバイト」になることは、新しいコードで op を書き出して手で当てた結果と比べ、sha を固定した。前のコード（8362d5fc）で組み直して比べることはしていない（core の model.hpp を変えたので、組み直しが全体に及ぶため）。
+
+### 群 K3（AI 向けの道具と手引き。ブランチ komawari-ai、komawari-core 692d212d から）
+- 設計: SPEC.md LAYOUT-01「AI 向けの道具（群 K3）」。K1 の API（request_from_json・generate・batch_to_json・merge_into_plan、komawari::skeleton_of_page・shape_of_page・difference・describe）をそのまま使い、service の API は変えていない。
+- MCP の道具 `layout_ideas`（service/studio_komawari.cpp、道具の表 kAgentTools・tool_table・api/mcp_tools に足した。MCP は 42 道具）:
+  - 引数: project・page（必須）、panels か min_panels・max_panels、min_tiers・max_tiers、preset、knobs、seed、count（既定 12）、base（案の skeleton）か base_page（今のページ）、variation、focus、plan（下書きのネーム計画）。
+  - 返り値: {page, request, seed, ideas[{skeleton, summary, panels, pattern, largest, reading_order, like_pages, plan?}], tried, dropped, around, name_approved}。plan を渡すと各案に merge_into_plan した plan が付き、そのまま submit_name に出せる。コマ数を書かずに plan を渡すと plan のコマ数ちょうど。
+  - 読むだけ（MCP の read_only に入れた: presence と book_in_use は無く、道具の記録だけが書かれる）。人が承認したページは警告 name_approved（変更は submit_name が断る）。断りは issues の code layout_ideas_invalid・base_twice・base_unusable・no_page、束が足りないときは警告 layout_ideas_few。
+  - MCP の inputSchema: ToolParam に schema（プロパティの説明・範囲を JSON の文で足す）を足し、layout_ideas の各引数と submit_name の plan に使った。ほかの道具の schema は前のまま。submit_name の説明文と MCP の instructions に拡張のキー・単調さの警告・layout_ideas を書いた。
+  - CLI: `genko studio layout-ideas BOOK --page N [--panels N] [--preset …] [--knobs JSON] [--seed S] [--count N] [--base FILE | --base-page] [--variation V] [--focus N] [--plan FILE] …`。`genko studio call BOOK layout_ideas ARGS.json` も通る。HTTP の API（genko serve）には studio の道具の入口が無いので足していない（MCP の Streamable HTTP には同じ道具が出る）。
+- B 手引き: manga_rules.md に「コマ割りの緩急」（beat の重さで大きさ・めくり・視線・前のページと変える・斜め／断ち切り／重ね／差し込み／はみ出し／枠なし／間の使いどころ・定型は例）、「コマ割りの案の束（layout_ideas）」、「単調さの警告」（code ごとの直し方の表）を足し、段組の節に拡張のキーを書いた。SKILL.md の plan_page を緩急と案の束で教える形に書き直した（integrations の Hermes・Claude Code の写しも同じ）。drawing.md（と写し）に add_frame の into・over、set_frame の border_mm・clip・over。lint の reveal_small・emphasis_small・finale_small の hint を、定型を例として示す文にした（code と severity は同じ）。docs/AGENT.md、OTHER_AGENTS.md（42 個）、ARCHITECTURE.md、integrations/hermes/config.example.yaml（ネーム担当に layout_ideas）。
+- 試験: test_mcp_api_e2e に layoutIdeasThroughMcp（tools/list に出る・schema・submit_name の説明文のキー、同じ seed で同じ束、コマ数ちょうど 1〜8、断り、本を変えない、下書きの計画から選んで submit_name、今のページの変異、拡張のキーを全部含む計画、単調な 3 ページで layout_repeats と layout_flat がほかの issue の後に警告で出る、承認済みのページは name_approved の警告で、submit_name は断り本は変わらない）。onlyAnAgentsTools の道具の表に layout_ideas を足した（42）。test_cli_e2e に studioLayoutIdeas（同じ seed で同じ出力・コマ数・knobs・plan のファイル・call・使い方の誤り exit 2・count 49 の断り・本を変えない）。手引きの写しの試験（test_ledger_service_b の skillCopyMatchesThePackagedOne・claudeCodeSkillCopyMatchesThePackagedSkill）と unit/test_layout_ideas 17 本も合格。PERF-F（test_perf_pipeline）は道具の数を固定していない（pipeline_harness も固定していない）ので変えていない。
+- 直さなかった物:
+  - core の既存の不具合（見つけた）: 斜めに切った（cut_frame）コマを merge_frame で戻すと、親のコマの `split`（割り線の記録）が残り、その後のまっすぐの split_frame は remember_split が前の記録を上書きしない。submit_name の replace で斜めの段組から斜めの無い段組に作り直したページは、`split` に前の斜めが残る（コマの形は正しい）。そのため skeleton_of_page・shape_of_page がそのページを「斜めあり」と読み、layout_repeats が出ないことがあり、inspect page の gutters（move_gutter）も前の線を返しうる。op の振る舞いを変えない約束なので直していない（直すなら Page::merge_frame か split_frame のまっすぐの道で、葉の古い split を消す）。試験は、この道を通らない順に並べた。
+  - 案の束の絵（12 案を並べた縮小画像）は返さない。AI は summary・pattern・largest と、submit_name のプレビューで見る。
+  - GUI（K2）は別の群。
 
 ## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 

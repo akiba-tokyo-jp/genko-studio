@@ -10,7 +10,7 @@ mcp_servers:
     # 道具が多すぎて選び間違えるときは、サブエージェントの役ごとに絞る（キー名は Hermes の版で確かめる）。
     # ネーム担当:
     #   tools:
-    #     include: [projects, status, next, inspect, render, set_bible, set_script, submit_name, apply_ops,
+    #     include: [projects, status, next, inspect, render, set_bible, set_script, submit_name, layout_ideas, apply_ops,
     #               record_review, request_approval, review_page, tickets, ask_human]
     # 作画担当:
     #   tools:
