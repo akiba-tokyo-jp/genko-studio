@@ -11,6 +11,8 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
+
 #include <cmath>
 #include <set>
 #include <string>
@@ -37,6 +39,7 @@
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "studio/schemas.hpp"
+#include "regex_timing.hpp"
 
 #include "k1_probe.inc"  // (the same probe 8362d5fc's build ran: submitNameSavesAsBeforeK1)
 
@@ -570,15 +573,32 @@ private slots:
         }
     }
 
-    // 12 ideas well within the time a window waits for (the drawing aside).
+    // 12 ideas well within the time a window waits for (the drawing aside): 50 ms a batch in an optimized build, the
+    // build that bound is for. A sanitizer's or a debug build runs the same work many times slower (the V3 ASan run: 303 ms
+    // for the 4 batches): there what is checked is that the time grows with the ideas asked for, not faster — 48 ideas
+    // a preset timed the same way, in this build, now, at most 10 times the 12's (as many again would be 4, the square's
+    // 16) — as the regex tests' bounds are (support/regex_timing.hpp).
     void aBatchIsQuick() {
-        QElapsedTimer timer;
-        timer.start();
-        int made = 0;
-        for (const ideas::Preset preset : kPresets) made += static_cast<int>(ideas::generate(request(preset, 0, "time")).ideas.size());
-        const qint64 ms = timer.elapsed();
-        qInfo("4 batches (%d ideas): %lld ms", made, static_cast<long long>(ms));
-        QVERIFY2(ms < 4 * 50, std::to_string(ms).c_str());
+        const auto timed = [](int count) {
+            QElapsedTimer timer;
+            timer.start();
+            int made = 0;
+            for (const ideas::Preset preset : kPresets) {
+                ideas::Request r = request(preset, 0, "time");
+                r.count = count;
+                made += static_cast<int>(ideas::generate(r).ideas.size());
+            }
+            const qint64 ms = timer.elapsed();
+            qInfo("4 batches of %d (%d ideas): %lld ms", count, made, static_cast<long long>(ms));
+            return ms;
+        };
+        const qint64 ms = timed(12);
+        if constexpr (genko::test::kOptimizedBuild) {
+            QVERIFY2(ms < 4 * 50, std::to_string(ms).c_str());
+        } else {
+            const qint64 many = timed(48);
+            QVERIFY2(many < std::max<qint64>(250, 10 * ms), (std::to_string(many) + " " + std::to_string(ms)).c_str());
+        }
     }
 
     void theRequestIsChecked() {
@@ -749,8 +769,11 @@ private slots:
         for (const genko::core::Frame& child : node->children) QVERIFY(child.over);
         QTemporaryDir dir;
         QCOMPARE(Json::parse(project_text(work.doc, dir))["features"], parsed(R"(["komawari@1"])"));
-        for (const genko::core::Frame& child : node->children) {
-            work.apply(Json::array({Json::object({{"op", "set_frame"}, {"page", 1}, {"frame_id", child.id}, {"over", false}})}), "ai:test");
+        // (the ids first: an op replaces the page's frames, and node with them)
+        std::vector<std::string> children;
+        for (const genko::core::Frame& child : node->children) children.push_back(child.id);
+        for (const std::string& child : children) {
+            work.apply(Json::array({Json::object({{"op", "set_frame"}, {"page", 1}, {"frame_id", child}, {"over", false}})}), "ai:test");
         }
         const std::string text = project_text(work.doc, dir);
         QCOMPARE(Json::parse(text)["features"], Json::array());
