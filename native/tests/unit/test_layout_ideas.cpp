@@ -8,6 +8,7 @@
 
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <cmath>
@@ -34,6 +35,8 @@
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "studio/schemas.hpp"
+
+#include "k1_probe.inc"  // (the same probe 8362d5fc's build ran: submitNameSavesAsBeforeK1)
 
 namespace layout = genko::service::layout;
 namespace ideas = genko::service::layout_ideas;
@@ -321,7 +324,7 @@ private slots:
         QCOMPARE(a.seed, std::string("km-0123456789abcdef"));
         for (const ideas::Idea& idea : a.ideas) qInfo("%s", idea.summary.c_str());
         QCOMPARE(skeletons(a), skeletons(b));
-        QCOMPARE(QString::fromStdString(sha256(skeletons(a))), QStringLiteral("cd748f42b15318b1c7dee9f3b0afe9d89ec27a597cb1f647f584cc1d6e1fe9d8"));
+        QCOMPARE(QString::fromStdString(sha256(skeletons(a))), QStringLiteral("470883d8a1dfc81f2fc4dd1e46adb613227f8de62d1b2067bcdc6ebd18cd4071"));
         ideas::Request action = request(ideas::Preset::Action, 6, "ネームの種");
         QCOMPARE(QString::fromStdString(sha256(skeletons(ideas::generate(action)))), QStringLiteral("574b6021e94f89c4e9ba4f0122695df3bc392537b9a538dfc1d3c6c85e78791d"));
         ideas::Request other = r;
@@ -609,6 +612,181 @@ private slots:
         for (const auto& issue : second.issues) QVERIFY2(issue.severity != "error", issue.code.c_str());
         const auto read = genko::storage::load_document(book);
         QCOMPARE(read.document.page(1).leaf_frames().size(), std::size_t{3});
+    }
+
+    // A plan without the new keys is saved as 8362d5fc (before K1) saved it: the demo4 names submitted through the tool,
+    // project.json (its random book id zeroed) and each page's input hash, taken from that build (k1_probe).
+    void submitNameSavesAsBeforeK1() {
+        QTemporaryDir root;
+        const auto [sha, hashes] = k1_probe(root.path().toStdString());
+        QCOMPARE(QString::fromStdString(hashes), QStringLiteral("ok ok ok ok sha256:9238450ccae65d3552a809acb132124bebff257ffd829d70b1d159baf285bcd0 sha256:a5df9f572363c47d1ecf212eebaec7fc2b4f7a7a0f9d557401536e6ec39f63d2 sha256:118132feb18e7ebd98e0c56bb5b1c04ce1d142329ad6f22bebe72d9e6c18cf49 sha256:90ebed411f37d33dea3e1aa3b902140b5a964ed9841ae314263651390af245e4 "));
+        QCOMPARE(QString::fromStdString(sha), QStringLiteral("7c1284b40aac3f696c2b4ab40fb41a84da5db79d1c3e82b1e801dd3b297a00a9"));
+    }
+
+    // The gates: on a page whose name a person approved, an agent changes no panel's over (strict_gates), and only a
+    // person lays an idea on it again (an agent of any name, "codex" too, is refused, the page left as it was).
+    void theGatesHold() {
+        Work work = blank_book();
+        work.doc.strict_gates = true;
+        const Json plan = parsed(R"({"page": 1, "tiers": [{"h": 0.5, "cols": [{"slot": "p1", "w": 1}]}, {"h": 0.5, "cols": [{"slot": "p2", "w": 1}]}],
+            "insets": [{"slot": "p3", "on": "p1", "rect": [0.3, 0.3, 0.4, 0.2]}], "panels": [{"slot": "p1"}, {"slot": "p2"}, {"slot": "p3"}]})");
+        const layout::CompiledLayout compiled = layout::apply_layout(work, Json(1), plan, "human:leaf");
+        work.apply(parsed(R"([{"op": "name_ok", "page": 1}])"), "human:leaf");
+        QVERIFY(work.doc.page(0).name_ok);
+        const Json off = Json::array({Json::object({{"op", "set_frame"}, {"page", 1}, {"frame_id", *compiled.frame_of("p3")}, {"over", false}})});
+        QVERIFY_THROWS_EXCEPTION(genko::core::ApplyError, work.apply(off, "ai:agent"));
+        QVERIFY(work.doc.page(0).find_frame(*compiled.frame_of("p3"))->over);
+        const ideas::Batch batch = ideas::generate(request(ideas::Preset::Talk, 4, "gates"));
+        for (const char* agent : {"ai:test", "codex"}) {
+            const std::size_t before = work.doc.page(0).leaf_frames().size();
+            QVERIFY_THROWS_EXCEPTION(layout::LayoutError, (void)ideas::apply_idea(work, Json(1), batch.ideas.front().skeleton, agent, true));
+            QCOMPARE(work.doc.page(0).leaf_frames().size(), before);
+        }
+        (void)ideas::apply_idea(work, Json(1), batch.ideas.front().skeleton, "human:leaf", true);
+        QCOMPARE(work.doc.page(0).leaf_frames().size(), batch.ideas.front().shape.count());
+    }
+
+    // over is named while a panel has it, and the feature goes when none has; a split panel over the others is two over
+    // them (the split node is none); a reader takes over as true or false only.
+    void overAndItsFeature() {
+        Work work = blank_book();
+        const Json plan = parsed(R"({"page": 1, "tiers": [{"h": 1, "cols": [{"slot": "p1", "w": 1}]}],
+            "insets": [{"slot": "p2", "on": "p1", "rect": [0.05, 0.6, 0.6, 0.35]}], "panels": [{"slot": "p1"}, {"slot": "p2"}]})");
+        const layout::CompiledLayout compiled = layout::apply_layout(work, Json(1), plan, "ai:test");
+        const std::string inset = *compiled.frame_of("p2");
+        work.apply(Json::array({Json::object({{"op", "split_frame"}, {"page", 1}, {"frame_id", inset}, {"axis", "vertical"}, {"ratio", 0.5}})}), "ai:test");
+        const genko::core::Frame* node = work.doc.page(0).find_frame(inset);
+        QVERIFY(node != nullptr && !node->children.empty() && !node->over);
+        for (const genko::core::Frame& child : node->children) QVERIFY(child.over);
+        QTemporaryDir dir;
+        QCOMPARE(Json::parse(project_text(work.doc, dir))["features"], parsed(R"(["komawari@1"])"));
+        for (const genko::core::Frame& child : node->children) {
+            work.apply(Json::array({Json::object({{"op", "set_frame"}, {"page", 1}, {"frame_id", child.id}, {"over", false}})}), "ai:test");
+        }
+        const std::string text = project_text(work.doc, dir);
+        QCOMPARE(Json::parse(text)["features"], Json::array());
+        QVERIFY(text.find("\"over\"") == std::string::npos);
+        // a node of the set_layout tree takes no over
+        work.apply(parsed(R"([{"op": "set_layout", "page": 1, "force": true, "tree": {"rect_mm": [29, 31.5, 150, 220], "axis": "horizontal", "over": true,
+            "children": [{"rect_mm": [29, 31.5, 150, 100]}, {"rect_mm": [29, 140, 150, 111.5], "over": true}]}}])"), "ai:test");
+        QVERIFY(!work.doc.page(0).frames[0].over && work.doc.page(0).frames[0].children[1].over);
+        // a reader: "over" as a string is a broken value (read-only), not true
+        Json broken = Json::parse(project_text(work.doc, dir));
+        broken["pages"][0]["frames"][0]["children"][1]["over"] = "false";
+        const auto read = genko::storage::load_document_text(broken.dump(), dir.path().toStdString());
+        QVERIFY(!read.report.clean());
+        QVERIFY(!read.document.page(0).frames[0].children[1].over);
+    }
+
+    // Variations of a skeleton with insets: each inset moves with its host, and every idea is laid as it reads.
+    void variedIdeasAreApplied() {
+        ideas::Request first = request(ideas::Preset::Standard, 6, "with-insets");
+        first.knobs.overlap = 1.0;
+        const ideas::Batch batch = ideas::generate(first);
+        const ideas::Idea* base = nullptr;
+        for (const ideas::Idea& idea : batch.ideas) {
+            if (base == nullptr && idea.skeleton.contains("insets")) base = &idea;
+        }
+        QVERIFY(base != nullptr);
+        int laid = 0;
+        for (const double v : {0.2, 0.6, 0.95}) {
+            ideas::Request r = request(ideas::Preset::Standard, 0, "vary-insets");
+            r.base = base->skeleton;
+            r.variation = v;
+            for (const ideas::Idea& idea : ideas::generate(r).ideas) {
+                QVERIFY(komawari::insets_on_hosts(idea.shape));
+                Work work = blank_book();
+                const layout::CompiledLayout compiled = ideas::apply_idea(work, Json(1), idea.skeleton, "ai:test", false);
+                QCOMPARE(std::vector<std::string>(compiled.reading_order.begin(), compiled.reading_order.end()), order_of(idea));
+                ++laid;
+            }
+        }
+        QVERIFY(laid >= 18);
+        // a K1-earlier plan as the base: its slants and template bleeds kept
+        ideas::Request old = request(ideas::Preset::Standard, 0, "old-base");
+        old.base = parsed(R"({"template": "action_slant", "panels": [{"slot": "p1"}, {"slot": "p2"}, {"slot": "p3", "bleed": true}]})");
+        old.variation = 0.1;
+        for (const ideas::Idea& idea : ideas::generate(old).ideas) {
+            QVERIFY(idea.shape.tilts > 0);
+            QVERIFY(idea.skeleton.dump().find("\"bleed\":true") != std::string::npos);
+        }
+    }
+
+    // What cannot be drawn from or laid is refused in words, and nothing is changed.
+    void brokenInputIsRefused() {
+        const auto base_refused = [](const char* text) {
+            ideas::Request r = request(ideas::Preset::Standard, 0, "broken");
+            r.base = Json::parse(text);
+            try {
+                (void)ideas::generate(r);
+            } catch (const layout::LayoutError& e) {
+                return e.where().rfind("/base", 0) == 0 && QString::fromStdString(e.message()).contains(QRegularExpression(QStringLiteral("[ぁ-んァ-ヶ一-龥]")));
+            }
+            return false;
+        };
+        QVERIFY(base_refused(R"({"tiers": [{"h": 1}]})"));
+        QVERIFY(base_refused(R"({"tiers": [{"h": "x", "cols": [{"slot": "p1", "w": 1}]}], "panels": [{"slot": "p1"}]})"));
+        QVERIFY(base_refused(R"({"tiers": [{"h": 1, "cols": [{"slot": "p1", "w": 1}]}], "panels": []})"));
+        // a skeleton without an inset's rect, or of 12 panels: refused before the page is cleared
+        Work work = blank_book();
+        const ideas::Batch batch = ideas::generate(request(ideas::Preset::Talk, 4, "kept"));
+        (void)ideas::apply_idea(work, Json(1), batch.ideas.front().skeleton, "ai:test", false);
+        const std::size_t kept = work.doc.page(0).leaf_frames().size();
+        for (const char* text : {R"({"tiers": [{"h": 1, "cols": [{"slot": "p1", "w": 1}]}], "insets": [{"slot": "p2", "on": "p1"}], "panels": [{"slot": "p1"}, {"slot": "p2"}]})",
+                                 R"({"tiers": [{"h": "1", "cols": [{"slot": "p1", "w": 1}]}], "panels": [{"slot": "p1"}]})",
+                                 R"({"tiers": [{"h": 1, "cols": [{"slot": "p1", "w": 1}]}], "insets": [{"slot": "p2", "on": "p1", "rect": [0.9, 0.9, 0.01, 0.01]}],
+                                     "panels": [{"slot": "p1"}, {"slot": "p2"}]})"}) {
+            QVERIFY_THROWS_EXCEPTION(layout::LayoutError, (void)ideas::apply_idea(work, Json(1), Json::parse(text), "ai:test", true));
+            QCOMPARE(work.doc.page(0).leaf_frames().size(), kept);
+        }
+        Json many = parsed(R"({"tiers": [], "panels": []})");
+        for (int t = 0; t < 4; ++t) {
+            Json cols = Json::array();
+            for (int c = 0; c < 3; ++c) {
+                const std::string slot = "p" + std::to_string(t * 3 + c + 1);
+                cols.push_back(Json::object({{"slot", slot}, {"w", c == 2 ? 0.34 : 0.33}}));
+                many["panels"].push_back(Json::object({{"slot", slot}}));
+            }
+            many["tiers"].push_back(Json::object({{"h", 0.25}, {"cols", cols}}));
+        }
+        QVERIFY_THROWS_EXCEPTION(layout::LayoutError, (void)ideas::apply_idea(work, Json(1), many, "ai:test", true));
+        QCOMPARE(work.doc.page(0).leaf_frames().size(), kept);
+        // requests: out of range, at odds, or not numbers
+        const auto refused = [](const char* text, const std::string& path) {
+            try {
+                (void)ideas::request_from_json(Json::parse(text), PageSpec::b5_doujin());
+            } catch (const layout::LayoutError& e) {
+                return e.where() == path;
+            }
+            return false;
+        };
+        QVERIFY(refused(R"({"panels": 18446744073709551615})", "/panels"));
+        QVERIFY(refused(R"({"panels": 2, "min_tiers": 3})", "/min_tiers"));
+        QVERIFY(refused(R"({"max_panels": 4, "focus": 5})", "/focus"));
+        QVERIFY(refused(R"({"seed": ""})", "/seed"));
+        QVERIFY(refused(R"({"panels": 4, "min_panels": 3})", "/panels"));
+        QCOMPARE(ideas::request_from_json(parsed(R"({"seed": 18446744073709551615})"), PageSpec::b5_doujin()).seed, std::string("18446744073709551615"));
+        QCOMPARE(ideas::seed_value("km-0123456789ABCDEF"), ideas::seed_value("km-0123456789abcdef"));
+        ideas::Request odd = request(ideas::Preset::Action, 0, "nan");
+        odd.variation = std::nan("");
+        odd.knobs.slant = std::nan("");
+        odd.knobs.big = 7;
+        odd.min_panels = 3;
+        odd.max_panels = 6;
+        odd.focus = 4;
+        const ideas::Batch made = ideas::generate(odd);
+        QVERIFY(!made.ideas.empty());
+        for (const ideas::Idea& idea : made.ideas) QVERIFY(idea.shape.count() >= 4 && komawari::largest(idea.shape) == 4);
+        // a plan's panels of slots the skeleton does not have are left out, and told
+        std::vector<std::string> dropped;
+        const Json plan = parsed(R"({"page": 1, "panels": [{"slot": "p1"}, {"slot": "p9", "shot": "MS"}]})");
+        const Json merged = ideas::merge_into_plan(batch.ideas.front().skeleton, plan, &dropped);
+        QCOMPARE(dropped, std::vector<std::string>{"p9"});
+        QVERIFY(layout::check_tiers(merged).empty());
+        // a page numbered 2.5 in the book: the warnings of the book are made all the same
+        Work odd_book = blank_book(3);
+        odd_book.doc.edit_page(1).index = Num(2.5);
+        (void)komawari::book_monotony(odd_book.doc, Json::object());
     }
 
 private:

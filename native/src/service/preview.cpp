@@ -52,7 +52,8 @@ render::Image annotate(const render::Image& image, const core::Page& page, int d
     if (core::py_truthy(plan)) {
         for (const Json& p : core::iterate(core::py_get(plan, "panels", Json::array()))) panels.set(core::py_get(p, "slot"), p);
         if (core::truthy_at(plan, "insets")) {  // (komawari@1: the insets read beside their hosts)
-            slots_by_order = komawari::reading_slots(plan);
+            const auto [fw, fh] = komawari::frame_size(page.spec);
+            slots_by_order = komawari::reading_slots(plan, fw, fh);
         } else if (core::truthy_at(plan, "tiers")) {
             slots_by_order = layout::slots_in_order(plan["tiers"]);
         } else if (core::truthy_at(plan, "template")) {

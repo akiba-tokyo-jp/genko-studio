@@ -1384,7 +1384,7 @@
  {
   "op": "set_layout",
   "page": "int",
-  "tree": "{rect_mm, axis?, children?}",
+  "tree": "{rect_mm, axis?, children?, over? (komawari@1: a panel, not a node)}",
   "force": "bool?"
  },
  {
