@@ -543,10 +543,10 @@ private slots:
     void variationsOfAPlainGridAreNotEmpty() {
         const char* const grids[] = {
             R"({"tiers": [{"h": 0.333, "cols": [{"slot": "p1", "w": 0.5}, {"slot": "p2", "w": 0.5}]}, {"h": 0.334, "cols": [{"slot": "p3", "w": 0.5}, {"slot": "p4", "w": 0.5}]},
-                          {"h": 0.333, "cols": [{"slot": "p5", "w": 0.5}, {"slot": "p6", "w": 0.5}]}], "panels": []})",
+                          {"h": 0.333, "cols": [{"slot": "p5", "w": 0.5}, {"slot": "p6", "w": 0.5}]}], "panels": [{"slot": "p1"}, {"slot": "p2"}, {"slot": "p3"}, {"slot": "p4"}, {"slot": "p5"}, {"slot": "p6"}]})",
             R"({"tiers": [{"h": 0.25, "cols": [{"slot": "p1", "w": 1}]}, {"h": 0.25, "cols": [{"slot": "p2", "w": 1}]}, {"h": 0.25, "cols": [{"slot": "p3", "w": 1}]},
-                          {"h": 0.25, "cols": [{"slot": "p4", "w": 1}]}], "panels": []})",
-            R"({"tiers": [{"h": 0.5, "cols": [{"slot": "p1", "w": 0.5}, {"slot": "p2", "w": 0.5}]}, {"h": 0.5, "cols": [{"slot": "p3", "w": 0.5}, {"slot": "p4", "w": 0.5}]}], "panels": []})"};
+                          {"h": 0.25, "cols": [{"slot": "p4", "w": 1}]}], "panels": [{"slot": "p1"}, {"slot": "p2"}, {"slot": "p3"}, {"slot": "p4"}]})",
+            R"({"tiers": [{"h": 0.5, "cols": [{"slot": "p1", "w": 0.5}, {"slot": "p2", "w": 0.5}]}, {"h": 0.5, "cols": [{"slot": "p3", "w": 0.5}, {"slot": "p4", "w": 0.5}]}], "panels": [{"slot": "p1"}, {"slot": "p2"}, {"slot": "p3"}, {"slot": "p4"}]})"};
         for (const char* grid : grids) {
             Work work = blank_book();
             (void)ideas::apply_idea(work, Json(1), parsed(grid), "human:test", false);

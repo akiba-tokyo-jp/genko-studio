@@ -125,7 +125,7 @@ QImage idea_picture(const core::Document& done, std::size_t index) {
     painter.setPen(QPen(QColor(QStringLiteral("#c8c8c8")), 1));
     painter.drawRect(box(trim).adjusted(0, 0, -1, -1));
     painter.setPen(QPen(QColor(QStringLiteral("#dcdcdc")), 1, Qt::DotLine));
-    painter.drawRect(box(inner));
+    painter.drawRect(box(inner).adjusted(-2, -2, 2, 2));  // (just outside it: a border on the basic frame stays a solid line)
     for (const core::Frame* frame : page.leaf_frames()) {
         QPolygonF outline;
         if (frame->poly && !frame->poly->empty()) {

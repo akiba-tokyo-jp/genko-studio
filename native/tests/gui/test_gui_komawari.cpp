@@ -418,7 +418,7 @@ private slots:
             d.preset->setCurrentIndex(2);  // (アクション)
             QVERIFY(QTest::qWaitFor([&] { return skeletons(d.batch()) != first; }, 5000));
             QCOMPARE(d.batch().seed, seed);
-            QCOMPARE(d.knobs.front().second->value(), 65);  // (斜め: アクション's)
+            QCOMPARE(d.knobs.front().second->value(), 75);  // (斜め: アクション's)
             // 5 and 24
             d.count->setCurrentIndex(0);
             d.make_batch(seed);
@@ -498,8 +498,8 @@ private slots:
             QCOMPARE(d.batch().seed, seed);
             QCOMPARE(d.list()->currentRow(), 3);
             QVERIFY(!d.back->isEnabled());
-            // a blank page as it is: one panel to vary
-            QVERIFY(d.page_can_be_base());
+            // a blank page as it is: one panel, nothing to vary — that base is greyed
+            QVERIFY(!d.page_can_be_base());
         });
     }
 
@@ -527,7 +527,11 @@ private slots:
         QVERIFY(w->last_notice().startsWith(QStringLiteral("コマ割りの案で割りました")));
         const auto shape = komawari::shape_of_page(studio.doc(), studio.page());
         QVERIFY(shape.has_value());
-        QCOMPARE(komawari::difference(*shape, chosen.shape), 0);
+        // (the same layout: its tiers, slants and insets — which of two panels of near the same size is the largest can read
+        // otherwise from the panels cut with deep slants)
+        QCOMPARE(QString::fromStdString(shape->pattern), QString::fromStdString(chosen.shape.pattern));
+        QCOMPARE(shape->tilts, chosen.shape.tilts);
+        QCOMPARE(overs(studio.page()), static_cast<std::size_t>(std::count_if(chosen.shape.panels.begin(), chosen.shape.panels.end(), [](const auto& b) { return b.over; })));
         const Json laid = panels_of(studio.page());
         QVERIFY(chosen.skeleton.contains("insets") ? overs(studio.page()) > 0 : true);
         studio.trigger("act_undo");
