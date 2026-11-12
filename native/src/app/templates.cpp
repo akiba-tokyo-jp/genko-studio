@@ -192,6 +192,29 @@ core::Rect rect_of(const Json& node) {
     return core::Rect{core::Num(f(r[0])), core::Num(f(r[1])), core::Num(f(r[2])), core::Num(f(r[3]))};
 }
 
+// コマ割り K2: from the basic frame a person's template was kept on to the one of the page it is laid on (a page of the
+// other side has it elsewhere). None for the same frame (within rounding): the tree as it is.
+struct Move {
+    core::Rect from, to;
+    double kx = 1, ky = 1;
+    double x(double v) const { return core::py_round(to.x.value() + (v - from.x.value()) * kx, 3); }
+    double y(double v) const { return core::py_round(to.y.value() + (v - from.y.value()) * ky, 3); }
+    Json poly(const Json& points) const {
+        Json out = Json::array();
+        for (const Json& p : points) out.push_back(Json::array({x(core::py_float(p[0])), y(core::py_float(p[1]))}));
+        return out;
+    }
+};
+
+std::optional<Move> move_between(const core::Rect& from, const core::Rect& to) {
+    const auto near = [](const core::Num& a, const core::Num& b) { return std::abs((a - b).value()) < 1e-3; };
+    if (near(from.x, to.x) && near(from.y, to.y) && near(from.width, to.width) && near(from.height, to.height)) return std::nullopt;
+    Move m{from, to};
+    m.kx = from.width.value() != 0.0 ? to.width.value() / from.width.value() : 1.0;
+    m.ky = from.height.value() != 0.0 ? to.height.value() / from.height.value() : 1.0;
+    return m;
+}
+
 bool has_kids(const Json& node) { return node.contains("children") && node["children"].is_array() && !node["children"].empty(); }
 bool is_over(const Json& node) { return node.contains("over") && core::py_truthy(node["over"]); }
 bool is_free_node(const Json& node) { return node.contains("axis") && node["axis"] == Json("free"); }
@@ -219,7 +242,7 @@ bool has_drawn(const Json& node) {
 }
 
 // A person's template: the tree's cuts and looks, made with the panel ops.
-void build(Builder& b, const Json& node, const std::string& frame_id) {
+void build(Builder& b, const Json& node, const std::string& frame_id, const Move* move = nullptr) {
     const bool has_children = node.contains("children") && node["children"].is_array() && !node["children"].empty();
     const std::string axis = node.contains("axis") && node["axis"].is_string() ? node["axis"].get<std::string>() : std::string();
     if (is_inset_node(node)) {
@@ -248,8 +271,8 @@ void build(Builder& b, const Json& node, const std::string& frame_id) {
         Json look = over;
         look.erase("poly");
         look.erase("border_mm");
-        build(b, look, made);
-        build(b, node["children"][0], frame_id);
+        build(b, look, made, move);
+        build(b, node["children"][0], frame_id, move);
         return;
     }
     if (has_children) {
@@ -271,8 +294,8 @@ void build(Builder& b, const Json& node, const std::string& frame_id) {
             const core::Frame& parent = b.find(frame_id);
             const std::string first = parent.children.at(0).id;
             const std::string second = parent.children.at(1).id;
-            build(b, kids[0], first);
-            build(b, kids[1], second);
+            build(b, kids[0], first, move);
+            build(b, kids[1], second, move);
         } else {
             const bool horizontal = axis == "horizontal";
             std::vector<const Json*> sorted;
@@ -293,13 +316,15 @@ void build(Builder& b, const Json& node, const std::string& frame_id) {
             const double gutter = sorted.size() > 1 ? std::max(0.0, gaps / static_cast<double>(sorted.size() - 1)) : 0.0;
             std::vector<std::string> parts = b.split_sequence(frame_id, ratios, horizontal ? "horizontal" : "vertical", gutter, {});
             if (!horizontal) std::reverse(parts.begin(), parts.end());  // (split_sequence lists columns right to left)
-            for (std::size_t i = 0; i < sorted.size(); ++i) build(b, *sorted[i], parts[i]);
+            for (std::size_t i = 0; i < sorted.size(); ++i) build(b, *sorted[i], parts[i], move);
         }
         return;
     }
     // a panel's look
     Json change = Json::object();
-    if (node.contains("poly") && core::py_truthy(node["poly"])) change["poly"] = node["poly"];
+    // (the outline of a slanted panel where its cuts are: on this page's basic frame — the cuts themselves are made in
+    // the panels' own boxes)
+    if (node.contains("poly") && core::py_truthy(node["poly"])) change["poly"] = move != nullptr ? move->poly(node["poly"]) : node["poly"];
     if (node.contains("bleed") && core::py_truthy(node["bleed"])) change["bleed"] = true;
     if (node.contains("clip") && node["clip"].is_boolean() && !node["clip"].get<bool>()) change["clip"] = false;
     if (node.contains("border_mm")) change["border_mm"] = node["border_mm"];
@@ -331,34 +356,34 @@ Json scaled(const Json& node, double sx, double sy) {
     return out;
 }
 
-// The same tree with every box and outline moved from the box `from` onto the box `to` (and scaled to its size).
-Json moved_node(const Json& node, const core::Rect& from, double kx, double ky, const core::Rect& to) {
-    const auto px = [&](double x) { return core::py_round(to.x.value() + (x - from.x.value()) * kx, 3); };
-    const auto py = [&](double y) { return core::py_round(to.y.value() + (y - from.y.value()) * ky, 3); };
+// A tree of drawn panels moved onto this page's basic frame: every box and outline but the root's when it is the whole
+// paper (add_frame makes the root of drawn panels so): that stays the paper.
+Json moved_drawn(const Json& node, const Move& move, bool root, double paper_w, double paper_h) {
     Json out = node;
     const Json& r = node.at("rect_mm");
-    out["rect_mm"] = Json::array({px(f(r[0])), py(f(r[1])), core::py_round(f(r[2]) * kx, 3), core::py_round(f(r[3]) * ky, 3)});
-    if (node.contains("poly") && core::py_truthy(node["poly"])) {
-        Json poly = Json::array();
-        for (const Json& p : node["poly"]) poly.push_back(Json::array({px(f(p[0])), py(f(p[1]))}));
-        out["poly"] = poly;
+    const bool whole_paper = root && std::abs(f(r[0])) < 1e-3 && std::abs(f(r[1])) < 1e-3 && std::abs(f(r[2]) - paper_w) < 1e-3 &&
+                             std::abs(f(r[3]) - paper_h) < 1e-3;
+    if (!whole_paper) {
+        out["rect_mm"] = Json::array({move.x(f(r[0])), move.y(f(r[1])), core::py_round(f(r[2]) * move.kx, 3), core::py_round(f(r[3]) * move.ky, 3)});
+        if (node.contains("poly") && core::py_truthy(node["poly"])) out["poly"] = move.poly(node["poly"]);
     }
     if (has_kids(node)) {
         Json children = Json::array();
-        for (const Json& child : node["children"]) children.push_back(moved_node(child, from, kx, ky, to));
+        for (const Json& child : node["children"]) children.push_back(moved_drawn(child, move, false, paper_w, paper_h));
         out["children"] = children;
     }
     return out;
 }
 
-Json moved(const Json& tree, const core::Rect& from, const core::Rect& to) {
-    if (from.x.value() == to.x.value() && from.y.value() == to.y.value() && from.width.value() == to.width.value() &&
-        from.height.value() == to.height.value()) {
-        return tree;  // (the page it came from, or one like it: as it is)
+// A tree with drawn (free) panels anywhere in it (a template kept before コマ割り K2: set as it is).
+bool has_free(const Json& node) {
+    if (node.contains("axis") && node["axis"] == Json("free")) return true;
+    if (node.contains("children") && node["children"].is_array()) {
+        for (const Json& child : node["children"]) {
+            if (has_free(child)) return true;
+        }
     }
-    const double kx = from.width.value() != 0.0 ? to.width.value() / from.width.value() : 1.0;
-    const double ky = from.height.value() != 0.0 ? to.height.value() / from.height.value() : 1.0;
-    return moved_node(tree, from, kx, ky, to);
+    return false;
 }
 
 }  // namespace
@@ -395,7 +420,7 @@ std::vector<Template> mine() {
     return out;
 }
 
-void save_mine(const QString& name, const core::Page& page) {
+void save_mine(const QString& name, const core::Page& page, const std::optional<core::Rect>& frame) {
     Json kept = Json::array();
     for (const Json& item : read_mine()) {
         if (item.is_object() && item.contains("name") && core::py_str(item["name"]) == name.toStdString()) continue;
@@ -405,6 +430,10 @@ void save_mine(const QString& name, const core::Page& page) {
     entry["name"] = name.toStdString();
     entry["size"] = Json::array({page.spec.width_mm.json(), page.spec.height_mm.json()});
     entry["tree"] = frame_tree(page.frames.at(0));
+    if (frame) {
+        const auto r3 = [](const core::Num& v) { return core::py_round(v.value(), 3); };
+        entry["frame"] = Json::array({r3(frame->x), r3(frame->y), r3(frame->width), r3(frame->height)});
+    }
     kept.push_back(entry);
     write_mine(kept);
 }
@@ -441,17 +470,31 @@ Plan plan(const core::Document& doc, std::size_t page_index, const Template& cho
         const Json& size = chosen.spec.at("size");
         const double w = f(size[0]);
         const double h = f(size[1]);
-        Json tree = scaled(chosen.spec.at("tree"), page.spec.width_mm.value() / (w != 0.0 ? w : 1.0),
-                           page.spec.height_mm.value() / (h != 0.0 ? h : 1.0));
-        // (コマ割り K2: the tree moved onto this page's basic frame — a page of the other side has it elsewhere — so that
-        // its drawn panels and the outlines of its slanted ones are where its cuts are)
-        tree = moved(tree, rect_of(tree), b.page().frames.at(0).rect);
-        if (has_drawn(tree)) {
-            // a layout of one's own with drawn panels: set as it is, as Python's dialog sets every one of one's own
-            b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"tree", tree}, {"force", true}}));
+        const double sx = page.spec.width_mm.value() / (w != 0.0 ? w : 1.0);
+        const double sy = page.spec.height_mm.value() / (h != 0.0 ? h : 1.0);
+        const Json tree = scaled(chosen.spec.at("tree"), sx, sy);
+        const std::string root = b.page().frames.at(0).id;  // (copied: the first op replaces the book it is in)
+        const Json* kept_on = chosen.spec.contains("frame") && chosen.spec["frame"].is_array() && chosen.spec["frame"].size() == 4 ? &chosen.spec["frame"] : nullptr;
+        if (kept_on == nullptr) {
+            // a template kept before コマ割り K2 (no basic frame with it): laid as it always was
+            if (has_free(tree)) {
+                // a layout of one's own with drawn panels: set as it is, as Python's dialog sets every one of one's own
+                b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"tree", tree}, {"force", true}}));
+            } else {
+                build(b, tree, root);
+            }
         } else {
-            const std::string root = b.page().frames.at(0).id;  // (copied: the first op replaces the book it is in)
-            build(b, tree, root);
+            // (コマ割り K2: from the basic frame it was kept on, scaled with the paper, onto this page's)
+            const Json& k = *kept_on;
+            const core::Rect from{core::Num(f(k[0]) * sx), core::Num(f(k[1]) * sy), core::Num(f(k[2]) * sx), core::Num(f(k[3]) * sy)};
+            const core::Rect to = page.inner_rect_mm(doc.start_side ? std::string_view(*doc.start_side) : std::string_view());
+            const std::optional<Move> move = move_between(from, to);
+            if (has_drawn(tree)) {
+                const Json laid = move ? moved_drawn(tree, *move, true, page.spec.width_mm.value(), page.spec.height_mm.value()) : tree;
+                b.apply(Json::object({{"op", "set_layout"}, {"page", b.number()}, {"tree", laid}, {"force", true}}));
+            } else {
+                build(b, tree, root, move ? &*move : nullptr);
+            }
         }
     } else {
         lay_out(b, chosen.spec);

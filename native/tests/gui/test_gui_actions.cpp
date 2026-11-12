@@ -470,6 +470,15 @@ private slots:
         // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 804＋16)
         // (and コマ割り K2's 1: ページ → コマ → コマ割りの案を出す… (act_komawari) — test_gui_komawari: 820＋1)
         QCOMPARE(w->actions_by_name().size(), std::size_t{821});
+        {
+            // (コマ割り K2: its words, tip, keys and place — what it does: test_gui_komawari)
+            QAction* ideas = w->action(QStringLiteral("act_komawari"));
+            QVERIFY(ideas != nullptr);
+            QCOMPARE(ideas->text(), QStringLiteral("コマ割りの案を出す…"));
+            QCOMPARE(ideas->statusTip(), QStringLiteral("コマ割りの案を束で出し、選んだ案で今のページを割ります（コマと台詞は作り直します）"));
+            QVERIFY(ideas->shortcuts().isEmpty());
+            QVERIFY(menus_of(w, ideas).contains(QStringLiteral("ページ/コマ")));
+        }
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

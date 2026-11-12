@@ -1642,7 +1642,7 @@ void MainWindow::save_template() {
     }
     try {
         if (!modal_target_unchanged(origin, snapshot, page_index)) return;
-        templates::save_mine(name, *page);
+        templates::save_mine(name, *page, page->inner_rect_mm(book().start_side ? std::string_view(*book().start_side) : std::string_view()));
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return;

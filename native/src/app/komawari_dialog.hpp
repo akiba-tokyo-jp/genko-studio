@@ -22,6 +22,7 @@ class QPushButton;
 class QSlider;
 class QSpinBox;
 class QThreadPool;
+class QKeyEvent;
 class QTimer;
 
 // コマ割りの案を出す… (コマ割り K2, docs/cpp-migration/SPEC.md LAYOUT-01): a batch of layout ideas for the page in
@@ -91,12 +92,16 @@ public:
     // The page as it is can be a base (its panels are tiers of cuts).
     bool page_can_be_base() const { return page_skeleton_.has_value(); }
 
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
+
 private:
     void show_batch();
     void vary_from(const core::Json& from, const QString& words, const std::string& with_seed);
     void settings_changed();
     void preset_changed();
     void follow();
+    void bound();
 
     std::shared_ptr<const core::Document> doc_;
     std::size_t page_index_ = 0;

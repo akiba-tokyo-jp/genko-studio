@@ -2,6 +2,7 @@
 
 #include <QString>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,8 +35,10 @@ struct Template {
 
 std::vector<Template> builtin();
 std::vector<Template> mine();
-// Keep this page's panels as a template (replacing one of the same name).
-void save_mine(const QString& name, const core::Page& page);
+// Keep this page's panels as a template (replacing one of the same name). With `frame` (コマ割り K2: the page's basic
+// frame, kept as "frame"), the template is laid on another page's basic frame where that is elsewhere; without it, as
+// every template before.
+void save_mine(const QString& name, const core::Page& page, const std::optional<core::Rect>& frame = std::nullopt);
 void remove_mine(const QString& name);
 
 // The page has one panel and no lines (Python's layout.is_blank).

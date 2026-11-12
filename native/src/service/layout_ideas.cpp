@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "core/actor.hpp"
+#include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -72,12 +73,13 @@ struct Params {
 
 Params params_of(Preset preset) {
     switch (preset) {
-        case Preset::Talk: return {5, 7, 3, 4, 3.5, 0.05, 0.05, 0.3, 0.15, 0.1, 0.05, 0.2, 0.15};
-        case Preset::Standard: return {4, 6, 2, 4, 3.0, 0.2, 0.2, 0.3, 0.4, 0.2, 0.15, 0.1, 0.2};
-        case Preset::Action: return {3, 6, 2, 4, 3.0, 0.65, 0.4, 0.2, 0.55, 0.3, 0.4, 0.05, 0.3};
-        case Preset::Showcase: return {1, 4, 1, 3, 2.0, 0.2, 0.7, 0.1, 0.9, 0.35, 0.45, 0.1, 0.2};
+        // (K2's review: the knobs made stronger — a batch is to show what is not the plain grid; 会話 the gentlest)
+        case Preset::Talk: return {5, 7, 3, 4, 3.5, 0.1, 0.1, 0.3, 0.25, 0.15, 0.05, 0.2, 0.15};
+        case Preset::Standard: return {4, 6, 2, 4, 3.0, 0.35, 0.3, 0.3, 0.55, 0.3, 0.15, 0.15, 0.2};
+        case Preset::Action: return {3, 6, 2, 4, 3.0, 0.75, 0.5, 0.2, 0.65, 0.4, 0.5, 0.2, 0.3};
+        case Preset::Showcase: return {1, 4, 1, 3, 2.0, 0.4, 0.8, 0.1, 0.95, 0.4, 0.55, 0.2, 0.2};
     }
-    return {4, 6, 2, 4, 3.0, 0.2, 0.2, 0.3, 0.4, 0.2, 0.15, 0.1, 0.2};
+    return {4, 6, 2, 4, 3.0, 0.35, 0.3, 0.3, 0.55, 0.3, 0.15, 0.15, 0.2};
 }
 
 struct Settings {
@@ -500,12 +502,12 @@ Built draw_fresh(Rng& rng, const Settings& s, int n, int wanted_focus) {
             }
             if (c + 1 < tier.cols.size()) {
                 col.gap10 = border_gap(rng, s.gap_vary * 0.5, false);
-                if (rng.chance(s.slant * 0.45)) col.tilt10 = tilt_of(rng, 4, 4 + 14 * s.slant);
+                if (rng.chance(s.slant * 0.45)) col.tilt10 = tilt_of(rng, 6, 8 + 20 * s.slant);
             }
         }
         if (t + 1 < tiers) {
             tier.gap10 = border_gap(rng, s.gap_vary, true);
-            if (rng.chance(s.slant * 0.7)) tier.tilt10 = tilt_of(rng, 6, 6 + 24 * s.slant);
+            if (rng.chance(s.slant * 0.7)) tier.tilt10 = tilt_of(rng, 12, 12 + 40 * s.slant);  // (deep enough to be seen: 12 mm is some 4°)
         }
     }
     // the panels' own keys
@@ -1004,6 +1006,39 @@ Draft vary(Rng& rng, const Draft& base, double v, const Settings& s) {
     return d;
 }
 
+// コマ割り K2: a variation of a dull base (a plain grid, panels of much the same size, nothing that stands out) given
+// what keeps it from being the grid again — a 大ゴマ (one tier made much taller and, in it, one column much wider), and a
+// deep slant on a border between tiers or a bleed of a panel on the paper's edge. Without it every variation of such a
+// page is sieved out as plain or flat as its base is.
+void add_accents(Rng& rng, Draft& d, const Settings& s) {
+    if (d.tiers.empty()) return;
+    const int t = rng.below(static_cast<int>(d.tiers.size()));
+    if (d.tiers.size() > 1) {
+        std::vector<double> heights;
+        for (std::size_t i = 0; i < d.tiers.size(); ++i) heights.push_back(d.tiers[i].h * (static_cast<int>(i) == t ? rng.range(1.9, 2.6) : 1.0));
+        const std::vector<int> tier_h = thousandths(heights, 60);
+        for (std::size_t i = 0; i < d.tiers.size(); ++i) d.tiers[i].h = tier_h[i];
+    }
+    Tier& tier = d.tiers[static_cast<std::size_t>(t)];
+    if (tier.cols.size() > 1) {
+        const int c = rng.below(static_cast<int>(tier.cols.size()));
+        std::vector<double> widths;
+        for (std::size_t i = 0; i < tier.cols.size(); ++i) widths.push_back(tier.cols[i].w * (static_cast<int>(i) == c ? rng.range(1.8, 2.4) : 1.0));
+        const std::vector<int> w = thousandths(widths, 80);
+        for (std::size_t i = 0; i < tier.cols.size(); ++i) tier.cols[i].w = w[i];
+    }
+    if (d.tiers.size() > 1 && rng.chance(0.6)) {
+        const int b = rng.below(static_cast<int>(d.tiers.size()) - 1);
+        d.tiers[static_cast<std::size_t>(b)].tilt10 = tilt_of(rng, 12, 12 + 40 * std::max(s.slant, 0.35));
+    } else {
+        std::vector<Place> edge;
+        for (const Place& p : places_of(d)) {
+            if (on_edge(d, p)) edge.push_back(p);
+        }
+        if (!edge.empty()) leaf_at(d, edge[static_cast<std::size_t>(rng.below(static_cast<int>(edge.size())))]).bleed = true;
+    }
+}
+
 // Two shapes that are the same but for small moves (each panel within 3% of the frame).
 bool near_same(const Shape& a, const Shape& b) {
     if (a.count() != b.count() || komawari::difference(a, b) != 0) return false;
@@ -1280,15 +1315,25 @@ Batch generate(const Request& given) {
         throw layout::LayoutError(r.focus > 0 ? "/focus" : "/min_panels", r.focus > 0 ? "見せ場のコマ（focus）がコマ数より大きい" : "min_panels が max_panels より大きい");
     }
     const int budget = count * 60;
-    int similar_below = komawari::kSimilarBelow;
+    // (a dull base: each variation is given 目立つ所 of its own — add_accents)
+    const bool dull_base = base_shape && base_shape->count() >= 2 &&
+                           (komawari::plain_grid(*base_shape) || komawari::flat(*base_shape) || komawari::strip_stack(*base_shape) ||
+                            komawari::accents(*base_shape) == 0);
+    // 目立つ所 (群 K2): an idea of a new batch has this many kinds of them (標準・アクション 2, 会話・見せゴマ 1; never more
+    // than its panels), but for a sixth of the batch at most — until the last quarter of the budget, when the knobs a
+    // person turned down leave too few
+    const int accent_need = r.preset == Preset::Standard || r.preset == Preset::Action ? 2 : 1;
+    const int few_allowed = count / 6;
+    int few = 0;
     for (int attempt = 0; attempt < budget && static_cast<int>(out.ideas.size()) < count; ++attempt) {
-        // (half the budget spent and the batch not full: alike ideas are let in, still not the same ones)
-        if (!base && attempt == budget / 2 && similar_below > 1) similar_below = 1;
+        // (half the budget spent and the batch not full: ideas alike but for the order of their tiers are let in)
+        const bool loose = attempt >= budget / 2;
         Rng rng(mix(seed, static_cast<std::uint64_t>(attempt)));
         ++out.tried;
         Draft draft;
         if (base) {
             draft = vary(rng, *base, r.variation, s);
+            if (dull_base) add_accents(rng, draft, s);
             try {
                 reanchor(draft, base_boxes, fw, fh);  // (each inset moves with its host)
             } catch (const std::exception&) {
@@ -1321,14 +1366,35 @@ Batch generate(const Request& given) {
             tally(out.dropped, why);
             continue;
         }
+        bool short_of_accents = false;
+        if (!base) {
+            // (段数 as asked: an inset taken from the panels can leave too few for the tiers asked for)
+            const int tier_count = static_cast<int>(std::count(made.second.pattern.begin(), made.second.pattern.end(), '-')) + 1;
+            if ((r.min_tiers > 0 && tier_count < r.min_tiers) || (r.max_tiers > 0 && tier_count > r.max_tiers)) {
+                tally(out.dropped, "tiers");
+                continue;
+            }
+            if (made.second.count() == 1 && komawari::accents(made.second) == 0) {  // (one plain panel: a blank page)
+                tally(out.dropped, "plain");
+                continue;
+            }
+            if (r.preset != Preset::Showcase && komawari::strip_stack(made.second)) {  // (帯の積み重ね)
+                tally(out.dropped, "strips");
+                continue;
+            }
+            short_of_accents = komawari::accents(made.second) < std::min(accent_need, static_cast<int>(made.second.count()));
+            if (short_of_accents && few >= few_allowed && attempt < budget * 3 / 4) {
+                tally(out.dropped, "accents");
+                continue;
+            }
+        }
         if (base_shape && near_same(made.second, *base_shape)) {
             tally(out.dropped, "same_as_base");
             continue;
         }
         bool alike = false;
         for (const Idea& idea : out.ideas) {
-            alike = alike || (base ? near_same(made.second, idea.shape) : komawari::difference(made.second, idea.shape) < similar_below ||
-                                                                               near_same(made.second, idea.shape));
+            alike = alike || near_same(made.second, idea.shape) || (!base && komawari::look_alike(made.second, idea.shape, loose));
         }
         if (alike) {
             tally(out.dropped, "similar");
@@ -1339,6 +1405,7 @@ Batch generate(const Request& given) {
         idea.shape = std::move(made.second);
         idea.summary = komawari::describe(idea.shape);
         out.ideas.push_back(std::move(idea));
+        few += short_of_accents ? 1 : 0;
     }
     return out;
 }
@@ -1430,7 +1497,10 @@ layout::CompiledLayout apply_idea(Work& work, const Json& page_index, const Json
             if (issue.severity == "error") throw layout::LayoutError("/skeleton" + issue.path, issue.message);
         }
         Work trial = work;
-        if (!blank) layout::clear_page(trial, *at, agent);
+        // (a page of one drawn panel is blank, but its root is a node of drawn panels, which no cut splits: set back to
+        // its basic frame first, as テンプレートでコマを割る… does)
+        const core::Page& seen = work.doc.page(*at);
+        if (!blank || (!seen.frames.empty() && core::is_free(seen.frames.front()))) layout::clear_page(trial, *at, agent);
         layout::CompiledLayout compiled = layout::apply_layout(trial, page_index, plan, agent);
         work = std::move(trial);
         return compiled;

@@ -218,7 +218,10 @@ Shape shape_of_plan(const Json& plan, double frame_w, double frame_h) {
                 }
                 for (std::size_t r = 0; r + 1 < rows.size(); ++r) mark_border(out.panels, in_col[r], in_col[r + 1], row_tilts[r], true);
                 out.gaps.insert(out.gaps.end(), row_gaps.begin(), row_gaps.end());
-                for (std::size_t r = 0; r < row_tilts.size(); ++r) out.tilts += std::fabs(row_tilts[r]) > 1e-6 ? 1 : 0;
+                for (std::size_t r = 0; r < row_tilts.size(); ++r) {
+                    out.tilts += std::fabs(row_tilts[r]) > 1e-6 ? 1 : 0;
+                    out.steepest = std::max(out.steepest, std::fabs(row_tilts[r]));
+                }
             } else {
                 PanelBox box;
                 box.slot = core::py_str(core::py_get(cols[c], "slot"));
@@ -240,6 +243,7 @@ Shape shape_of_plan(const Json& plan, double frame_w, double frame_h) {
                 for (const std::size_t b : col_panels[c + 1]) mark_border(out.panels, a, b, col_tilts[c], false);
             }
             out.tilts += std::fabs(col_tilts[c]) > 1e-6 ? 1 : 0;
+            out.steepest = std::max(out.steepest, std::fabs(col_tilts[c]));
         }
         out.gaps.insert(out.gaps.end(), col_gaps.begin(), col_gaps.end());
         out.pattern += (out.pattern.empty() ? "" : "-") + std::to_string(here.size()) + (stacked ? "s" : "");
@@ -251,6 +255,7 @@ Shape shape_of_plan(const Json& plan, double frame_w, double frame_h) {
             for (const std::size_t b : tier_panels[t + 1]) mark_border(out.panels, a, b, tier_tilts[t], true);
         }
         out.tilts += std::fabs(tier_tilts[t]) > 1e-6 ? 1 : 0;
+        out.steepest = std::max(out.steepest, std::fabs(tier_tilts[t]));
     }
     out.gaps.insert(out.gaps.end(), tier_gaps.begin(), tier_gaps.end());
     // the insets, each read beside the panel it goes into (by where they are, as drawn panels are)
@@ -435,6 +440,113 @@ std::string describe(const Shape& shape) {
     if (overflows > 0) out += "・はみ出し " + std::to_string(overflows);
     if (frameless > 0) out += "・枠なし " + std::to_string(frameless);
     return out;
+}
+
+namespace {
+
+// Each tier's panels and whether a column of it is stacked, from the pattern ("2s-1" → {2, true}, {1, false}).
+std::vector<std::pair<int, bool>> tiers_of(const Shape& shape) {
+    std::vector<std::pair<int, bool>> out;
+    if (shape.drawn) return out;
+    std::size_t at = 0;
+    while (at < shape.pattern.size()) {
+        std::size_t end = shape.pattern.find('-', at);
+        if (end == std::string::npos) end = shape.pattern.size();
+        const std::string part = shape.pattern.substr(at, end - at);
+        const bool stacked = !part.empty() && part.back() == 's';
+        try {
+            out.emplace_back(std::stoi(stacked ? part.substr(0, part.size() - 1) : part), stacked);
+        } catch (const std::exception&) {
+            return {};
+        }
+        at = end + 1;
+    }
+    return out;
+}
+
+// A 大ゴマ that stands out: kAccentBigShare of the frame, and kAccentBigOver times the next largest panel.
+bool standing_big(const Shape& shape) {
+    const std::size_t at = largest(shape);
+    if (at == 0 || shape.count() < 2 || share(shape, at) < kAccentBigShare) return false;  // (one panel alone is a blank page)
+    double next = 0;
+    for (std::size_t i = 0; i < shape.panels.size(); ++i) {
+        if (i + 1 != at) next = std::max(next, shape.panels[i].area());
+    }
+    return next <= 0 || shape.panels[at - 1].area() >= kAccentBigOver * next;
+}
+
+// Where a panel is on the page, in words: 右上, 上, 中ほど, 左下 …
+std::string place_words(const Shape& shape, const PanelBox& box) {
+    const double fw = std::max(1.0, shape.frame_w), fh = std::max(1.0, shape.frame_h);
+    const double cy = (box.y + box.h / 2) / fh, cx = (box.x + box.w / 2) / fw;
+    const std::string v = cy < 1.0 / 3 ? "上" : cy > 2.0 / 3 ? "下" : "";
+    const std::string h = box.w > fw * 0.66 ? "" : cx > 2.0 / 3 ? "右" : cx < 1.0 / 3 ? "左" : "";
+    if (v.empty() && h.empty()) return "中ほど";
+    return h + v;
+}
+
+}  // namespace
+
+std::string describe_for_people(const Shape& shape) {
+    std::string out = std::to_string(shape.count()) + " コマ";
+    const auto tiers = tiers_of(shape);
+    if (shape.drawn) {
+        out += "（描いたコマ）";
+    } else if (!tiers.empty()) {
+        out += "・" + std::to_string(tiers.size()) + " 段";
+        if (tiers.size() > 1) {
+            out += "（上から ";
+            for (std::size_t i = 0; i < tiers.size(); ++i) out += (i > 0 ? "・" : "") + std::to_string(tiers[i].first);
+            out += "）";
+        }
+        if (std::any_of(tiers.begin(), tiers.end(), [](const auto& t) { return t.second; })) out += "・縦積み";
+    }
+    const std::size_t big = largest(shape);
+    if (big > 0 && shape.count() > 1 && share(shape, big) >= kBigShare) out += "・大ゴマは" + place_words(shape, shape.panels[big - 1]);
+    if (shape.tilts > 0) out += shape.steepest >= kAccentTiltMm ? "・深い斜め" : "・斜め";
+    if (any_of(shape, &PanelBox::bleed)) out += "・断ち切り";
+    if (any_of(shape, &PanelBox::over)) out += "・差し込み";
+    if (any_of(shape, &PanelBox::frameless)) out += "・枠なし";
+    if (any_of(shape, &PanelBox::overflow)) out += "・はみ出しあり";
+    return out;
+}
+
+int accents(const Shape& shape) {
+    int n = 0;
+    n += shape.steepest >= kAccentTiltMm - 1e-9 ? 1 : 0;
+    n += any_of(shape, &PanelBox::bleed) ? 1 : 0;
+    n += any_of(shape, &PanelBox::over) ? 1 : 0;
+    n += standing_big(shape) ? 1 : 0;
+    const auto tiers = tiers_of(shape);
+    n += std::any_of(tiers.begin(), tiers.end(), [](const auto& t) { return t.second; }) ? 1 : 0;
+    double widest = 0;
+    for (const double g : shape.gaps) widest = std::max(widest, g);
+    n += widest >= kAccentGapMm - 1e-9 ? 1 : 0;
+    n += any_of(shape, &PanelBox::frameless) ? 1 : 0;
+    return n;
+}
+
+bool strip_stack(const Shape& shape) {
+    if (shape.count() < 4 || shape.tilts > 0 || shape.drawn) return false;
+    const auto tiers = tiers_of(shape);
+    if (tiers.empty()) return false;
+    // (the tiers alone are strips: an inset over one does not make it another layout)
+    return std::all_of(tiers.begin(), tiers.end(), [](const auto& t) { return t.first == 1 && !t.second; });
+}
+
+bool look_alike(const Shape& a, const Shape& b, bool exact) {
+    if (a.count() != b.count() || a.drawn != b.drawn) return false;
+    if (exact) {
+        if (a.pattern != b.pattern) return false;
+    } else {
+        auto ta = tiers_of(a), tb = tiers_of(b);
+        std::sort(ta.begin(), ta.end());
+        std::sort(tb.begin(), tb.end());
+        if (ta != tb) return false;
+    }
+    const auto deep = [](const Shape& s) { return s.tilts == 0 ? 0 : s.steepest >= kAccentTiltMm ? 2 : 1; };
+    return big_place(a) == big_place(b) && deep(a) == deep(b) && any_of(a, &PanelBox::bleed) == any_of(b, &PanelBox::bleed) &&
+           any_of(a, &PanelBox::over) == any_of(b, &PanelBox::over) && any_of(a, &PanelBox::frameless) == any_of(b, &PanelBox::frameless);
 }
 
 // --- the page's own panels ----------------------------------------------------------------------------------------------

@@ -11,11 +11,14 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSlider>
 #include <QSpinBox>
@@ -34,6 +37,7 @@
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -74,12 +78,75 @@ Json panels_of(const core::Page& page) {
     return out;
 }
 
-// The page laid with the skeleton, on a copy of the book (the window's pictures).
+// The page laid with the skeleton, on a copy of the book (the window's pictures: random ids, apart from any a test counts).
 core::Document laid(const core::Document& doc, std::size_t index, const Json& skeleton, const std::string& actor) {
+    core::ScopedIdsApart apart;
     service::Work work{doc, Json::array()};
     const Json number = work.doc.page(index).index.json();
     (void)ideas::apply_idea(work, number, skeleton, actor, true);
     return std::move(work.doc);
+}
+
+// A page whose root is a node of drawn panels: its panels go when an idea is laid, even when it is blank (one drawn panel).
+bool drawn_root(const core::Page& page) { return !page.frames.empty() && core::is_free(page.frames.front()); }
+
+// The picture of an idea: the page's panels alone (no layers: the layout is what is chosen), drawn at 20 dpi, with what a
+// border cannot show marked — the paper's edge and the basic frame faintly, a panel without a border as a grey dashed
+// outline, a bleed coloured out to the paper's edge, a panel whose art runs past its border with a small arrow.
+QImage idea_picture(const core::Document& done, std::size_t index) {
+    core::Page page = done.page(index);
+    page.layers.clear();
+    render::RenderOptions options;
+    options.skip_unported = true;
+    QImage picture = to_qimage(render::render_page(page, 20, options, &done).image).convertToFormat(QImage::Format_RGB32);
+    const double paper_w = page.spec.width_mm.value(), paper_h = page.spec.height_mm.value();
+    if (picture.isNull() || paper_w <= 0 || paper_h <= 0) return picture;
+    const double kx = picture.width() / paper_w, ky = picture.height() / paper_h;
+    const auto at = [&](double x, double y) { return QPointF(x * kx, y * ky); };
+    const auto box = [&](const core::Rect& r) {
+        return QRectF(at(r.x.value(), r.y.value()), at((r.x + r.width).value(), (r.y + r.height).value()));
+    };
+    const core::Rect trim = page.trim_rect_mm();
+    const core::Rect inner = page.inner_rect_mm(done.start_side ? std::string_view(*done.start_side) : std::string_view());
+    QPainter painter(&picture);
+    painter.setRenderHint(QPainter::Antialiasing);
+    // the bleeds: from the panel out to the paper's edge on each side it meets the basic frame
+    for (const core::Frame* frame : page.leaf_frames()) {
+        if (!frame->bleed) continue;
+        QRectF r = box(frame->rect);
+        const QRectF in = box(inner);
+        if (std::abs(r.left() - in.left()) < 2) r.setLeft(0);
+        if (std::abs(r.right() - in.right()) < 2) r.setRight(picture.width());
+        if (std::abs(r.top() - in.top()) < 2) r.setTop(0);
+        if (std::abs(r.bottom() - in.bottom()) < 2) r.setBottom(picture.height());
+        painter.fillRect(r, QColor(120, 160, 230, 70));
+    }
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(QColor(QStringLiteral("#c8c8c8")), 1));
+    painter.drawRect(box(trim).adjusted(0, 0, -1, -1));
+    painter.setPen(QPen(QColor(QStringLiteral("#dcdcdc")), 1, Qt::DotLine));
+    painter.drawRect(box(inner));
+    for (const core::Frame* frame : page.leaf_frames()) {
+        QPolygonF outline;
+        if (frame->poly && !frame->poly->empty()) {
+            for (const core::Point& p : *frame->poly) outline << at(p.x.value(), p.y.value());
+        } else {
+            outline = QPolygonF(box(frame->rect));
+        }
+        if (frame->border_mm <= 0) {
+            painter.setPen(QPen(QColor(QStringLiteral("#909090")), 1, Qt::DashLine));
+            painter.drawPolygon(outline);
+        }
+        if (!frame->clip) {
+            // (はみ出し: an arrow out of the top right corner)
+            const QPointF c = box(frame->rect).topRight();
+            painter.setPen(QPen(QColor(QStringLiteral("#d0602a")), 1.4));
+            painter.drawLine(c + QPointF(-7, 7), c + QPointF(2, -2));
+            painter.drawLine(c + QPointF(2, -2), c + QPointF(-3, -2));
+            painter.drawLine(c + QPointF(2, -2), c + QPointF(2, 3));
+        }
+    }
+    return picture;
 }
 
 const std::pair<const char*, const char*> kKnobs[] = {{"slant", "斜め"},       {"bleed", "断ち切り"}, {"split", "コマ内分割"}, {"big", "大ゴマ率"},
@@ -98,9 +165,37 @@ std::optional<double> knob_of(const ideas::Knobs& k, const std::string& key) {
     return k.frameless;
 }
 
+// An error in the window's words: the service's (no API keys in brackets, such as （min_tiers）).
 QString shown_error(const std::exception& error) {
-    if (const auto* given = dynamic_cast<const layout::LayoutError*>(&error)) return wording::error(given->message());
-    return wording::error(QString::fromUtf8(error.what()));
+    QString words;
+    if (const auto* given = dynamic_cast<const layout::LayoutError*>(&error)) {
+        words = wording::error(given->message());
+    } else {
+        words = wording::error(QString::fromUtf8(error.what()));
+    }
+    static const QRegularExpression key(QStringLiteral("（[A-Za-z_]+）"));
+    return words.remove(key);
+}
+
+// Why a batch came out short, from the reason the most ideas were sieved out for.
+QString dropped_words(const ideas::Batch& batch) {
+    std::string most;
+    int n = 0;
+    for (const auto& [why, k] : batch.dropped) {
+        if (k > n) {
+            most = why;
+            n = k;
+        }
+    }
+    if (most == "focus") return QStringLiteral("見せ場のコマが、いちばん大きくならない案を外しました");
+    if (most == "small") return QStringLiteral("小さすぎるコマのある案を外しました");
+    if (most == "order") return QStringLiteral("読む順が乱れる案を外しました");
+    if (most == "gap") return QStringLiteral("コマの間が狭すぎる案を外しました");
+    if (most == "same_as_base") return QStringLiteral("元とほとんど同じ案を外しました");
+    if (most == "unfit") return QStringLiteral("この大きさに収まらない案を外しました");
+    if (most == "tiers") return QStringLiteral("段数に合わない案を外しました");
+    if (most == "accents" || most == "strips") return QStringLiteral("目立つ所の少ない案を外しました（つまみを上げると増えます）");
+    return QStringLiteral("似ている案や無難すぎる案を外しました");
 }
 
 }  // namespace
@@ -117,7 +212,9 @@ templates::Plan idea_plan(const core::Document& doc, std::size_t page_index, con
     {
         core::ScopedIdScript script;
         service::Work work{doc, Json::array()};
-        if (!layout::is_blank(work.doc, work.doc.page(page_index))) clearing = layout::clear_page(work, page_index, actor);
+        if (!layout::is_blank(work.doc, work.doc.page(page_index)) || drawn_root(work.doc.page(page_index))) {
+            clearing = layout::clear_page(work, page_index, actor);
+        }
         compiled = ideas::apply_idea(work, number, skeleton, actor, false);
         taken = script.taken();
         made = panels_of(work.doc.page(page_index));
@@ -162,8 +259,9 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
     pool_->setMaxThreadCount(2);
     const core::Page& page = doc_->page(page_index_);
     spec_ = page.spec;
-    needs_clearing = !templates::is_blank(*doc_, page);
+    needs_clearing = !templates::is_blank(*doc_, page) || drawn_root(page);  // (drawn panels go too)
     page_skeleton_ = service::komawari::skeleton_of_page(*doc_, page);
+    if (page.leaf_frames().size() < 2) page_skeleton_.reset();  // (one panel: nothing to vary)
 
     // --- the settings (left) ---
     auto* settings = new QWidget;
@@ -233,26 +331,26 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
         form->addRow(QString::fromUtf8(kKnobs[i].second), row);
         knobs.emplace_back(kKnobs[i].first, slider);
     }
-    auto* seed_title = new QLabel(QStringLiteral("seed"));
+    auto* seed_title = new QLabel(QStringLiteral("シード（seed）"));
     theme::role(seed_title, "section");
     form->addRow(seed_title);
     seed = new QLineEdit;
     seed->setObjectName(QStringLiteral("komawari_seed"));
-    seed->setToolTip(QStringLiteral("同じ設定と seed で、同じ束が出ます。貼り付けて Enter で出し直します"));
+    seed->setToolTip(QStringLiteral("同じ設定とシードなら、同じ案が出ます。貼り付けて Enter で出し直します"));
     form->addRow(seed);
     auto* seed_buttons = new QWidget;
     auto* seed_row = new QHBoxLayout(seed_buttons);
     seed_row->setContentsMargins(0, 0, 0, 0);
     copy_seed = new QPushButton(QStringLiteral("コピー"));
-    copy_seed->setToolTip(QStringLiteral("この束の seed をクリップボードへ"));
+    copy_seed->setToolTip(QStringLiteral("この束のシードをクリップボードへ"));
     paste_seed = new QPushButton(QStringLiteral("貼り付け"));
-    paste_seed->setToolTip(QStringLiteral("クリップボードの seed で束を出し直します"));
+    paste_seed->setToolTip(QStringLiteral("クリップボードのシードで束を出し直します"));
     seed_row->addWidget(copy_seed);
     seed_row->addWidget(paste_seed);
     form->addRow(seed_buttons);
     new_batch = new QPushButton(QStringLiteral("新しい束"));
     new_batch->setObjectName(QStringLiteral("komawari_new"));
-    new_batch->setToolTip(QStringLiteral("seed を変えて、同じ設定で別の束を出します"));
+    new_batch->setToolTip(QStringLiteral("シードを変えて、同じ設定で別の束を出します"));
     form->addRow(new_batch);
     settings->setFixedWidth(std::max(280, settings->sizeHint().width()));  // (its rows whole)
 
@@ -283,7 +381,7 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
     if (!page_skeleton_) {
         if (auto* model = qobject_cast<QStandardItemModel*>(base->model())) {
             model->item(1)->setEnabled(false);
-            model->item(1)->setToolTip(QStringLiteral("描いたコマのページは、元にできません"));
+            model->item(1)->setToolTip(QStringLiteral("コマが 1 つのページや、描いたコマのページは、元にできません"));
         }
     }
     variation = new QSlider(Qt::Horizontal);
@@ -295,14 +393,14 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
     connect(variation, &QSlider::valueChanged, variation_shown, [variation_shown](int v) { variation_shown->setText(QString::number(v / 100.0, 'f', 2)); });
     vary = new QPushButton(QStringLiteral("これを元に変異"));
     vary->setObjectName(QStringLiteral("komawari_vary"));
-    vary->setToolTip(QStringLiteral("元（選んだ案か今のページのコマ割り）を、変異度だけ変えた案の束を出します"));
+    vary->setToolTip(QStringLiteral("変異の元（選んだ案か今のページのコマ割り）を、変異度に応じて少しずつ変えた案の束を出します"));
     back = new QPushButton(QStringLiteral("ガチャに戻る"));
     back->setObjectName(QStringLiteral("komawari_back"));
     back->setToolTip(QStringLiteral("変異の前の束に戻ります"));
     // (two rows: the base and the 変異度, then the buttons — the slider keeps its room on a narrow screen)
     auto* vary_rows = new QVBoxLayout;
     vary_rows->setContentsMargins(0, 0, 0, 0);
-    vary_row->addWidget(new QLabel(QStringLiteral("元")));
+    vary_row->addWidget(new QLabel(QStringLiteral("変異の元")));
     vary_row->addWidget(base);
     vary_row->addWidget(new QLabel(QStringLiteral("変異度")));
     vary_row->addWidget(variation, 1);
@@ -319,8 +417,9 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
     right->addWidget(summary);
     right->addLayout(vary_rows);
 
-    auto* note = new QLabel(needs_clearing ? QStringLiteral("コマと台詞は作り直されます（元に戻す で取り消せます）。")
-                                           : QStringLiteral("空のページを、選んだ案で割ります。"));
+    QString words = needs_clearing ? QStringLiteral("コマと台詞は作り直されます（元に戻す で取り消せます）。") : QStringLiteral("空のページを、選んだ案で割ります。");
+    if (page.name_ok) words = QStringLiteral("承認済みのネームのページです。") + words;
+    auto* note = new QLabel(words);
     note->setWordWrap(true);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     apply_button = buttons->button(QDialogButtonBox::Ok);
@@ -360,13 +459,10 @@ KomawariDialog::KomawariDialog(QWidget* parent, std::shared_ptr<const core::Docu
     connect(max_tiers, &QSpinBox::valueChanged, this, [this](int v) {
         if (v > 0 && min_tiers->value() > v) min_tiers->setValue(v);
     });
-    connect(panels, &QComboBox::currentIndexChanged, this, [this] {
-        const int n = panels->currentData().toInt();
-        focus->setMaximum(n > 0 ? n : static_cast<int>(layout::kMaxPanels));
-    });
+    connect(panels, &QComboBox::currentIndexChanged, this, [this] { bound(); });
     for (const auto& [key, slider] : knobs) connect(slider, &QSlider::valueChanged, this, [this] { settings_changed(); });
     connect(seed, &QLineEdit::returnPressed, this, [this] { from_seed_field(); });
-    connect(copy_seed, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(seed->text()); });
+    connect(copy_seed, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(QString::fromStdString(batch_.seed)); });
     connect(paste_seed, &QPushButton::clicked, this, [this] {
         const QString text = QApplication::clipboard()->text().trimmed();
         if (text.isEmpty()) return;
@@ -428,7 +524,34 @@ void KomawariDialog::preset_changed() {
     const auto p = ideas::preset_from(preset->currentData().toString().toStdString());
     const ideas::PresetDefaults defaults = ideas::preset_defaults(p ? *p : ideas::Preset::Standard);
     for (const auto& [key, slider] : knobs) slider->setValue(static_cast<int>(std::lround(knob_of(defaults.knobs, key).value_or(0.0) * 100)));
+    bound();
     settings_changed();
+}
+
+void KomawariDialog::bound() {
+    // (見せ場 and 段数 within the panels there can be: those given, else the preset's most)
+    const auto p = ideas::preset_from(preset->currentData().toString().toStdString());
+    const int given = panels->currentData().toInt();
+    const int most = given > 0 ? given : ideas::preset_defaults(p ? *p : ideas::Preset::Standard).max_panels;
+    focus->setMaximum(most);
+    min_tiers->setMaximum(std::min(most, ideas::kMaxTiers));
+    max_tiers->setMaximum(std::min(most, ideas::kMaxTiers));
+}
+
+void KomawariDialog::keyPressEvent(QKeyEvent* event) {
+    // (Enter lays the idea only from the list or the button: in the seed's field or a number's it draws the batch again)
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        QWidget* at = focusWidget();
+        if (at != list_ && at != apply_button) {
+            event->accept();
+            return;
+        }
+        if (at == list_) {
+            choose();
+            return;
+        }
+    }
+    QDialog::keyPressEvent(event);
 }
 
 void KomawariDialog::settings_changed() {
@@ -440,6 +563,7 @@ void KomawariDialog::settings_changed() {
         base_skeleton_.reset();
     }
     again_->start();
+    follow();  // (nothing laid nor varied from the list shown until the batch the settings make is there)
 }
 
 void KomawariDialog::make_batch(const std::string& with_seed) {
@@ -494,6 +618,7 @@ void KomawariDialog::vary_from(const Json& from, const QString& words, const std
 }
 
 void KomawariDialog::make_variations() {
+    if (again_->isActive()) return;
     if (base->currentIndex() == 1) {
         if (page_skeleton_) vary_from(Json(*page_skeleton_), QStringLiteral("今のページのコマ割り"), {});
         return;
@@ -518,13 +643,13 @@ void KomawariDialog::show_batch() {
     ++generation_;
     pool_->clear();  // (the pictures of the batch before, not yet started, are not drawn)
     list_->clear();
-    seed->setText(QString::fromStdString(batch_.seed));
+    if (!batch_.seed.empty()) seed->setText(QString::fromStdString(batch_.seed));  // (an error keeps the seed it was)
     const int asked = count->currentData().toInt();
     const int n = static_cast<int>(batch_.ideas.size());
     if (!batch_.seed.empty()) {
         QString words = varying_ ? QStringLiteral("変異: %1 を元に、変異度 %2 の %3 案").arg(base_words_, QString::number(variation->value() / 100.0, 'f', 2)).arg(n)
                                  : QStringLiteral("ガチャ: %1 案").arg(n);
-        if (n < asked) words += QStringLiteral("（%1 案のうち、ほかは似ているか無難すぎて外しました）").arg(asked);
+        if (n < asked) words += QStringLiteral("（%1 案のうち、%2）").arg(asked).arg(dropped_words(batch_));
         state->setText(words);
     }
     QPixmap blank(kPicture);
@@ -533,7 +658,7 @@ void KomawariDialog::show_batch() {
     for (int i = 0; i < n; ++i) {
         const ideas::Idea& idea = batch_.ideas[static_cast<std::size_t>(i)];
         auto* item = new QListWidgetItem(QIcon(blank), QStringLiteral("案 %1").arg(i + 1));
-        item->setToolTip(QString::fromStdString(idea.summary));
+        item->setToolTip(QString::fromStdString(service::komawari::describe_for_people(idea.shape)));
         item->setData(Qt::UserRole, i);
         list_->addItem(item);
         // its picture: the page cut by it, drawn small on a worker thread
@@ -547,9 +672,7 @@ void KomawariDialog::show_batch() {
             QImage picture;
             try {
                 const core::Document done = laid(*book, index, skeleton, who);
-                render::RenderOptions options;
-                options.skip_unported = true;
-                picture = to_qimage(render::render_page(done.page(index), 20, options, &done).image);
+                picture = idea_picture(done, index);
             } catch (const std::exception&) {
             }
             QMetaObject::invokeMethod(
@@ -572,11 +695,13 @@ void KomawariDialog::show_batch() {
 void KomawariDialog::follow() {
     const int row = list_->currentRow();
     const bool picked = row >= 0 && row < static_cast<int>(batch_.ideas.size());
-    summary->setText(picked ? QStringLiteral("案 %1: %2").arg(row + 1).arg(QString::fromStdString(batch_.ideas[static_cast<std::size_t>(row)].summary))
+    summary->setText(picked ? QStringLiteral("案 %1: %2").arg(row + 1).arg(QString::fromStdString(
+                                                                  service::komawari::describe_for_people(batch_.ideas[static_cast<std::size_t>(row)].shape)))
                             : QString());
-    apply_button->setEnabled(picked);
-    vary->setEnabled(base->currentIndex() == 1 ? page_skeleton_.has_value() : picked);
-    back->setEnabled(varying_ && gacha_.has_value());
+    const bool settled = !again_->isActive();
+    apply_button->setEnabled(picked && settled);
+    vary->setEnabled(settled && (base->currentIndex() == 1 ? page_skeleton_.has_value() : picked));
+    back->setEnabled(settled && varying_ && gacha_.has_value());
 }
 
 bool KomawariDialog::wait_pictures(int ms) {
@@ -590,6 +715,7 @@ bool KomawariDialog::wait_pictures(int ms) {
 }
 
 void KomawariDialog::choose() {
+    if (again_->isActive()) return;
     const int row = list_->currentRow();
     if (row < 0 || row >= static_cast<int>(batch_.ideas.size())) return;
     const ideas::Idea& idea = batch_.ideas[static_cast<std::size_t>(row)];
@@ -599,7 +725,7 @@ void KomawariDialog::choose() {
         ask::warning(this, QStringLiteral("Genko"), shown_error(error));
         return;
     }
-    chosen = QString::fromStdString(idea.summary);
+    chosen = QString::fromStdString(service::komawari::describe_for_people(idea.shape));
     accept();
 }
 

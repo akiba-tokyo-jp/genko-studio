@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QLineEdit>
@@ -22,6 +23,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -37,6 +39,10 @@
 #include "core/command_bus.hpp"
 #include "core/frames.hpp"
 #include "render/ops_registry.hpp"
+#include "core/ids.hpp"
+#include "core/pynum.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/writer.hpp"
 #include "gui_support.hpp"
 #include "service/komawari_shape.hpp"
 #include "service/layout_ideas.hpp"
@@ -141,6 +147,52 @@ bool on_basic_frame(const core::Document& doc, const core::Page& page) {
 
 const QString kShot = qEnvironmentVariable("GENKO_KOMAWARI_SHOT");
 
+std::string sha256(const std::string& bytes) {
+    return QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex().toStdString();
+}
+
+// A template laid on page `index` of `doc` (ids counted from 1000): the sha of its ops with the ids they give, and of the
+// book saved afterwards (project.json). The same values as テンプレートでコマを割る… gave before コマ割り K2 (e9601687).
+std::pair<std::string, std::string> laid_sha(const core::Document& doc, std::size_t index, const genko::app::templates::Template& chosen) {
+    genko::core::ScopedIdSource ids(genko::core::counting_ids(1000));
+    const genko::app::templates::Plan plan = genko::app::templates::plan(doc, index, chosen, "human:tester");
+    core::Document laid;
+    {
+        genko::core::ScopedIdScript script(plan.ids);
+        laid = core::CommandBus(genko::render::ops_registry()).apply(doc, plan.ops, core::Actor("human:tester")).doc;
+    }
+    Json ids_json = Json::array();
+    for (const std::string& id : plan.ids) ids_json.push_back(id);
+    QTemporaryDir dir;
+    genko::storage::AssetStore store(dir.path().toStdString());
+    return {sha256(plan.ops.dump() + ids_json.dump()), sha256(genko::storage::project_json_v4(laid, store))};
+}
+
+// A book of `pages` pages made with counted ids (and a book id of its own), `ops` applied.
+core::Document counted_book(int pages, const Json& ops) {
+    genko::core::ScopedIdSource ids(genko::core::counting_ids());
+    core::Document doc = new_doc(pages);
+    doc.book_id = "0123456789abcdef0123456789abcdef";
+    if (!ops.empty()) doc = core::CommandBus(genko::render::ops_registry()).apply(doc, ops, core::Actor("human:tester")).doc;
+    return doc;
+}
+
+// One's own template of page `index` as 今のコマ割りをテンプレートに残す… keeps it: before コマ割り K2 (no "frame"), or now.
+genko::app::templates::Template own(const core::Document& doc, std::size_t index, bool with_frame) {
+    const core::Page& page = doc.page(index);
+    genko::app::templates::Template t;
+    t.key = "own";
+    t.mine = true;
+    t.spec = Json::object({{"name", "own"}, {"size", Json::array({page.spec.width_mm.json(), page.spec.height_mm.json()})},
+                           {"tree", genko::app::frame_tree(page.frames.at(0))}});
+    if (with_frame) {
+        const core::Rect r = page.inner_rect_mm(doc.start_side ? std::string_view(*doc.start_side) : std::string_view());
+        t.spec["frame"] = Json::array({core::py_round(r.x.value(), 3), core::py_round(r.y.value(), 3), core::py_round(r.width.value(), 3),
+                                       core::py_round(r.height.value(), 3)});
+    }
+    return t;
+}
+
 }  // namespace
 
 class TestGuiKomawari : public QObject {
@@ -152,6 +204,69 @@ private slots:
         qRegisterMetaType<genko::app::BookChange>();
         genko::app::icons::init_resources();
         genko::app::theme::apply(qApp);
+    }
+
+    // テンプレートでコマを割る… lays what it laid before コマ割り K2 (e9601687), op for op and byte for byte: drawn panels
+    // (add_frame: their root is the whole paper) kept and laid again on their own page — a template of before (no
+    // "frame") and one kept now —, slanted cuts the same, and a built-in template.
+    void templatesLayAsBefore() {
+        const Json drawn_ops = Json::array({Json{{"op", "add_frame"}, {"page", 1}, {"rect", Json::array({20, 22, 80, 60})}},
+                                            Json{{"op", "add_frame"}, {"page", 1}, {"points", Json::parse("[[110, 20], [180, 20], [170, 90], [112, 84]]")}},
+                                            Json{{"op", "add_frame"}, {"page", 1}, {"rect", Json::array({25, 120, 150, 70})}}});
+        const core::Document drawn = counted_book(2, drawn_ops);
+        QVERIFY(core::is_free(drawn.page(0).frames[0]));
+        const core::Document cut = counted_book(2, Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"axis", "horizontal"}, {"ratio", 0.4}, {"tilt_mm", 14}},
+                                                                Json{{"op", "split_frame"}, {"page", 1}, {"axis", "vertical"}, {"ratio", 0.55}}}));
+        std::map<std::string, std::pair<std::string, std::string>> got;
+        got["drawn, before"] = laid_sha(drawn, 0, own(drawn, 0, false));
+        got["drawn, now"] = laid_sha(drawn, 0, own(drawn, 0, true));
+        got["cut, before"] = laid_sha(cut, 0, own(cut, 0, false));
+        got["cut, now"] = laid_sha(cut, 0, own(cut, 0, true));
+        const auto built_in = genko::app::templates::builtin();
+        QVERIFY(built_in.size() > 3);
+        got["built-in 0"] = laid_sha(cut, 1, built_in[0]);
+        for (const auto& t : built_in) {
+            if (t.spec.contains("slant")) {
+                got["built-in slanted"] = laid_sha(drawn, 0, t);
+                break;
+            }
+        }
+        for (const auto& [name, sha] : got) qInfo("%s: ops %s, book %s", name.c_str(), sha.first.c_str(), sha.second.c_str());
+        // (the values e9601687's templates.cpp gives: build this test against it to see them again)
+        const std::map<std::string, std::pair<std::string, std::string>> before = {
+            {"drawn, before", {"eeb0d19bc36875996384d0e4b085fed68848b41559d02e5b9c55585b763515be", "dccaa8d656cde1fc21b517f360c7f8cb9ca71eba18496429ca8fd58c7bfba77a"}},
+            {"cut, before", {"3e9d67cc3092316d904a59b84e113e3c9dafad892a642e43dafd3bea9f422910", "0f6017b1df9e14d9bddfe9f3df106d63ba55525466853fa5b1c9972c7da28f13"}},
+            {"built-in 0", {"821bf06b4dcb406ea508a4a992eadc22f29850cd208ba24aea7c29148de8ccf1", "92df3c5bb77a110b62727b1c846c941758c208e4b9d074e373ea03c7f6ffc741"}},
+            {"built-in slanted", {"81bed71e0aa00f95dc03587a834ed20f1f98548027077d99cef47d26f319c2dd", "ac94808aca05ebe783406d5ee9e9e895bf6f4c05419517b21ed745f76f694150"}},
+        };
+        for (const auto& [name, sha] : before) {
+            QVERIFY2(got.count(name) == 1, name.c_str());
+            QCOMPARE(QString::fromStdString(got[name].first), QString::fromStdString(sha.first));
+            QCOMPARE(QString::fromStdString(got[name].second), QString::fromStdString(sha.second));
+        }
+        // kept now ("frame") and laid on its own page: the same as before
+        QCOMPARE(got["drawn, now"], got["drawn, before"]);
+        QCOMPARE(got["cut, now"], got["cut, before"]);
+        // kept now and laid on the page of the other side: the root stays the paper, each panel the same in its basic frame
+        const auto side = [&drawn](std::size_t i) {
+            return drawn.page(i).inner_rect_mm(drawn.start_side ? std::string_view(*drawn.start_side) : std::string_view());
+        };
+        const genko::app::templates::Plan plan = genko::app::templates::plan(drawn, 1, own(drawn, 0, true), "human:tester");
+        core::Document other;
+        {
+            genko::core::ScopedIdScript script(plan.ids);
+            other = core::CommandBus(genko::render::ops_registry()).apply(drawn, plan.ops, core::Actor("human:tester")).doc;
+        }
+        const core::Frame& root = other.page(1).frames.at(0);
+        QCOMPARE(root.rect.width.value(), other.page(1).spec.width_mm.value());
+        QCOMPARE(root.rect.x.value(), 0.0);
+        const auto a = drawn.page(0).leaf_frames();
+        const auto b = other.page(1).leaf_frames();
+        QCOMPARE(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            QVERIFY(std::abs((a[i]->rect.x - side(0).x).value() - (b[i]->rect.x - side(1).x).value()) < 0.02);
+            QVERIFY(std::abs((a[i]->rect.width - b[i]->rect.width).value()) < 0.02);
+        }
     }
 
     // The window from ページ → コマ and the panel tool's settings; 12 ideas, each drawn as the page cut by it, the
@@ -212,12 +327,23 @@ private slots:
             QCOMPARE(d.list()->count(), 12);
             QVERIFY(d.wait_pictures(60000));
             if (!kShot.isEmpty()) {
+                // 標準 and アクション (…/dialog.png, …/dialog-action.png)
                 d.resize(1000, 680);
                 d.show();
                 QCoreApplication::processEvents();
                 d.list()->setCurrentRow(4);
                 QCoreApplication::processEvents();
                 QVERIFY(d.grab().save(kShot));
+                const auto before = skeletons(d.batch());
+                d.preset->setCurrentIndex(2);
+                QVERIFY(QTest::qWaitFor([&] { return skeletons(d.batch()) != before; }, 5000));
+                QVERIFY(d.wait_pictures(60000));
+                d.list()->setCurrentRow(4);
+                QCoreApplication::processEvents();
+                QString action = kShot;
+                action.replace(QStringLiteral(".png"), QStringLiteral("-action.png"));
+                QVERIFY(d.grab().save(action));
+                d.hide();
             }
         });
         QCOMPARE(opened, 1);
@@ -258,13 +384,32 @@ private slots:
             d.paste_seed->click();
             QCOMPARE(d.batch().seed, seed);
             QCOMPARE(skeletons(d.batch()), first);
-            // typed, and Enter (the window stays: Enter never lays an idea)
+            // typed, and Enter — with the window shown, as the person has it (its button box has a default button then):
+            // the batch again, the window stays, nothing laid; Enter in a number's box neither
+            d.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&d));
             d.new_batch->click();
+            d.seed->setFocus();
             d.seed->setText(QString::fromStdString(seed));
             QTest::keyClick(d.seed, Qt::Key_Return);
-            QVERIFY(d.isVisible() || d.result() == 0);
+            QVERIFY(d.isVisible());
             QVERIFY(!d.plan);
+            QCOMPARE(d.result(), 0);
             QCOMPARE(skeletons(d.batch()), first);
+            for (QWidget* box : std::vector<QWidget*>{d.focus, d.min_tiers, d.panels}) {
+                box->setFocus();
+                QTest::keyClick(box, Qt::Key_Enter);
+                QTest::keyClick(box, Qt::Key_Return);
+                QVERIFY(d.isVisible());
+                QVERIFY(!d.plan);
+            }
+            QCOMPARE(skeletons(d.batch()), first);
+            // copied: the batch's seed, not what is typed in the field
+            d.seed->setText(QStringLiteral("書きかけ"));
+            d.copy_seed->click();
+            QCOMPARE(QApplication::clipboard()->text(), QString::fromStdString(seed));
+            d.seed->setText(QString::fromStdString(seed));
+            d.hide();
             // the same as the service gives for the request
             ideas::Request r = d.request();
             r.seed = seed;
@@ -458,7 +603,20 @@ private slots:
             r.seed = "agent";
             return r;
         }()).ideas.front().skeleton, "human:tester");
-        QVERIFY_THROWS_EXCEPTION(std::exception, (void)core::CommandBus(genko::render::ops_registry()).apply(*studio.session->snapshot(), plan.ops, core::Actor("ai:helper")));
+        {
+            // (with the ids the ops name: only the gate can refuse them — a person's same change goes through)
+            const core::CommandBus bus(genko::render::ops_registry());
+            QString refused;
+            try {
+                core::ScopedIdScript script(plan.ids);
+                (void)bus.apply(*studio.session->snapshot(), plan.ops, core::Actor("ai:helper"));
+            } catch (const std::exception& error) {
+                refused = QString::fromUtf8(error.what());
+            }
+            QVERIFY2(refused.contains(QStringLiteral("the name is approved")), qPrintable(refused));
+            core::ScopedIdScript script(plan.ids);
+            QCOMPARE(bus.apply(*studio.session->snapshot(), plan.ops, core::Actor("human:tester")).doc.page(0).leaf_frames().size(), std::size_t{3});
+        }
         // テンプレートでコマを割る… on the same page: the same answer
         studio.answers->responder->question = [](const QString&, const QString&) { return true; };
         studio.answers->responder->exec = [](QDialog* dialog) {
@@ -471,6 +629,50 @@ private slots:
         const Json before = panels_of(studio.page());
         studio.trigger("act_template");
         QVERIFY(panels_of(studio.page()) != before);
+    }
+
+    // A page of one drawn panel (blank, its root a node of drawn panels): the pictures are drawn, it asks first (the
+    // drawn panel goes), and the idea is laid — as テンプレートでコマを割る… does. Its one panel is no base to vary.
+    void aPageOfOneDrawnPanel() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_frame"}, {"page", 1}, {"rect", Json::array({30, 30, 80, 90})}}})));
+        QVERIFY(core::is_free(studio.page().frames[0]));
+        QCOMPARE(studio.leaves(), std::size_t{1});
+        studio.answers->asked.clear();
+        studio.answers->responder->question = [](const QString&, const QString& text) { return text.contains(QStringLiteral("コマ割りの案で割り直します")); };
+        studio.komawari([&](KomawariDialog& d) {
+            QVERIFY(d.needs_clearing);
+            QVERIFY(!d.page_can_be_base());
+            QVERIFY(d.wait_pictures(60000));
+            for (int row = 0; row < d.list()->count(); ++row) QVERIFY(d.list()->item(row)->icon().availableSizes().front() != QSize(120, 170));
+            d.panels->setCurrentIndex(5);
+            d.make_batch("one-drawn");
+            d.list()->setCurrentRow(0);
+            d.choose();
+            QVERIFY(d.plan.has_value());
+        });
+        QCOMPARE(studio.leaves(), std::size_t{5});
+        QVERIFY(on_basic_frame(studio.doc(), studio.page()));
+        studio.trigger("act_undo");
+        QCOMPARE(studio.leaves(), std::size_t{1});
+        QVERIFY(core::is_free(studio.page().frames[0]));
+    }
+
+    // The window closed while its pictures are being drawn (a new batch, and another, then gone): nothing is left to
+    // answer to, the event loop runs on.
+    void closedWhileDrawing() {
+        Studio studio;
+        for (int i = 0; i < 3; ++i) {
+            studio.komawari([&](KomawariDialog& d) {
+                d.count->setCurrentIndex(2);  // (24)
+                d.make_batch({});
+                d.new_batch->click();
+            });
+            QTest::qWait(50);
+        }
+        QTest::qWait(300);
+        QVERIFY(studio.ops.empty());
     }
 
     // 今のコマ割りをテンプレートに残す… after an idea with an inset, and テンプレートでコマを割る… with it on another page
@@ -542,7 +744,7 @@ private slots:
             return title == QStringLiteral("テンプレートに残す") ? std::optional<QString>(QStringLiteral("描いたコマ")) : std::nullopt;
         };
         studio.trigger("act_save_template");
-        for (const int page : {2, 1}) {
+        for (const int page : {2, 1, 3}) {  // (the other side, the same, and its own page)
             w->select_page(page);
             lay_mine(QStringLiteral("描いたコマ"));
             QCOMPARE(panels_in_frame(studio.page()), hand);

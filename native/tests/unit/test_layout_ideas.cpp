@@ -324,9 +324,9 @@ private slots:
         QCOMPARE(a.seed, std::string("km-0123456789abcdef"));
         for (const ideas::Idea& idea : a.ideas) qInfo("%s", idea.summary.c_str());
         QCOMPARE(skeletons(a), skeletons(b));
-        QCOMPARE(QString::fromStdString(sha256(skeletons(a))), QStringLiteral("470883d8a1dfc81f2fc4dd1e46adb613227f8de62d1b2067bcdc6ebd18cd4071"));
+        QCOMPARE(QString::fromStdString(sha256(skeletons(a))), QStringLiteral("d37c780a0406a66d6d935af97f33e7e3d5a581d21750768ee4ae537a638d05f7"));
         ideas::Request action = request(ideas::Preset::Action, 6, "ネームの種");
-        QCOMPARE(QString::fromStdString(sha256(skeletons(ideas::generate(action)))), QStringLiteral("574b6021e94f89c4e9ba4f0122695df3bc392537b9a538dfc1d3c6c85e78791d"));
+        QCOMPARE(QString::fromStdString(sha256(skeletons(ideas::generate(action)))), QStringLiteral("95a1b60f0c42194bf2790f74e9a455a0463f5af32cf710142e51cf39a0fd1ee3"));
         ideas::Request other = r;
         other.seed = "km-0123456789abcdee";
         QVERIFY(skeletons(ideas::generate(other)) != skeletons(a));
@@ -338,6 +338,60 @@ private slots:
         fresh.seed = c.seed;
         QCOMPARE(skeletons(ideas::generate(fresh)), skeletons(c));
         QCOMPARE(ideas::seed_value("km-0123456789abcdef"), std::uint64_t{0x0123456789abcdefULL});
+    }
+
+    // 群 K2 (the review of the batch): a batch is not the plain grid — over many seeds and every preset, a batch of 12
+    // has at most 2 ideas short of 目立つ所 (標準・アクション 2 kinds, 会話・見せゴマ 1), never a stack of strips, no two
+    // alike to the eye, and its slants deep enough to be seen.
+    void aBatchIsNotThePlainGrid() {
+        int ideas_seen = 0, deep = 0, slanted = 0;
+        for (const ideas::Preset preset : kPresets) {
+            const int need = preset == ideas::Preset::Standard || preset == ideas::Preset::Action ? 2 : 1;
+            for (int panels : {0, 4, 6}) {
+                if (preset == ideas::Preset::Showcase && panels == 6) panels = 3;
+                for (int k = 0; k < 12; ++k) {
+                    const ideas::Batch batch = ideas::generate(request(preset, panels, "quality-" + std::to_string(k)));
+                    const std::string where = std::string(ideas::preset_key(preset)) + " " + std::to_string(panels) + " #" + std::to_string(k);
+                    QVERIFY2(batch.ideas.size() == std::size_t{ideas::kDefaultCount}, where.c_str());
+                    int few = 0;
+                    for (std::size_t i = 0; i < batch.ideas.size(); ++i) {
+                        const komawari::Shape& shape = batch.ideas[i].shape;
+                        few += komawari::accents(shape) < std::min(need, static_cast<int>(shape.count())) ? 1 : 0;
+                        if (preset != ideas::Preset::Showcase) QVERIFY2(!komawari::strip_stack(shape), (where + " " + batch.ideas[i].summary).c_str());
+                        for (std::size_t j = 0; j < i; ++j) {
+                            QVERIFY2(!komawari::look_alike(shape, batch.ideas[j].shape, true), (where + " " + batch.ideas[i].summary).c_str());
+                        }
+                        ++ideas_seen;
+                        slanted += shape.tilts > 0 ? 1 : 0;
+                        deep += shape.steepest >= komawari::kAccentTiltMm ? 1 : 0;
+                    }
+                    QVERIFY2(few <= 2, (where + ": " + std::to_string(few) + " ideas short of accents").c_str());
+                }
+            }
+        }
+        qInfo("komawari: %d ideas, %d slanted, %d of them %g mm or more", ideas_seen, slanted, deep, komawari::kAccentTiltMm);
+        QVERIFY(deep * 2 > slanted);  // (most slants are deep ones)
+        // the words for a person: no slot names nor the pattern's marks
+        const ideas::Batch batch = ideas::generate(request(ideas::Preset::Standard, 5, "words"));
+        for (const ideas::Idea& idea : batch.ideas) {
+            const std::string words = komawari::describe_for_people(idea.shape);
+            QVERIFY2(words.rfind("5 コマ・", 0) == 0, words.c_str());
+            QVERIFY2(words.find(" p") == std::string::npos && words.find("s-") == std::string::npos && words.find("段 ") == std::string::npos, words.c_str());
+        }
+    }
+
+    // 群 K2: a page of one drawn panel (blank, but its root a node of drawn panels) takes an idea — set back to its
+    // basic frame first, without replace — as テンプレートでコマを割る… takes a template.
+    void aPageOfOneDrawnPanelTakesAnIdea() {
+        Work work = blank_book();
+        work.apply(Json::array({Json{{"op", "add_frame"}, {"page", 1}, {"rect", Json::array({30, 30, 60, 80})}}}), "human:test");
+        QVERIFY(genko::core::is_free(work.doc.page(0).frames.front()));
+        QCOMPARE(work.doc.page(0).leaf_frames().size(), std::size_t{1});
+        QVERIFY(layout::is_blank(work.doc, work.doc.page(0)));
+        const ideas::Batch batch = ideas::generate(request(ideas::Preset::Standard, 4, "drawn-one"));
+        const layout::CompiledLayout compiled = ideas::apply_idea(work, Json(1), batch.ideas.front().skeleton, "human:test", false);
+        QCOMPARE(work.doc.page(0).leaf_frames().size(), std::size_t{4});
+        QCOMPARE(compiled.reading_order.size(), std::size_t{4});
     }
 
     void eachIdeaHasExactlyTheNumberOfPanels() {
@@ -479,6 +533,39 @@ private slots:
         ideas::Request from_page = small;
         from_page.base = *skeleton;
         QVERIFY(!ideas::generate(from_page).ideas.empty());
+    }
+
+    // 群 K2: a dull page as the base — a plain grid, a stack of strips, 2-2-2 of one size — still gives a full batch of
+    // variations (each given 目立つ所 of its own), none of them plain or flat, its panels' number kept; from the page as it
+    // is and at small and large degrees.
+    void variationsOfAPlainGridAreNotEmpty() {
+        const char* const grids[] = {
+            R"({"tiers": [{"h": 0.333, "cols": [{"slot": "p1", "w": 0.5}, {"slot": "p2", "w": 0.5}]}, {"h": 0.334, "cols": [{"slot": "p3", "w": 0.5}, {"slot": "p4", "w": 0.5}]},
+                          {"h": 0.333, "cols": [{"slot": "p5", "w": 0.5}, {"slot": "p6", "w": 0.5}]}], "panels": []})",
+            R"({"tiers": [{"h": 0.25, "cols": [{"slot": "p1", "w": 1}]}, {"h": 0.25, "cols": [{"slot": "p2", "w": 1}]}, {"h": 0.25, "cols": [{"slot": "p3", "w": 1}]},
+                          {"h": 0.25, "cols": [{"slot": "p4", "w": 1}]}], "panels": []})",
+            R"({"tiers": [{"h": 0.5, "cols": [{"slot": "p1", "w": 0.5}, {"slot": "p2", "w": 0.5}]}, {"h": 0.5, "cols": [{"slot": "p3", "w": 0.5}, {"slot": "p4", "w": 0.5}]}], "panels": []})"};
+        for (const char* grid : grids) {
+            Work work = blank_book();
+            (void)ideas::apply_idea(work, Json(1), parsed(grid), "human:test", false);
+            const auto skeleton = komawari::skeleton_of_page(work.doc, work.doc.page(0));
+            QVERIFY(skeleton.has_value());
+            const auto page_shape = komawari::shape_of_page(work.doc, work.doc.page(0));
+            QVERIFY(page_shape.has_value());
+            for (const double degree : {0.1, 0.3, 0.9}) {
+                ideas::Request r = request(ideas::Preset::Standard, 0, "grid");
+                r.base = *skeleton;
+                r.variation = degree;
+                const ideas::Batch batch = ideas::generate(r);
+                const std::string where = std::string(grid).substr(0, 40) + " " + std::to_string(degree) + " " + std::to_string(batch.ideas.size());
+                QVERIFY2(batch.ideas.size() >= 10, where.c_str());
+                for (const ideas::Idea& idea : batch.ideas) {
+                    QCOMPARE(idea.shape.count(), page_shape->count());
+                    QVERIFY(!komawari::plain_grid(idea.shape) && !komawari::flat(idea.shape));
+                    QVERIFY(komawari::accents(idea.shape) >= 1);
+                }
+            }
+        }
     }
 
     // 12 ideas well within the time a window waits for (the drawing aside).

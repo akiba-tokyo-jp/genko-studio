@@ -26,6 +26,11 @@ inline constexpr double kRevealSmallShare = 0.3; // a 見せ場 panel under this
 inline constexpr int kSimilarBelow = 3;          // two ideas whose difference is under this are alike (one batch)
 inline constexpr int kRepeatAtMost = 1;          // two pages whose difference is at most this are the same layout
 inline constexpr int kAccentPages = 4;           // the book-wide check waits for this many pages with panels
+// 目立つ所 (群 K2, the review of the batch: what keeps an idea from being the plain grid) — accents()
+inline constexpr double kAccentTiltMm = 10.0;    // a border slanted this much or more (one end against the other)
+inline constexpr double kAccentGapMm = 11.0;     // a gap this wide or wider between tiers
+inline constexpr double kAccentBigShare = 0.35;  // a 大ゴマ: this share of the frame or more …
+inline constexpr double kAccentBigOver = 1.8;    // … and this many times the next largest panel
 
 // One panel: its box in mm from the basic frame's top left, before the slant of its borders; how much a slanted border
 // takes from it at its narrow end (squeeze); and its layout keys.
@@ -47,6 +52,7 @@ struct Shape {
     std::vector<PanelBox> panels;     // in reading order
     std::string pattern;              // the tiers' panels, top to bottom: "2-1-3", a stacked column marked "s" ("2s-1"); "free" when drawn
     int tilts = 0;                    // slanted borders
+    double steepest = 0;              // the most any border slants (mm, one end against the other)
     std::vector<double> gaps;         // the gaps between neighbouring panels (mm)
     bool drawn = false;               // drawn panels (not tiers): measured as they are
 
@@ -93,6 +99,21 @@ double share(const Shape& shape, std::size_t index);
 int difference(const Shape& a, const Shape& b);
 // A short account of a shape: "4コマ・段 2-1-1・大ゴマ p3・斜め 1・断ち切り 1".
 std::string describe(const Shape& shape);
+// The same for a person (the window's words: no slot names nor the pattern's marks): "5 コマ・3 段（上から 1・2・2）・
+// 大ゴマは右上・斜め・断ち切り・はみ出しあり".
+std::string describe_for_people(const Shape& shape);
+
+// --- the batch's sieve (群 K2) ----------------------------------------------------------------------------------------
+
+// How many kinds of 目立つ所 a layout has (0…7): a border slanted kAccentTiltMm or more, a bleed, an inset or overlap,
+// a 大ゴマ (kAccentBigShare of the frame and kAccentBigOver times the next), a column stacked into rows, a gap between
+// tiers of kAccentGapMm or more, a panel without a border.
+int accents(const Shape& shape);
+// A stack of strips (帯の積み重ね): 4 panels or more, every tier one panel, no slant.
+bool strip_stack(const Shape& shape);
+// Two layouts alike to the eye: the same panels in tiers of the same sizes (in any order; with `exact`, in the same
+// order), the 大ゴマ in the same place, and the same slant (a deep one or none), bleed, inset and frameless.
+bool look_alike(const Shape& a, const Shape& b, bool exact);
 
 // --- 単調さの警告（C） -----------------------------------------------------------------------------------------------
 
