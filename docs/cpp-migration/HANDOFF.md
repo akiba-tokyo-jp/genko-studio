@@ -45,7 +45,28 @@
   - MCP（K3）: 案の束の道具。submit_name の説明文と手引き（B）に新しいキーを書くこと。
   - 重ねの下で隠すのは、枠線と、コマに置いた絵（clip_to frame・bleed）だけ。スマートオブジェクトをコマで切った絵と、ページ全体の層の絵は、重ねのコマの下でも見える。over のコマ同士の上下は決めていない。
   - 自由な割り線は直線（位置と傾き）まで。曲がった線・折れ線は今の手の操作（set_frame curves・poly）のまま。
-  - 拡張のキーを書かない計画が「前と同じバイト」になることは、新しいコードで op を書き出して手で当てた結果と比べ、sha を固定した。前のコード（8362d5fc）で組み直して比べることはしていない（core の model.hpp を変えたので、組み直しが全体に及ぶため）。
+
+### 群 K1 のレビュー（読取専用 1 回）と直し
+- P2（4 件）はすべて直した:
+  - 承認済みのページで、人でない者が set_frame の over を変えることを、strict_gates で止める。over はコマ割りの変化（same_layout）にも数える。
+  - apply_idea の関門を `core::can_approve(agent)` にした（ai: でない名前も止める）。骨組みは check_tiers で先に検査し、写しの上で当ててから入れ替える。断ったとき work は元のまま。
+  - 差し込みの宿主を、変異を通して変わらないコマの番号で持つ。変異の後、差し込みは宿主と一緒に動く。振るいに「差し込みの箱の 4 分の 1 以上が宿主に掛かる」を足した。
+  - 壊れた base は LayoutError("/base…", 日本語) で断る。
+- P3:
+  - over はコマだけが持つ（割れば子へ移る、set_layout の節には付かない、features は葉だけを見る）。読み手は真偽値でない over を broken_value にする。
+  - book_monotony は本の番号のまま返し（Json）、位置で前後を見る。monotony も例外を出さない。
+  - reading_slots と lint の読み順は、本の基本枠の大きさで測る。
+  - 描いたコマ 1 つだけのページ、基本枠でない根は、骨組みにしない。
+  - 要求の検査を足した（panels と範囲の両方、min_tiers>コマ数、focus>コマ数、空の seed、64 bit を超える整数）。大文字の 16 進の seed も受ける。Request を直接作ったときの NaN と範囲の外は、generate が範囲に収める。
+  - 自動の seed は new_txn_id（システムの乱数）から作り、new_id を食わない。
+  - 振るいに flat（layout_flat と同じ基準）を足した。
+  - draft_of は、panels の slant、template の bleed と slant、計画の tier_gap_mm・col_gap_mm を引き継ぐ。
+  - merge_into_plan は、骨組みに無い slot の panels を外して知らせる（dropped）。panels の slant も外す。
+  - apply_layout は、差し込みの後で選択を元に戻す。
+  - 文書（列の間・set_layout の over）。
+- 互換の試験を、8362d5fc のコードで取った値に替えた。8362d5fc を scratchpad の別の build で、試験の対象 1 つだけ組み、demo4 のネーム 4 ページを submit_name した project.json（book_id を 0 にしたもの）の sha と、各ページの input_hash を固定した（submitNameSavesAsBeforeK1）。新しいコードでも同じ値になった。その build は消した。
+- 試験: test_layout_ideas は 22 本になった（足した物: 8362d5fc と同じ保存・関門（strict_gates の set_frame over、ai: でない名前の apply_idea）・over と features の外れ方・割った over・読み手の検査・変異した案（差し込みあり）の当て・K1 より前の計画を元にした変異・壊れた base と骨組みと要求）。すべて合格。関係する試験（test_model・test_storage・test_ops・test_studio_ops・test_command_bus・test_placed・test_contract_storage（前からの SKIP 3 本）・test_service・test_ledger_service_a・b・c・test_gui_ledger_a の test_every_error_reads_in_japanese・test_gui_ledger_c）もすべて合格。
+- 直さなかった物: 台詞の自動配置（letter）は、宿主の台詞が差し込みの上に乗ることを避けない（未確認のまま）。束の sha は Linux でだけ取った（Windows では M7 で確かめる）。`"over": false` を明示した本は、保存でその鍵が消える（false は既定なので、見た目と意味は同じ）。
 
 ### 群 K2（GUI。ブランチ komawari-gui、komawari-core 692d212d から）
 - 窓「コマ割りの案を出す…」（app/komawari_dialog.{hpp,cpp}、命令 `act_komawari`）: ページ → コマ の「テンプレートでコマを割る…」の次と、コマ割りツールの設定（「案を出す…」）。形と操作は SPEC LAYOUT-01「窓『コマ割りの案を出す…』」。

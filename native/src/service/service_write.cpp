@@ -219,7 +219,7 @@ ToolResult StudioService::submit_name(const Json& a) {
     append(issues, briefs::props_by_id(plan, *bible));
     if (studio::has_errors(issues)) return ToolResult(false, Json::object({{"committed", false}}), issues);
     const bool tall = doc.spec.height_mm > core::Num(2) * doc.spec.width_mm;
-    append(issues, lint::lint_name_plan(plan, *script, *bible, static_cast<std::int64_t>(doc.pages.size()), tall));
+    append(issues, lint::lint_name_plan(plan, *script, *bible, static_cast<std::int64_t>(doc.pages.size()), tall, komawari::frame_size(doc.spec)));
     if (studio::has_errors(issues)) return ToolResult(false, Json::object({{"committed", false}}), issues);
     const Json page_index = util::item(plan, "page");
     const bool replace = py_truthy(a["replace"]);

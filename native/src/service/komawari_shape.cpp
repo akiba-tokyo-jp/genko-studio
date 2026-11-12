@@ -294,10 +294,10 @@ Shape shape_of_plan(const Json& plan, double frame_w, double frame_h) {
     return out;
 }
 
-std::vector<std::string> reading_slots(const Json& plan) {
+std::vector<std::string> reading_slots(const Json& plan, double frame_w_mm, double frame_h_mm) {
     Shape shape;
     try {
-        shape = shape_of_plan(plan, 180, 270);
+        shape = shape_of_plan(plan, frame_w_mm, frame_h_mm);
     } catch (const layout::LayoutError&) {
         throw;
     } catch (const std::exception&) {  // (a plan its checks refuse: its tiers' order, as before insets)
@@ -327,6 +327,20 @@ bool plain_grid(const Shape& shape) {
         if (box.slanted || box.bleed || box.over || box.frameless || box.overflow) return false;
     }
     return size_ratio(shape) < kPlainSizeRatio;
+}
+
+bool flat(const Shape& shape) { return shape.panels.size() >= 3 && size_ratio(shape) < kFlatSizeRatio; }
+
+bool insets_on_hosts(const Shape& shape) {
+    for (const PanelBox& inset : shape.panels) {
+        if (inset.host.empty()) continue;
+        const auto host = std::find_if(shape.panels.begin(), shape.panels.end(), [&inset](const PanelBox& b) { return b.slot == inset.host; });
+        if (host == shape.panels.end()) return false;
+        const double w = std::min(inset.x + inset.w, host->x + host->w) - std::max(inset.x, host->x);
+        const double h = std::min(inset.y + inset.h, host->y + host->h) - std::max(inset.y, host->y);
+        if (w <= 0 || h <= 0 || w * h < inset.area() / 4) return false;
+    }
+    return true;
 }
 
 std::size_t reading_break(const Shape& shape) {
@@ -507,8 +521,14 @@ std::optional<Json> skeleton_of_page(const core::Document& doc, const core::Page
     if (page.frames.empty()) return std::nullopt;
     const core::Frame& root = page.frames.front();
     // (a root of drawn panels is one only when it is a panel with its insets: a page of one tier, one panel)
-    if (core::is_free(root) && std::count_if(root.children.begin(), root.children.end(), [](const core::Frame& f) { return !f.over; }) != 1) {
-        return std::nullopt;
+    // (drawn panels, and one drawn panel alone, are not tiers; nor a node not over the basic frame)
+    if (core::is_free(root)) {
+        const auto under = std::count_if(root.children.begin(), root.children.end(), [](const core::Frame& f) { return !f.over && f.children.empty(); });
+        const auto over = std::count_if(root.children.begin(), root.children.end(), [](const core::Frame& f) { return f.over && f.children.empty(); });
+        const core::Rect inner = page.inner_rect_mm(doc.start_side ? std::string_view(*doc.start_side) : std::string_view());
+        const bool on_frame = std::fabs((root.rect.x - inner.x).value()) < 0.01 && std::fabs((root.rect.y - inner.y).value()) < 0.01 &&
+                              std::fabs((root.rect.width - inner.width).value()) < 0.01 && std::fabs((root.rect.height - inner.height).value()) < 0.01;
+        if (under != 1 || over < 1 || under + over != static_cast<std::ptrdiff_t>(root.children.size()) || !on_frame) return std::nullopt;
     }
     const core::Rect frame = root.rect;
     if (!(frame.width.value() > 0 && frame.height.value() > 0)) return std::nullopt;
@@ -667,12 +687,10 @@ std::set<std::string> reveal_beats(const Json& script) {
     return out;
 }
 
-std::string page_word(std::int64_t n) { return std::to_string(n); }
 
 void flat_check(std::vector<studio::Issue>& out, const Shape& shape, const std::string& path) {
-    if (shape.count() < 3) return;
-    const double ratio = size_ratio(shape);
-    if (ratio < kFlatSizeRatio) {
+    if (flat(shape)) {
+        const double ratio = size_ratio(shape);
         out.push_back(warning("layout_flat", path, "コマの大きさの差が小さい（いちばん大きいコマが、いちばん小さいコマの " + fixed(ratio, 1) + " 倍）",
                               "見せたいコマを大きくし、ほかを小さくして緩急を付ける（大ゴマ・断ち切り・コマの数の変化）"));
     }
@@ -704,48 +722,47 @@ void reveal_check(std::vector<studio::Issue>& out, const Shape& shape, const Jso
     }
 }
 
-using Shapes = std::vector<std::pair<std::int64_t, std::optional<Shape>>>;  // page number → its shape (none: blank)
+// The book's pages in their order: each one's number and shape (none: blank, or one that cannot be measured).
+struct PageShape {
+    core::Num index;
+    std::optional<Shape> shape;
+};
+using Shapes = std::vector<PageShape>;
 
-const std::optional<Shape>* shape_at(const Shapes& shapes, std::int64_t n) {
-    for (const auto& [k, s] : shapes) {
-        if (k == n) return &s;
+std::optional<Shape> safe_shape(const core::Document& doc, const core::Page& page) {
+    try {
+        return shape_of_page(doc, page);
+    } catch (const std::exception&) {  // (a warning never stops: a page that cannot be measured is not counted)
+        return std::nullopt;
     }
-    return nullptr;
 }
 
-// Whether the three pages from `start` have the same or alike layouts.
-bool run_at(const Shapes& shapes, std::int64_t start) {
-    const auto* a = shape_at(shapes, start);
-    const auto* b = shape_at(shapes, start + 1);
-    const auto* c = shape_at(shapes, start + 2);
-    if (a == nullptr || b == nullptr || c == nullptr || !*a || !*b || !*c) return false;
-    return difference(**a, **b) <= kRepeatAtMost && difference(**b, **c) <= kRepeatAtMost;
-}
-
-// The first run of three pages through `around` whose layouts are the same or alike: its first page, else 0.
-std::int64_t repeated_run(const Shapes& shapes, std::int64_t around) {
-    for (std::int64_t start = around - 2; start <= around; ++start) {
-        if (start >= 1 && run_at(shapes, start)) return start;
-    }
-    return 0;
+// Whether the three pages from position `start` have the same or alike layouts.
+bool run_at(const Shapes& shapes, std::size_t start) {
+    if (start + 2 >= shapes.size()) return false;
+    const auto& a = shapes[start].shape;
+    const auto& b = shapes[start + 1].shape;
+    const auto& c = shapes[start + 2].shape;
+    if (!a || !b || !c) return false;
+    return difference(*a, *b) <= kRepeatAtMost && difference(*b, *c) <= kRepeatAtMost;
 }
 
 std::optional<studio::Issue> accent_check(const Shapes& shapes) {
     int counted = 0;
-    for (const auto& [n, s] : shapes) {
-        if (!s) continue;
+    for (const PageShape& p : shapes) {
+        if (!p.shape) continue;
         ++counted;
-        if (s->tilts > 0 || any_of(*s, &PanelBox::bleed)) return std::nullopt;
+        if (p.shape->tilts > 0 || any_of(*p.shape, &PanelBox::bleed)) return std::nullopt;
     }
     if (counted < kAccentPages) return std::nullopt;
     return warning("book_without_accent", "/", "コマのある " + std::to_string(counted) + " ページに、斜めの境目も断ち切りのコマも 1 つも無い",
                    "見せ場や動きのあるページで、斜め（tilt_mm・slant）か断ち切り（bleed）を使う");
 }
 
-studio::Issue repeat_issue(const Shapes& shapes, std::int64_t start, const std::string& path) {
-    const auto* s = shape_at(shapes, start);
+studio::Issue repeat_issue(const Shapes& shapes, std::size_t start, const std::string& path) {
     return warning("layout_repeats", path,
-                   page_word(start) + "〜" + page_word(start + 2) + " ページの段組が、続けて同じか似ている（" + describe(**s) + "）",
+                   shapes[start].index.repr() + "〜" + shapes[start + 2].index.repr() + " ページの段組が、続けて同じか似ている（" +
+                       describe(*shapes[start].shape) + "）",
                    "大ゴマ・斜め・断ち切り・コマの数で、ページごとに緩急を付ける（コマ割りの案の束: layout_ideas）");
 }
 
@@ -753,46 +770,44 @@ studio::Issue repeat_issue(const Shapes& shapes, std::int64_t start, const std::
 
 std::vector<studio::Issue> monotony(const core::Document& doc, const Json& page_index, const Json& plan, const Json& script) {
     std::vector<studio::Issue> out;
-    const auto at = page_at(doc, page_index);
-    if (!at) return out;
-    const core::Page& target = doc.page(*at);
-    const auto [fw, fh] = frame_size(target.spec);
-    Shape now;
     try {
-        now = shape_of_plan(plan, fw, fh);
-    } catch (const std::exception&) {
-        return out;
-    }
-    const std::string base = core::truthy_at(plan, "tiers") ? "/tiers" : "/template";
-    flat_check(out, now, base);
-    reveal_check(out, now, plan, reveal_beats(script));
-    const std::int64_t number = core::to_int(page_index);
-    Shapes shapes;
-    for (const auto& held : doc.pages) {
-        const core::Page& page = *held;
-        const std::int64_t n = core::to_int(page.index.json());
-        if (n == number) {
-            shapes.emplace_back(n, now);
-        } else {
-            shapes.emplace_back(n, shape_of_page(doc, page));
+        const auto at = page_at(doc, page_index);
+        if (!at) return out;
+        const core::Page& target = doc.page(*at);
+        const auto [fw, fh] = frame_size(target.spec);
+        const Shape now = shape_of_plan(plan, fw, fh);
+        const std::string base = core::truthy_at(plan, "tiers") ? "/tiers" : "/template";
+        flat_check(out, now, base);
+        reveal_check(out, now, plan, reveal_beats(script));
+        Shapes shapes;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            const core::Page& page = *doc.pages[i];
+            shapes.push_back({page.index, i == *at ? std::optional<Shape>(now) : safe_shape(doc, page)});
         }
+        for (std::size_t start = *at >= 2 ? *at - 2 : 0; start <= *at; ++start) {
+            if (run_at(shapes, start)) {
+                out.push_back(repeat_issue(shapes, start, base));
+                break;
+            }
+        }
+        if (auto accent = accent_check(shapes)) out.push_back(std::move(*accent));
+    } catch (const std::exception&) {  // (warnings never stop a name: a plan that cannot be measured gets none)
+        return {};
     }
-    if (const std::int64_t start = repeated_run(shapes, number)) out.push_back(repeat_issue(shapes, start, base));
-    if (auto accent = accent_check(shapes)) out.push_back(std::move(*accent));
     return out;
 }
 
-std::vector<std::pair<std::int64_t, studio::Issue>> book_monotony(const core::Document& doc, const Json& script) {
-    std::vector<std::pair<std::int64_t, studio::Issue>> out;
+std::vector<std::pair<Json, studio::Issue>> book_monotony(const core::Document& doc, const Json& script) {
+    std::vector<std::pair<Json, studio::Issue>> out;
     Shapes shapes;
-    for (const auto& held : doc.pages) shapes.emplace_back(core::to_int(held->index.json()), shape_of_page(doc, *held));
+    for (const auto& held : doc.pages) shapes.push_back({held->index, safe_shape(doc, *held)});
     const std::set<std::string> reveals = reveal_beats(script);
-    std::int64_t last_run = -10;
-    for (const auto& [n, shape] : shapes) {
-        if (!shape) continue;
+    std::size_t next_run = 0;  // (one warning a run of three)
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        if (!shapes[i].shape) continue;
         std::vector<studio::Issue> here;
-        flat_check(here, *shape, "/tiers");
-        const core::Page& page = doc.page(*page_at(doc, Json(n)));
+        flat_check(here, *shapes[i].shape, "/tiers");
+        const core::Page& page = *doc.pages[i];
         const Json name = page.plan ? core::py_get(*page.plan, "name") : Json();
         if (name.is_object()) {
             try {
@@ -801,13 +816,13 @@ std::vector<std::pair<std::int64_t, studio::Issue>> book_monotony(const core::Do
             } catch (const std::exception&) {
             }
         }
-        if (n > last_run + 2 && run_at(shapes, n)) {  // (the run that starts here; one warning a run)
-            here.push_back(repeat_issue(shapes, n, "/tiers"));
-            last_run = n;
+        if (i >= next_run && run_at(shapes, i)) {
+            here.push_back(repeat_issue(shapes, i, "/tiers"));
+            next_run = i + 3;
         }
-        for (studio::Issue& issue : here) out.emplace_back(n, std::move(issue));
+        for (studio::Issue& issue : here) out.emplace_back(page.index.json(), std::move(issue));
     }
-    if (auto accent = accent_check(shapes)) out.emplace_back(0, std::move(*accent));
+    if (auto accent = accent_check(shapes)) out.emplace_back(Json(), std::move(*accent));
     return out;
 }
 

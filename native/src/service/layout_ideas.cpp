@@ -5,10 +5,12 @@
 #include <cmath>
 #include <cstdio>
 
+#include "core/actor.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "service/lint.hpp"
+#include "service/wording.hpp"
 
 namespace genko::service::layout_ideas {
 
@@ -111,6 +113,7 @@ Settings settings_of(const Request& r) {
 
 struct Leaf {
     bool bleed = false, frameless = false, overflow = false;
+    int id = -1;  // which panel it is, through every change of a variation (an inset names its host by it)
 };
 
 struct Row {
@@ -136,7 +139,7 @@ struct Tier {
 };
 
 struct Inset {
-    int host = 0;  // the tier panel it goes into (0-based, tiers' order)
+    int host = -1;  // the id of the tier panel it goes into (Leaf::id)
     int x = 0, y = 0, w = 0, h = 0;  // thousandths of the basic frame
     Leaf leaf;
 };
@@ -144,14 +147,42 @@ struct Inset {
 struct Draft {
     std::vector<Tier> tiers;
     std::vector<Inset> insets;
+    int tier_gap10 = -1, col_gap10 = -1;  // the plan's gaps (−1: apply_layout's)
 };
 
-int leaves_of(const Draft& d) {
-    int n = 0;
+// Each leaf without an id given the next one.
+void number_leaves(Draft& d) {
+    int next = 0;
+    const auto seen = [&next](const Leaf& leaf) { next = std::max(next, leaf.id + 1); };
     for (const Tier& t : d.tiers) {
-        for (const Col& c : t.cols) n += c.rows.empty() ? 1 : static_cast<int>(c.rows.size());
+        for (const Col& c : t.cols) {
+            seen(c.leaf);
+            for (const Row& r : c.rows) seen(r.leaf);
+        }
     }
-    return n;
+    for (Tier& t : d.tiers) {
+        for (Col& c : t.cols) {
+            if (c.rows.empty() && c.leaf.id < 0) c.leaf.id = next++;
+            for (Row& r : c.rows) {
+                if (r.leaf.id < 0) r.leaf.id = next++;
+            }
+        }
+    }
+}
+
+// The tier panels' leaf ids in the tiers' order (t0, t1, … of raw_skeleton).
+std::vector<int> leaf_ids(const Draft& d) {
+    std::vector<int> out;
+    for (const Tier& t : d.tiers) {
+        for (const Col& c : t.cols) {
+            if (c.rows.empty()) {
+                out.push_back(c.leaf.id);
+            } else {
+                for (const Row& r : c.rows) out.push_back(r.leaf.id);
+            }
+        }
+    }
+    return out;
 }
 
 // Weights to thousandths that add up to 1000 (the remainder to the largest; each at least `least`).
@@ -219,12 +250,17 @@ Json raw_skeleton(const Draft& d, std::vector<std::pair<std::string, Leaf>>& lea
         tiers.push_back(std::move(tier));
     }
     Json out = Json::object({{"tiers", std::move(tiers)}});
+    if (d.tier_gap10 >= 0) out["tier_gap_mm"] = d.tier_gap10 / 10.0;
+    if (d.col_gap10 >= 0) out["col_gap_mm"] = d.col_gap10 / 10.0;
     if (!d.insets.empty()) {
+        const std::vector<int> ids = leaf_ids(d);
         Json insets = Json::array();
         for (std::size_t i = 0; i < d.insets.size(); ++i) {
             const Inset& in = d.insets[i];
             const std::string slot = "i" + std::to_string(i);
-            insets.push_back(Json::object({{"slot", slot}, {"on", "t" + std::to_string(in.host)},
+            const auto host = std::find(ids.begin(), ids.end(), in.host);
+            const std::string on = host == ids.end() || in.host < 0 ? std::string() : "t" + std::to_string(host - ids.begin());
+            insets.push_back(Json::object({{"slot", slot}, {"on", on},
                                            {"rect", Json::array({in.x / 1000.0, in.y / 1000.0, in.w / 1000.0, in.h / 1000.0})}}));
             leaves.emplace_back(slot, in.leaf);
         }
@@ -492,6 +528,7 @@ Built draw_fresh(Rng& rng, const Settings& s, int n, int wanted_focus) {
         }
     }
     d.insets.resize(static_cast<std::size_t>(insets));
+    number_leaves(d);
     return out;
 }
 
@@ -561,7 +598,7 @@ bool place_insets(Rng& rng, Draft& d, int focus, double fw, double fh) {
         const double dy = std::fabs((y + ht / 2) - (h.y + h.h / 2));
         const double half = std::min(ht, h.h) / 2;
         if (!(dy >= half * 1.25 || dy <= half * 0.6)) return false;
-        inset.host = host;
+        inset.host = leaf_at(d, places[static_cast<std::size_t>(host)]).id;
         inset.x = static_cast<int>(std::floor(x / fw * 1000 + 0.5));
         inset.y = static_cast<int>(std::floor(y / fh * 1000 + 0.5));
         inset.w = static_cast<int>(std::floor(w / fw * 1000 + 0.5));
@@ -585,16 +622,49 @@ std::vector<int> ratios_of(const std::vector<Json>& items, const char* key) {
     return thousandths(w, 1);
 }
 
+// A skeleton (or a whole name plan, its template's tiers too) as a draft: its sizes, each border's gap and slant as
+// apply_layout takes them (the entry's tilt_mm, else the slant of the panel the entry is, the template's then the
+// plan's), the plan's gaps, each panel's keys (the template's bleeds, then the plan's), and its insets by their hosts.
 Draft draft_of(const Json& skeleton) {
     const Json tiers = layout::resolve_tiers(skeleton);
+    Json template_shape = Json::object();
+    if (!core::truthy_at(skeleton, "tiers")) {
+        const Json name = core::py_get(skeleton, "template");
+        if (name.is_string() && layout::templates().contains(name.get<std::string>())) template_shape = layout::templates()[name.get<std::string>()];
+    }
+    std::vector<std::pair<std::string, double>> slants;
+    const auto set_slant = [&slants](const std::string& key, double value) {
+        for (auto& [k, v] : slants) {
+            if (k == key) {
+                v = value;
+                return;
+            }
+        }
+        slants.emplace_back(key, value);
+    };
     std::vector<std::pair<std::string, Leaf>> flags;
+    const auto flag = [&flags](const std::string& slot) -> Leaf& {
+        for (auto& [k, v] : flags) {
+            if (k == slot) return v;
+        }
+        flags.emplace_back(slot, Leaf{});
+        return flags.back().second;
+    };
+    if (const Json given = core::py_get(template_shape, "slant"); given.is_object()) {
+        for (const auto& [key, value] : given.items()) {
+            if (value.is_number()) set_slant(key, core::to_float(value));
+        }
+    }
+    for (const Json& slot : core::iterate(core::py_or(core::py_get(template_shape, "bleed"), Json::array()))) flag(core::py_str(slot)).bleed = true;
     for (const Json& panel : core::iterate(core::py_or(core::py_get(skeleton, "panels"), Json::array()))) {
-        Leaf leaf;
-        leaf.bleed = core::py_truthy(core::py_get(panel, "bleed"));
+        if (!panel.is_object()) continue;
+        const std::string slot = core::py_str(core::py_get(panel, "slot"));
+        Leaf& leaf = flag(slot);
+        if (const Json bleed = core::py_get(panel, "bleed"); !bleed.is_null()) leaf.bleed = core::py_truthy(bleed);
         const Json border = core::py_get(panel, "border_mm");
         leaf.frameless = border.is_number() && core::to_float(border) <= 0;
         leaf.overflow = core::py_truthy(core::py_get(panel, "overflow"));
-        flags.emplace_back(core::py_str(core::py_get(panel, "slot")), leaf);
+        if (const Json slant = core::py_get(panel, "slant"); slant.is_number()) set_slant(slot, core::to_float(slant));
     }
     const auto flag_of = [&flags](const Json& slot) {
         for (const auto& [k, v] : flags) {
@@ -606,35 +676,54 @@ Draft draft_of(const Json& skeleton) {
         const Json g = core::py_get(entry, "gap_mm");
         return g.is_number() ? static_cast<int>(std::floor(core::to_float(g) * 10 + 0.5)) : -1;
     };
+    // the border after an entry: its tilt_mm, else the slant of the one panel it is (layout.cpp's leaf)
+    const auto tilt_of_entry = [&slants](const Json& entry, const Json& one_slot) {
+        const Json own = core::py_get(entry, "tilt_mm");
+        if (own.is_number()) return to_tenths(own);
+        if (!one_slot.is_string()) return 0;
+        for (const auto& [k, v] : slants) {
+            if (k == one_slot.get<std::string>()) return static_cast<int>(std::floor(v * 10 + 0.5));
+        }
+        return 0;
+    };
+    const auto plan_gap = [](const Json& plan, const char* key) {
+        const Json g = core::py_get(plan, key);
+        return g.is_number() ? static_cast<int>(std::floor(core::to_float(g) * 10 + 0.5)) : -1;
+    };
     Draft d;
-    std::vector<std::string> slots;  // the tier panels' slots in the tiers' order
+    d.tier_gap10 = plan_gap(skeleton, "tier_gap_mm");
+    d.col_gap10 = plan_gap(skeleton, "col_gap_mm");
+    std::vector<std::string> slot_names;  // the tier panels' slot_names in the tiers' order (their leaf ids: their places here)
     const std::vector<Json> tier_list = core::iterate(tiers);
     const std::vector<int> th = ratios_of(tier_list, "h");
     for (std::size_t t = 0; t < tier_list.size(); ++t) {
         Tier tier;
         tier.h = th[t];
         tier.gap10 = gap_of(tier_list[t]);
-        tier.tilt10 = to_tenths(core::py_get(tier_list[t], "tilt_mm"));
         const std::vector<Json> cols = core::iterate(core::py_or(core::py_get(tier_list[t], "cols"), Json::array()));
+        const bool single = cols.size() == 1 && !core::truthy_at(cols[0], "rows");
+        tier.tilt10 = tilt_of_entry(tier_list[t], single ? core::py_get(cols[0], "slot") : Json());
         const std::vector<int> cw = ratios_of(cols, "w");
         for (std::size_t c = 0; c < cols.size(); ++c) {
             Col col;
             col.w = cw[c];
             col.gap10 = gap_of(cols[c]);
-            col.tilt10 = to_tenths(core::py_get(cols[c], "tilt_mm"));
             const std::vector<Json> rows = core::iterate(core::py_or(core::py_get(cols[c], "rows"), Json::array()));
+            col.tilt10 = tilt_of_entry(cols[c], rows.empty() ? core::py_get(cols[c], "slot") : Json());
             if (rows.empty()) {
                 col.leaf = flag_of(core::py_get(cols[c], "slot"));
-                slots.push_back(core::py_str(core::py_get(cols[c], "slot")));
+                col.leaf.id = static_cast<int>(slot_names.size());
+                slot_names.push_back(core::py_str(core::py_get(cols[c], "slot")));
             } else {
                 const std::vector<int> rh = ratios_of(rows, "h");
                 for (std::size_t r = 0; r < rows.size(); ++r) {
                     Row row;
                     row.h = rh[r];
                     row.gap10 = gap_of(rows[r]);
-                    row.tilt10 = to_tenths(core::py_get(rows[r], "tilt_mm"));
+                    row.tilt10 = tilt_of_entry(rows[r], core::py_get(rows[r], "slot"));
                     row.leaf = flag_of(core::py_get(rows[r], "slot"));
-                    slots.push_back(core::py_str(core::py_get(rows[r], "slot")));
+                    row.leaf.id = static_cast<int>(slot_names.size());
+                    slot_names.push_back(core::py_str(core::py_get(rows[r], "slot")));
                     col.rows.push_back(row);
                 }
             }
@@ -644,11 +733,11 @@ Draft draft_of(const Json& skeleton) {
     }
     for (const Json& inset : core::iterate(core::py_or(core::py_get(skeleton, "insets"), Json::array()))) {
         const std::string on = core::py_str(core::py_get(inset, "on"));
-        const auto at = std::find(slots.begin(), slots.end(), on);
+        const auto at = std::find(slot_names.begin(), slot_names.end(), on);
         const Json rect = core::py_get(inset, "rect");
-        if (at == slots.end() || !rect.is_array() || rect.size() != 4) continue;
+        if (at == slot_names.end() || !rect.is_array() || rect.size() != 4) continue;
         Inset in;
-        in.host = static_cast<int>(at - slots.begin());
+        in.host = static_cast<int>(at - slot_names.begin());
         in.x = to_thousandths(core::to_float(rect[0]));
         in.y = to_thousandths(core::to_float(rect[1]));
         in.w = to_thousandths(core::to_float(rect[2]));
@@ -658,6 +747,43 @@ Draft draft_of(const Json& skeleton) {
     }
     return d;
 }
+
+// Each tier panel's box (mm) by its leaf id.
+std::vector<std::pair<int, PanelBox>> boxes_by_id(const Draft& d, double fw, double fh) {
+    Draft bare = d;
+    bare.insets.clear();
+    std::vector<std::pair<std::string, Leaf>> leaves;
+    const Shape shape = komawari::shape_of_plan(raw_skeleton(bare, leaves), fw, fh);
+    const std::vector<int> ids = leaf_ids(d);
+    std::vector<std::pair<int, PanelBox>> out;
+    for (const PanelBox& box : shape.panels) {
+        const std::size_t k = static_cast<std::size_t>(std::stoi(box.slot.substr(1)));
+        if (k < ids.size()) out.emplace_back(ids[k], box);
+    }
+    return out;
+}
+
+// After a variation, each inset moved with its host (by the host's middle) and kept in the frame.
+void reanchor(Draft& d, const std::vector<std::pair<int, PanelBox>>& before, double fw, double fh) {
+    if (d.insets.empty()) return;
+    const auto after = boxes_by_id(d, fw, fh);
+    const auto find = [](const std::vector<std::pair<int, PanelBox>>& boxes, int id) -> const PanelBox* {
+        for (const auto& [k, b] : boxes) {
+            if (k == id) return &b;
+        }
+        return nullptr;
+    };
+    for (Inset& in : d.insets) {
+        const PanelBox* was = find(before, in.host);
+        const PanelBox* now = find(after, in.host);
+        if (was == nullptr || now == nullptr) continue;
+        const double dx = (now->x + now->w / 2) - (was->x + was->w / 2);
+        const double dy = (now->y + now->h / 2) - (was->y + was->h / 2);
+        in.x = std::clamp(in.x + static_cast<int>(std::floor(dx / fw * 1000 + 0.5)), 0, std::max(0, 1000 - in.w));
+        in.y = std::clamp(in.y + static_cast<int>(std::floor(dy / fh * 1000 + 0.5)), 0, std::max(0, 1000 - in.h));
+    }
+}
+
 
 // --- variations -------------------------------------------------------------------------------------------------------
 
@@ -875,8 +1001,6 @@ Draft vary(Rng& rng, const Draft& base, double v, const Settings& s) {
         }
         tier.tilt10 = std::clamp(tier.tilt10, -static_cast<int>(layout::kMaxTiltMm * 10), static_cast<int>(layout::kMaxTiltMm * 10));
     }
-    const int tier_panels = leaves_of(d);
-    for (Inset& in : d.insets) in.host = std::min(in.host, tier_panels - 1);
     return d;
 }
 
@@ -905,11 +1029,12 @@ void tally(std::vector<std::pair<std::string, int>>& dropped, const std::string&
 
 // Why an idea is sieved out (empty: kept), before the batch's likeness.
 std::string sieve(const Shape& shape, const Request& r) {
-    if (shape.count() == 0) return "unfit";
+    if (shape.count() == 0 || !komawari::insets_on_hosts(shape)) return "unfit";
     if (komawari::smallest_side(shape) < lint::kMinPanelSideMm) return "small";
     if (komawari::narrowest_gap(shape) < komawari::kMinGapMm) return "gap";
     if (komawari::reading_break(shape) != 0) return "order";
     if (komawari::plain_grid(shape)) return "plain";
+    if (komawari::flat(shape)) return "flat";  // (no idea of the batch gets layout_flat when it is submitted)
     if (r.focus > 0 && komawari::largest(shape) != static_cast<std::size_t>(r.focus)) return "focus";
     return {};
 }
@@ -960,7 +1085,8 @@ std::uint64_t seed_value(std::string_view text) {
         std::uint64_t v = 0;
         bool hex = true;
         for (const char c : text.substr(3)) {
-            const int d = c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1);
+            // (its 16 hex digits in either case)
+            const int d = c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : (c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1));
             if (d < 0) {
                 hex = false;
                 break;
@@ -982,8 +1108,9 @@ namespace {
 int int_arg(const Json& args, const char* key, int lo, int hi, const std::string& message) {
     const Json value = core::py_get(args, key);
     if (value.is_null()) return 0;
-    if (!value.is_number_integer() || core::to_int(value) < lo || core::to_int(value) > hi) throw layout::LayoutError(std::string("/") + key, message);
-    return static_cast<int>(core::to_int(value));
+    // (compared as a double: an integer past 64 bits is out of the range, not an error of its own)
+    if (!value.is_number_integer() || !(value.get<double>() >= lo && value.get<double>() <= hi)) throw layout::LayoutError(std::string("/") + key, message);
+    return static_cast<int>(value.get<double>());
 }
 
 double unit_arg(const Json& value, const std::string& path, const std::string& label) {
@@ -1044,7 +1171,8 @@ Request request_from_json(const Json& args, const core::PageSpec& spec) {
     }
     if (const Json seed = core::py_get(a, "seed"); !seed.is_null()) {
         if (!seed.is_string() && !seed.is_number_integer()) throw layout::LayoutError("/seed", "seed は文字列か整数");
-        r.seed = core::py_str(seed);
+        r.seed = seed.is_string() ? seed.get<std::string>() : seed.dump();  // (an integer as its digits, however large)
+        if (r.seed.empty()) throw layout::LayoutError("/seed", "seed が空（新しい seed にするなら seed を書かないか null にする）");
     }
     const int count = int_arg(a, "count", 1, kMaxCount, "束の数（count）は 1〜" + std::to_string(kMaxCount));
     r.count = count > 0 ? count : kDefaultCount;
@@ -1054,7 +1182,12 @@ Request request_from_json(const Json& args, const core::PageSpec& spec) {
     }
     if (const Json variation = core::py_get(a, "variation"); !variation.is_null()) r.variation = unit_arg(variation, "/variation", "変異度（variation）");
     r.focus = int_arg(a, "focus", 1, most, "見せ場のコマ（focus）は 1〜" + std::to_string(most) + " 番");
-    if (r.panels > 0 && r.focus > r.panels) throw layout::LayoutError("/focus", "見せ場のコマ（focus）がコマ数より大きい");
+    const int most_panels = r.panels > 0 ? r.panels : (r.max_panels > 0 ? r.max_panels : most);
+    if (r.focus > most_panels) throw layout::LayoutError("/focus", "見せ場のコマ（focus）がコマ数より大きい");
+    if (r.min_tiers > most_panels) throw layout::LayoutError("/min_tiers", "段数の下限（min_tiers）がコマ数より多い");
+    if (r.panels > 0 && (r.min_panels > 0 || r.max_panels > 0)) {
+        throw layout::LayoutError("/panels", "コマ数は panels（ちょうど）か min_panels・max_panels（範囲）のどちらかで決める");
+    }
     return r;
 }
 
@@ -1087,24 +1220,64 @@ Json request_to_json(const Request& r) {
     return out;
 }
 
-Batch generate(const Request& r) {
+namespace {
+
+// A request as the window may make it by hand, kept in its bounds: knobs and the degree in 0..1 (one that is not a
+// number: the preset's, 0.3), counts in theirs. LayoutError for a basic frame that is not a size.
+Request bounded(Request r) {
+    if (!(std::isfinite(r.frame_w_mm) && std::isfinite(r.frame_h_mm) && r.frame_w_mm > 0 && r.frame_h_mm > 0)) {
+        throw layout::LayoutError("/", "基本枠の大きさが正しくない");
+    }
+    for (std::optional<double>* knob : {&r.knobs.slant, &r.knobs.bleed, &r.knobs.split, &r.knobs.big, &r.knobs.overlap, &r.knobs.overflow, &r.knobs.frameless}) {
+        if (*knob && !std::isfinite(**knob)) knob->reset();
+        if (*knob) **knob = std::clamp(**knob, 0.0, 1.0);
+    }
+    r.variation = std::isfinite(r.variation) ? std::clamp(r.variation, 0.0, 1.0) : 0.3;
+    const int most = static_cast<int>(layout::kMaxPanels);
+    r.panels = std::clamp(r.panels, 0, most);
+    r.min_panels = std::clamp(r.min_panels, 0, most);
+    r.max_panels = std::clamp(r.max_panels, 0, most);
+    r.min_tiers = std::clamp(r.min_tiers, 0, kMaxTiers);
+    r.max_tiers = std::clamp(r.max_tiers, 0, kMaxTiers);
+    r.focus = std::clamp(r.focus, 0, most);
+    r.count = std::clamp(r.count, 1, kMaxCount);
+    return r;
+}
+
+}  // namespace
+
+Batch generate(const Request& given) {
+    const Request r = bounded(given);
     Batch out;
-    out.seed = !r.seed.empty() ? r.seed : "km-" + (core::new_id() + core::new_id()).substr(0, 16);
+    // (a new seed from the system's random source, not new_id(): the ids a test or a script lays out stay theirs)
+    out.seed = !r.seed.empty() ? r.seed : "km-" + core::new_txn_id().substr(0, 16);
     const std::uint64_t seed = seed_value(out.seed);
-    const Settings s = settings_of(r);
-    const int count = std::clamp(r.count, 1, kMaxCount);
+    Settings s = settings_of(r);
+    if (!r.base && r.focus > 0) s.min_n = std::max(s.min_n, r.focus);  // (the 見せ場 is one of the panels)
+    s.min_t = std::min(s.min_t, s.max_n);
+    const int count = r.count;
     const double fw = r.frame_w_mm, fh = r.frame_h_mm;
     std::optional<Draft> base;
     std::optional<Shape> base_shape;
+    std::vector<std::pair<int, PanelBox>> base_boxes;
     if (r.base) {
-        Json checked = *r.base;
-        for (const studio::Issue& issue : layout::check_tiers(checked)) {
-            if (issue.severity == "error") throw layout::LayoutError("/base" + issue.path, issue.message);
+        const Json& checked = *r.base;
+        try {
+            for (const studio::Issue& issue : layout::check_tiers(checked)) {
+                if (issue.severity == "error") throw layout::LayoutError("/base" + issue.path, issue.message);
+            }
+            base = draft_of(checked);
+            base_shape = komawari::shape_of_plan(checked, fw, fh);
+            base_boxes = boxes_by_id(*base, fw, fh);
+        } catch (const layout::LayoutError& e) {
+            if (e.where().rfind("/base", 0) == 0) throw;
+            throw layout::LayoutError("/base" + e.where(), e.message());
+        } catch (const std::exception&) {  // (a skeleton of the wrong types: the base's fault, in words)
+            throw layout::LayoutError("/base", "変異の元（base）の骨組みが読めない（tiers・insets・panels の形を確かめる）");
         }
-        base = draft_of(checked);
-        base_shape = komawari::shape_of_plan(checked, fw, fh);
+        if (r.focus > 0 && static_cast<std::size_t>(r.focus) > base_shape->count()) throw layout::LayoutError("/focus", "見せ場のコマ（focus）がコマ数より大きい");
     } else if (s.min_n > s.max_n) {
-        throw layout::LayoutError("/min_panels", "min_panels が max_panels より大きい");
+        throw layout::LayoutError(r.focus > 0 ? "/focus" : "/min_panels", r.focus > 0 ? "見せ場のコマ（focus）がコマ数より大きい" : "min_panels が max_panels より大きい");
     }
     const int budget = count * 60;
     int similar_below = komawari::kSimilarBelow;
@@ -1116,6 +1289,12 @@ Batch generate(const Request& r) {
         Draft draft;
         if (base) {
             draft = vary(rng, *base, r.variation, s);
+            try {
+                reanchor(draft, base_boxes, fw, fh);  // (each inset moves with its host)
+            } catch (const std::exception&) {
+                tally(out.dropped, "unfit");
+                continue;
+            }
         } else {
             const int n = rng.between(s.min_n, s.max_n);
             Built built = draw_fresh(rng, s, n, r.focus);
@@ -1130,7 +1309,7 @@ Batch generate(const Request& r) {
         try {
             made = finish(draft, fw, fh);
             for (const studio::Issue& issue : layout::check_tiers(made.first)) fits = fits && issue.severity != "error";
-        } catch (const core::ApplyError&) {
+        } catch (const std::exception&) {
             fits = false;
         }
         if (!fits) {
@@ -1182,7 +1361,7 @@ Json batch_to_json(const Batch& batch) {
     return Json::object({{"seed", batch.seed}, {"ideas", std::move(ideas)}, {"tried", batch.tried}, {"dropped", std::move(dropped)}});
 }
 
-Json merge_into_plan(const Json& skeleton, const Json& plan) {
+Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::string>* dropped) {
     Json out = plan.is_object() ? plan : Json::object();
     out["template"] = nullptr;
     out["tiers"] = core::py_get(skeleton, "tiers");
@@ -1194,23 +1373,35 @@ Json merge_into_plan(const Json& skeleton, const Json& plan) {
             out[key] = nullptr;
         }
     }
-    Json panels = out.contains("panels") && out["panels"].is_array() ? out["panels"] : Json::array();
-    for (const Json& given : core::iterate(core::py_or(core::py_get(skeleton, "panels"), Json::array()))) {
+    const Json given_panels = core::py_or(core::py_get(skeleton, "panels"), Json::array());
+    Json panels = Json::array();
+    // the plan's panels of the skeleton's slots, in the plan's order; those of other slots left out (and told)
+    if (out.contains("panels") && out["panels"].is_array()) {
+        for (const Json& p : out["panels"]) {
+            const Json slot = core::py_get(p, "slot");
+            const bool kept = std::any_of(given_panels.begin(), given_panels.end(), [&slot](const Json& g) { return core::py_get(g, "slot") == slot; });
+            if (kept) {
+                panels.push_back(p);
+            } else if (dropped != nullptr) {
+                dropped->push_back(core::py_str(slot));
+            }
+        }
+    }
+    for (const Json& given : core::iterate(given_panels)) {
         const Json slot = core::py_get(given, "slot");
-        Json* panel = nullptr;
-        for (Json& p : panels) {
-            if (p.is_object() && core::py_get(p, "slot") == slot) panel = &p;
+        std::size_t at = panels.size();
+        for (std::size_t i = 0; i < panels.size(); ++i) {
+            if (panels[i].is_object() && core::py_get(panels[i], "slot") == slot) at = i;
         }
-        if (panel == nullptr) {
-            panels.push_back(Json::object({{"slot", slot}}));
-            panel = &panels.back();
-        }
-        for (const char* key : {"bleed", "border_mm", "overflow"}) {
+        if (at == panels.size()) panels.push_back(Json::object({{"slot", slot}}));
+        Json& panel = panels[at];
+        // (the skeleton's layout keys; slant is the tiers' tilt_mm now)
+        for (const char* key : {"bleed", "border_mm", "overflow", "slant"}) {
             const Json value = core::py_get(given, key);
             if (!value.is_null()) {
-                (*panel)[key] = value;
-            } else if (panel->contains(key)) {
-                (*panel)[key] = nullptr;
+                panel[key] = value;
+            } else if (panel.contains(key)) {
+                panel[key] = nullptr;
             }
         }
     }
@@ -1221,19 +1412,35 @@ Json merge_into_plan(const Json& skeleton, const Json& plan) {
 layout::CompiledLayout apply_idea(Work& work, const Json& page_index, const Json& skeleton, const std::string& agent, bool replace) {
     const auto at = page_at(work.doc, page_index);
     if (!at) throw layout::LayoutError("/page", core::py_str(page_index) + " ページはない（1〜" + std::to_string(work.doc.pages.size()) + "）");
-    if (agent.rfind("ai:", 0) == 0 && work.doc.page(*at).name_ok) {
-        throw layout::LayoutError("/page", core::py_str(page_index) + " ページのネームは承認済み。AI はコマ割りを変えない（変えるには人間が承認を取り消す）");
+    // (who may approve — a person — is who may lay a page whose name is approved again: the command bus's rule)
+    if (!core::can_approve(agent) && work.doc.page(*at).name_ok) {
+        throw layout::LayoutError("/page", core::py_str(page_index) + " ページのネームは承認済み。人でなければコマ割りを変えない（変えるには人間が承認を取り消す）");
     }
-    if (!layout::is_blank(work.doc, work.doc.page(*at))) {
-        if (!replace) throw layout::LayoutError("/page", core::py_str(page_index) + " ページにはすでにコマか台詞がある（replace で作り直す）");
-        layout::clear_page(work, *at, agent);
-    }
+    if (!skeleton.is_object()) throw layout::LayoutError("/skeleton", "骨組みは {tiers, insets?, panels}");
     Json plan = Json::object({{"page", page_index}, {"tiers", core::py_get(skeleton, "tiers")}});
     for (const char* key : {"insets", "tier_gap_mm", "col_gap_mm"}) {
         if (!core::py_get(skeleton, key).is_null()) plan[key] = skeleton[key];
     }
     plan["panels"] = core::py_or(core::py_get(skeleton, "panels"), Json::array());
-    return layout::apply_layout(work, page_index, plan, agent);
+    const bool blank = layout::is_blank(work.doc, work.doc.page(*at));
+    if (!blank && !replace) throw layout::LayoutError("/page", core::py_str(page_index) + " ページにはすでにコマか台詞がある（replace で作り直す）");
+    // checked before the page is cleared, and laid on a copy: the page is left as it was when anything is refused
+    try {
+        for (const studio::Issue& issue : layout::check_tiers(plan)) {
+            if (issue.severity == "error") throw layout::LayoutError("/skeleton" + issue.path, issue.message);
+        }
+        Work trial = work;
+        if (!blank) layout::clear_page(trial, *at, agent);
+        layout::CompiledLayout compiled = layout::apply_layout(trial, page_index, plan, agent);
+        work = std::move(trial);
+        return compiled;
+    } catch (const layout::LayoutError&) {
+        throw;
+    } catch (const core::ApplyError& e) {
+        throw layout::LayoutError("/skeleton", wording::error(std::string(e.what())).toStdString());
+    } catch (const std::exception&) {
+        throw layout::LayoutError("/skeleton", "骨組みが読めない（tiers・insets・panels の形を確かめる）");
+    }
 }
 
 }  // namespace genko::service::layout_ideas

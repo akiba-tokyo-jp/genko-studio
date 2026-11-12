@@ -523,7 +523,13 @@ core::Frame Reader::read_frame(const Json& data, const std::string& at) {
     }
     frame.line = dict_if_dict(data, "line");
     frame.corner_mm = to_float_or(data, "corner_mm", 0.0, at);
-    frame.over = to_bool(data, "over", false);  // (komawari@1)
+    if (const Json* over = find(data, "over")) {  // (komawari@1: true or false; anything else, and the book is read-only)
+        if (over->is_boolean()) {
+            frame.over = over->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "over"), {}, "a panel's over is true or false, not " + core::py_repr(*over));
+        }
+    }
     check_keys(data, kFrameKeys, at, "frame");
     return frame;
 }

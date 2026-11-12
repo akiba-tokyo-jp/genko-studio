@@ -94,21 +94,27 @@ struct Batch {
 Request request_from_json(const Json& args, const core::PageSpec& spec);
 Json request_to_json(const Request& request);
 
-// The batch (never more than request.count ideas; fewer when the sieve leaves fewer — Batch::dropped says why).
-// layout::LayoutError for a request or base it cannot draw from.
+// The batch (never more than request.count ideas; fewer when the sieve leaves fewer — Batch::dropped says why: plain,
+// flat, order, small, gap, focus, similar, same_as_base, unfit). A request made by hand is kept in its bounds (knobs and
+// the degree in 0..1, NaN: the preset's / 0.3). layout::LayoutError for a request or base it cannot draw from (a base
+// that cannot be read: "/base…", in Japanese).
 Batch generate(const Request& request);
 // {"seed", "ideas": [{"skeleton", "summary", "panels", "pattern", "largest", "reading_order"}], "tried", "dropped"}
 Json batch_to_json(const Batch& batch);
 
-// A seed's 64 bits: "km-" and 16 hex digits as they are, any other text by its FNV-1a hash.
+// A seed's 64 bits: "km-" and 16 hex digits (either case) as they are, any other text by its FNV-1a hash.
 std::uint64_t seed_value(std::string_view text);
 
 // A name plan with the skeleton's layout put in: its tiers, insets and gaps (the template dropped), and each panel's
-// layout keys (bleed, border_mm, overflow) set on the plan's panel of that slot (added for a slot it has no panel for).
-Json merge_into_plan(const Json& skeleton, const Json& plan);
+// layout keys (bleed, border_mm, overflow; slant cleared — the tiers' tilt_mm say it) set on the plan's panel of that
+// slot (added for a slot it has no panel for). The plan's panels of slots the skeleton does not have are left out, their
+// slots put in `dropped` when it is given.
+Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::string>* dropped = nullptr);
 
 // Apply a skeleton to a page of `work` through layout::apply_layout: the page must be blank, or `replace` clears it
-// first (layout::clear_page). An agent ("ai:…") never changes a page whose name a person approved. LayoutError otherwise.
+// first (layout::clear_page). Only who may approve (a person: core::can_approve) changes a page whose name is approved.
+// The skeleton is checked (layout::check_tiers) before the page is touched and laid on a copy: on a LayoutError (path
+// "/page" or "/skeleton…", in Japanese) `work` is as it was.
 layout::CompiledLayout apply_idea(Work& work, const Json& page_index, const Json& skeleton, const std::string& agent, bool replace);
 
 }  // namespace genko::service::layout_ideas

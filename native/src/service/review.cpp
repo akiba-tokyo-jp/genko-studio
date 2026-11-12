@@ -318,7 +318,7 @@ std::string review_html(const std::filesystem::path& project, int max_px) {
         if (!dull.empty()) {
             parts += "<h2>コマ割りの緩急（" + std::to_string(dull.size()) + " 件の注意）</h2><ul>";
             for (const auto& [page, issue] : dull) {
-                const std::string where = page > 0 ? std::to_string(page) + " ページ: " : std::string();
+                const std::string where = page.is_null() ? std::string() : py_str(page) + " ページ: ";
                 parts += "<li>" + escape(where + issue.message) + (issue.hint.empty() ? "" : "<br><span class='muted'>" + escape(issue.hint) + "</span>") + "</li>";
             }
             parts += "</ul>";

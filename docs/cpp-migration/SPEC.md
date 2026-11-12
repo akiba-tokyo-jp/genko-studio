@@ -1463,12 +1463,12 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 - panels[] に `border_mm`（0〜5 mm。0 で枠なし）と `overflow`（true: 絵が枠で切れない＝はみ出し。コマの clip を false にする）。断ち切りは今の `bleed`。
 - 計画に `insets`: `[{slot, on, rect}]`（差し込み・重ね）。`on` は段組のコマの slot、`rect` は基本枠の幅・高さを 1 とした `[x, y, w, h]`。差し込みのコマもコマ数（kMaxPanels=8）に数え、panels[] に指示が要る。`on` のコマの中に収めれば差し込み、境目をまたげば重ね。
 - 検査（check_tiers）の code: layout_gap_range・layout_tilt_range・layout_border_unused（警告）・layout_insets・layout_inset_host・layout_inset_rect・panel_border_range。当てられない形（間が広すぎてコマが入らない、斜めがコマを横切らない）は apply_layout が LayoutError（日本語の文。wording を通す）で断る。
-- 原稿の拡張（core）: コマ（Frame）に `over`（ほかのコマの上に重なる。true のときだけ保存）。op は `add_frame` に `into`（コマの id: そのコマの場所を「描いたコマの節（free）」にし、そのコマ自身（id・指示・台詞・絵はそのまま）と新しいコマを入れる。2 つはその節の中で位置の読み順で読まれる）と `over`（into のときの既定は true）、`set_frame` と `set_layout` の木に `over`。`over` のコマの下では、下のコマの枠線と、下のコマに置いた絵（clip_to frame・bleed）が隠れる。
+- 原稿の拡張（core）: コマ（Frame）に `over`（ほかのコマの上に重なる。true のときだけ保存）。op は `add_frame` に `into`（コマの id: そのコマの場所を「描いたコマの節（free）」にし、そのコマ自身（id・指示・台詞・絵はそのまま）と新しいコマを入れる。2 つはその節の中で位置の読み順で読まれる）と `over`（into のときの既定は true）、`set_frame` と `set_layout` の木に `over`。`over` のコマの下では、下のコマの枠線と、下のコマに置いた絵（clip_to frame・bleed）が隠れる。`over` はコマ（葉）だけが持つ: over のコマを split_frame・cut_frame で割ると 2 つの子が over になって親は外れ、set_layout の木の割った節の `over` は読まない。読み手は真偽値でない `over` を broken_value にする（読取専用）。どのコマが上かもコマ割りなので、strict_gates の承認済みのページでは、人でない者の `set_frame` の `over` を止め、承認の後のコマ割りの変化（same_layout）にも数える。
 - apply_layout は今の op の組み合わせ（split_frame の gutter_mm・tilt_mm、add_frame の into・over、set_frame の border_mm・clip・bleed）で作る。読み順は今の決まり（段は上から、段の中は右から、行は上から。差し込みはその宿主と、位置の読み順で）。
 
 **生成の手順（service/layout_ideas）**
-1. 乱数: seed の文字列から 64 bit（`km-` と 16 桁の 16 進ならその値、ほかは FNV-1a）。案ごとに splitmix64 で混ぜて xoshiro256** を起こす。std の分布は使わず、[0,1) は上位 53 bit から作る。比は千分率、間と斜めは 0.1 mm の整数で持ち、JSON にするときに割る。浮動小数の縮約はビルドで切ってある（-ffp-contract=off）。だから同じ要求と seed は OS・コンパイラによらず同じ束になる。
-2. コマ数 N（ちょうど、または範囲から）→ 差し込みの数（重ねのつまみ）→ 段数（範囲とプリセットの好みから）→ 各段のコマ数 → 段ごとの列（3 列まで、つまみ「コマ内分割」で列を 2〜3 行に。1 列だけの段は段と見分けが付かないので重ねない）→ 大ゴマ（focus の番号、またはつまみ「大ゴマ率」で選び、その段・列・行を大きくする）→ 段・列・行の大きさ（揺らぎ）→ 境目の間（プリセットごとの割合で広い間 11〜15 mm・狭い間 3〜4.5 mm）と斜め → 断ち切り（紙の端に接するコマだけ）・枠なし・はみ出し → 差し込み（大ゴマか大きいコマの右上（宿主より先に読む）・左下（後に読む）、または左隣のコマとの境目をまたぐ重ね。宿主と中心の高さが十分離れるか十分そろう所だけ）。
+1. 乱数: seed の文字列から 64 bit（`km-` と 16 桁の 16 進（大文字・小文字とも）ならその値、ほかは FNV-1a。整数の seed はその数字の並び。空の文字列は断る。seed を書かなければ、システムの乱数から `km-…` を作って返す。new_id は使わないので、試験や台本の id を食わない）。案ごとに splitmix64 で混ぜて xoshiro256** を起こす。std の分布は使わず、[0,1) は上位 53 bit から作る。比は千分率、間と斜めは 0.1 mm の整数で持ち、JSON にするときに割る。浮動小数の縮約はビルドで切ってある（-ffp-contract=off）。だから同じ要求と seed は OS・コンパイラによらず同じ束になる。
+2. コマ数 N（ちょうど、または範囲から）→ 差し込みの数（重ねのつまみ）→ 段数（範囲とプリセットの好みから）→ 各段のコマ数 → 段ごとの列（3 列まで、つまみ「コマ内分割」で列を 2〜3 行に。1 列だけの段は段と見分けが付かないので重ねない）→ 大ゴマ（focus の番号、またはつまみ「大ゴマ率」で選び、その段・列・行を大きくする）→ 段・列・行の大きさ（揺らぎ）→ 境目の間（プリセットごとの割合で、段の境目は広い間 11〜15 mm・狭い間 3〜4.5 mm、列の境目は広い間 5〜6 mm・狭い間 2 mm）と斜め → 断ち切り（紙の端に接するコマだけ）・枠なし・はみ出し → 差し込み（大ゴマか大きいコマの右上（宿主より先に読む）・左下（後に読む）、または左隣のコマとの境目をまたぐ重ね。宿主と中心の高さが十分離れるか十分そろう所だけ）。
 3. 段組を読み順に並べ替え、slot を p1… と付け直す。
 
 **プリセットとつまみの範囲**（つまみは 0〜1。指定が無ければプリセットの値）
@@ -1484,15 +1484,16 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 
 **振るいの基準（service/komawari_shape。単調さの警告と同じ測り方を 1 か所に置く）**
 - plain: 2 コマ以上で、いちばん大きいコマがいちばん小さいコマの 1.2 倍未満、斜め・断ち切り・重ね・枠なし・はみ出しが 1 つも無い（無難な格子）。
+- flat: 3 コマ以上で 1.5 倍未満（単調さの警告 layout_flat と同じ基準 `komawari::flat`。警告の側に寄せたので、束から選んだ案を出しても layout_flat は出ない）。
 - order: 読み順の崩れ（次のコマが前のコマより丸ごと上にある、または同じ並びで丸ごと右にある）。
 - small: いちばん短い辺（斜めで細る端を引いた長さ）が kMinPanelSideMm（25 mm。panel_too_small と同じ）未満。
 - gap: 境目の間が kMinGapMm（2 mm）未満。
 - focus: 見せ場に指定したコマがいちばん大きくない。
 - similar: 束の中の案と似ている。違いの点数（段の並び 3・大ゴマの位置 2・斜めの有無 2（数だけの違いは 1）・断ち切り 1・重ね 2・枠なしかはみ出し 1）が 3 未満（kSimilarBelow）。試行の半分を使っても束が埋まらなければ、点数 1 以上で入れる。同じ形は入れない。
 - 変異では similar の代わりに「ほぼ同じ」（違いの点数 0 で、どのコマも基本枠の 3% 以内）を除き、元と「ほぼ同じ」案も除く（same_as_base）。
-- unfit: 差し込みの置き場が無い、検査に通らない。試行は束の数の 60 倍まで。
+- unfit: 差し込みの置き場が無い、差し込みの箱の 4 分の 1 以上が宿主の箱に掛かっていない（`komawari::insets_on_hosts`）、検査に通らない。試行は束の数の 60 倍まで。
 
-**変異のしかた**: 元は骨組み（案の skeleton か、`komawari::skeleton_of_page` で今のページから作ったもの）。コマ数は元のまま。変異度 v で、段・列・行の大きさを ±0.6v 揺らし、斜めを段の境目で ±12v mm・列の境目で ±8v mm 動かし（間の狭すぎる境目は 2 mm に広げ）、境目の斜め・間・断ち切り・枠なし・はみ出しを v に比べた割合で入れ替え、差し込みを ±4v% 動かす。v ≥ 0.34 では確率 v でコマを隣の段へ移す・列を重ねる／ほどく・大ゴマの段を入れ替える。v ≥ 0.67 では確率 v−0.5 で 2 段を 1 段に、1 段を 2 段にする。
+**変異のしかた**: 元は骨組み（案の skeleton か、`komawari::skeleton_of_page` で今のページから作ったもの。K1 より前のネーム計画・template の計画でもよく、panels の slant・template の bleed と slant・計画の tier_gap_mm・col_gap_mm も引き継ぐ）。コマ数は元のまま。各コマに変異を通して変わらない番号を付け、差し込みは宿主をその番号で持つ。変異の後、差し込みは宿主の中心が動いた分だけ動く。変異度 v で、段・列・行の大きさを ±0.6v 揺らし、斜めを段の境目で ±12v mm・列の境目で ±8v mm 動かし（間の狭すぎる境目は 2 mm に広げ）、境目の斜め・間・断ち切り・枠なし・はみ出しを v に比べた割合で入れ替え、差し込みを ±4v% 動かす。v ≥ 0.34 では確率 v でコマを隣の段へ移す・列を重ねる／ほどく・大ゴマの段を入れ替える。v ≥ 0.67 では確率 v−0.5 で 2 段を 1 段に、1 段を 2 段にする。
 
 **単調さの警告（C。submit_name が返す。止めない）**
 - `layout_repeats`: 「N〜N+2 ページの段組が、続けて同じか似ている（…）」。前後のページの今のコマ（無ければ数えない）と出す計画の 3 ページ続きで、違いの点数が隣同士どれも 1 以下（kRepeatAtMost）。
@@ -1504,9 +1505,10 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 **GUI・MCP 向けの API**（`service/layout_ideas.hpp`・`service/komawari_shape.hpp`）
 - `Request request_from_json(const Json& args, const core::PageSpec& spec)`（{panels, min_panels, max_panels, min_tiers, max_tiers, preset, knobs:{slant, bleed, split, big, overlap, overflow, frameless}, seed, count, base, variation, focus}。断りは LayoutError(path, 文)）、`Json request_to_json(const Request&)`。
 - `Batch generate(const Request&)`（Batch: ideas・seed・tried・dropped）、`Json batch_to_json(const Batch&)`（{seed, ideas:[{skeleton, summary, panels, pattern, largest, reading_order}], tried, dropped}）。
-- `Json merge_into_plan(const Json& skeleton, const Json& plan)`: AI のネーム計画に骨組みを入れる（template を外し、panels の bleed・border_mm・overflow を slot ごとに合わせる）。
-- `layout::CompiledLayout apply_idea(Work&, page_index, skeleton, agent, replace)`: 今の apply_layout の道で当てる。白紙でなければ replace で clear_page。AI（ai:…）は人が承認したネームのページを変えない（ほかの関門は command bus のまま）。
-- `std::optional<Json> komawari::skeleton_of_page(doc, page)`（今のページ → 骨組み。描いたコマは無し）、`shape_of_plan`・`shape_of_page`・`reading_slots`・測り方（size_ratio・plain_grid・reading_break・smallest_side・narrowest_gap・largest・share・difference・describe）、`monotony(doc, page, plan, script)`・`book_monotony(doc, script)`。
+- 要求の検査（request_from_json）: panels（ちょうど）と min_panels・max_panels（範囲）を両方書く、min_tiers がコマ数より多い、focus がコマ数（範囲なら上限）より大きい、空の seed、64 bit を超える整数は LayoutError。範囲と focus のときは focus 以上のコマ数で作る。Request を直接作ったときは generate が範囲に収める（つまみと変異度は 0〜1、NaN はプリセットの値・0.3）。壊れた base は LayoutError("/base…", 日本語)。
+- `Json merge_into_plan(const Json& skeleton, const Json& plan, std::vector<std::string>* dropped = nullptr)`: AI のネーム計画に骨組みを入れる（template を外し、panels の bleed・border_mm・overflow を slot ごとに合わせ、slant を外す。骨組みに無い slot の panels は外し、その slot を dropped に入れる）。
+- `layout::CompiledLayout apply_idea(Work&, page_index, skeleton, agent, replace)`: 今の apply_layout の道で当てる。白紙でなければ replace で clear_page。承認済みのネームのページは、人（`core::can_approve(agent)`）でなければ変えない（command bus と同じ判定。ほかの関門は command bus のまま）。骨組みはページに触る前に check_tiers で検査し、写しの上で当ててから入れ替えるので、断ったとき work は元のまま。
+- `std::optional<Json> komawari::skeleton_of_page(doc, page)`（今のページ → 骨組み。描いたコマは無し。根が描いたコマの節なら、基本枠の大きさで、コマ 1 つと over のコマだけのとき）、`shape_of_plan`・`shape_of_page`・`reading_slots(plan, frame_w_mm, frame_h_mm)`・測り方（size_ratio・plain_grid・flat・insets_on_hosts・reading_break・smallest_side・narrowest_gap・largest・share・difference・describe）、`monotony(doc, page, plan, script)`・`book_monotony(doc, script)`（ページの番号は本のまま Json で返す。本全体の警告は null。どちらも例外を出さず、測れないものには警告を出さない）。`lint::lint_name_plan` は基本枠の大きさ（既定 180×270）を受ける。
 - 速さ: 12 案の束を描かずに数 ms（目安 50 ms）。
 - `PresetDefaults preset_defaults(Preset)`（群 K2 で足した）: プリセットのコマ数・段数の範囲と、つまみ 7 つの値。窓はつまみをここから始め、プリセットと同じ値のつまみは要求に書かない（書かない要求と同じ束になる）。
 
@@ -1518,7 +1520,7 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 - 当てる: clear_page と apply_idea の op を 1 つの変更（ids つき）にまとめ、テンプレートの窓と同じ確かめ（コマや台詞のあるページは「N ページのコマと台詞を消して、コマ割りの案で割り直します」）の後、人の操作として apply_ops で当てる。元に戻す 1 回で戻る。関門はテンプレートの窓と同じ（command bus のまま）。
 - 当てたコマ割りは「今のコマ割りをテンプレートに残す…」で残せ、テンプレートの窓から当て直せる。自分のテンプレートは当てるページの基本枠に合わせて置き（反対側のページでもずれない）、差し込み・重ね（宿主のコマ 1 つと over のコマ 1 つの節）は add_frame の into で作り直す。ほかの描いたコマは今までどおり set_layout で置く。
 
-**既存の本との互換**: 拡張のキーを書かない計画は、前と同じ op（split_frame・set_frame・set_spread）・コマ・保存のバイトになる（submit_name は fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。input_hash も前と同じ）。`over` は true のときだけ書き、そのときだけ `features` に `komawari@1` を加える（schema-v4.md「コマの重ね」）ので、前の本は同じに開き・描かれ・保存される。komawari@1 のある本を前の版で開くと、未知の拡張として読取専用になる。
+**既存の本との互換**: 拡張のキーを書かない計画は、前と同じ op（split_frame・set_frame・set_spread）・コマ・保存のバイトになる（submit_name は fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。input_hash も前と同じ。試験 submitNameSavesAsBeforeK1 が、8362d5fc で組んだ版で demo4 のネームを submit_name して取った project.json と input_hash を固定している）。`over` は true のときだけ書き、そのときだけ `features` に `komawari@1` を加える（schema-v4.md「コマの重ね」）ので、前の本は同じに開き・描かれ・保存される。komawari@1 のある本を前の版で開くと、未知の拡張として読取専用になる。
 
 ## 7. 利用者向け改善
 
