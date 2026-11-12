@@ -55,7 +55,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
     - 定型（`template` の `reveal_top`・`reveal_bleed`・`finale_bleed`・`action_slant` など）は例。そのまま並べず、`tiers` に書き直して崩す。
   - 案の束から選ぶ: `mcp__genko__layout_ideas`（`page`、下書きの `plan`、`preset` は talk / standard / action / showcase、見せ場のコマの番号 `focus`）で 12 案が出る。
     `summary` と `like_pages`（前後のページと似ている案）を見て選び、よい案は `base` に `skeleton` を入れて `variation` で崩した束を出す（今のページを崩すなら `base_page: true`）。
-    選んだ案の `plan` をそのまま `submit_name` に送り、プレビューを見て自分で直す。`plan` を渡さなかったときは `tiers`・`insets` をそのまま入れ、`template` を null にし、`panels` の slot ごとに `skeleton.panels` の `bleed`・`border_mm`・`overflow` を足す。
+    選んだ案の `plan` をそのまま `submit_name` に送り、プレビューを見て自分で直す。計画の slot は p1, p2, … の読み順にしておく（案に無い slot のコマは外れて `plan_dropped` に出る）。`plan` を渡さなかったときは `tiers`・`insets` をそのまま入れ、`template` を null にし、`panels` の slot ごとに `skeleton.panels` の `bleed`・`border_mm`・`overflow` を足し、`slant` は null にする。
   - 境目ごとの間と斜めは段・列・行の `gap_mm`・`tilt_mm`（その後ろの境目）。ページの `spread: true` で次のページと見開き。コマの間の既定はページの `tier_gap_mm`（段の間、既定 7）と `col_gap_mm`（横に並ぶコマの間、既定 3）。できたあとで動かすときは inspect page の `gutters`（frame_id と index）を move_gutter に渡す。
   - 単調さの警告（止めない。直してから進む）: `layout_repeats`（3 ページ続けて似た段組 → このページの段の数・大ゴマの位置を変える）、`layout_flat`（コマの大きさの差が小さい → 重い beat を大きく）、`reveal_beat_small`（見せ場のコマが小さい → 大ゴマか断ち切り）、`book_without_accent`（本に斜めも断ち切りも無い → 見せ場や動きのページで使う）。
   - 1 ページ目を扉にするなら `title: true`（`template` は `title_top` か `reveal_bleed`）。題名と作者名が入る。

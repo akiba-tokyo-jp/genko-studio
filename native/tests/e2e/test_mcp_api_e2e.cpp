@@ -568,6 +568,15 @@ private slots:
             QCOMPARE(idea["plan"]["panels"].size(), std::size_t(3));
         }
         QVERIFY2(book_tree(book) == unchanged, tree_diff(unchanged, book_tree(book)).c_str());
+        // fewer panels than the draft: the panels the idea has no slot for are left out of its plan, and said so
+        const Json fewer = Mcp::text(mcp.call("layout_ideas", Json::object({{"project", "k.genko"}, {"page", 2}, {"plan", draft}, {"panels", 2},
+                                                                             {"seed", "km-00000000000000b8"}, {"count", 3}})));
+        QVERIFY2(fewer["ok"] == Json(true) && !fewer["ideas"].empty(), genko::core::dump_python(fewer).c_str());
+        for (const Json& idea : fewer["ideas"]) {
+            QCOMPARE(idea["plan"]["panels"].size(), std::size_t(2));
+            QCOMPARE(idea["plan_dropped"], Json::array({"p3"}));
+        }
+        QVERIFY2(genko::core::dump_python(fewer["issues"]).find("plan_panels_dropped") != std::string::npos, genko::core::dump_python(fewer["issues"]).c_str());
         const Json picked = drafted["ideas"][0];
         const Json submitted = Mcp::text(mcp.call("submit_name", Json::object({{"project", "k.genko"}, {"plan", picked["plan"]}, {"commit", true}, {"replace", true}})));
         QVERIFY2(submitted["ok"] == Json(true) && submitted["committed"] == Json(true), genko::core::dump_python(submitted).c_str());

@@ -67,7 +67,7 @@ std::optional<Shape> shape_of_page(const core::Document& doc, const core::Page& 
 std::optional<Json> skeleton_of_page(const core::Document& doc, const core::Page& page);
 
 // The plan's slots in the order the page will read them (its tiers', each inset where it is read beside its host).
-std::vector<std::string> reading_slots(const Json& plan);
+std::vector<std::string> reading_slots(const Json& plan, double frame_w_mm = 180, double frame_h_mm = 270);
 
 // --- the measures ---------------------------------------------------------------------------------------------------
 
@@ -75,6 +75,11 @@ std::vector<std::string> reading_slots(const Json& plan);
 double size_ratio(const Shape& shape);
 // All the same size, straight, no bleed, no inset, every border drawn: a plain grid (無難な格子).
 bool plain_grid(const Shape& shape);
+// 3 panels or more, the largest under kFlatSizeRatio times the smallest: コマの大きさの差が小さい (layout_flat; the
+// batch sieves these out too, so an idea never gets the warning).
+bool flat(const Shape& shape);
+// Each inset meets its host: a quarter of its box or more on the host's (inside it, or across its border).
+bool insets_on_hosts(const Shape& shape);
 // Where the reading order jumps back (up, or right inside a row): the 1-based index of the panel read after the jump, else 0.
 std::size_t reading_break(const Shape& shape);
 // The shortest side of any panel (mm) and the narrowest gap (mm; none: a large number).
@@ -95,7 +100,8 @@ std::string describe(const Shape& shape);
 // running (layout_repeats), panels of much the same size (layout_flat), a reveal beat's panel small
 // (reveal_beat_small), and no slant nor bleed anywhere in the book's names (book_without_accent).
 std::vector<studio::Issue> monotony(const core::Document& doc, const Json& page_index, const Json& plan, const Json& script);
-// The same for the book as it is (each page's own panels): for review.html.
-std::vector<std::pair<std::int64_t, studio::Issue>> book_monotony(const core::Document& doc, const Json& script);
+// The same for the book as it is (each page's own panels), each with its page's index as the book has it (null: the
+// book's): for review.html. Neither ever throws: what cannot be measured gets no warning.
+std::vector<std::pair<Json, studio::Issue>> book_monotony(const core::Document& doc, const Json& script);
 
 }  // namespace genko::service::komawari

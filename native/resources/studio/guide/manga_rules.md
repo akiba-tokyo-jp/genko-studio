@@ -39,9 +39,9 @@ Genko は、あなた（エージェント）が書いた計画を検査し、�
    - `preset`: 会話が中心なら `talk`、ふつうは `standard`、動きは `action`、見せ場・扉は `showcase`。
    - `focus`: 見せ場のコマの番号（読み順）。そのコマがいちばん大きい案だけが出る。
    - `knobs`（0〜1）で斜め・断ち切り・重ねなどの多さを上げ下げする。同じ束をもう一度出すときは返った `seed` を渡す。
-2. 束（既定 12 案）の `summary`・`pattern`・`largest` を見て、beat の重さとめくりに合う案を選ぶ。`like_pages` に前後のページが入っている案は、隣と似ている（`layout_repeats` になりやすい）。
+2. 束（既定 12 案）には、無難な格子・大きさの差が小さい割り（`layout_flat` と同じ基準: 3 コマ以上で、いちばん大きいコマがいちばん小さいコマの 1.5 倍未満）・読み順の崩れ・短辺 25 mm 未満のコマ・2 mm 未満の間・束の中で似た案は入らない（除いた数は `dropped`）。`summary`・`pattern`・`largest` を見て、beat の重さとめくりに合う案を選ぶ。`like_pages` に前後のページが入っている案は、隣と似ている（`layout_repeats` になりやすい）。
 3. 崩す: よい案があれば `base` にその `skeleton` を入れ、`variation`（0.2〜0.5）で変えた束を出す。今のページを崩すなら `base_page: true`。
-4. 選んだ案の `plan`（`plan` を渡したとき）を、`submit_name` にそのまま送る。自分で入れるときは、`tiers` と `insets` をそのまま入れ、`template` を null にし、`panels` の各 slot に `skeleton.panels` の `bleed`・`border_mm`・`overflow` を足す。
+4. 選んだ案の `plan`（`plan` を渡したとき）を、`submit_name` にそのまま送る。案の slot は読み順に p1, p2, … で、案に無い slot のコマは `plan` から外れる（`plan_dropped`・警告 `plan_panels_dropped`。外れたコマの beat と台詞は残りのコマに移す）。自分で入れるときは、`tiers` と `insets` をそのまま入れ、`template` を null にし、`panels` の各 slot に `skeleton.panels` の `bleed`・`border_mm`・`overflow` を足し、`slant` は null にする（斜めは段・列・行の `tilt_mm` に入っている）。
 5. 最後はプレビューを見て自分で直す（大ゴマの位置、間、斜めの向き）。案は下書きで、そのまま出さなくてよい。
 6. 人が承認したページは変えない（`layout_ideas` は警告 `name_approved`、`submit_name` は断る）。
 

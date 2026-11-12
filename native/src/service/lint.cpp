@@ -115,13 +115,13 @@ double share(const std::vector<std::pair<std::string, double>>& shares, const st
     return 1;
 }
 
-std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t page_count, bool tall) {
+std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t page_count, bool tall, std::pair<double, double> frame) {
     const auto shares = shares_of(plan);
     if (shares.empty()) return {};
     std::vector<std::string> order;
     try {
         // (komawari@1: a plan with insets reads them beside their hosts)
-        order = core::truthy_at(plan, "insets") ? komawari::reading_slots(plan) : layout::slots_in_order(layout::resolve_tiers(plan));
+        order = core::truthy_at(plan, "insets") ? komawari::reading_slots(plan, frame.first, frame.second) : layout::slots_in_order(layout::resolve_tiers(plan));
     } catch (const layout::LayoutError&) {
         return {};
     }
@@ -338,7 +338,7 @@ Json script_index(const Json& script) {
     return out;
 }
 
-std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall) {
+std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall, std::pair<double, double> frame) {
     std::vector<Issue> issues;
     const Json page_value = core::py_get(plan, "page", Json(0));
     const std::int64_t page = core::to_int(page_value);
@@ -483,7 +483,7 @@ std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Js
             issues.push_back(warning("axis_crossed", "/panels", "場面 " + core::py_str(scene_id) + " で人物の左右が入れ替わる（180度ルール）", "意図的なら cross:true を付ける"));
         }
     }
-    for (Issue& issue : size_hints(plan, page, page_count, tall)) issues.push_back(std::move(issue));
+    for (Issue& issue : size_hints(plan, page, page_count, tall, frame)) issues.push_back(std::move(issue));
     if (core::truthy_at(plan, "title")) {
         if (core::py_strip(core::py_str(core::py_or(core::py_get(bible, "title"), Json("")))).empty()) {
             issues.push_back(warning("title_missing", "/title", "扉にするページだが、企画書に題名（title）が無い"));

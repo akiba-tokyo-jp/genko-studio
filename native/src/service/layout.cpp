@@ -481,13 +481,15 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
     // komawari@1: the panels set in another's place (差し込み・重ね), over the others, read with the panel they go into
     const Json insets = core::py_get(plan, "insets");
     if (insets.is_array()) {
+        const Json selected = work.doc.page(find_page(work.doc, page_index)).selected_frame_id;
         const core::Rect frame = basic_frame;
         for (std::size_t i = 0; i < insets.size(); ++i) {
             const Json& inset = insets[i];
             const std::string path = "/insets/" + std::to_string(i);
             const std::string* host = out.frame_of(core::py_str(core::py_get(inset, "on")));
             if (host == nullptr) throw LayoutError(path + "/on", "差し込む先のコマがない");
-            const Json& rect = inset["rect"];
+            const Json rect = core::py_get(inset, "rect");  // (check_tiers has made it [x, y, w, h] in 0..1)
+            if (!rect.is_array() || rect.size() != 4) throw LayoutError(path + "/rect", "rect は基本枠の中の [x, y, w, h]");
             const double fw = frame.width.value(), fh = frame.height.value();
             Json op = Json::object({{"op", "add_frame"},
                                     {"page", page_index},
@@ -506,6 +508,7 @@ CompiledLayout apply_layout(Work& work, const Json& page_index, const Json& plan
             const Json chosen = work.doc.page(find_page(work.doc, page_index)).selected_frame_id;  // (add_frame chose the new panel)
             put_slot(core::py_str(core::py_get(inset, "slot")), core::py_str(chosen));
         }
+        work.doc.edit_page(find_page(work.doc, page_index)).selected_frame_id = selected;  // (the selection as it was)
     }
     Json extra = Json::array();
     for (const std::string& slot : bleeds) {  // (sorted: a set of slots)

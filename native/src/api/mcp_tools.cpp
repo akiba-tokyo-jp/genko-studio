@@ -213,7 +213,9 @@ const std::vector<ToolSpec>& table() {
         plan に下書きのネーム計画を渡すと、各案に骨組みを入れた plan が付き、そのまま submit_name に出せる（コマ数を省くと plan のコマ数ちょうど）。
         返す: seed、ideas [{skeleton {tiers, insets?, panels}, summary, panels, pattern, largest, reading_order, like_pages（前後のページと
         似ている＝layout_repeats になりやすい）, plan?}]、around（前後のページの段組）、dropped（振るいで除いた案の数と理由）。
-        自分で入れるとき: tiers と insets をそのまま、template は null、panels は slot ごとに skeleton の bleed・border_mm・overflow を足して指示と台詞を書く。
+        案の slot は読み順に p1, p2, …。plan の中で案に無い slot のコマは外れる（plan_dropped・警告 plan_panels_dropped）。
+        振るい（dropped）: 無難な格子・大きさの差が小さい割り（layout_flat と同じ基準）・読み順の崩れ・小さすぎるコマ・狭すぎる間・似た案。
+        自分で入れるとき: tiers と insets をそのまま、template は null、panels は slot ごとに skeleton の bleed・border_mm・overflow を足し、slant は null にして指示と台詞を書く。
         人が承認したページは submit_name が断る（警告 name_approved）。)",
          {{"project", Kind::Str, false, std::nullopt},
           {"page", Kind::Int, false, std::nullopt},

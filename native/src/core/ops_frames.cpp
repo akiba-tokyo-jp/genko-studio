@@ -363,6 +363,10 @@ void split_frame(OpContext& c) {
         std::tie(a, b) = page.split_frame(target_id, axis, Num(ratio), Num(gutter));
         remember_split(target);
     }
+    if (target.over) {  // (komawari@1: a panel over the others is two over them; the split itself is none)
+        a->over = b->over = true;
+        target.over = false;
+    }
     if (target.panel) {
         // the brief stays with the panel read first: top, or the binding-side column
         Frame* first = axis == "horizontal" || doc.binding != Binding::Right ? a : b;
@@ -420,6 +424,10 @@ void cut_frame_op(OpContext& c) {
         std::tie(a, b) = cut_frame(target, p0, p1, gutter);
     } catch (const PyValueError& error) {
         throw OpError(error.what());
+    }
+    if (target.over) {  // (komawari@1)
+        a->over = b->over = true;
+        target.over = false;
     }
     if (panel) {
         Frame* first = (target.split_axis && *target.split_axis == "horizontal") || doc.binding != Binding::Right ? a : b;

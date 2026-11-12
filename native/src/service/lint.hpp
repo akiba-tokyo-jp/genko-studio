@@ -28,7 +28,9 @@ std::vector<studio::Issue> lint_script(const Json& script, const Json& bible, st
 // lint.script_index(script): beat id → {beat, scene_id, scene_first} (a later beat of the same id replaces it).
 Json script_index(const Json& script);
 // lint.lint_name_plan(plan, script, bible, page_count, tall)
-std::vector<studio::Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall = false);
+// (komawari@1: `frame` is the basic frame (mm) the insets of a plan are read in; none: 180 × 270)
+std::vector<studio::Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall = false,
+                                          std::pair<double, double> frame = {180, 270});
 // lint.lint_name_geometry(plan, layout, placements)
 std::vector<studio::Issue> lint_name_geometry(const Json& plan, const layout::CompiledLayout& compiled,
                                               const std::vector<letter::BalloonPlacement>& placements);

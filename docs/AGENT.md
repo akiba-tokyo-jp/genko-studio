@@ -136,8 +136,9 @@ genko studio layout-ideas demo.genko --page 2 --panels 4 --preset action --focus
   It returns `{page, request, seed, ideas: [{skeleton {tiers, insets?, panels}, summary, panels, pattern, largest,
   reading_order, like_pages, plan?}], tried, dropped, around, name_approved}`. `like_pages`: the neighbouring pages the
   idea is alike to (it would make `layout_repeats` likelier). Given `plan`, each idea carries `plan`, the draft with the
-  idea's layout put in (template null, tiers and insets, each panel's bleed / border_mm / overflow), ready for
-  `submit_name`; without a count of panels the ideas have exactly the plan's panels. A page a person approved gets the
+  idea's layout put in (template null, tiers and insets, each panel's bleed / border_mm / overflow, slant null; the
+  draft's panels whose slot the idea has not are left out and listed in `plan_dropped`, warning
+  `plan_panels_dropped`), ready for `submit_name`; without a count of panels the ideas have exactly the plan's panels. A page a person approved gets the
   warning `name_approved` (submit_name refuses it).
 - Layout keys of name_plan@1 (all optional; a plan without them is kept and hashed as before): each tier, col and row
   `gap_mm` (the gap after it, 0–100) and `tilt_mm` (the slant of the border after it, −80–80; a horizontal border's

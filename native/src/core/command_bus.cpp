@@ -360,7 +360,7 @@ bool same_layout(const std::vector<Frame>& a, const std::vector<Frame>& b) {
         const Frame& y = b[i];
         if (!(x.id == y.id && x.rect.x == y.rect.x && x.rect.y == y.rect.y && x.rect.width == y.rect.width && x.rect.height == y.rect.height))
             return false;
-        if (x.poly.has_value() != y.poly.has_value()) return false;
+        if (x.poly.has_value() != y.poly.has_value() || x.over != y.over) return false;  // (komawari@1: which panel lies over is the layout)
         if (x.poly) {
             if (x.poly->size() != y.poly->size()) return false;
             for (std::size_t k = 0; k < x.poly->size(); ++k) {
@@ -784,7 +784,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
     std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : std::string();
     const bool named = name_value != nullptr && name_value->is_string();
     const auto page_of = [&doc](const Json& op) -> const Page& { return doc.page(require_page(doc, op)); };
-    if (named && (layout_op(name) || (name == "set_frame" && op_in.contains("poly"))) && !actor.can_approve()) {
+    if (named && (layout_op(name) || (name == "set_frame" && (op_in.contains("poly") || op_in.contains("over")))) && !actor.can_approve()) {
         const Page& page = page_of(op_in);
         if (page.name_ok) {
             throw OpError("page " + page.index.repr() +

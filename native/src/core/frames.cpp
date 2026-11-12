@@ -430,7 +430,7 @@ bool is_free(const Frame& node) { return node.split_axis && *node.split_axis == 
 
 namespace {
 bool any_over(const Frame& frame) {
-    if (frame.over) return true;
+    if (frame.children.empty()) return frame.over;  // (a panel: a split node says nothing)
     return std::any_of(frame.children.begin(), frame.children.end(), [](const Frame& child) { return any_over(child); });
 }
 }  // namespace

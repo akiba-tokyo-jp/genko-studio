@@ -93,9 +93,15 @@ ToolResult StudioService::layout_ideas(const Json& a) {
         }
         ideas[i]["like_pages"] = std::move(like);
         if (plan.is_object()) {
-            Json merged = layout_ideas::merge_into_plan(batch.ideas[i].skeleton, plan);
+            std::vector<std::string> dropped;
+            Json merged = layout_ideas::merge_into_plan(batch.ideas[i].skeleton, plan, &dropped);
             merged["page"] = page_index;
             ideas[i]["plan"] = std::move(merged);
+            if (!dropped.empty()) {  // (the draft's panels the idea has no slot for: left out of its plan)
+                Json slots = Json::array();
+                for (const std::string& slot : dropped) slots.push_back(slot);
+                ideas[i]["plan_dropped"] = std::move(slots);
+            }
         }
     }
     Json out = Json::object({{"page", page_index}, {"request", layout_ideas::request_to_json(request)}});
@@ -107,6 +113,11 @@ ToolResult StudioService::layout_ideas(const Json& a) {
         issues.push_back(warning("name_approved", "/page",
                                  py_str(page_index) + " ページのネームは承認済み。AI はこのページのコマ割りを変えない（submit_name は断る）",
                                  "案は別のページの参考にする。このページを変えるには人間に承認の取り消しを頼む"));
+    }
+    if (std::any_of(ideas.begin(), ideas.end(), [](const Json& idea) { return idea.contains("plan_dropped"); })) {
+        issues.push_back(warning("plan_panels_dropped", "/plan/panels",
+                                 "下書きの計画に、案に無い slot のコマがある。そのコマは、その案の plan から外した（plan_dropped。案の slot は読み順に p1, p2, …）",
+                                 "計画の slot を p1, p2, … にして panels を省き、計画のコマ数ちょうどの案を出す。または外れたコマの beat と台詞を残りのコマに移す"));
     }
     if (static_cast<int>(batch.ideas.size()) < request.count) {
         issues.push_back(warning("layout_ideas_few", "/count",
