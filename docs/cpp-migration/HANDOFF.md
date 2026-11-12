@@ -68,12 +68,13 @@
 - 試験: test_layout_ideas は 22 本になった（足した物: 8362d5fc と同じ保存・関門（strict_gates の set_frame over、ai: でない名前の apply_idea）・over と features の外れ方・割った over・読み手の検査・変異した案（差し込みあり）の当て・K1 より前の計画を元にした変異・壊れた base と骨組みと要求）。すべて合格。関係する試験（test_model・test_storage・test_ops・test_studio_ops・test_command_bus・test_placed・test_contract_storage（前からの SKIP 3 本）・test_service・test_ledger_service_a・b・c・test_gui_ledger_a の test_every_error_reads_in_japanese・test_gui_ledger_c）もすべて合格。
 - 直さなかった物: 台詞の自動配置（letter）は、宿主の台詞が差し込みの上に乗ることを避けない（未確認のまま）。束の sha は Linux でだけ取った（Windows では M7 で確かめる）。`"over": false` を明示した本は、保存でその鍵が消える（false は既定なので、見た目と意味は同じ）。
 
-### 群 K2（GUI。ブランチ komawari-gui、komawari-core 692d212d から）
+### 群 K2（GUI。ブランチ komawari-gui、komawari-core 692d212d から。K1 のレビューの直し e9601687 を取り込み済み）
 - 窓「コマ割りの案を出す…」（app/komawari_dialog.{hpp,cpp}、命令 `act_komawari`）: ページ → コマ の「テンプレートでコマを割る…」の次と、コマ割りツールの設定（「案を出す…」）。形と操作は SPEC LAYOUT-01「窓『コマ割りの案を出す…』」。
 - 当てる: `idea_plan` が clear_page と apply_idea の op を 1 つの変更にまとめる（service の apply_ops は batch ごとに job id を 1 つ引くので、op ごとに同じ ids で当て直して job id を外し、最後に 1 batch で同じコマになることを確かめる）。主窓はテンプレートの窓と同じ確かめの後 apply_ops で当てる（人の操作。関門はテンプレートの窓と同じ）。
 - app/templates.cpp: 自分のテンプレートを、当てるページの基本枠に合わせて置く（今までは紙の比だけで伸ばしたので、反対側のページでは描いたコマと斜めのコマの輪郭が基本枠からずれた）。差し込み・重ねの節（宿主 1 つと over 1 つ）は add_frame の into で作り直す（今までは描いたコマとして set_layout で丸ごと置いた）。
 - service の API に `preset_defaults(Preset)` を足した（窓のつまみの初めの値。K3 も使える）。ほかの API は変えていない。
-- 試験: gui/test_gui_komawari（窓と 12 案の絵・同じ seed で同じ束〔コピー・貼り付け・Enter〕・コマ数ちょうど 1〜8・段数・見せ場・変異とガチャに戻る・当てて Undo・Redo・保存と読み戻し・確かめ・今のページを元に変異・テンプレートに残して反対側と同じ側と元のページに当て直す〔差し込み・描いたコマ〕・速さ）。test_gui_actions の命令の数を 820 → 821。commands.json を作り直した。ヘルプの「2. コマを割る」に一節。
+- 試験: gui/test_gui_komawari（窓と 12 案の絵・同じ seed で同じ束〔コピー・貼り付け・Enter〕・コマ数ちょうど 1〜8・段数・見せ場・変異とガチャに戻る・当てて Undo・Redo・保存と読み戻し・確かめ・今のページを元に変異・承認済みのページ〔strict_gates〕に人は当てられ、同じ op を AI は断られる・テンプレートに残して反対側と同じ側と元のページに当て直す〔差し込み・描いたコマ〕・速さ: 12 案の束は 1 ms、絵 12 枚は約 50 ms、その間のイベントループの待ちは最長約 30 ms）。test_gui_layout の画面の大きさの検査に窓を足した（21 → 22 窓）。test_gui_actions の命令の数を 820 → 821。commands.json を作り直した。ヘルプの「2. コマを割る」に一節。
+- 直さなかった物: 窓の設定（プリセット・つまみ・束の数）は窓を閉じると忘れる（覚えない）。描いたコマを複数持つページは、今までどおり「今のページのコマ割り」を変異の元にできない（skeleton_of_page が無し）。
 
 ## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 

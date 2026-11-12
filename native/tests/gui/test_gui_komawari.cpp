@@ -33,7 +33,10 @@
 #include "app/main_window.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
 #include "core/frames.hpp"
+#include "render/ops_registry.hpp"
 #include "gui_support.hpp"
 #include "service/komawari_shape.hpp"
 #include "service/layout_ideas.hpp"
@@ -56,9 +59,11 @@ struct Studio {
     std::unique_ptr<MainWindow> window;
     std::vector<Json> ops;
 
-    explicit Studio(int pages = 3) {
+    explicit Studio(int pages = 3, bool strict = false) {
         book = path_of(dir.filePath("book.genko"));
-        write_book(book, new_doc(pages));
+        core::Document doc = new_doc(pages);
+        doc.strict_gates = strict;
+        write_book(book, doc);
         session = Session::open(book, quick(path_of(dir.filePath("recovery"))));
         window = std::make_unique<MainWindow>(session);
         window->resize(1280, 860);
@@ -428,6 +433,44 @@ private slots:
             QVERIFY(d.list()->count() > 0);
             for (const ideas::Idea& idea : d.batch().ideas) QCOMPARE(idea.shape.count(), std::size_t{3});
         });
+    }
+
+    // A page whose name a person approved (strict_gates): a person's window lays an idea on it, as テンプレートでコマを割る…
+    // does — the same gate (the command bus's: an agent is refused, a person not).
+    void anApprovedPageIsLaidByAPerson() {
+        Studio studio(3, true);
+        MainWindow* w = studio.window.get();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "name_ok"}, {"page", 1}}})));
+        QVERIFY(studio.page().name_ok);
+        studio.komawari([&](KomawariDialog& d) {
+            d.panels->setCurrentIndex(4);
+            d.make_batch("approved");
+            d.list()->setCurrentRow(0);
+            d.choose();
+            QVERIFY(d.plan.has_value());
+        });
+        QCOMPARE(studio.leaves(), std::size_t{4});
+        QVERIFY(studio.page().name_ok);
+        // an agent's change of the same ops is refused by the gate (the window is a person's)
+        const genko::app::templates::Plan plan = genko::app::idea_plan(*studio.session->snapshot(), 0, ideas::generate([] {
+            ideas::Request r;
+            r.panels = 3;
+            r.seed = "agent";
+            return r;
+        }()).ideas.front().skeleton, "human:tester");
+        QVERIFY_THROWS_EXCEPTION(std::exception, (void)core::CommandBus(genko::render::ops_registry()).apply(*studio.session->snapshot(), plan.ops, core::Actor("ai:helper")));
+        // テンプレートでコマを割る… on the same page: the same answer
+        studio.answers->responder->question = [](const QString&, const QString&) { return true; };
+        studio.answers->responder->exec = [](QDialog* dialog) {
+            auto* d = qobject_cast<genko::app::TemplateDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->list()->setCurrentRow(d->list()->count() - 1);
+            d->choose();
+            return d->result();
+        };
+        const Json before = panels_of(studio.page());
+        studio.trigger("act_template");
+        QVERIFY(panels_of(studio.page()) != before);
     }
 
     // 今のコマ割りをテンプレートに残す… after an idea with an inset, and テンプレートでコマを割る… with it on another page
