@@ -642,7 +642,7 @@ void require_drawable(const Document& doc, const std::optional<std::string>& ref
 std::optional<Json> style_locked(const Json& studio) {
     const Json* style = get(studio, "style");
     if (style == nullptr || !style->is_object() || !style->contains("locked")) return std::nullopt;
-    return (*style)["locked"];
+    return Json(style->at("locked"));  // (an explicit copy: MSVC with nlohmann 3.12 takes no implicit conversion to optional)
 }
 
 void set_studio(OpContext& c) {
