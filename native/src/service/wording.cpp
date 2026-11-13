@@ -1506,11 +1506,10 @@ const std::vector<Rule>& rules() {
                          "設定にしたレイヤーに描けます。一人の原稿には、この制限はありません）"));
         r.push_back(rule(R"(page (\S+): before the name is approved an agent puts no picture on the name.*)",
                          "AI と進める原稿では、ネームの承認の前に、AI はネーム・下描き（印刷に出さないレイヤーも）に画像を置けません"
-                         "（\\1 ページ）。ラフはネームのレイヤーに線で描きます（add_mannequin・add_figure の人形を trace_prims で鉛筆の線に、"
-                         "物や背景の形は add_shape、ほかの線は add_stroke）"));
+                         "（\\1 ページ）。ラフはネームのレイヤーに線で描きます（3D の人形を鉛筆の線にする、物や背景の形を描く、線を引く）"));
         r.push_back(rule(R"(only a person can mark an asset as an atari.*)",
-                         "アセットをアタリ（kind atari）にしたり、それを変えたりできるのは人だけです（AI は、人から渡された手描きのアタリを "
-                         "import_name で取り込みます）"));
+                         "アセットをアタリにしたり、アタリの印を外したりできるのは人だけです（AI は、人から渡された手描きのアタリを、"
+                         "ネームの取り込みで取り込みます）"));
         r.push_back(rule(".*finish needs the art approved.*", "作画が承認されてから仕上げに進めます"));
         r.push_back(rule(".*approve the name first.*", "先にネームの承認が要ります"));
         r.push_back(rule("add_line with frame_id needs explicit x_mm/y_mm.*", "コマを指定して台詞を置くときは、x_mm と y_mm も指定します"));

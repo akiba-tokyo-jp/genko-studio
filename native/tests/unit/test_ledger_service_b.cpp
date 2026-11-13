@@ -1673,8 +1673,9 @@ private slots:
         for (const char* to : {"draft", "name"}) {
             const Json r = agent.call("apply_ops", Json::array({kBook, place(1, to)}), Json{{"commit", true}}).to_dict();
             const Json said = genko::core::py_get(r, "error");
-            QVERIFY2(!r.value("ok", true) && has(said, "ネームのレイヤーに線で描きます") && has(said, "trace_prims") &&
-                         has(genko::core::py_get(r, "detail"), "draws the rough as lines on the name layer"),
+            QVERIFY2(!r.value("ok", true) && has(said, "ネームのレイヤーに線で描きます") && has(said, "3D の人形を鉛筆の線にする") &&
+                         has(genko::core::py_get(r, "detail"), "draws the rough as lines on the name layer") &&
+                         has(genko::core::py_get(r, "detail"), "trace_prims"),  // (the ops by name: in the detail, for the agent)
                      r.dump().c_str());
             QVERIFY(saved() == before);
         }
@@ -1779,7 +1780,7 @@ private slots:
         const auto before = saved();
         for (const Json& ops : {mark, Json::array({mark[0], place("name")}), Json::array({mark[0], place("draft")})}) {
             const Json r = agent.call("apply_ops", Json::array({kBook, ops}), Json{{"commit", true}}).to_dict();
-            QVERIFY2(!r.value("ok", true) && has(genko::core::py_get(r, "error"), "アタリ（kind atari）にしたり") &&
+            QVERIFY2(!r.value("ok", true) && has(genko::core::py_get(r, "error"), "アタリにしたり、アタリの印を外したり") &&
                          has(genko::core::py_get(r, "detail"), "only a person can mark an asset as an atari"),
                      r.dump().c_str());
             QVERIFY(saved() == before);
