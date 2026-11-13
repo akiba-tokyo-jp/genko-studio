@@ -123,6 +123,21 @@
 - コマ割りの工程は、ASan・Release の合格で Debug を省いて main に入れる。
 - マージのときに Windows 用と Linux 用の実行ファイルを作る。Windows は GitHub Actions で一度だけ（手動でだけ動く `.github/workflows/build-executables.yml`。自動の CI〔native.yml〕は戻さない）。試験は「動くかだけ」（版・本を作る・調べる・描き出す）。できた物は下書きの Release に添付し、公開はしない。流した後はワークフローを `.github/disabled-workflows/` に戻す。Windows の実機での受入（配布前に必須）は残る。
 
+### 実行ファイル（Windows・Linux）と Windows のビルドの直し — 2026-11-13
+- `.github/workflows/build-executables.yml`（手動でだけ動く）を一度流して、下書きの Release **v0.1.0** を作った（公開していない）。流した後は `.github/disabled-workflows/` に戻した（`.github/workflows/` は空。native.yml も無効のまま）。
+  - genko-studio のリポジトリ設定で Actions が「Disable actions」になっていて、最初の実行（run 43368010783）は始まらないまま残った（取り消せない状態）。利用者が「Allow all actions」に変えた。ワークフローが 1 本も無いので、この設定のままでも何も走らない。
+  - 合格した run: 43400526839（main 74882ad3）。Linux（ubuntu-24.04）と Windows（windows-2022、MSVC 19.44）でビルドし、展開した配布物で `--version`・`new`・`inspect`・`export --format png`（8 ページ）が通った。
+  - 添付: `genko-studio-0.1.0-linux-x86_64.tar.gz`（sha256 `b37d4f9d70bb06073e0bcb7116e9c52b4ffa8ba857e3bbdc419e74ea89c79f02`）、`genko-studio-0.1.0-windows-x64.zip`（sha256 `dae21e4917e5d9675da2b27d30ebd66ccfda3df0de9b1c24f114fe71e950a59c`）、SHA256SUMS.txt。
+  - Linux の tar.gz は GitHub 上で作り直した物（同じソース。V3 で全試験・素の Ubuntu への導入まで通した物は sha256 `df7a0779…`、上の節）。
+- 10 月 5 日以来 Windows でビルドしていなかったので、MSVC・vcpkg との違いを直した（Linux の動きは変えていない。直したファイルは Linux で -Werror のコンパイルを確かめた）:
+  - vcpkg: harfbuzz を既定の機能なし（hb-ft を使わない）にし、使っていない freetype を外した（自前の FreeType 2.14.3 の Freetype::Freetype と、vcpkg の freetype の包みがぶつかって構成が止まっていた）。nlohmann-json を Linux と同じ 3.11.3 に固定した（overrides）。
+  - imaging.hpp: libImaging の ImPlatform.h が持ち込む <windows.h> の near・far マクロを取り消す。
+  - fx_rank: MSVC に __int128 が無いので、64 ビット 2 つの Wide（_mul128、double への丸めは 128 ビットと同じ。手元で 200 万回照らし合わせて一致）。
+  - color_canvas・proof: Little CMS 2.16 以降は cmsGetToneCurveSegment(0, …)->Params（vcpkg 2.19、Ubuntu 2.14）。
+  - optional<Json> を返す所を明示の Json に（ops_studio・state・brushes・selection・psd_effects）、psd_type は文字列で比べる、pcraft_variables は path::native() を文字で比べる、page.cpp の InkCanvas を ?: でなくラムダで、automate_merge の actor を波括弧で（most vexing parse）。
+  - GenkoPackage: Windows だけ windeployqt に `--no-system-dxc-compiler`（dxcompiler.dll・dxil.dll を入れない。SBOM の検査は緩めていない）。
+- **Windows で確かめたのはビルドと上の 4 つの操作だけ。** Windows の試験（windows-debug・windows-release の全試験と --pair）と実機での受入（配布の前に必須）は残る。費用は Actions の込みの枠の中（Windows 約 8 回のビルド）。
+
 ## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 
 ### 利用者の決定
