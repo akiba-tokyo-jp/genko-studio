@@ -78,8 +78,11 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
     - 短い返事（「はい」「え？」）は短いまま。長い台詞は 2 つのフキダシに分ける（同じ人なら並べて置かれる）。
 - ネームのラフを描く: `submit_name` でコマと台詞ができたら、コマの中の人物・物・背景をラフ（アタリ）として、そのページのネームのレイヤーに鉛筆の線で描く。
   ネームのレイヤーは印刷されず、ネームの承認の前でも描ける。
-  ネームの段階では画像を作らない・置かない（`import_image`・`generation_request`・`take_panel_art`・`adopt`、`place_asset` の `draft`・`name` は使わない。
-  承認の前のネーム・下描きに画像を置こうとすると、エージェントは断られる）。画像はネームの承認の後、作画で使う。
+  ネームの段階では画像を作らない・置かない。使わない道具: `import_image`、`generation_request`（`purpose: draft` も）、`import_images`（draft の依頼への取り込みも）、
+  `take_panel_art`、`adopt`（`to: draft`）、`place_asset`（`to: draft`・`name`）、画像の素材の `stamp_material`、画像を含む `paste`、
+  `import_name`（人が描いて渡したアタリのスキャン・写真を取り込むときだけ使う。自分で作った絵には使わない）。
+  ネームの承認の前に、ネーム・下描き・印刷に出さないレイヤーへ画像を置こうとすると、エージェントは断られる（`place_asset`・`adopt`・`take_panel_art`・
+  `generation_request` の draft・`stamp_material`・`paste`。人が描いたアタリを `import_name` で取り込むときだけは下描きに入る）。画像はネームの承認の後、作画で使う。
   1. ネームのレイヤー: `inspect`（`target: "snapshot"`、`page`）の `layers` で `role` が `name` のレイヤーの `id`。下の op の `layer_id` にはこれを入れる。
      はじめに `set_layer`（`layer: "name"`、`panel_each: true`）にしておくと、線はそれぞれ描き始めたコマの中だけに出る（コマからはみ出す人物の線が隣のコマに入らない）。
   2. 人物: コマごとに `add_figure`（`preset`: stand・walk・run・sit・point・arms_up・think・kneel・peace、`hands`）か `add_mannequin`（`preset` に look_back もある）を、
@@ -112,7 +115,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 
 ## 人間が描いたアタリの画像から始めるとき
 
-人間が紙や別のアプリで描いたネーム（アタリ）のスキャン・写真を取り込むときの手順。あなたが描くラフは、上の「ネームのラフを描く」のとおり線で描く。
+人間が紙や別のアプリで描いたネーム（アタリ）のスキャン・写真を取り込むときの手順。`import_name` は、人が描いて渡したアタリのためだけに使う（自分で作った絵は取り込まない）。
+あなたが描くラフは、上の「ネームのラフを描く」のとおり線で描く。
 
 - 人間が `import_name` か CLI でアタリを取り込むと、Genko がコマ割りを検出して提案にする（確定は人間）。
 - `read_atari`: `mcp__genko__render`（`kind: "atari"`）でアタリを見て、手書きの台詞を読み、`mcp__genko__propose_lines` で提案する。

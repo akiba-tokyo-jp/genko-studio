@@ -305,7 +305,7 @@
    - そのページの dialogue / monologue / narration の beat はちょうど1回ずつ置く
 4. **自己点検（エージェント）。** プレビュー画像を見て、読み順の迷い、窮屈なコマ、弱いめくりを直す。点検の結果は `record_review{target:{page_id}, kind:"name", score, notes}` で残す（worklist が同じ点検を出し直さないため）。
 5. **人間の確認。** `studio review` の HTML かプレビュー画像で見て、直すなら指示を書くか自分で op を使い、よければ `studio approve name --page N` を付ける。エージェントは `request_approval{gate:"name", pages}` で依頼し、承認を待つ間は他のページに進める。
-- **ラフ（アタリ）の既定は構造的なもの**（人物の箱 + 向き + prim + ruler）。エージェントが画像ツールでラフ画像を作った場合は、`generation_request{purpose:"draft"}` の依頼に `import_images` で取り込み、`adopt{to:"draft"}` で DRAFT に置ける（出力されない。name_ok 前でも可）。
+- **ラフ（アタリ）は線で描く。** 構造（人物の箱 + 向き + prim + ruler）に加えて、エージェントはネームのレイヤー（出力されない。name_ok 前でも描ける）に `apply_ops` で鉛筆の線を描く: 人形（`add_figure`・`add_mannequin`）を置いて `trace_prims{kind:"pencil"}` で線にし、物や背景は `add_shape`、ほかの線は `add_stroke`。**name_ok の前は、エージェントはネーム・下描き・出力しないレイヤーに画像を置かない**（`place_asset` の name / draft、`adopt{to:"draft"}`、draft の依頼の `take_panel_art`、`generation_request{purpose:"draft"}`、画像の `stamp_material`、画像を含む `paste` は断られる）。例外は、人が描いて渡したアタリのスキャンを `import_name` で取り込むときだけ（DRAFT に置かれる）。人はいつでも置ける。
 - **ゲート:** **name ②**（人間）。
 
 #### S5 生成・編集（コマ単位、パイロットページ先行）
@@ -679,7 +679,7 @@ title.genko/
 }
 ```
 
-- **`purpose`:** `panel_art`（コマの絵）、`character_sheet`（設定画）、`location`（背景の参照）、`draft`（ネーム用のラフ、DRAFT に置く）。
+- **`purpose`:** `panel_art`（コマの絵）、`character_sheet`（設定画）、`location`（背景の参照）、`draft`（DRAFT に置く画像。エージェントはネームの承認の後だけ。承認の前のラフは画像にせず、ネームのレイヤーに線で描く）。
 - **`mode`:** `new`（新規）、`edit`（元画像 `source` + 指示で直す）、`inpaint`（元画像 + `mask` の白い所だけ描き直す）、`upscale`（高解像度化）。候補の `mode` にはほかに `derive`（Genko の決定的変換、`origin.kind:"genko"`）がある。修正の依頼は `parent` の候補を `source` に入れる。
 - **サイズ。** `suggested_px` はコマの比から計算した理想（約 1 MP、64 の倍数）。画像ツールが決まったサイズしか出せない場合に備え、`tool_sizes` に「どのサイズで作ってどう切るか」を並べる。候補を取り込むときに縦横比が違っても、配置は cover で合わせ、切れる範囲を `mapping` に残す。対応サイズの一覧はユーザー設定の `tools.json`（§6.5）から引く。
 - **プロンプトは下書きである。** 組み立ては決定的（style → キャラの `tokens` → shot と angle の語彙 → 場所 → 動きと表情 → 制約の順）で、エージェントは自由に書き直してよい。実際に使ったプロンプトは取り込み時に来歴へ書く。人間が `gen.prompt_override` を書いたコマでは、下書きの代わりにそれが入り、`notes_for_agent` に「人間の指定なので変えない」と書かれる。
@@ -1029,10 +1029,10 @@ M1 は性能・安全・ロック・actor（1〜3、7、10）を、M2 は v3 に
 | `import_candidates` | `request_id`（受け先は依頼の `target`: コマ、キャラ、場所のどれか）, `candidates[{id, asset, mode, parent?, origin{kind, actor, tool_id, tool?, model?, prompt?, params?, refs_used?, note?}, px}]` | 候補を足すだけ。資産は検証・登録済みであること。**`origin` が無ければ拒否。** `origin.actor` は呼び出しの actor と一致すること。依頼の `brief_hash` が今と違えば `stale:true`。受け先がなければ orphans へ。`attempts.images` を更新する | page lock |
 | `review_candidates` | `page`, `frame_id`, `reviews[{candidate_id, score, note?, fix?}]` | 評価を記録する（誰の評価かは actor） | page lock |
 | `set_candidate` | `page`, `frame_id`, `candidate_id`, `status: candidate\|shortlisted\|rejected`, `reason?` | 候補の状態を変える | page lock |
-| `adopt_candidate` | `page`, `frame_id`, `candidate_id`, `to?: art\|bg\|draft`（既定 art）, `fit?: cover\|contain\|stretch`, `offset_mm?: [dx, dy]`, `scale?`, `clip_to?: frame\|bleed\|none` | `(frame_id, to)` ごとの placed layer を作るか使い回し、`asset`・`placement_mm`（mapping から計算）・`source` を設定する。`panel.adopted[to]` を更新し、status を adopted にする。art と bg は INK の下に入れる。**art_ok が付いたページで ai:* が採用を替えると `art_ok` は外れる**（人間の再確認が要る） | **art / bg は name_ok が常に必要**。draft は name_ok 前でも可で非出力。page lock |
+| `adopt_candidate` | `page`, `frame_id`, `candidate_id`, `to?: art\|bg\|draft`（既定 art）, `fit?: cover\|contain\|stretch`, `offset_mm?: [dx, dy]`, `scale?`, `clip_to?: frame\|bleed\|none` | `(frame_id, to)` ごとの placed layer を作るか使い回し、`asset`・`placement_mm`（mapping から計算）・`source` を設定する。`panel.adopted[to]` を更新し、status を adopted にする。art と bg は INK の下に入れる。**art_ok が付いたページで ai:* が採用を替えると `art_ok` は外れる**（人間の再確認が要る） | **art / bg は name_ok が常に必要**。draft は非出力で、人は name_ok 前でも可、ai:* は name_ok の後だけ。page lock |
 | `unadopt` | `page`, `frame_id`, `to?` | 採用を外す。直前の採用があればそれに戻す | page lock |
 | `set_placement` | `page`, `frame_id`, `to?`, `fit?`, `offset_mm?`, `scale?`, `clip_to?` | 配置の微調整 | page lock |
-| `place_asset` | `page`, `asset`（`"sha256:…"` だけ。ローカルパスは受けない）, `to?: art\|bg\|draft\|name` または `layer_id`, `frame_id?`, `placement_mm?`, `fit?`, `clip_to?` | 人間の持ち込み画像、背景ライブラリ、取り込んだアタリを置く。資産は先に取り込み、`register_assets` で来歴を付けておく。name / draft は非出力を強制。`put_raster` は「全ページに stretch で place_asset」と同じ意味になる | art / bg は strict_gates で name_ok が要る。page lock |
+| `place_asset` | `page`, `asset`（`"sha256:…"` だけ。ローカルパスは受けない）, `to?: art\|bg\|draft\|name` または `layer_id`, `frame_id?`, `placement_mm?`, `fit?`, `clip_to?` | 人間の持ち込み画像、背景ライブラリ、取り込んだアタリを置く。資産は先に取り込み、`register_assets` で来歴を付けておく。name / draft は非出力を強制。`put_raster` は「全ページに stretch で place_asset」と同じ意味になる | art / bg は strict_gates で name_ok が要る。name / draft（と出力しないレイヤー）への ai:* の画像も、name_ok の前は断る（人が描いたアタリ〔`import_name`〕の draft だけは置ける）。page lock |
 | `request_fix` | `page`, `frame_id`, `candidate_id?`, `instruction`, `scope: frame\|person\|background\|text\|regions`, `region_ids?` | kind=fix のチケットを作り、panel.status を `fix_requested` にする。worklist が `fix_panel` としてエージェントに出す | page lock |
 
 **仕上げ**
@@ -2214,7 +2214,7 @@ Claude Code などでの通し確認は人間が行う（手順は `docs/OTHER_A
 | 7 | 承認の本人性 | 当面はワークフローの守り（MCP に承認の道具が無い、actor の固定、HTTP のトークン）。必要になれば承認リンク（M7-5）か、承認を人間の鍵で署名する |
 | 8 | 複数 actor のもとでの永続 undo | M2 は「自分の最新 commit だけ戻せる」線形 undo。M7 で rebase undo |
 | 9 | 斜めコマ・多角形コマ | 当面は長方形で近似。多角形フレームは M9 以降、需要を見てから |
-| 10 | ネームの既定のラフ | 構造的（人物の箱 + 向き + prim）。画像ツールのラフはページ単位の任意 |
+| 10 | ネームの既定のラフ | 構造的（人物の箱 + 向き + prim）と、ネームのレイヤーの線（人形を trace_prims）。エージェントはネームの承認の前に画像のラフを置かない |
 | 11 | mono の戦略 | グレースケールの漫画調を直接作らせ、Genko が決定的に仕上げる |
 | 12 | 描き文字（SFX）を画像ツールで作るか | v1 は Genko の装飾文字。画像ツールの描き文字は M9 以降に検討 |
 | 13 | 1コマの枚数と修正巡回の既定 | 1 回の依頼で 2〜4 枚、上限 8 枚、修正 2 巡。超えたらチケット |
