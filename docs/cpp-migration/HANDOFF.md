@@ -16,7 +16,54 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12（この節が最新）
+## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13（この節が最新）
+
+### 利用者の決定（2026-11-13）
+- 「吹き出しが少しいびつに見える」「いびつにせずに今風の漫画の吹き出しを各種作って置けるように」。続けて「手描き風は消して良いです」、すでにある本のフキダシは「全部を今風に描く」。
+- だから: 手描き風の描き方（卵形の楕円・線の強弱・揺れ・ばらついた破線・角のあるしっぽ）を無くし、すべてのフキダシを 1 つの描き方（今風）で描く。**すでにある本のフキダシも開けば今風になる（見た目が変わる）。文字の大きさは変えない。**「すでにある本は同じ画素で描く」という決まりは、フキダシの画素についてだけ、この決定で外れた。フキダシ以外は今までどおり。
+- 群: B1 が土台（core・render・service）、B2 が GUI、B3 が AI 向けの道具と手引き。B2・B3 は下の「B2・B3 が使うもの」を使う。
+
+### 群 B1（土台。ブランチ native/fukidashi-core、main 5cf6551a から）
+- 設計: SPEC.md BALLOON-01（描き方・種類・鍵・しっぽ・文字の収まり・前の本の読み替え・拡張・試験）、schema-v4.md「フキダシ（fukidashi@1 と balloon_geometry）」。
+- 描画: `render/text/balloon_clean.{hpp,cpp}`（輪郭を実数の多角形で作る。＋−×÷と平方根だけ、正多角形の角と波の位相は libm_float の sinf・cosf。4 分の 1 か右半分を作って写す。塗りは形の和集合、線は「和集合の縁から太さ以内」を正確な面積のラスタライザーで出す）。`balloons.cpp` の shape_masks は全部これで描く。手描き風の機械（uneven・swell・角度で切る破線・収縮で出す線・整数の多角形・角のあるしっぽ）は消した。ページへは 1 回の混ぜ方で載せる（透明のあるレイヤーでも縁が暗くならない）。
+- 種類: 今ある種類（speech・rounded・box・narration・cloud・thought・shout・electric・whisper・flash・dotted_box・tone_box・fancy_box・手で描いた輪郭）を今風に。新しい種類 `capsule`・`polygon`。新しい鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`。しっぽの `kind: inward` と `fillet_mm`。付け根は輪郭としっぽの向きに沿う曲線でつなぐ。つないだフキダシは切れ込みを同じ継ぎ目で、離れていれば首でつなぐ。
+- 前の鍵: `hand` は受け取るだけ（描く形は変えない。文字を収める楕円の決め方だけ前と同じに使う）。`wobble` は波の輪郭（`wave_mm` = 0.03 × wobble × 箱の短い辺）として描く。どちらもエラーにしない。
+- 文字: 楕円の種類の文字は、前と同じ「文字の楕円」（2.6 乗の超楕円）に収める。その楕円は箱の 0.955 / 1.035 で、箱に内接する真の楕円に入る。capsule・polygon は形そのものに収める（shape_gauge・fit_in_shape）。
+- 前の本: project.json の一番上の `balloon_geometry`（今は 2）。無い本は、読むときに、手描きの楕円だった台詞（文字レイヤーの記録も）の箱を真ん中を保って 1.035 倍にする（storage/reader の read_line。core/fukidashi.hpp の grow_legacy_oval）。保存で鍵が付き、2 度は大きくならない。楕円の台詞が無い本には鍵を書かない。前の版の Genko は知らない鍵として残す（拡張ではない）。
+- 拡張 `fukidashi@1`: 新しい種類・鍵・しっぽを使っているあいだだけ書く（core::uses_fukidashi）。
+- 自動の文字入れ: 楕円の箱は前の 1.035 倍。1〜2 列で高さが幅の 3 倍以上の speech は `capsule`（service::letter::shape_for。ネームの文字入れと propose_lines の寸法）。
+- 設計からの変更（利用者の決定で）: `style.draw`・本の `balloon_draw`・`authoring_draw`・op `restyle_balloons`・既定の書き込みは作らない（描き方が 1 つになったので要らない）。「前の本は同じ画素」の試験も置かない（意図して変わる）。
+
+### B2・B3 が使うもの
+- 種類の名前 `capsule`・`polygon`、鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽの `kind: "inward"`・`fillet_mm`。どれも今の `add_line`・`edit_line`・`move_line` で渡す（新しい op は無い）。範囲と断りの文は SPEC BALLOON-01、`genko schema`（edit_line の「style (fukidashi)」）。
+- 寸法: `render::text::hug_power`・`hug_keep`（app/lettering.cpp の measure はこれを呼んでいるので、楕円はもう 1.035 倍になっている）、`service::letter::measure(breaks, "capsule")`、`service::letter::shape_for`。
+- 見本の絵（パレットのサムネイル）: `render::text::draw_group` をそのまま使う。
+- B2 に残ること: 種類のメニューに「縦長（カプセル）」「多角形（機械の声）」、パレット、台詞パネルの新しい鍵、`hand`（手描き風）と `wobble` をメニューから外す、commands.json。app/lettering.cpp の measure に capsule の寸法（今は箱の種類として測る）。
+- B3 に残ること: MCP の道具の説明と手引き（SKILL.md・drawing.md と integrations/ の写し）から手描き風の説明を外し、新しい種類・鍵を書く。ネーム計画（studio/schemas.cpp の panels[].lines[].balloon）に capsule・polygon を足すかどうか。
+
+### 直した既存の試験（どれも意図した変更。緩めていない）
+- test_storage v4RoundTrip: 楕円のある本は `balloon_geometry` を書く（鍵の並びに 1 つ足した）。
+- test_gui_lines: 楕円（speech・thought）の箱の期待値を 1.035 倍に（aLineIsTypedWhereTheTextToolClicks、aLineIsTypedOverDeletedTurnedAndReshaped の 2 か所、theLinesPanelListsReordersAndEdits の 2 か所、theStoryEditorPoursAScriptAndEditsEveryLine、selectedCharactersAreStyledAsTyped の box_size・measure）。「既定の設定に戻す」が消す鍵は 46 → 52（鍵が 6 つ増えた）。
+- test_ledger_service_c test_a_balloon_sits_by_its_speaker_and_its_tail_reaches_them: 1 列 5 字の「ちっちゃ!」は capsule になり、話し手のすぐ横に置かれてしっぽが要らなくなった。話し手の側に置かれることは両方で見て、しっぽは 2 列の台詞（楕円）で見る。
+- tests/support/psd_book_hashes.hpp: PSD の見本（画像の道 4 つ、文字を編集できる道 4 つ）の sha256 を取り直した（フキダシの画素が変わるので）。レイヤーを重ねると台詞になること・2 つの道の統合画像が同じことは、前の試験のまま通る。
+- test_save_e2e savedBookReadsBackWhole: v3 の見本の手描きの楕円（30 × 60 mm）は、v4 に変換した写しで 31.05 × 62.1 mm（真ん中は同じ）になり、`balloon_geometry: 2` が付く。
+- test_psd_text imageWayIsAsBefore: 4 ページ分の sha256 をまとめて言うようにした（検査は同じ）。test_render_page: コメントだけ。
+- docs/ops.schema.json: native の一覧と同じ文に（edit_line の balloon・tails・style の説明）。
+
+### 確かめたこと（Linux Release。関係する試験だけ）
+- 関係する試験 59 本（test_render_page・test_gui_lines・test_psd_text・test_smart_stack・test_ruby_render・test_contract_type 3 本・test_ledger_service_a/b/c・test_service・test_storage・test_model・test_features・test_command_bus・test_ops_e2e・test_cli_e2e・test_mcp_api_e2e・test_gui_ledger_a・test_fukidashi・test_fukidashi_service と、台詞に触れる契約・GUI・e2e の試験）: 試験の関数 1672 件が合格、不合格 0、スキップ 32（前からのスキップと、見本の書き出し 1 件）。test_perf_render は 6 件合格・1 件スキップ（PSD の見本の環境変数が無いとき）。全体の試験と ASan は流していない（群の出口で）。
+- 新しい試験: test_fukidashi（輪郭の鏡像・線の太さ・破線・しっぽの付け根・継ぎ目・タイル＝ページ・白黒の線の太さ・レイヤーを重ねるとページ・ベタに白抜き・トーン枠・前の鍵・拡張の出入り・前の本の読み替えと文字の大きさ・2 度大きくならない・今の形の文字の収まり）、test_fukidashi_service（op の受け取りと日本語の断り・切れ込みのしっぽ・楕円の寸法・capsule の選び方と寸法・ネームの文字入れ）。前の本の見本は tests/data/fukidashi（main 5cf6551a が書いた project.json と、その版での文字の em と大きさ）。76 本の台詞すべてが 150・600 dpi で同じ em・同じ大きさ。
+- 速さ（test_perf_render の ten_balloons_at_600dpi。表示だけ）: B4・600 dpi（6071 × 8598 px）に 10 個。フキダシなし 453 ms、ありを最初から 964 ms、もう一度 467 ms、形だけ 395 ms（1 個 39.5 ms）。前の本の見本を `genko render` で 600 dpi に描く時間は、main の実行ファイル 10.0 s・4.6 s（1・2 ページ）に対して 5.7 s・1.8 s。
+- 見本: 今風の種類としっぽ（150 dpi の全体、600 dpi の原寸の切り出し）、前の本を main と今の版で描いた並び。作業用の場所（リポジトリの外）に置き、報告に道を書いた。
+
+### 残り・気を付けること
+- 版をまたぐ動き: `balloon_geometry` の付いた本を前の版で開いて楕円を足して保存すると、その楕円は読み替えられない（文字が少し小さく収まることがある）。前の版は公開前の v0.1.0 の下書きだけ。
+- op の列を今の版でやり直したとき（ジャーナルの再生、試験の見本の op）は、箱は書かれた数字のまま真の楕円になる。文字の楕円は箱の 0.955 / 1.035 なので、前の版で同じ op を当てたときより文字が 1 段小さく収まることがある（保存した本を開く道は読み替えるので変わらない）。
+- 回したフキダシの紙の大きさ（turned_sheet の py_hypot）と、しっぽの先の回し方以外の回転の計算は前のまま（環境の libm）。今風の形の計算には入っていない。
+- 鋭い切れ込み（本体に沿って寝たしっぽ）は、継ぎ目を大きく取っても小さなくびれとして残る。`fillet_mm` で変えられる。
+- Windows の実機のビルドは未確認（near・far の名前、GCC の拡張、__int128 は使っていない）。
+
+## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12
 
 ### 利用者の決定（2026-11-12）
 - 生成 AI がコマ割りをすると無難な格子しか出ない。これを直すため、次の 4 つを全部入れる。

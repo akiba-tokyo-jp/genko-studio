@@ -610,14 +610,28 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     double paper[3] = {255.0, 255.0, 255.0};
     double line[3] = {0.0, 0.0, 0.0};
     for (std::size_t c = 0; c < 3; ++c) {
-        if (c < masks.paper.size()) paper[c] = static_cast<double>(masks.paper[c]);
-        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(masks.line_rgb[c]);
+        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
+        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
     }
     const auto count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     for (std::size_t i = 0; i < count; ++i) {
-        const double b = static_cast<double>(static_cast<unsigned char>(band[i])) / 255.0;
-        const double c = static_cast<double>(static_cast<unsigned char>(cover[i])) / 255.0;
-        if (b <= 0 && c <= 0) continue;
+        const auto band8 = static_cast<unsigned char>(band[i]);
+        const auto cover8 = static_cast<unsigned char>(cover[i]);
+        if (band8 == 0 && cover8 == 0) continue;
+        if (tone.empty() || tone[i] == '\0') {  // (most of a balloon: all line, or all fill — the colour itself)
+            const bool all_line = band8 == 255;
+            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0;
+            if (all_line || all_fill) {
+                char* whole = &pixels[i * bands];
+                const double* colour = all_line ? line : paper;
+                for (std::size_t k = 0; k < 3; ++k) whole[k] = static_cast<char>(static_cast<std::uint8_t>(colour[k]));
+                if (bands == 4) whole[3] = static_cast<char>(static_cast<std::uint8_t>(255));
+                continue;
+            }
+            if (band8 == 0 && !masks.fill) continue;  // (inside a balloon without a fill: the page as it is)
+        }
+        const double b = static_cast<double>(band8) / 255.0;
+        const double c = static_cast<double>(cover8) / 255.0;
         const double inside = c > b ? c - b : 0.0;
         const double t = tone.empty() ? 0.0 : std::min(inside, static_cast<double>(static_cast<unsigned char>(tone[i])) / 255.0);
         const double w_line = b + t;
