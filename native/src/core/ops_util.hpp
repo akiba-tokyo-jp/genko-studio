@@ -56,11 +56,27 @@ LayerRole stroke_role(const std::string& layer_name);
 // ops._gated: strict gates or a studio (agents' books) enforce the name → art → finish order.
 bool gated(const Document& doc);
 
-// (name-lines: the rough of a name is lines) An agent's picture on the name or the draft layer (`role`) of a page whose
-// name is not approved yet, in a gated book: OpError — the agent draws the rough there as lines (trace_prims, add_shape,
-// add_stroke on the name layer). A person keeps it, and so does an agent once the page's name is approved; a person's
-// scanned atari (`asset` kept in studio.assets as kind "atari": import_name's) still comes in as the draft.
-void refuse_unnamed_picture(const OpContext& c, const Page& page, LayerRole role, const Json& asset = Json());
+// A layer kept off the print: the name, a draft, or one set exportable: false (strict_gates lets anyone draw on it before the
+// name is approved — CommandBus's check_strict).
+bool kept_off_print(const Layer& layer);
+
+// (name-lines: the rough of a name is lines) An agent's picture on a layer kept off the print (`target`: the name, a draft,
+// or exportable: false) of a page whose name is not approved yet, in a gated book: OpError — the agent draws the rough
+// there as lines (trace_prims, add_shape, add_stroke on the name layer). A person keeps it, and so does an agent once the
+// page's name is approved. A person's hand-drawn atari (`asset` kept in studio.assets as kind "atari": import_name's, or a
+// person's) still comes in as a draft — on a draft layer only, never on the name.
+void refuse_unnamed_picture(const OpContext& c, const Page& page, const Layer& target, const Json& asset = Json());
+
+// While one of these lives on this thread, register_assets takes an agent's kind "atari": StudioService::import_name holds
+// it for the scan a person gave the agent. Elsewhere only a person marks an asset as an atari (or changes that).
+class AtariImport {
+public:
+    AtariImport();
+    ~AtariImport();
+    AtariImport(const AtariImport&) = delete;
+    AtariImport& operator=(const AtariImport&) = delete;
+};
+bool importing_atari();
 
 // ops._rgb3: three ints 0..255. OpError "<what> is [r, g, b]".
 std::vector<std::int64_t> rgb3(const Json& value, std::string_view what);

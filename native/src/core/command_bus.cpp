@@ -407,7 +407,7 @@ void check_unnamed_drawing(const std::vector<PagePtr>& before, const std::map<st
         const Page* now = page_now(after, was);
         if (now == nullptr || now == was.get()) continue;
         for (const Layer& layer : now->layers) {
-            if (!printed(layer) || !layer.exportable) continue;
+            if (kept_off_print(layer)) continue;
             const auto old = std::find_if(was->layers.begin(), was->layers.end(), [&](const Layer& l) { return l.id == layer.id; });
             if (old == was->layers.end() || !same_locked_look(*old, layer) || replaced(layer)) {
                 throw OpError(name + " on a printed layer needs name_ok on page " + now->index.repr() + " (strict_gates)");
@@ -415,7 +415,7 @@ void check_unnamed_drawing(const std::vector<PagePtr>& before, const std::map<st
         }
         // (a printed layer it took away is drawing on the page too, as delete_layers: the review of pc6-A's P3-5)
         for (const Layer& layer : was->layers) {
-            if (!printed(layer) || !layer.exportable) continue;
+            if (kept_off_print(layer)) continue;
             if (std::none_of(now->layers.begin(), now->layers.end(), [&](const Layer& l) { return l.id == layer.id; })) {
                 throw OpError(name + " on a printed layer needs name_ok on page " + now->index.repr() + " (strict_gates)");
             }
@@ -910,7 +910,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
         // (a layer that is not printed — the name, a draft, or one set exportable:false — may be drawn on before the
         // name is approved: trying a line out does not change the page)
-        if (target != nullptr && printed(*target) && target->exportable && !page.name_ok) {
+        if (target != nullptr && !kept_off_print(*target) && !page.name_ok) {
             throw OpError(name + " on a printed layer needs name_ok on page " + page.index.repr() + " (strict_gates)");
         }
         return;

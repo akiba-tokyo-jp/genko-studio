@@ -654,6 +654,8 @@ std::string name_layer_of(StudioService& agent, int page) {
 }
 
 // The skill's example of drawing the rough (the ```json block after 「ネームのラフを描く」): the arguments of apply_ops.
+// Pinning the guide's example text here is on purpose: the tests send it as it is, so the example an agent copies stays
+// runnable (a change to the ops or to the guide that breaks it fails here).
 Json skill_rough_example() {
     const std::string skill = genko::service::data::skill();
     const std::size_t section = skill.find("- ネームのラフを描く:");
@@ -1659,14 +1661,15 @@ private slots:
         QVERIFY2(made.empty(), made.c_str());
         const fs::path book = root / kBook;
         const std::string frame = first_leaf(book, 1).id;
-        const auto saved = [&book] { return genko::storage::read_file(book / "project.json"); };
+        // (the whole book: project.json with studio.assets' meta, the asset files, the inbox, the requests)
+        const auto saved = [&book] { return genko::test::tree_hashes(q(book), false); };
         const ToolResult imported = agent.call("import_image", Json::array({kBook}), Json{{"png_base64", genko::core::b64encode(flat_png(64, 64, render::Ink{90, 90, 90}))}});
         QVERIFY2(imported.ok, imported.to_dict().dump().c_str());
         const std::string asset = imported.data["asset"].get<std::string>();
         const auto place = [&](int page, const char* to) {
             return Json::array({Json{{"op", "place_asset"}, {"page", page}, {"asset", asset}, {"to", to}, {"frame_id", first_leaf(book, page).id}}});
         };
-        std::string before = saved();
+        auto before = saved();
         for (const char* to : {"draft", "name"}) {
             const Json r = agent.call("apply_ops", Json::array({kBook, place(1, to)}), Json{{"commit", true}}).to_dict();
             const Json said = genko::core::py_get(r, "error");
@@ -1730,6 +1733,78 @@ private slots:
         QVERIFY2(again.ok, again.to_dict().dump().c_str());
         const ToolResult took = agent.call("take_panel_art", Json::array({kBook, request, image("b.png")}), Json::object());
         QVERIFY2(took.ok, took.to_dict().dump().c_str());
+        // a name taken back is gated again
+        const Json revoked = HumanService(book, "human:leaf").revoke(Json("name"), Json::array({2}), Json(), Json("描き直す"));
+        QVERIFY2(revoked.value("ok", false), revoked.dump().c_str());
+        before = saved();
+        const Json reopened = agent.call("apply_ops", Json::array({kBook, place(2, "draft")}), Json{{"commit", true}}).to_dict();
+        QVERIFY2(!reopened.value("ok", true) && has(genko::core::py_get(reopened, "error"), "線で描きます"), reopened.dump().c_str());
+        QVERIFY(saved() == before);
+    }
+
+    // A person's take_panel_art of a draft request before the name is approved goes through (only an agent waits).
+    void aPersonTakesADraftBeforeTheName() {
+        const fs::path root = folder(QStringLiteral("person_draft"));
+        StudioService agent(root, "ai:test");
+        StudioService person(root, "human:leaf");
+        const std::string made = make_demo(agent, 1, false);
+        QVERIFY2(made.empty(), made.c_str());
+        const fs::path book = root / kBook;
+        const ToolResult asked = person.call("generation_request", Json::array({kBook}), Json{{"page", 1}, {"frame_id", first_leaf(book, 1).id}, {"purpose", "draft"}});
+        QVERIFY2(asked.ok, asked.to_dict().dump().c_str());
+        const std::string request = asked.data["request"]["id"].get<std::string>();
+        write_file(utf8_path(asked.data["inbox"]) / "a.png", panel_png(asked.data["request"]["size"]["suggested_px"]));
+        const ToolResult taken = person.call("take_panel_art", Json::array({kBook, request, Json{{"file", "studio/inbox/" + request + "/a.png"}, {"origin", Json{{"kind", "agent"}, {"tool_id", kTool}}}}}), Json::object());
+        QVERIFY2(taken.ok, taken.to_dict().dump().c_str());
+        QCOMPARE(layers_of(book, 1, genko::core::LayerRole::Draft).size(), std::size_t{1});
+    }
+
+    // An atari is a person's: an agent cannot mark an asset kind atari (register_assets: refused, in Japanese, the book as
+    // it was), a person can. The scan a person gave, brought in by the agent's import_name, still lands on the draft before
+    // the name is approved; an asset a person marked atari goes on a draft through the agent's place_asset too, but never
+    // on the name layer.
+    void anAtariIsAPersonsScan() {
+        const fs::path root = folder(QStringLiteral("atari_kind"));
+        StudioService agent(root, "ai:test");
+        StudioService person(root, "human:leaf");
+        const std::string made = make_demo(agent, 1, false);
+        QVERIFY2(made.empty(), made.c_str());
+        const fs::path book = root / kBook;
+        const auto saved = [&book] { return genko::test::tree_hashes(q(book), false); };
+        const ToolResult imported = agent.call("import_image", Json::array({kBook}), Json{{"png_base64", genko::core::b64encode(flat_png(64, 90, render::Ink{40, 40, 40}))}});
+        QVERIFY2(imported.ok, imported.to_dict().dump().c_str());
+        const std::string asset = imported.data["asset"].get<std::string>();
+        const Json mark = Json::array({Json{{"op", "register_assets"}, {"assets", Json{{asset, Json{{"kind", "atari"}, {"origin", "self"}}}}}}});
+        const auto place = [&asset](const char* to) { return Json{{"op", "place_asset"}, {"page", 1}, {"asset", asset}, {"to", to}}; };
+        const auto before = saved();
+        for (const Json& ops : {mark, Json::array({mark[0], place("name")}), Json::array({mark[0], place("draft")})}) {
+            const Json r = agent.call("apply_ops", Json::array({kBook, ops}), Json{{"commit", true}}).to_dict();
+            QVERIFY2(!r.value("ok", true) && has(genko::core::py_get(r, "error"), "アタリ（kind atari）にしたり") &&
+                         has(genko::core::py_get(r, "detail"), "only a person can mark an asset as an atari"),
+                     r.dump().c_str());
+            QVERIFY(saved() == before);
+        }
+        const ToolResult marked = person.call("apply_ops", Json::array({kBook, mark}), Json{{"commit", true}});
+        QVERIFY2(marked.ok, marked.to_dict().dump().c_str());
+        // (taking the mark away is a person's too)
+        const Json unmark = Json::array({Json{{"op", "register_assets"}, {"assets", Json{{asset, Json{{"kind", "generated"}}}}}}});
+        QVERIFY(!agent.call("apply_ops", Json::array({kBook, unmark}), Json{{"commit", true}}).ok);
+        const auto marked_book = saved();
+        const Json named = agent.call("apply_ops", Json::array({kBook, Json::array({place("name")})}), Json{{"commit", true}}).to_dict();
+        QVERIFY2(!named.value("ok", true) && has(genko::core::py_get(named, "error"), "線で描きます"), named.dump().c_str());
+        QVERIFY(saved() == marked_book);
+        const ToolResult drafted = agent.call("apply_ops", Json::array({kBook, Json::array({place("draft")})}), Json{{"commit", true}});
+        QVERIFY2(drafted.ok, drafted.to_dict().dump().c_str());
+        // the scan a person gave, imported by the agent: on the draft of page 2 before its name (registered kind atari)
+        const fs::path scans = root / "scans";
+        write_file(scans / "p2.png", flat_png(220, 310, render::Ink{250, 250, 250}));
+        const ToolResult scanned = agent.call("import_name", Json::array({kBook, Json::array({"scans/p2.png"})}), Json{{"start_page", 2}});
+        QVERIFY2(scanned.ok, scanned.to_dict().dump().c_str());
+        const std::vector<genko::core::Layer> drafts = layers_of(book, 2, genko::core::LayerRole::Draft);
+        QCOMPARE(drafts.size(), std::size_t{1});
+        const genko::core::Document doc = genko::service::load_episode(book);
+        QCOMPARE(genko::core::py_get(genko::core::py_get(doc.studio["assets"], *drafts[0].asset), "kind"), Json("atari"));
+        QVERIFY(!doc.page(1).name_ok);
     }
 
     // The work item of a page with no name yet names apply_ops beside submit_name, and says the rough is drawn with

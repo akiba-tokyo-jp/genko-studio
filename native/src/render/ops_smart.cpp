@@ -400,7 +400,10 @@ LayerRole place_role(const OpContext& c, const Document& doc, std::size_t at, co
     if ((to == "art" || to == "bg") && doc.strict_gates && !seen.name_ok) {
         throw OpError("page " + seen.index.repr() + ": approve the name first (strict_gates)");
     }
-    core::refuse_unnamed_picture(c, seen, role);  // (an agent's rough is lines, not a picture)
+    Layer laid;  // (the layer smart_place makes: its role, printed for art and bg alone)
+    laid.role = role;
+    laid.exportable = to == "art" || to == "bg";
+    core::refuse_unnamed_picture(c, seen, laid);  // (an agent's rough is lines, not a picture)
     return role;
 }
 

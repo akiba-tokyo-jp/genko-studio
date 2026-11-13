@@ -1504,10 +1504,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(".*needs name_ok.*|ink strokes require name_ok|.*requires name_ok",
                          "AI と進める原稿では、ネームの承認の後でペン入れできます（承認の前は、ネーム・下描きと、印刷に出さない"
                          "設定にしたレイヤーに描けます。一人の原稿には、この制限はありません）"));
-        r.push_back(rule(R"(page (\S+): before the name is approved an agent draws the rough as lines.*)",
-                         "\\1 ページのネームはまだ承認されていません。承認の前は、ネーム・下描きのレイヤーに画像を置けません。"
-                         "ラフはネームのレイヤーに線で描きます（add_mannequin・add_figure の人形を trace_prims で鉛筆の線に、"
+        r.push_back(rule(R"(page (\S+): before the name is approved an agent puts no picture on the name.*)",
+                         "AI と進める原稿では、ネームの承認の前に、AI はネーム・下描き（印刷に出さないレイヤーも）に画像を置けません"
+                         "（\\1 ページ）。ラフはネームのレイヤーに線で描きます（add_mannequin・add_figure の人形を trace_prims で鉛筆の線に、"
                          "物や背景の形は add_shape、ほかの線は add_stroke）"));
+        r.push_back(rule(R"(only a person can mark an asset as an atari.*)",
+                         "アセットをアタリ（kind atari）にしたり、それを変えたりできるのは人だけです（AI は、人から渡された手描きのアタリを "
+                         "import_name で取り込みます）"));
         r.push_back(rule(".*finish needs the art approved.*", "作画が承認されてから仕上げに進めます"));
         r.push_back(rule(".*approve the name first.*", "先にネームの承認が要ります"));
         r.push_back(rule("add_line with frame_id needs explicit x_mm/y_mm.*", "コマを指定して台詞を置くときは、x_mm と y_mm も指定します"));

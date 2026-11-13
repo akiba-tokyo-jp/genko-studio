@@ -110,7 +110,8 @@ const std::vector<ToolSpec>& table() {
         {"adopt",
          R"(候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。page・frame_id は省くと候補から引く。
         art は本の解像度に足りなければ拡大して採用し直し（upscale: false で止める）、regions（顔・人物の位置）を渡せば報告まで
-        1 回で済む。場所の参照画像は location_id。作画の確定は人間の art 承認で行う。)",
+        1 回で済む。場所の参照画像は location_id。作画の確定は人間の art 承認で行う。
+        to: draft も、エージェントはネームの承認の後（承認の前のネームのラフは、ネームのレイヤーに線で描く）。)",
          {{"project", Kind::Str, false, std::nullopt}, {"candidate_id", Kind::Str, false, std::nullopt}, {"page", Kind::Int, true, Json()}, {"frame_id", Kind::Str, true, Json()}, {"to", Kind::Str, false, Json("art")}, {"fit", Kind::Str, true, Json()}, {"offset_mm", Kind::ListFloat, true, Json()}, {"scale", Kind::Float, true, Json()}, {"location_id", Kind::Str, true, Json()}, {"regions", Kind::ListDict, true, Json()}, {"upscale", Kind::Bool, false, Json(true)}, {"session", Kind::Str, true, Json()}}},
         {"request_fix",
          R"(修正のチケットを残す（自分で直す予定のメモ、または人間への相談）。)",

@@ -7,6 +7,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -116,7 +117,11 @@ ToolResult StudioService::import_name(const Json& a) {
                                                                                          {"by", actor_}})}})}}));
             imported.push_back(Json::object({{"page", p.index}, {"asset", p.ref}, {"align", p.used}, {"placement_mm", p.placement}}));
         }
-        session.apply(batch, actor_);
+        {
+            // (the scan a person gave: register_assets may mark it kind atari for whoever imports it — core::AtariImport)
+            const core::AtariImport atari;
+            session.apply(batch, actor_);
+        }
         for (const Json& item : imported) {
             const core::Document& doc = session.doc();
             const auto found = page_at(doc, item["page"]);  // (made just above, in this session)

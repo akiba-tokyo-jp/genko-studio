@@ -2086,6 +2086,9 @@ void paste(OpContext& c) {
     const std::size_t ti = raster_paint_target(page, op);
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
     if (items.empty()) throw OpError("nothing to paste");
+    // (name-lines: pictures pasted onto the name, a draft or a layer kept off the print by an agent before the name is
+    // approved are refused; lines alone go through)
+    if (!items.patches.empty()) core::refuse_unnamed_picture(c, page, page.layers[ti]);
     validate_patch_items(items);
     bring_part_patterns(doc, items.shapes, items.patterns);  // (patterns@1, PC4 E3: the patterns its shape parts name, from another book)
     std::vector<double> m = matrix_of(op);
@@ -2755,7 +2758,7 @@ void stamp_material(OpContext& c) {
     // ops._paint_target before the kind is looked at further (its errors come first; a page without an ink layer gets one)
     Layer& target = core::paint_target(c.doc.edit_page(at), c.op);
     if (kind == "image") {
-        core::refuse_unnamed_picture(c, c.doc.page(at), target.role);  // (an agent's rough is lines, not a picture)
+        core::refuse_unnamed_picture(c, c.doc.page(at), target);  // (an agent's rough is lines, not a picture)
         const std::optional<MaterialPicture> picture = material_picture(material);
         if (!picture) throw OpError("the picture file of this material is missing");
         // float(op.get("width_mm") or material.get("width_mm") or 60), its height by the aspect, and where its middle goes
