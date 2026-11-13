@@ -239,16 +239,16 @@ inline core::Document clean_book() {
     };
     int at = 0;
     for (const Cell& cell : cells) {
-        const double cx = 30.0 + (at % 4) * 48.0;
-        const double cy = 28.0 + (at / 4) * 38.5;
+        const double cx = 36.0 + (at % 4) * 46.0;
+        const double cy = 30.0 + (at / 4) * 37.5;
         ++at;
         add(1, cell.kind, cx - cell.w / 2, cy - cell.h / 2, cell.w, cell.h, cell.text, cell.more);
     }
     // --- page 2 ---
     at = 0;
     const auto tailed = [&](const char* kind, double w, double h, Json list, const char* text = "ねえ\n聞いて", Json more = Json::object()) {
-        const double cx = 34.0 + (at % 4) * 48.0;
-        const double cy = 26.0 + (at / 4) * 40.0;
+        const double cx = 36.0 + (at % 4) * 46.0;
+        const double cy = 28.0 + (at / 4) * 38.0;
         ++at;
         const double x = cx - w / 2, y = cy - h / 2;
         Json placed = Json::array();
@@ -294,19 +294,24 @@ inline core::Document clean_book() {
     tailed("thought", 30, 24, Json::array({to(20, 21)}));
     tailed("shout", 34, 28, Json::array({to(22, 21)}));
     tailed("electric", 32, 26, Json::array({to(22, 21)}));
-    tailed("whisper", 30, 24, Json::array({to(18, 20)}));
+    tailed("narration", 30, 22, Json::array(), "しっぽなし");
     {
-        const double y = 26.0 + 6 * 40.0 - 8;
-        add(2, "speech", 14, y, 30, 24, "それで", Json{{"style", Json{{"group", "g1"}}}, {"tail", Json::array({16, y + 34})}});
-        add(2, "speech", 36, y + 13, 28, 22, "どうした", style(Json{{"group", "g1"}}));
-        add(2, "speech", 72, y, 24, 20, "あのね", style(Json{{"group", "g2"}}));
-        add(2, "speech", 98, y + 14, 24, 20, "じつは", Json{{"style", Json{{"group", "g2"}}}, {"tail", Json::array({124, y + 42})}});
-        add(2, "rounded", 130, y, 26, 20, "かどまる", style(Json{{"group", "g3"}}));
-        add(2, "rounded", 146, y + 14, 26, 20, "つなぐ", style(Json{{"group", "g3"}}));
-        const std::string cut = add(2, "speech", 172, y - 34, 28, 24, "消しゴム", Json{{"tail", Json::array({198, y - 4})}});
-        ops.push_back(Json{{"op", "cut_balloon"}, {"id", cut}, {"points", Json::array({Json::array({172, y - 31}), Json::array({186, y - 36}), Json::array({198, y - 30})})},
+        const double y = 28.0 + 6 * 38.0 - 14;
+        add(2, "speech", 20, y, 30, 24, "それで", Json{{"style", Json{{"group", "g1"}}}, {"tail", Json::array({22, y + 34})}});
+        add(2, "speech", 42, y + 13, 28, 22, "どうした", style(Json{{"group", "g1"}}));
+        add(2, "speech", 78, y, 24, 20, "あのね", style(Json{{"group", "g2"}}));
+        add(2, "speech", 104, y + 14, 24, 20, "じつは", Json{{"style", Json{{"group", "g2"}}}, {"tail", Json::array({130, y + 40})}});
+        add(2, "rounded", 136, y, 26, 20, "かどまる", style(Json{{"group", "g3"}}));
+        add(2, "rounded", 152, y + 14, 26, 20, "つなぐ", style(Json{{"group", "g3"}}));
+    }
+    {  // (page 1's foot: the balloon eraser and a turned balloon)
+        const double y = 30.0 + 7 * 37.5 - 20;
+        const std::string cut = add(1, "speech", 22, y, 30, 24, "消しゴム", Json{{"tail", Json::array({56, y + 30})}});
+        ops.push_back(Json{{"op", "cut_balloon"}, {"id", cut}, {"points", Json::array({Json::array({22, y + 3}), Json::array({36, y - 2}), Json::array({50, y + 4})})},
                            {"width_mm", 3.0}});
-        add(2, "speech", 176, y + 8, 26, 22, "傾けて", Json{{"style", Json{{"rotate_deg", 15.0}}}, {"tail", Json::array({200, y + 40})}});
+        add(1, "speech", 70, y, 28, 24, "傾けて", Json{{"style", Json{{"rotate_deg", 15.0}}}, {"tail", Json::array({102, y + 30})}});
+        add(1, "shout", 116, y - 2, 34, 28, "まわる\n叫び", style(Json{{"rotate_deg", -12.0}}));
+        add(1, "whisper", 162, y, 30, 24, "ねえ\n聞いて", Json{{"tail", Json::array({186, y + 32})}});
     }
     return classic_bus().apply(doc, ops, core::Actor("human:作者")).doc;
 }

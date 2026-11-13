@@ -16,7 +16,8 @@
 //   - the geometry's generation (project.json's "balloon_geometry", a plain key a build of before keeps as it is):
 //     a book without it was lettered for the hand-drawn oval — 0.955 of its box, fuller than an ellipse — so, read,
 //     each such oval's box is made 1.035 times as big about its middle (the true ellipse of that box holds the oval
-//     the letters were fitted in: the letters keep their size). Once, in memory; the book says 2 from its next save.
+//     the letters were fitted in, and the letters are still fitted in that oval: they are set exactly as they were).
+//     Once, in memory; the book says 2 from its next save.
 
 namespace genko::core {
 
@@ -27,8 +28,10 @@ inline constexpr std::int64_t kBalloonGeometry = 2;
 // How much bigger than its box the true ellipse is that holds the hand-drawn oval of that box (the superellipse of
 // power 2.6 at 0.955 of the box reaches 2^(1/2 − 1/2.6) × 0.955 = 1.0345 of the ellipse's diagonal).
 inline constexpr double kOvalGrowth = 1.035;
-// The share of an oval's box its columns may run (less the margins): what the hand-drawn oval's was, of the box as it
-// is now (0.955 of the box before it grew).
+// The share of an oval's box the letters' oval takes: the letters are kept in the oval they always were (the
+// superellipse of power 2.6 — render/text/lettering's hug_power), 0.955 of the box before it grew, so of the box now
+// 0.955 / kOvalGrowth. The letters of a book of before are set exactly as they were; a balloon of now is sized so that
+// its true ellipse holds that oval.
 inline constexpr double kOvalRoom = 0.955 / kOvalGrowth;
 
 // Whether a line's balloon is one of the ovals (speech, thought, whisper).

@@ -44,6 +44,7 @@ constexpr double kSqrt2 = 1.4142135623730951;  // SQRT2 = 2 ** 0.5
 constexpr double kCapMm = 5.0;                  // CAP_MM
 constexpr double kSfxCapMm = 12.0;              // SFX_CAP_MM
 constexpr double kFitPad = 0.15;                // FIT_PAD
+constexpr double kHandPower = 2.6;              // HAND_POWER (the letters' oval: fuller than an ellipse)
 constexpr double kUnbroken = 1.0e6;             // (type@1: a point text's room, px — never broken there)
 const Rgb kText{10, 10, 10};                    // TEXT
 
@@ -1406,8 +1407,10 @@ std::pair<double, double> inner(std::string_view kind, double w, double h, doubl
 
 namespace {
 
-// (`st.get("hand", True) and not float(st.get("wobble") or 0)`: what was drawn by hand before fukidashi@1 — the
-// hand-drawn oval is gone, but a line's letters are still given the room they were set in)
+// (`st.get("hand", True) and not float(st.get("wobble") or 0)`: what was drawn as the hand-drawn oval before
+// fukidashi@1. The oval is drawn as a true ellipse now, but its letters are kept in the oval they always were — fuller
+// than an ellipse, a little inside the box: the letters of a book of before keep their size, and a balloon of now is
+// sized so that its ellipse holds that oval)
 bool hand_drawn(const Json& st) {
     const Json& hand = st.contains("hand") ? st["hand"] : Json(true);
     return core::py_truthy(hand) && float_or(at(st, "wobble"), 0) == 0.0;
@@ -1415,26 +1418,21 @@ bool hand_drawn(const Json& st) {
 
 }  // namespace
 
-// (every oval is a true ellipse now: SPEC BALLOON-01)
-double hug_power(std::string_view, const Json&) { return 2.0; }
+double hug_power(std::string_view kind, const Json& st) { return one_of(kind, kUneven) && hand_drawn(st) ? kHandPower : 2.0; }
 
 double hug_keep(std::string_view kind, const Json& st) {
     if (kind == "shout") {
         const Json& depth = at(st, "spike_depth");
         return 1 - core::py_max(0.05, core::py_min(0.6, depth.is_null() ? 0.2 : core::to_float(depth))) - 0.02;
     }
+    if (one_of(kind, kUneven) && hand_drawn(st)) return core::kOvalRoom;
     return 1.0;
 }
 
 double fit_keep(std::string_view kind, const Json& st, bool drawn_by_hand) {
-    // (a balloon drawn by hand — a path — keeps its box: its letters stay in the oval they were fitted in before, which
-    // the ellipse kOvalGrowth times its box holds)
-    if (drawn_by_hand && one_of(kind, kUneven) && hand_drawn(st)) return core::kOvalGrowth;
-    return hug_keep(kind, st);
-}
-
-double room_keep(std::string_view kind, const Json& st, bool drawn_by_hand) {
-    if (one_of(kind, kUneven) && hand_drawn(st)) return drawn_by_hand ? 0.955 : core::kOvalRoom;
+    // (a balloon drawn by hand — a path — keeps its box when a book of before is read: its letters' oval is 0.955 of
+    // it, as it was)
+    if (drawn_by_hand && one_of(kind, kUneven) && hand_drawn(st)) return 0.955;
     return hug_keep(kind, st);
 }
 
@@ -1839,8 +1837,13 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const bool hug = shape.empty() && one_of(kind, kHugged);
     const bool by_hand = line.path && !line.path->empty();  // (a balloon drawn by hand: its outline, its box their bounds)
     const double keep = hug ? fit_keep(kind, st, by_hand) : 1.0;
-    const double room_share = hug ? room_keep(kind, st, by_hand) : 1.0;
-    // (fukidashi@1: a capsule and a polygon hold the letters in their own shape; the ovals and the bursts in an ellipse)
+    const double power = hug_power(kind, st);
+    // (an oval whose box grew when a book of before was read: the box's pixels are rounded again, by up to one — the
+    // letters' oval is taken a pixel of the box bigger, so it is never smaller than it was: no letter is set smaller)
+    const double spare = hug && !by_hand && keep == core::kOvalRoom ? 1.0 : 0.0;
+    const double oval_w = (static_cast<double>(w) + spare) * keep;
+    const double oval_h = (static_cast<double>(h) + spare) * keep;
+    // (fukidashi@1: a capsule and a polygon hold the letters in their own shape; the ovals and the bursts in an oval)
     const bool shaped = hug && (kind == "capsule" || kind == "polygon");
     const double corner_px = core::py_truthy(at(st, "corner_mm")) ? core::to_float(at(st, "corner_mm")) / 25.4 * dpi : -1.0;
     std::vector<std::array<double, 2>> sides_outline;
@@ -1854,7 +1857,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const auto fitted = [&](const std::vector<std::array<double, 2>>& points) {
         const double a = static_cast<double>(w) / 2, b = static_cast<double>(h) / 2;
         if (shaped) return fit_in_shape(points, a, b, [&](double x, double y) { return shape_gauge(kind, x, y, a, b, &sides_outline); });
-        return fit_in(points, a * keep, b * keep, 2.0);
+        return fit_in(points, oval_w / 2, oval_h / 2, power);
     };
     const auto room = [&](std::int64_t size) -> std::pair<double, double> {
         if (shape == "point") return {kUnbroken, kUnbroken};  // (type@1: broken only where its text breaks)
@@ -1864,7 +1867,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             const double margin = static_cast<double>(2 * size) * kFitPad;
             // (a capsule and a polygon are sized close round their words: the columns may run their whole room)
             const double slack = shaped ? 1.0 : 0.92;
-            return {(static_cast<double>(w) * room_share - margin) * slack, (static_cast<double>(h) * room_share - margin) * slack};
+            return {(oval_w - margin) * slack, (oval_h - margin) * slack};
         }
         return inner(kind, static_cast<double>(w), static_cast<double>(h), pad, at(st, "spike_depth"), corner_px);
     };

@@ -700,14 +700,15 @@ private slots:
             const char* name;
             std::size_t page;
             double x, y;
-        } parts[] = {{"clean-600-kinds-a.png", 0, 6, 6}, {"clean-600-kinds-b.png", 0, 102, 6}, {"clean-600-kinds-c.png", 0, 6, 84},
-                     {"clean-600-kinds-d.png", 0, 102, 84}, {"clean-600-kinds-e.png", 0, 6, 160}, {"clean-600-kinds-f.png", 0, 102, 160},
-                     {"clean-600-tails-a.png", 1, 8, 4}, {"clean-600-tails-b.png", 1, 104, 4}, {"clean-600-tails-c.png", 1, 8, 84},
-                     {"clean-600-tails-d.png", 1, 104, 84}, {"clean-600-tails-e.png", 1, 8, 164}, {"clean-600-tails-f.png", 1, 104, 164},
-                     {"clean-600-joined.png", 1, 8, 210}, {"clean-600-joined-b.png", 1, 104, 210}};
+        } parts[] = {{"clean-600-kinds-a.png", 0, 12, 10}, {"clean-600-kinds-b.png", 0, 104, 10}, {"clean-600-kinds-c.png", 0, 12, 86},
+                     {"clean-600-kinds-d.png", 0, 104, 86}, {"clean-600-kinds-e.png", 0, 12, 162}, {"clean-600-kinds-f.png", 0, 104, 162},
+                     {"clean-600-kinds-g.png", 0, 12, 213}, {"clean-600-kinds-h.png", 0, 104, 213},
+                     {"clean-600-tails-a.png", 1, 12, 6}, {"clean-600-tails-b.png", 1, 104, 6}, {"clean-600-tails-c.png", 1, 12, 82},
+                     {"clean-600-tails-d.png", 1, 104, 82}, {"clean-600-tails-e.png", 1, 12, 158}, {"clean-600-tails-f.png", 1, 104, 158},
+                     {"clean-600-joined.png", 1, 12, 213}, {"clean-600-joined-b.png", 1, 104, 213}};
         for (const auto& part : parts) write(part.name, page_part(doc, 600, part.x, part.y, 84, 84, part.page));
         // (the same pages made black and white, as the monochrome print: a part)
-        write("clean-600-mono.png", genko::render::to_bitonal(page_part(doc, 600, 8, 4, 84, 84, 1)).convert("L"));
+        write("clean-600-mono.png", genko::render::to_bitonal(page_part(doc, 600, 12, 6, 84, 84, 1)).convert("L"));
         // (the book of before, as this build draws it: beside the pictures main's build made of it)
         const Document old = genko::storage::load_document(old_book_dir()).document;
         for (std::size_t i = 0; i < old.pages.size(); ++i) write("after-" + std::to_string(i + 1) + ".png", page_picture(old, 200, i));

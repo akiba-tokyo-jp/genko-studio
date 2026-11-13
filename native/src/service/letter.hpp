@@ -59,8 +59,9 @@ Json look_style(const Json& look, const std::string& balloon);
 // fukidashi@1 (SPEC BALLOON-01): the shape a line is lettered in — a speech line of one or two columns at least three
 // times as tall as wide in a capsule; any other in its own kind.
 std::string shape_for(const std::vector<std::string>& breaks, const std::string& balloon, double em = kEmMm);
-// letter.measure(breaks, balloon, em): the balloon's box (w, h) as the renderer draws it (an oval: the smallest true
-// ellipse round the words; a capsule: round ends on the words' narrow side).
+// letter.measure(breaks, balloon, em): the balloon's box (w, h) as the renderer draws it (an oval: the box whose true
+// ellipse holds the letters' oval round the words — 1.035 times what it was for the hand-drawn oval; a capsule: round
+// ends on the words' narrow side).
 std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em = kEmMm);
 // letter.fits(rect, balloon, others, em): how much text the panel takes in one balloon of this kind, in words.
 std::string fits(const Box& rect, const std::string& balloon, std::size_t others = 0, double em = kEmMm);

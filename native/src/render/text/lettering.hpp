@@ -33,16 +33,16 @@ std::int64_t px(double mm, int dpi);
 // _inner(kind, w, h, pad, depth): the room for the words inside the shape (`corner`: a rounded balloon's corner in px,
 // style.corner_mm; negative: its usual one).
 std::pair<double, double> inner(std::string_view kind, double w, double h, double pad, const core::Json& depth, double corner = -1.0);
-// hug_power(kind, st) and _hug_keep(kind, st): the power of the oval the letters are kept in (2: every oval is a true
-// ellipse since fukidashi@1, SPEC BALLOON-01) and the share of the box it takes (a burst's valleys; 1 otherwise). A
-// balloon sized for its words is the smallest such oval round them, over the share (app/lettering, service/letter).
+// hug_power(kind, st) and _hug_keep(kind, st): the oval the letters are kept in — its power (2.6 for speech, thought
+// and whisper: fuller than an ellipse; 2 for the others, and for a line with hand: false or a wobble, as before) and
+// the share of the box it takes (a burst's valleys; core::kOvalRoom for the fuller oval, which the true ellipse of the
+// box then holds — fukidashi@1, SPEC BALLOON-01; 1 otherwise). A balloon sized for its words is the smallest such
+// oval round them, over the share (app/lettering, service/letter).
 double hug_power(std::string_view kind, const core::Json& st);
 double hug_keep(std::string_view kind, const core::Json& st);
-// The same for the letters of a line that is there: `drawn_by_hand` (the line has a hand-drawn outline, whose box did
-// not grow when the book was read — core/fukidashi.hpp) keeps an oval's letters in the ellipse that holds the oval of
-// before; and the share of the box the columns may run (what it was before for an oval of before, of its box now).
+// The share for the letters of a line that is there: `drawn_by_hand` (the line has a hand-drawn outline, whose box did
+// not grow when the book was read — core/fukidashi.hpp) keeps the fuller oval at 0.955 of its box, as it was.
 double fit_keep(std::string_view kind, const core::Json& st, bool drawn_by_hand);
-double room_keep(std::string_view kind, const core::Json& st, bool drawn_by_hand);
 // fukidashi@1: how far out of a shape a point lies — 1 on its edge, less inside — the shape about its middle, half
 // sizes a × b: a capsule, or a convex outline given about its middle (a polygon's); an ellipse otherwise.
 double shape_gauge(std::string_view kind, double x, double y, double a, double b, const std::vector<std::array<double, 2>>* outline = nullptr);

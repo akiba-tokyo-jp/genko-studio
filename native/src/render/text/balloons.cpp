@@ -403,7 +403,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         const Body& b = bodies[i + 1];
         if (!a.smooth || !b.smooth) continue;
         const double least = core::py_min(a.least, b.least);
-        const double reach = core::py_max(width * 2, least * 0.22);
+        const double reach = core::py_max(width * 2, least * 0.3);
         std::vector<clean::Shape> joins = clean::joins_between(a.outline, b.outline, reach);
         if (joins.empty() && !clean::inside(a.outline, b.centre) && !clean::inside(b.outline, a.centre)) {
             const std::vector<double> la = clean::lengths_of(a.outline);
@@ -465,7 +465,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         if (body.smooth) {  // (the tail runs out of the outline: no corner where they meet)
             const Json* fillet = core::dict_get(tail, "fillet_mm");
             spec.fillet = fillet != nullptr && !fillet->is_null() ? core::py_max(0.0, core::to_float(*fillet)) / 25.4 * dpi
-                                                                   : core::py_max(width * 2, core::py_min(base * 0.3, shortest * 0.12));
+                                                                   : core::py_max(width * 2, core::py_min(base * 0.45, shortest * 0.18));
         }
         clean::Tail made = clean::tail(body.guide, body.centre, spec);
         if (spec.kind == "inward") made.shape.owner = static_cast<int>(index);

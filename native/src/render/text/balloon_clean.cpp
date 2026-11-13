@@ -196,10 +196,19 @@ std::vector<path_raster::XY> as_xy(const Contour& points) {
     return out;
 }
 
-// A patch that rounds the notch at `corner`, where two outlines meet: from `a` on the one (its inside toward `a_in`)
-// round to `b` on the other (its inside toward `b_in`), reaching a little inside both so that the corner itself is
-// covered. Only the curve is part of the outline.
-Shape patch(P corner, P a, P a_in, P b, P b_in, double inset) {
+// How much further a join reaches into a sharp notch than into a blunt one, so that its curve is about as round
+// either way: the cotangent of half the angle between the notch's two sides (unit vectors from its corner), kept
+// between 0.6 and 2.5.
+double sharpness(P along_a, P along_b) {
+    const double cosine = std::clamp(dot(along_a, along_b), -0.98, 0.98);
+    return std::clamp(std::sqrt((1 + cosine) / (1 - cosine)), 0.6, 2.5);
+}
+
+// A patch that rounds the notch at `corner`, where two outlines meet: from `a` on the one (its inside toward `a_in`,
+// running toward the corner along `a_to`) round to `b` on the other (`b_in`, `b_to` the same), a curve that leaves
+// both along their own directions; the patch reaches a little inside both so that the corner itself is covered. Only
+// the curve is part of the outline.
+Shape patch(P corner, P a, P a_in, P a_to, P b, P b_in, P b_to, double inset) {
     Shape shape;
     const P a_inner = add(a, mul(a_in, inset));
     const P b_inner = add(b, mul(b_in, inset));
@@ -207,7 +216,17 @@ Shape patch(P corner, P a, P a_in, P b, P b_in, double inset) {
     shape.points.push_back(a_inner);
     shape.points.push_back(a);
     const std::size_t first = shape.points.size() - 1;
-    round_corner(shape.points, a, corner, b, corner_pieces(a, corner, b));
+    // (the handles no longer than the shorter way to the corner: the curve never loops)
+    const double handle = std::min(distance(a, corner), distance(b, corner)) * 2 / 3;
+    const P c1 = add(a, mul(a_to, handle));
+    const P c2 = add(b, mul(b_to, handle));
+    const int pieces = corner_pieces(a, corner, b);
+    for (int j = 1; j <= pieces; ++j) {
+        const double t = static_cast<double>(j) / pieces;
+        const double u = 1 - t;
+        const double w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+        push(shape.points, {w0 * a.x + w1 * c1.x + w2 * c2.x + w3 * b.x, w0 * a.y + w1 * c1.y + w2 * c2.y + w3 * b.y});
+    }
     const std::size_t last = shape.points.size() - 1;
     shape.points.push_back(b_inner);
     shape.points.push_back(behind);
@@ -586,6 +605,8 @@ Tail tail(const Contour& guide, P centre, const TailSpec& spec) {
     const bool bent = !spec.bends.empty();
     const bool notch = spec.kind == "inward";
     const P target = bent ? spec.bends.front() : (spec.has_via ? spec.via : spec.tip);
+    // (it leaves the outline on the line from the balloon's middle to what it points at: a tail points from the middle
+    // of its balloon at the speaker)
     const double at = facing(guide, lengths, centre, target);
     const double half = std::max(1.0, std::min(spec.base, total * 0.3) / 2);
     const P left = point_at(guide, lengths, at - half);
@@ -638,26 +659,41 @@ Tail tail(const Contour& guide, P centre, const TailSpec& spec) {
         const double length = distance(middle, control) + distance(control, spec.tip);
         const bool zigzag = spec.kind == "zigzag";
         const int steps = zigzag ? 16 : std::clamp(static_cast<int>(std::ceil(length / 5)), 24, 160);
-        const P d0 = sub(control, middle);
-        const double sign = offset_sign(inward(unit(hyp(d0.x, d0.y) > 1e-9 ? d0 : sub(spec.tip, middle))));
-        for (int i = 0; i < steps; ++i) {
-            const double t = static_cast<double>(i) / steps;
-            const double u = 1 - t;
-            const P here{u * u * middle.x + 2 * u * t * control.x + t * t * spec.tip.x, u * u * middle.y + 2 * u * t * control.y + t * t * spec.tip.y};
-            const P d{2 * u * (control.x - middle.x) + 2 * t * (spec.tip.x - control.x), 2 * u * (control.y - middle.y) + 2 * t * (spec.tip.y - control.y)};
-            // (full at the base, then quickly to a point)
-            double width = half_chord * (bow ? static_cast<double>(libm::powf(static_cast<float>(u), 1.3f)) : u);
-            if (zigzag && i > 0) width *= i % 2 != 0 ? 1.6 : 0.55;
-            // (the base runs along the balloon's outline; further out the tail's width lies across its own line)
-            const double blend = std::min(1.0, t / 0.4);
-            const double eased = blend * blend * (3 - 2 * blend);
-            const P across = unit(lerp(side0, mul(inward(unit(d)), sign), eased));
-            if (i == 0) {
-                left_side.push_back(left);
-                right_side.push_back(right);
-            } else {
-                left_side.push_back(add(here, mul(across, width)));
-                right_side.push_back(sub(here, mul(across, width)));
+        // (across the tail: the way its width lies where it bends, on the side its base's left end is)
+        const P run = sub(spec.tip, middle);
+        P across = inward(unit(hyp(run.x, run.y) > 1e-9 ? run : sub(control, middle)));
+        if (dot(across, side0) < 0) across = mul(across, -1.0);
+        if (zigzag) {  // (its sides step in and out about its middle line, full at the base and to a point)
+            const P d0 = sub(control, middle);
+            const double sign = offset_sign(inward(unit(hyp(d0.x, d0.y) > 1e-9 ? d0 : run)));
+            for (int i = 0; i < steps; ++i) {
+                const double t = static_cast<double>(i) / steps;
+                const double u = 1 - t;
+                const P here{u * u * middle.x + 2 * u * t * control.x + t * t * spec.tip.x, u * u * middle.y + 2 * u * t * control.y + t * t * spec.tip.y};
+                const P d{2 * u * (control.x - middle.x) + 2 * t * (spec.tip.x - control.x), 2 * u * (control.y - middle.y) + 2 * t * (spec.tip.y - control.y)};
+                const double width = half_chord * u * (i % 2 != 0 ? 1.6 : 0.55);
+                const double blend = std::min(1.0, t / 0.4);
+                const double eased = blend * blend * (3 - 2 * blend);
+                const P over = unit(lerp(side0, mul(inward(unit(d)), sign), eased));
+                if (i == 0) {
+                    left_side.push_back(left);
+                    right_side.push_back(right);
+                } else {
+                    left_side.push_back(add(here, mul(over, width)));
+                    right_side.push_back(sub(here, mul(over, width)));
+                }
+            }
+        } else {
+            // each side one curve from its end of the base to the tip, bending about the middle line's bend — no
+            // wave in it: full at the base, then (a bowed tail) quickly to a point, or (a straight one) evenly
+            const double belly = half_chord * (bow ? 0.31 : 0.5);
+            const P bend_left = add(control, mul(across, belly));
+            const P bend_right = sub(control, mul(across, belly));
+            for (int i = 0; i < steps; ++i) {
+                const double t = static_cast<double>(i) / steps;
+                const double u = 1 - t;
+                left_side.push_back(i == 0 ? left : P{u * u * left.x + 2 * u * t * bend_left.x + t * t * spec.tip.x, u * u * left.y + 2 * u * t * bend_left.y + t * t * spec.tip.y});
+                right_side.push_back(i == 0 ? right : P{u * u * right.x + 2 * u * t * bend_right.x + t * t * spec.tip.x, u * u * right.y + 2 * u * t * bend_right.y + t * t * spec.tip.y});
             }
         }
     }
@@ -680,35 +716,40 @@ Tail tail(const Contour& guide, P centre, const TailSpec& spec) {
     const bool joined = spec.fillet > 0.5 && !notch && !bent && !spec.bolt && spec.kind != "zigzag";
     if (joined) {
         const double inset = std::max(1.5, spec.fillet * 0.35);
-        const auto join = [&](const Contour& side, P corner, double back) {
-            // (along the tail's side from the corner, as far as the join reaches)
-            double walked = 0.0;
-            double reach = spec.fillet;
+        const auto join = [&](const Contour& side, P corner, double from, double way) {
             double side_length = 0.0;
             for (std::size_t i = 0; i + 1 < side.size(); ++i) side_length += distance(side[i], side[i + 1]);
-            reach = std::min(reach, side_length * 0.35);
-            if (reach < 0.5) return;
-            P on_side = corner;
-            P side_direction = unit(sub(side.size() > 1 ? side[1] : spec.tip, side[0]));
-            for (std::size_t i = 0; i + 1 < side.size(); ++i) {
-                const double span = distance(side[i], side[i + 1]);
-                if (walked + span >= reach) {
-                    on_side = lerp(side[i], side[i + 1], span > 0 ? (reach - walked) / span : 0.0);
-                    side_direction = unit(sub(side[i + 1], side[i]));
-                    break;
+            // (the point `reach` along the tail's side from the corner, and the side's direction there)
+            const auto along_side = [&](double reach, P& direction) {
+                double walked = 0.0;
+                direction = unit(sub(side.size() > 1 ? side[1] : spec.tip, side[0]));
+                for (std::size_t i = 0; i + 1 < side.size(); ++i) {
+                    const double span = distance(side[i], side[i + 1]);
+                    direction = unit(sub(side[i + 1], side[i]));
+                    if (walked + span >= reach) return lerp(side[i], side[i + 1], span > 0 ? (reach - walked) / span : 0.0);
+                    walked += span;
                 }
-                walked += span;
-            }
-            const P on_body = point_at(guide, lengths, back);
-            const P body_direction = direction_at(guide, lengths, back);
+                return side.back();
+            };
+            // (a sharp notch — a tail leaning along the balloon — is rounded further than a blunt one)
+            P unused;
+            const double sharp = sharpness(unit(sub(point_at(guide, lengths, from + way * spec.fillet), corner)),
+                                           unit(sub(along_side(std::min(spec.fillet, side_length * 0.4), unused), corner)));
+            const double reach_side = std::min(spec.fillet * sharp, side_length * 0.45);
+            const double reach_body = std::min(spec.fillet * sharp, total * 0.12);
+            if (reach_side < 0.5 || reach_body < 0.5) return;
+            P side_direction;
+            const P on_side = along_side(reach_side, side_direction);
+            const P on_body = point_at(guide, lengths, from + way * reach_body);
+            const P body_direction = direction_at(guide, lengths, from + way * reach_body);
             const P body_in = clockwise ? inward(body_direction) : mul(inward(body_direction), -1.0);
             // (the tail's inside, across its side: toward its other side)
             P tail_in = inward(side_direction);
             if (dot(tail_in, sub(middle, corner)) < 0) tail_in = mul(tail_in, -1.0);
-            out.joins.push_back(patch(corner, on_body, body_in, on_side, tail_in, inset));
+            out.joins.push_back(patch(corner, on_body, body_in, mul(body_direction, -way), on_side, tail_in, mul(side_direction, -1.0), inset));
         };
-        join(left_side, left, at - half - spec.fillet);
-        join(right_side, right, at + half + spec.fillet);
+        join(left_side, left, at - half, -1.0);
+        join(right_side, right, at + half, 1.0);
     }
     return out;
 }
@@ -758,14 +799,16 @@ std::vector<Shape> joins_between(const Contour& a, const Contour& b, double reac
         const double probe = 0.75;
         const double way_a = inside(b, point_at(a, la, c.sa + probe)) ? -1.0 : 1.0;
         const double way_b = inside(a, point_at(b, lb, c.sb + probe)) ? -1.0 : 1.0;
-        const P on_a = point_at(a, la, c.sa + way_a * limit);
-        const P on_b = point_at(b, lb, c.sb + way_b * limit);
+        const double sharp = sharpness(unit(sub(point_at(a, la, c.sa + way_a * limit), c.at)), unit(sub(point_at(b, lb, c.sb + way_b * limit), c.at)));
+        const double far = std::min(limit * sharp, 0.2 * std::min(la.back(), lb.back()));
+        const P on_a = point_at(a, la, c.sa + way_a * far);
+        const P on_b = point_at(b, lb, c.sb + way_b * far);
         if (inside(b, on_a) || inside(a, on_b)) continue;  // (the outlines meet again before the join ends)
-        const P da = direction_at(a, la, c.sa + way_a * limit);
-        const P db = direction_at(b, lb, c.sb + way_b * limit);
+        const P da = direction_at(a, la, c.sa + way_a * far);
+        const P db = direction_at(b, lb, c.sb + way_b * far);
         const P a_in = a_clockwise ? inward(da) : mul(inward(da), -1.0);
         const P b_in = b_clockwise ? inward(db) : mul(inward(db), -1.0);
-        out.push_back(patch(c.at, on_a, a_in, on_b, b_in, inset));
+        out.push_back(patch(c.at, on_a, a_in, mul(da, -way_a), on_b, b_in, mul(db, -way_b), inset));
     }
     return out;
 }

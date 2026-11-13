@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 
+#include "core/fukidashi.hpp"
 #include "core/pynum.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -20,6 +21,7 @@ Box body_of(const Figure& f) { return service::as_box(f.body); }
 
 const double kTailPastMm[2] = {3.0, 8.0};
 constexpr double kFitPad = 0.15;  // balloons.FIT_PAD
+constexpr double kHandPower = 2.6;
 
 bool in(const std::string& value, std::initializer_list<const char*> names) {
     return std::any_of(names.begin(), names.end(), [&value](const char* name) { return value == name; });
@@ -29,11 +31,13 @@ bool ellipse_kind(const std::string& balloon) { return in(balloon, {"speech", "t
 std::optional<double> spiked(const std::string& balloon) { return balloon == "shout" ? std::optional<double>(0.26) : std::nullopt; }
 const char* const kJoined[] = {"speech", "rounded", "thought", "whisper"};
 
-// balloons.hug_power and _hug_keep for the style letter gives them ({} or {"spike_depth": …}): every oval a true
-// ellipse (fukidashi@1, SPEC BALLOON-01), a burst's letters inside its valleys
-double hug_power(const std::string&) { return 2.0; }
+// balloons.hug_power and _hug_keep for the style letter gives them ({} or {"spike_depth": …}): the letters' oval
+// (fuller than an ellipse for speech, thought and whisper) and its share of the box — for those the share whose box's
+// true ellipse holds the oval (fukidashi@1, SPEC BALLOON-01: core::kOvalRoom)
+double hug_power(const std::string& kind) { return in(kind, {"speech", "thought", "whisper"}) ? kHandPower : 2.0; }
 double hug_keep(const std::string& kind, std::optional<double> spike) {
     if (kind == "shout") return 1 - core::py_max(0.05, core::py_min(0.6, spike.value_or(0.2))) - 0.02;
+    if (in(kind, {"speech", "thought", "whisper"})) return core::kOvalRoom;
     return 1.0;
 }
 

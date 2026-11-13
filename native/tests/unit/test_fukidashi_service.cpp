@@ -58,6 +58,14 @@ QString refusal(const Json& ops) {
     return {};
 }
 
+// The sentence of a refusal: without the op's usage the bus adds after it (（add_line の書き方: {…}）).
+QString sentence(const QString& said) {
+    const qsizetype usage = said.indexOf(QStringLiteral("の書き方:"));
+    if (usage < 0) return said;
+    const qsizetype bracket = said.lastIndexOf(QStringLiteral("（"), usage);
+    return bracket < 0 ? said : said.left(bracket);
+}
+
 }  // namespace
 
 class TestFukidashiService : public QObject {
@@ -127,18 +135,15 @@ private slots:
         QFETCH(QString, says);
         const QString said = refusal(Json::parse(ops.toStdString()));
         QVERIFY2(said.contains(says), qPrintable(said));
-        // (no key's or op's name left in what the person reads: no English word of four letters or more)
-        QString words = said;
-        words.remove(QRegularExpression(QStringLiteral("^[^:：]*[:：]\\s*")));
-        QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(words).hasMatch(), qPrintable(said));
+        // (no key's or op's name left in the sentence the person reads: no English word of four letters or more — the
+        // op's usage the bus adds after it, in brackets, is the caller's)
+        QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(sentence(said)).hasMatch(), qPrintable(said));
     }
     // (a kind that is none of them: said too, with nothing English left)
     void anUnknownKindIsRefusedInJapanese() {
         const QString said = refusal(Json::array({line_op("bubble")}));
         QVERIFY(!said.isEmpty());
-        QString words = said;
-        words.remove(QRegularExpression(QStringLiteral("^[^:：]*[:：]\\s*")));
-        QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(words).hasMatch(), qPrintable(said));
+        QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(sentence(said)).hasMatch(), qPrintable(said));
     }
 
     // A balloon moved or grown over its tails: a tail whose tip it now covers is pushed out past its outline — a notch
