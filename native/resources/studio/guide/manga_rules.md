@@ -82,7 +82,7 @@ Genko は、あなた（エージェント）が書いた計画を検査し、�
 
 - 脚本で、そのページの dialogue / monologue / narration の beat は、どこかのコマに **ちょうど1回** 置く。
 - `breaks` は縦書きの1行ずつ。1行 14 字まで、フキダシ1つで 40 字まで。自然な切れ目で改行する。
-- `balloon`: speech（話す）/ thought（心の声）/ shout / whisper / narration（四角い枠）。
+- `balloon`: speech（話す）/ capsule（1 列の短い台詞）/ thought（心の声）/ shout / whisper / polygon（機械の声）/ narration（四角い枠）。
 - フキダシはコマの右上から読み順に置かれ、人物の顔の位置を避ける。入らなければ `balloon_overflow` が返るので、台詞を短くするか、コマを大きくするか、台詞を別のコマに移す。
 - 話者がそのコマにいないと、フキダシの尾が付かない（画面外の声として扱う）。
 

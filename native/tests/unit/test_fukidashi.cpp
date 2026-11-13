@@ -516,6 +516,64 @@ private slots:
         QVERIFY(page.width() > 0);
     }
 
+    // A zigzag tail runs to a point: where it is too slim to show white between its two lines it stops stepping out, so
+    // no small closed patch of white (an "eye") is left along it. The white of the picture is two pieces — the paper
+    // round the balloon, and the balloon's inside with its tail's — at any resolution and whichever way the tail points.
+    // (Tails of an ordinary length, their tips 14 mm or more past the outline: a zigzag has sixteen steps whatever its
+    // length, and on a much shorter one the steps themselves are closer than the line is wide.)
+    void aZigzagTailClosesWithAPoint() {
+        const genko::render::text::LetterParts balloon_only{true, false, false, false};
+        const double tips[][2] = {{16, 20}, {-18, 19}, {32, 3}, {4, -29}, {-27, -19}, {30, 26}, {-34, 2}, {2, 30}};
+        for (const int dpi : {150, 350, 600}) {
+            for (const auto& tip : tips) {
+                const Document doc = one_line("speech", Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 30}, {"h_mm", 24},
+                                                             {"tails", Json::array({Json{{"to", Json::array({55 + tip[0], 52 + tip[1]})}, {"kind", "zigzag"}}})}});
+                const genko::render::Size size{static_cast<int>(120 / 25.4 * dpi), static_cast<int>(110 / 25.4 * dpi)};
+                Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+                genko::render::text::clear_balloon_cache();
+                genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+                const Grey g = grey_of(page);
+                // the pieces of white (anything not mostly ink), joined side to side and corner to corner
+                std::vector<int> piece(static_cast<std::size_t>(g.w) * static_cast<std::size_t>(g.h), 0);
+                std::vector<std::int64_t> sizes;
+                std::vector<int> stack;
+                for (int start = 0; start < g.w * g.h; ++start) {
+                    if (piece[static_cast<std::size_t>(start)] != 0 || g.at(start % g.w, start / g.w) <= 64) continue;
+                    sizes.push_back(0);
+                    const int id = static_cast<int>(sizes.size());
+                    stack.push_back(start);
+                    piece[static_cast<std::size_t>(start)] = id;
+                    while (!stack.empty()) {
+                        const int at = stack.back();
+                        stack.pop_back();
+                        ++sizes.back();
+                        const int x = at % g.w, y = at / g.w;
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dx = -1; dx <= 1; ++dx) {
+                                const int nx = x + dx, ny = y + dy;
+                                if (nx < 0 || ny < 0 || nx >= g.w || ny >= g.h) continue;
+                                const int next = ny * g.w + nx;
+                                if (piece[static_cast<std::size_t>(next)] != 0 || g.at(nx, ny) <= 64) continue;
+                                piece[static_cast<std::size_t>(next)] = id;
+                                stack.push_back(next);
+                            }
+                        }
+                    }
+                }
+                QString said;
+                for (const std::int64_t n : sizes) said += QStringLiteral(" %1").arg(n);
+                QVERIFY2(sizes.size() == 2, qPrintable(QStringLiteral("%1 dpi, tip %2, %3: pieces of white%4").arg(dpi).arg(tip[0]).arg(tip[1]).arg(said)));
+                // (and the tail is there: ink near its tip)
+                const int tx = static_cast<int>((55 + tip[0] * 0.9) / 25.4 * dpi), ty = static_cast<int>((52 + tip[1] * 0.9) / 25.4 * dpi);
+                int dark = 0;
+                const int reach = std::max(3, dpi / 40);
+                for (int y = ty - reach; y <= ty + reach; ++y)
+                    for (int x = tx - reach; x <= tx + reach; ++x) dark += g.at(x, y) < 128 ? 1 : 0;
+                QVERIFY2(dark > 0, qPrintable(QStringLiteral("%1 dpi, tip %2, %3").arg(dpi).arg(tip[0]).arg(tip[1])));
+            }
+        }
+    }
+
     // --- drawn ---------------------------------------------------------------------------------------------------------
 
     // A part of the page is the whole page cut there, every pixel: the sample of now at 600 dpi in tiles, and at 150.

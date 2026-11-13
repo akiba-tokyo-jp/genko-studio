@@ -338,6 +338,7 @@ private slots:
         const std::string whisper = add("whisper");
         const std::string cloud = add("cloud");
         const std::string flash = add("flash");
+        const std::string narration = add("narration");
         const std::string sfx = add("sfx");
         auto& p = s.panel();
         QFormLayout* form = p.style_form;
@@ -363,7 +364,9 @@ private slots:
         s.choose(cloud);
         QCOMPARE(rows(), QStringLiteral("dash tail_kind tail_fillet"));
         s.choose(flash);
-        QCOMPARE(rows(), QStringLiteral("tail_kind tail_fillet"));
+        QCOMPARE(rows(), QString());  // (a flash's spokes are its outline; it is drawn without tails)
+        s.choose(narration);
+        QCOMPARE(rows(), QStringLiteral("corner wave dash"));  // (a box without tails)
         s.choose(sfx);
         QCOMPARE(rows(), QString());
         // (their names, for the tests and the screen readers; their words in Japanese)
@@ -764,6 +767,9 @@ private slots:
         QCOMPARE(QString::fromLatin1(s.window->armed_balloon_preset()->key), QStringLiteral("capsule"));
         QCOMPARE(s.palette().marked(), QStringLiteral("capsule"));
         QCOMPARE(s.palette().list()->currentItem(), s.palette().item(QStringLiteral("capsule")));
+        QVERIFY(s.palette().item(QStringLiteral("capsule"))->font().bold());   // (marked: the list's highlight, heavier letters)
+        QCOMPARE(s.palette().list()->selectedItems(), QList<QListWidgetItem*>{s.palette().item(QStringLiteral("capsule"))});
+        QVERIFY(!s.palette().item(QStringLiteral("oval"))->font().bold());
         QCOMPARE(s.window->text_settings()->balloon->currentData().toString(), QStringLiteral("capsule"));
         // typed where the text tool clicks: a capsule, its box the auto-lettering's for those words
         Json placed = s.type_at(QPointF(100.0, 150.0), QStringLiteral("そうなんだ"));
@@ -838,6 +844,7 @@ private slots:
         QCOMPARE(s.ops.size(), count + 1);
         QCOMPARE(s.line(chosen)->style["border_mm"], Json(0.8));
         QCOMPARE(s.palette().marked(), QStringLiteral("double"));
+        QCOMPARE(s.palette().list()->selectedItems(), QList<QListWidgetItem*>{s.palette().item(QStringLiteral("double"))});
         // the text tool's own フキダシ chosen: the palette's look is let go, the kind chosen placed plain
         auto* settings = s.window->text_settings();
         settings->balloon->setCurrentIndex(settings->balloon->findData(QStringLiteral("rounded")));
@@ -845,6 +852,7 @@ private slots:
         QVERIFY(s.window->armed_balloon_preset() == nullptr);
         QCOMPARE(s.palette().marked(), QString());
         QVERIFY(s.palette().list()->selectedItems().isEmpty());
+        for (int i = 0; i < s.palette().list()->count(); ++i) QVERIFY(!s.palette().list()->item(i)->font().bold());
         s.trigger("act_text");
         placed = s.type_at(QPointF(100.0, 240.0), QStringLiteral("ふつう"));
         QCOMPARE(placed["balloon"], Json("rounded"));
@@ -945,7 +953,7 @@ private slots:
             s.put(Json{{"op", "add_line"}, {"text", "そうなんだ"}, {"balloon", "capsule"}, {"x_mm", 150}, {"y_mm", 110}, {"w_mm", 9.5}, {"h_mm", 31}});
             s.window->show_dock(QStringLiteral("フキダシ"));
             s.window->balloon_dock()->setFloating(true);
-            s.window->balloon_dock()->resize(330, 760);
+            s.window->balloon_dock()->resize(440, 920);  // (every preset in sight: four across)
             QTRY_VERIFY_WITH_TIMEOUT(s.palette().pictures_drawn(), 30000);
             s.window->arm_balloon_preset(QStringLiteral("capsule"));
             QTest::qWait(200);

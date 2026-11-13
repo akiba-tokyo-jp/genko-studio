@@ -50,7 +50,8 @@ const std::vector<std::string>& balloon_look_keys();
 core::Json preset_tails(const BalloonPreset& preset, double x_mm, double y_mm, double w_mm, double h_mm);
 // The one edit_line that gives a line the preset's look: its kind, its look's keys (the others of the look null), and
 // — a preset about its tails — its tails (a line that has tails keeps where they point, each taking the preset's
-// kind; one that has none takes the preset's). The line's words, place and size are not in it.
+// kind; one that has none, not as many as しっぽ 2 本 says, or tails pointing the other way — in or out — takes the
+// preset's own). The line's words, place and size are not in it.
 core::Json preset_restyle_op(const BalloonPreset& preset, const core::StoryLine& line);
 // A preset's picture: a balloon of its look drawn by the renderer on white paper, `scale` device pixels a pixel.
 QImage preset_picture(const BalloonPreset& preset, double scale = 1.0);
@@ -62,7 +63,8 @@ class BalloonPalette : public QWidget {
 public:
     explicit BalloonPalette(QWidget* parent = nullptr);
     QListWidget* list() const { return list_; }
-    // The preset marked as the one the next line takes (empty: none).
+    // The preset marked as the one the next line takes (empty: none): its item in heavier letters on the accent's soft
+    // colour, and the item in hand; no item is left chosen.
     void mark(const QString& key);
     QString marked() const;
     // Every picture drawn now (the tests; shown, they are drawn a few at a time).
@@ -77,6 +79,7 @@ signals:
     void picked(const QString& key, const QString& how);
 
 protected:
+    void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 

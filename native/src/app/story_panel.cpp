@@ -960,8 +960,10 @@ void StoryPanel::show_shape_rows(const core::StoryLine& l) {
     style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash"})));
     style_form->setRowVisible(spike_alt, !drawn && kind == "shout");
     style_form->setRowVisible(dash, !none && !kind_in(kind, {"dotted_box", "flash"}));
-    style_form->setRowVisible(tail_kind, !none);
-    style_form->setRowVisible(tail_fillet, !none);
+    // (a narration, a flash and the framed boxes are drawn without tails: render/text/balloons no_tail)
+    const bool tailed = !none && !kind_in(kind, {"narration", "flash", "dotted_box", "tone_box", "fancy_box"});
+    style_form->setRowVisible(tail_kind, tailed);
+    style_form->setRowVisible(tail_fillet, tailed);
     corner->setEnabled(!squircle->isChecked() || kind != "rounded");  // (the fuller box has its own corners)
 }
 

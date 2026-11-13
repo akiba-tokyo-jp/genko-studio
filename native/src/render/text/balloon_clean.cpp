@@ -771,6 +771,10 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
             const int steps = zigzag ? 16 : std::clamp(static_cast<int>(std::ceil(length / 4)), 24, 200);
             middle.push_back(sub(root, mul(normal, depth)));
             wide.push_back(half * within(zigzag ? 1.0 : 1.1, length));
+            // (a zigzag toward its tip: from the first neck too slim to show white between its two lines, it runs to its
+            // point without stepping out again — a step out past such a neck would be a small closed "eye" of white.
+            // spec.line 0 — the width not said, or no line — leaves every step)
+            bool closing = false;
             for (int i = 0; i <= steps; ++i) {
                 const double t = static_cast<double>(i) / steps;
                 const double u = 1 - t;
@@ -778,7 +782,12 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
                 middle.push_back({w0 * root.x + w1 * c1.x + w2 * c2.x + w3 * spec.tip.x, w0 * root.y + w1 * c1.y + w2 * c2.y + w3 * spec.tip.y});
                 // (full at the root, slimming evenly to a point; a zigzag's sides step in and out)
                 double width = half * static_cast<double>(libm::powf(static_cast<float>(u), 1.1f));
-                if (zigzag && i > 0) width = half * u * (i % 2 != 0 ? 1.6 : 0.55);
+                if (zigzag && i > 0) {
+                    const double neck = half * u * 0.55;
+                    // (a neck whose white is slimmer than the line itself — its two lines 2 × line of its 2 × neck — reads as closed)
+                    if (!closing && i % 2 == 0 && spec.line > 0 && neck < spec.line * 1.5) closing = true;
+                    width = closing ? neck : half * u * (i % 2 != 0 ? 1.6 : 0.55);
+                }
                 wide.push_back(i == steps ? 0.0 : width);
             }
         }

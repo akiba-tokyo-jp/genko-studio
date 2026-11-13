@@ -140,14 +140,15 @@ Json preset_restyle_op(const BalloonPreset& preset, const core::StoryLine& line)
         const bool inward_now = !now.empty() && std::all_of(now.begin(), now.end(), [](const Json& t) { return t.is_object() && t.value("kind", "") == "inward"; });
         const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
         const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
-        if (now.empty() || now.size() != preset.tails.size() || (kind == "inward") != inward_now) {
-            // (none, another number of them, or tails that point the other way — in or out: the preset's own)
+        const bool counted = preset.tails.size() > 1 && now.size() != preset.tails.size();  // (しっぽ 2 本: as many as it says)
+        if (now.empty() || counted || (kind == "inward") != inward_now) {
+            // (none, not as many as the preset is about, or tails that point the other way — in or out: the preset's own)
             op["tails"] = preset_tails(preset, line.x_mm.value(), line.y_mm.value(), w, h);
         } else {
-            Json tails = Json::array();  // (where they point kept, each of the preset's kind)
+            Json tails = Json::array();  // (every tail kept where it points, each of the preset's kind)
             for (std::size_t i = 0; i < now.size(); ++i) {
                 Json t = now[i];
-                const Json& from = preset.tails[i];
+                const Json& from = preset.tails[std::min(i, preset.tails.size() - 1)];
                 if (from.contains("kind")) {
                     t["kind"] = from["kind"];
                 } else {
@@ -277,16 +278,26 @@ QListWidgetItem* BalloonPalette::item(const QString& key) const {
 }
 
 void BalloonPalette::mark(const QString& key) {
+    // the look the next line takes: its item chosen (the list's highlight), in heavier letters, and the one in hand. A
+    // pick that only restyled a line leaves the highlight on the marked look, or on none (the item in hand stays where
+    // it was, for the arrow keys).
     QListWidgetItem* wanted = item(key);
+    const bool fresh = wanted != nullptr && marked() != key;  // (newly marked: it becomes the item in hand)
     const QSignalBlocker quiet(list_);
-    if (wanted == nullptr) {
-        list_->clearSelection();
-        list_->setCurrentItem(nullptr);
-    } else {
-        list_->setCurrentItem(wanted);
-        wanted->setSelected(true);
+    for (int i = 0; i < list_->count(); ++i) {
+        QListWidgetItem* it = list_->item(i);
+        QFont font = it->font();
+        font.setBold(it == wanted);
+        it->setFont(font);
+        it->setBackground(it == wanted ? QBrush(QColor(theme::tokens().accent_soft)) : QBrush());
     }
-    list_->setProperty("marked", key);
+    list_->clearSelection();
+    if (wanted != nullptr) wanted->setSelected(true);  // (the look's own highlight: the list's chosen item)
+    if (fresh) {
+        list_->setCurrentItem(wanted, QItemSelectionModel::NoUpdate);
+        list_->scrollToItem(wanted);
+    }
+    list_->setProperty("marked", wanted != nullptr ? key : QString());
 }
 
 QString BalloonPalette::marked() const { return list_->property("marked").toString(); }
@@ -301,6 +312,12 @@ void BalloonPalette::draw_some(int most) {
 }
 
 void BalloonPalette::draw_pictures() { draw_some(count_); }
+
+void BalloonPalette::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    // (the look changed — light, dark, the brightness: the marked item's colour with it)
+    if ((event->type() == QEvent::StyleChange || event->type() == QEvent::PaletteChange) && list_ != nullptr && !marked().isEmpty()) mark(marked());
+}
 
 void BalloonPalette::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);

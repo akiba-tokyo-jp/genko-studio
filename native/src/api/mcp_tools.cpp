@@ -176,7 +176,8 @@ const std::vector<ToolSpec>& table() {
         {"propose_lines",
          R"(アタリの手書き台詞を読んだ結果を提案する。lines: [{text（列は 
  で区切る）, balloon?, speaker?,
-        box01: [x, y, w, h]（アタリ画像の中の 0..1）か x_mm, y_mm（w_mm, h_mm は省略可）}]。確定は人間。重ね表示を返す。)",
+        box01: [x, y, w, h]（アタリ画像の中の 0..1）か x_mm, y_mm（w_mm, h_mm は省略可）}]。確定は人間。重ね表示を返す。
+        balloon は apply_ops の説明にある種類。省くと言葉で決まる（1 列で 5 字以上なら capsule、ほかは speech）。)",
          {{"project", Kind::Str, false, std::nullopt}, {"page", Kind::Int, false, std::nullopt}, {"lines", Kind::ListDict, false, std::nullopt}, {"session", Kind::Str, true, Json()}}},
         {"proposals",
          R"(コマ割りと台詞の提案の一覧（status: open / all）。)",
@@ -264,7 +265,14 @@ const std::vector<ToolSpec>& table() {
          R"(細かい修正と作画の状態（台詞の移動・編集、コマの分割・結合、set_panel、import_candidates、adopt_candidate、
         set_placement など。一覧は inspect target=schemas ではなく genko://ops）。承認・ロック・ファイル読み込みの op は使えない
         （import_psd だけは読める: path は原稿のフォルダからの相対パスか、--root の中の絶対パス）。返事の results に、
-        一部の op が見つけたもの・作ったもの（replace_text の件数と場所、import_psd のレイヤー）が入る。)",
+        一部の op が見つけたもの・作ったもの（replace_text の件数と場所、import_psd のレイヤー）が入る。
+        台詞のフキダシ（add_line・edit_line）: balloon は speech（楕円）/ capsule（1 列の短い台詞。縦書きは縦長、横書きは横長）/
+        rounded / box / polygon（多角形。機械の声）/ cloud / thought / shout / electric / flash / whisper / narration /
+        dotted_box / tone_box / fancy_box / sfx / none。style の形の鍵: corner_mm 0〜50（角の丸み。0 で四角）、squircle（rounded を
+        ふっくら）、sides 5〜12（polygon の角の数。既定 8）、wave_mm 0〜3（ふるえる線）、spike_alt 0〜0.8（shout のトゲを 1 本おきに
+        短く）、dash_mm 0.2〜10（破線の 1 本の長さ）、double、border_mm（0 で線なし）。しっぽは tails: [{to, via?, vias?, width_mm?,
+        kind?: wedge / straight / zigzag / fade / bubbles / inward（フキダシに切れ込む。to はフキダシの中）, fillet_mm? 0〜20
+        （付け根の丸み。0 で角）}]。フキダシはどれも同じ今風の線で描く（手描き風は無い）。)",
          {{"project", Kind::Str, false, std::nullopt}, {"ops", Kind::ListDict, false, std::nullopt}, {"commit", Kind::Bool, false, Json(false)}, {"session", Kind::Str, true, Json()}}},
         {"record_review",
          R"(プレビューを見た自己点検の結果を残す（同じネームで点検を繰り返さないため）。)",

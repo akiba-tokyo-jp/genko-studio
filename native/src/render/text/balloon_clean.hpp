@@ -97,6 +97,7 @@ struct TailSpec {
     double base = 0.0;         // how wide it is where it leaves the balloon (px, across its middle line)
     double fillet = 0.0;       // how far its join with the balloon is rounded, along the outline and along its side (px; 0: a corner)
     double depth = 0.0;        // how far its base reaches inside the balloon (px)
+    double line = 0.0;         // the outline's width (px; 0: not said) — a zigzag stops stepping out where it is slimmer than its line
     std::string_view kind = "wedge";  // wedge | straight | zigzag | fade | inward (bubbles are circles: bubble_trail)
     bool bolt = false;         // (an electric balloon's: a lightning bolt)
 };

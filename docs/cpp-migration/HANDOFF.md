@@ -79,8 +79,50 @@
 - op の列を今の版でやり直したとき（ジャーナルの再生、試験の見本の op）は、箱は書かれた数字のまま真の楕円になる。文字の箱はその 1 / 1.035 なので、前の版で同じ op を当てたときより文字が 1 段小さく収まることがある（保存した本を開く道は読み替えるので変わらない）。
 - 回したフキダシの紙の大きさ（turned_sheet の py_hypot）は前のまま（環境の libm）。しっぽの先の回し方は libm_float。今風の形の計算には環境の libm は入っていない。
 - 鋭い切れ込み（本体に沿って寝たしっぽ）は、継ぎ目が小さいので小さなくびれとして残る。`fillet_mm` で大きくできる。
-- ギザギザのしっぽの先は、線の太さより細くなる所で両側の線が重なり、小さな目が残ることがある（前からの見え方）。
+- ギザギザのしっぽの先の小さな目は、群 B3 で直した（下の「群 B2・B3」）。ごく短いギザギザのしっぽ（1 段が線 2 本より短い）は、歯がつぶれて黒い塊に見える（16 段のまま。前から）。
 - Windows の実機のビルドは未確認（near・far の名前、GCC の拡張、__int128 は使っていない）。
+
+### 群 B2・B3（GUI と、AI 向けの道具・手引き。同じブランチ native/fukidashi-core、d48c3f60 の上）— 2026-11-13
+#### 作ったもの（B2。GUI）
+- 種類: `lettering::kinds()` に「縦長（カプセル）」`capsule`（楕円の次）と「多角形（機械の声）」`polygon`（四角の次）。ページ → 台詞 → フキダシの形、フキダシの右クリック、台詞パネル、文字ツールの設定、ストーリーエディターの 5 つに出る。15 → 17 種類。
+- 手描き風の設定を外した: 台詞パネルの「線の揺れ」（`wobble`）。`hand` の設定は画面には元から無い。残したもの（フキダシの手描き風ではないので）: 「フキダシを手で描く」（自分で輪郭を描く）、「手で描いたフキダシを曲線にする」、書体の「手書き風」、コマの枠線の「手描き風」、ブラシ。`hand`・`wobble` を持つ本はそのまま開き、ほかの設定を変えても鍵は残る（パネルはもう `wobble` を書かない）。前の `wobble` の波は「線のふるえ」に mm で出て、そこを変えると `wave_mm` に書いて `wobble` を外す（楕円の台詞は `hand: false` を足し、文字を収める楕円を変えない）。「既定の設定に戻す」は前の鍵も消す（前から）。
+- 台詞パネルの新しい設定（app/story_panel。選択ツールのオプションに出る）: 角の丸み、角をふっくら丸くする、角の数、線のふるえ、トゲの長短、破線の長さ、しっぽの形（くさび・まっすぐ・ギザギザ・消える・泡・内向き）、しっぽの付け根の丸み。効く種類のときだけ行を出す（描画の body_of・no_tail と同じ分け方）。どれも `edit_line` 1 つ。フキダシの右クリックの「しっぽの形」にも「まっすぐ」「内向き（切れ込み）」を足した。内向きにすると先をフキダシの中へ（真ん中から先への線の上、縁までの 0.55）、外向きに戻すと外へ（1.6）移す。
+- ドック「フキダシ」（app/balloon_palette、main_window_fukidashi）: プリセット 32 個（下）。絵は draw_group が描く（40 × 34 mm の紙を 56 dpi × 画面の倍率で。線なしだけ灰色の紙）。初めて見せたときに 4 枚ずつ描き、プロセスの中で使い回す。キー（矢印・Enter・Space）、ツールチップ、右クリック（選んだ台詞に当てる／次に置く台詞に使う）。ウィンドウ → フキダシ、ページ → 台詞 → フキダシのパレットを開く（`act_balloon_palette`）。台詞のタブの隣、初めは閉じている。写植の並び（作業の段階）に入れた。配置は saveState に入る（objectName「フキダシ」）。
+- 選んだときの動き: このページの台詞を選んでいて文字ツールを持っていなければ、その台詞に当てる（`edit_line` 1 つ）。そうでなければ次に置く台詞の形（文字ツールに持ち替え、type_new_line・balloon_drawn が読む。別のプリセットか文字ツールの「フキダシ」を選ぶまで続く）。台詞パネルの「コマに追加」とストーリーエディターは、自分の種類の欄があるので、パレットの形は使わない。
+- 寸法: app/lettering の measure は capsule・polygon を service::letter::measure で測る（式は 1 つ）。polygon の寸法は service に足した（polygon_room）。polygon の角の数は place_at・refit がスタイルから読む。
+- プリセット（鍵 / 名前）: oval ふつう、oval_tail しっぽつき、capsule 縦長、capsule_wide 横長、rounded 角丸、squircle ふっくら角丸、box 四角、narration ナレーション、cloud もくもく、thought_cloud 心の声（雲）、thought 心の声（泡）、shout 叫び、shout_alt 叫び（長短）、shout_sharp 叫び（鋭い）、electric 電子音、flash フラッシュ、whisper ささやき、long_dash 長い破線、wave ふるえ声、double 二重線、thick 太い線、no_line 線なし、polygon8 八角形、polygon6 六角形、black_oval ベタ白抜き、black_shout ベタの叫び、black_flash ベタフラ、dotted_box 点線の囲み、tone_box トーンの囲み、fancy_box 飾り枠、inward_tail 内向きしっぽ、two_tails しっぽ 2 本。
+- 作らなかったもの: つないだ 2 つ（`group`）のプリセット。つなぎは台詞 2 本の鍵なので、1 本を置く・1 本に当てるプリセットでは作れない（右クリック「次の台詞のフキダシとつなげる」は前のまま）。
+- commands.json: 4 つ足した（ウィンドウ → フキダシ、フキダシのパレットを開く、フキダシの形の 2 つ）。消した命令は無い。保存してあるショートカットは、ウィンドウの命令ごとに `shortcuts/<名前>` を引くだけなので、知らない名前の設定が残っていても読まれず、何も起きない（preferences.cpp）。
+
+#### 作ったもの（B3。AI 向け）
+- MCP の道具の説明（api/mcp_tools.cpp）: `apply_ops` に、フキダシの種類（capsule・polygon を含む）・形の鍵と範囲・しっぽの kind と fillet_mm を書いた。`propose_lines` に、balloon を省いたときの決まり。手描き風は「無い」とだけ書いた。`inspect` の説明は変えていない（2026-10-15 の決定）。道具の inputSchema は変えていない（test_mcp_api_e2e の sha256 は前のまま）。
+- op の一覧（core/data/ops_schema.json と docs/ops.schema.json）: `corner_mm` の 0 は四角、`add_line` の balloon・tails・style は edit_line と同じ、`wobble` を style の並びから外し、`hand`・`wobble` は「前の鍵。受け取るが新しい台詞には使わない」と書いた。
+- 手引き: SKILL.md に「フキダシの形を選ぶ」の表（会話・1 列の台詞・説明・心の声・叫び・ささやき・機械の声・ナレーション・ふるえ・コマの外の声・ベタ）、drawing.md に種類・形の鍵・しっぽの説明（`wobble`（手描き風の揺れ）を外した）、manga_rules.md の balloon の並び。integrations/hermes と integrations/claude-code の写しは同じ内容。
+- ネーム計画: `panels[].lines[].balloon` の種類に `capsule`・`polygon` を足した（studio/schemas.cpp）。計画の input_hash は計画の中身のハッシュなので、今ある見本のハッシュは変わらない。
+- docs/AGENT.md の種類・しっぽ・鍵の説明。OTHER_AGENTS.md・AI_PIPELINE.md には直す所が無かった。CLI のヘルプに種類の並びは無い（`genko schema` は ops_schema.json）。
+- ギザギザのしっぽの先の「目」（B1 の残り）: balloon_clean.cpp の zigzag で、くびれの白が線の太さより細くなる所から先は外へ振らずに細らせる（TailSpec.line）。16 段のままなので、ごく短いしっぽ（1 段が線 2 本より短い）は前と同じく歯がつぶれる。
+
+#### 直した既存の試験（どれも意図した変更。緩めていない）
+- test_gui_lines commandsAsPythonsWindowHasThem: ページ → 台詞 の並びに「フキダシのパレットを開く」が入る（11 → 12 項目）。フキダシの形のメニューと文字ツールの設定の種類は 15 → 17。
+- test_gui_lines theLinesPanelListsReordersAndEdits: 台詞パネルの設定を変えたときの edit_line の style から `"wobble": null` が無くなった（線の揺れの欄を外したので、パネルは `wobble` を書かない）。
+- test_gui_actions theMenusHoldPythonsCommands: 名前つきの命令 821 → 822（`act_balloon_palette` の 1 つ）。
+- core/data/commands.json: 4 つ足した（test_gui_prefs commandsJsonIsTheMenus が作り直したもの）。
+- docs/ops.schema.json: native の一覧と同じ文に（add_line・edit_line の説明）。
+- 期待値を変えていないもの: test_mcp_api_e2e の道具の inputSchema の sha256、PSD・opentype の画素の sha256（見本にギザギザのしっぽが無い）、ネームの見本の input_hash と test_layout_ideas の project.json の sha256。
+
+#### 確かめたこと（Linux Release。関係する試験だけ）
+- 152 本の実行ファイル（test_gui_* 全部・*_e2e 全部・service・ledger_service_a/b/c・fukidashi・fukidashi_service・layout_ideas・studio_files・studio_ops・mcp_connection・storage・model・strokes・command_bus・ops・features・render_page・psd_text・smart_stack・smart_render・ruby・ruby_render・type_text・contract の type 3 本・opentype・psd_text・psd・storage・render_cli・pipeline・export・export_cli・annotations・layer_comps・measure・pcraft・slices・smart・video・align・anim・color_model・image_ops・ink・layers・paths・transform・prefs・retouch・guides・copy・open・variables・artboards・page_size・brushes_model・color_model・groups・page_geometry・page_size・pyre・spell・variables・adjust・ai_link・perf_render・package・control_channel・session・migration・tiles・web_export・pcraft・prefs_table・json・buildinfo）: 試験の関数 2986 件が合格、不合格 0、スキップ 25（Release では動かない障害注入 22 件、見本と画面の絵の書き出し 2 件、PSD の速さの見本 1 件）。3 本を並べて流した。全体の試験・ASan・test_soak_app は流していない。
+- 新しい試験: test_gui_fukidashi 9 件（メニュー 5 つ、手描き風の設定が無い・前の鍵の台詞の編集、形の設定の鍵と取り消し、パレットと絵、選んだ台詞に当てる、次に置く台詞、capsule・polygon の寸法、画面の絵の書き出し）、test_fukidashi aZigzagTailClosesWithAPoint（直す前は落ちることを確かめた）。
+- 画面の絵（作業用の場所。GENKO_FUKIDASHI_OUT を付けた test_gui_fukidashi screenshots が書く）: パレット（明・暗）、台詞パネルの設定（明・暗）。日本語は字で出ていて、切れている所は無い。
+
+#### 残り・気を付けること（B2・B3）
+- Windows の実機のビルドは未確認。
+- 「次に置く台詞の形」は、文字ツールの「フキダシ」を選び直すか別のプリセットを選ぶまで続く。画面の印は、パレットの選ばれた項目（太字）と文字ツールの設定の種類だけ。
+- 選んだ台詞に capsule のプリセットを当てても箱は変えない（言葉・場所・大きさを保つ決まり）。横に広い箱では、両端の丸い横長になる。
+- 手で描いた輪郭（path）の台詞に当てると、形は変わらず線と塗りだけ変わる（そう知らせる）。type@1 のポイント文字・段落文字には当てない（知らせる）。
+- パレットの絵は 56 dpi（× 画面の倍率）なので、飾り枠の角飾りやトーンの点は実際より粗く見える。
+- polygon の寸法は角を丸める前の多角形で測る。奇数の角（5・7・9・11）は 2% の余裕を足している（試験は 5〜12 角で文字が 5 mm のまま収まることを見る）。
+- 内向きのしっぽにしたときの先の置き場所（縁までの 0.55）は、箱の楕円で測る（四角や多角形でも中に入る）。
 
 ## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12
 

@@ -454,6 +454,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
                     : tail_style == "fade" ? std::string_view("fade")
                                            : std::string_view("wedge");
         spec.depth = core::py_max(base * 0.5, width * 3 + 2);
+        spec.line = width;
         if (bent) {  // 折れ線のしっぽ
             for (const Json& v : core::iterate(*vias)) spec.bends.push_back(at_px(v));
         } else {
