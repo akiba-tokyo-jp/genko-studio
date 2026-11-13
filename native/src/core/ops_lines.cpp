@@ -507,7 +507,52 @@ Json lettering_style(const Json& value, const PictureCheck& check) {
 
 }  // namespace
 
-// ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others)
+namespace {
+
+// fukidashi@1: whether a point (dx, dy from the balloon's middle) lies inside a capsule or a polygon of w × h — the
+// shapes as they are drawn (a polygon's corners not rounded).
+bool inside_capsule(double dx, double dy, double w, double h) {
+    const double r = py_min(w, h) / 2;
+    const double narrow = std::abs(w <= h ? dx : dy);
+    const double lengthwise = std::abs(w <= h ? dy : dx);
+    const double straight = py_max(w, h) / 2 - r;
+    if (lengthwise <= straight) return narrow < r;
+    return narrow * narrow + (lengthwise - straight) * (lengthwise - straight) < r * r;
+}
+
+bool inside_polygon(double dx, double dy, double w, double h, std::int64_t sides) {
+    const auto n = static_cast<int>(std::clamp<std::int64_t>(sides, 5, 12));
+    // (a regular polygon, a flat side up, stretched to the box: render/text/balloon_clean's)
+    std::vector<std::pair<double, double>> corners;
+    double reach = 0.0, top = 0.0, foot = 0.0;
+    for (int k = 0; k < n; ++k) {
+        const double angle = -kPi / 2 + kPi / n + 2 * kPi * k / n;
+        corners.emplace_back(py_cos(angle), py_sin(angle));
+        reach = py_max(reach, corners.back().first);
+        top = py_min(top, corners.back().second);
+        foot = py_max(foot, corners.back().second);
+    }
+    for (auto& [x, y] : corners) {
+        x = x / reach * (w / 2);
+        y = -h / 2 + (y - top) / (foot - top) * h;
+    }
+    for (int k = 0; k < n; ++k) {  // (inside: on the inner side of every edge)
+        const auto [ax, ay] = corners[static_cast<std::size_t>(k)];
+        const auto [bx, by] = corners[static_cast<std::size_t>((k + 1) % n)];
+        if ((bx - ax) * (dy - ay) - (by - ay) * (dx - ax) <= 0) return false;
+    }
+    return true;
+}
+
+std::int64_t polygon_sides(const StoryLine& line) {
+    const Json* sides = line.style.is_object() ? get(line.style, "sides") : nullptr;
+    return sides != nullptr && sides->is_number() ? to_int(*sides) : 8;
+}
+
+}  // namespace
+
+// ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others;
+// fukidashi@1: a capsule and a polygon by their own shape)
 bool tail_hidden(const StoryLine& line, const Json& tip) {
     const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
     const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
@@ -518,6 +563,8 @@ bool tail_hidden(const StoryLine& line, const Json& tip) {
     if (kind == "box" || kind == "narration" || kind == "rounded" || kind == "none" || kind == "sfx") {
         return std::abs(dx) < w / 2 && std::abs(dy) < h / 2;
     }
+    if (kind == "capsule") return inside_capsule(dx, dy, w, h);
+    if (kind == "polygon") return inside_polygon(dx, dy, w, h, polygon_sides(line));
     return squared(divided(dx, w / 2)) + squared(divided(dy, h / 2)) < 1.0;
 }
 
@@ -544,7 +591,17 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
         }
         const double length = py_hypot(dx, dy);
         const double ux = divided(dx, length), uy = divided(dy, length);
-        const double edge = divided(1.0, std::sqrt(squared(divided(ux, w / 2)) + squared(divided(uy, h / 2))));  // (the outline that way)
+        double edge = divided(1.0, std::sqrt(squared(divided(ux, w / 2)) + squared(divided(uy, h / 2))));  // (the outline that way)
+        if (line.balloon == "capsule" || line.balloon == "polygon") {  // (fukidashi@1: their own outline that way)
+            double inside = 0.0, outside = py_hypot(w, h);
+            const std::int64_t sides = polygon_sides(line);
+            for (int step = 0; step < 48; ++step) {
+                const double mid = (inside + outside) / 2;
+                const bool in = line.balloon == "capsule" ? inside_capsule(ux * mid, uy * mid, w, h) : inside_polygon(ux * mid, uy * mid, w, h, sides);
+                (in ? inside : outside) = mid;
+            }
+            edge = outside;
+        }
         tail["to"] = Json::array({py_round(cx + ux * (edge + beyond), 2), py_round(cy + uy * (edge + beyond), 2)});
         changed = true;
     }

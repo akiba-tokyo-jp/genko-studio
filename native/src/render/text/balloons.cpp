@@ -144,7 +144,9 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         body.smooth = true;
         return body;
     }
-    const double corner = mm_px(at(lst, "corner_mm"), dpi, -1.0);
+    if (box.x1 - box.x0 < 1 || box.y1 - box.y0 < 1) return body;  // (a box of no pixel: nothing is drawn of it)
+    // (style.corner_mm: 0 is square corners; not set, the kind's own)
+    const double corner = at(lst, "corner_mm").is_number() ? core::to_float(at(lst, "corner_mm")) / 25.4 * dpi : -1.0;
     if (kind == "rounded") {
         body.outline = core::py_truthy(at(lst, "squircle")) ? clean::squircle(box) : clean::rounded(box, corner >= 0 ? corner : body.least * 0.6);
         body.smooth = true;
@@ -424,15 +426,16 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         const std::size_t index = static_cast<std::size_t>(std::find(lines.begin(), lines.end(), line) - lines.begin());
         const clean::Box& box = locals[index];
         const Body& body = bodies[index];
+        if (body.outline.size() < 3) continue;  // (a balloon of no size has no tail)
         const P tip = at_px(core::subscript(tail, "to"));
         const double shortest = core::py_min(box.x1 - box.x0, box.y1 - box.y0);
         const Json* kind_value = core::dict_get(tail, "kind");
         const std::string tail_style = core::py_str(kind_value != nullptr && core::py_truthy(*kind_value) ? *kind_value : Json("wedge"));
-        // (a letterer's tail is broad where it leaves the balloon: about a third of its narrow side)
+        // (a slim tail: where it leaves the balloon, a little over a fifth of the balloon's narrow side)
         const Json* width_value = core::dict_get(tail, "width_mm");
         const double base = width_value != nullptr && core::py_truthy(*width_value)
                                 ? static_cast<double>(px(core::to_float(core::subscript(tail, "width_mm")), dpi))
-                                : core::py_max(4.0, shortest / (tail_style == "wedge" ? 3.0 : 4.0));
+                                : core::py_max(4.0, shortest * (tail_style == "wedge" ? 0.22 : 0.2));
         const Json* vias = core::dict_get(tail, "vias");
         const bool bent = vias != nullptr && core::py_truthy(*vias);
         if (!bent && (body.kind == "thought" || tail_style == "bubbles")) {
@@ -462,12 +465,14 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
             // (an electric balloon's tail: a lightning bolt)
             spec.bolt = body.kind == "electric" && !spec.has_via && spec.kind != "inward";
         }
-        if (body.smooth) {  // (the tail runs out of the outline: no corner where they meet)
+        {  // (the join with the balloon rounded a little — half a millimetre, a line and a half at least, a quarter of
+           // the tail's width at most; style fillet_mm says otherwise, 0 a corner)
             const Json* fillet = core::dict_get(tail, "fillet_mm");
-            spec.fillet = fillet != nullptr && !fillet->is_null() ? core::py_max(0.0, core::to_float(*fillet)) / 25.4 * dpi
-                                                                   : core::py_max(width * 2, core::py_min(base * 0.45, shortest * 0.18));
+            spec.fillet = fillet != nullptr && !fillet->is_null()
+                              ? core::py_max(0.0, core::to_float(*fillet)) / 25.4 * dpi
+                              : core::py_min(core::py_max(width * 1.5, 0.5 / 25.4 * dpi), base * 0.25);
         }
-        clean::Tail made = clean::tail(body.guide, body.centre, spec);
+        clean::Tail made = clean::tail(body.outline, body.guide, body.centre, spec);
         if (spec.kind == "inward") made.shape.owner = static_cast<int>(index);
         shapes.push_back(std::move(made.shape));
         for (clean::Shape& join : made.joins) shapes.push_back(std::move(join));
@@ -670,8 +675,10 @@ void paint_shapes(const PagePart& part, const std::vector<const core::StoryLine*
     if (!masks) {
         masks = std::make_shared<const Masks>(shape_masks(lines, boxes, tails, region, dpi, st));
         if (key) {
-            const std::int64_t pixels = static_cast<std::int64_t>(region.width()) * region.height();
-            remembered_masks().put(*key, masks, pixels * (masks->tone.empty() ? 2 : 3));
+            // (what is held: a byte a pixel for where the group lies, for its line and — a tone box — for its tone; the
+            // planes of coverage they were worked out from are gone by now)
+            const auto bytes = [](const Image& mask) { return mask.empty() ? std::int64_t{0} : static_cast<std::int64_t>(mask.width()) * mask.height(); };
+            remembered_masks().put(*key, masks, bytes(masks->cover) + bytes(masks->band) + bytes(masks->tone) + 256);
         }
     }
     // (each pixel is its own: the part where the region and the image meet is painted the same)

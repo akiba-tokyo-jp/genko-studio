@@ -94,21 +94,25 @@ struct TailSpec {
     bool has_via = false;
     P via;
     std::vector<P> bends;      // (折れ線のしっぽ: it bends at each)
-    double base = 0.0;         // how wide it leaves the balloon (px along the outline)
-    double fillet = 0.0;       // how far its join with the balloon is rounded (px; 0: a corner)
+    double base = 0.0;         // how wide it is where it leaves the balloon (px, across its middle line)
+    double fillet = 0.0;       // how far its join with the balloon is rounded, along the outline and along its side (px; 0: a corner)
     double depth = 0.0;        // how far its base reaches inside the balloon (px)
     std::string_view kind = "wedge";  // wedge | straight | zigzag | fade | inward (bubbles are circles: bubble_trail)
     bool bolt = false;         // (an electric balloon's: a lightning bolt)
 };
-// A tail leaving the outline `guide` (whose middle is `centre`) toward its tip: its shape, the two points where its
-// sides leave the outline (on it), and the rounded joins there (shapes of their own; none when fillet is 0).
+// A tail of the balloon whose outline is `outline` (and `guide` the smooth outline it leaves from — the outline itself,
+// or a burst's valleys — whose middle is `centre`). Its root is where the line from the middle to what it points at
+// leaves the guide; its middle line leaves the balloon straight across the outline there and bends to the tip (no bend
+// when the tip lies straight out); its two sides lie either side of that line, slimming to the tip. `left` and `right`
+// are where its sides leave the outline (on it), and `joins` the small rounded joins there (shapes of their own; none
+// when fillet is 0): the outline itself is untouched everywhere else.
 struct Tail {
     Shape shape;
     P left;
     P right;
     std::vector<Shape> joins;
 };
-Tail tail(const Contour& guide, P centre, const TailSpec& spec);
+Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec);
 // The three bubbles of a thought toward `tip`, from the outline's edge, the first `radius` big.
 std::vector<Contour> bubble_trail(const Contour& guide, P centre, P tip, double radius);
 // The rounded joins where two outlines cross (joined balloons): a patch in each notch, `reach` along both.

@@ -691,9 +691,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["episode"] = doc.episode.json();
     out["binding"] = core::to_string(doc.binding);
     out["start_side"] = opt_string(doc.start_side);
-    // (fukidashi@1: the generation of the balloons' geometry its ovals were lettered for, said while it has an oval — a
-    // book without the key is one of before, whose hand-drawn ovals grow when it is read: core/fukidashi.hpp)
-    if (core::has_ovals(doc)) out["balloon_geometry"] = doc.balloon_geometry;
+    // (fukidashi@1: the generation of the balloons' geometry its lines are of, said while it has what a book of before is
+    // read otherwise for — an oval, a border_mm of 0. A book without the key is one of before: core/fukidashi.hpp)
+    if (core::says_balloon_geometry(doc)) out["balloon_geometry"] = doc.balloon_geometry;
     out["strict_gates"] = doc.strict_gates;
     out["autosave"] = doc.autosave;
     out["font_path"] = doc.font_path;

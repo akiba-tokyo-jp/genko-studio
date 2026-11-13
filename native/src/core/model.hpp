@@ -565,7 +565,7 @@ struct Document {
     std::int64_t revision = 0;
     std::optional<std::string> start_side;
     // fukidashi@1 (core/fukidashi.hpp): the generation of the balloons' geometry its lines are lettered for (2: true
-    // ellipses; a book of before is brought to it as it is read). Written as "balloon_geometry" while it has an oval.
+    // ellipses; a book of before is brought to it as it is read). Written as "balloon_geometry" while it has an oval or a border_mm of 0.
     std::int64_t balloon_geometry = 2;
     bool strict_gates = false;
     Json studio = Json::object();

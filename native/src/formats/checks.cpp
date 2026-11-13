@@ -18,6 +18,7 @@
 #include "core/balloon_tails.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/fukidashi.hpp"
 #include "core/paths.hpp"
 #include "core/placement.hpp"
 #include "core/pyconv.hpp"
@@ -493,8 +494,10 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
             if (line->ruby_spans) ruby_review_issues(*line, page, short_text, nullptr, out);  // (TEXT-01: said wherever the line is)
             continue;
         }
-        const std::array<double, 4> box{line->x_mm.value(), line->y_mm.value(), line->w_mm.truthy() ? line->w_mm.value() : 0.0,
-                                        line->h_mm.truthy() ? line->h_mm.value() : 0.0};
+        // (the box of the line's words: an oval's letters have their own inside its balloon's — fukidashi@1, SPEC BALLOON-01:
+        // for an oval of a book of before, the box it had there, so the book is told what it was told)
+        const std::array<double, 4> letters = core::letter_box(*line);
+        const std::array<double, 4> box{letters[0], letters[1], line->w_mm.truthy() ? letters[2] : 0.0, line->h_mm.truthy() ? letters[3] : 0.0};
         placed.emplace_back(line, box);
         const auto [x, y, w, h] = box;
         const std::string kind = line->balloon.empty() ? std::string("speech") : line->balloon;

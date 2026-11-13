@@ -461,6 +461,7 @@ Contour cloud(const Box& box, int bumps) {
         top = std::min(top, p.y);
         foot = std::max(foot, p.y);
     }
+    if (!(reach > 0) || !(foot > top)) return {};  // (a box of no size: nothing)
     const double cx = box.cx();
     const double y0 = box.y0;
     const double high = box.y1 - box.y0;
@@ -597,160 +598,254 @@ Shape whole(Contour points, bool cut, int owner) {
     return shape;
 }
 
-Tail tail(const Contour& guide, P centre, const TailSpec& spec) {
+namespace {
+
+// Where a line, walked from its first point, first meets the closed outline: on which of its segments and how far
+// along it, the point, and how far along the outline that is.
+struct Meeting {
+    bool found = false;
+    std::size_t segment = 0;
+    double along = 0.0;
+    P at;
+    double s = 0.0;
+};
+
+Meeting first_meeting(const Contour& line, const Contour& outline, const std::vector<double>& lengths) {
+    Meeting out;
+    if (line.size() < 2 || outline.size() < 3) return out;
+    const Bounds reach = bounds_of(outline);
+    for (std::size_t i = 0; i + 1 < line.size() && !out.found; ++i) {
+        const P a = line[i];
+        const P b = line[i + 1];
+        if (std::max(a.x, b.x) < reach.x0 || std::min(a.x, b.x) > reach.x1 || std::max(a.y, b.y) < reach.y0 || std::min(a.y, b.y) > reach.y1) continue;
+        double best = 2.0;
+        for (std::size_t j = 0; j < outline.size(); ++j) {
+            double t = 0.0, u = 0.0;
+            if (!crossing(a, b, outline[j], outline[(j + 1) % outline.size()], t, u) || t >= best) continue;
+            best = t;
+            out.s = lengths[j] + (lengths[j + 1] - lengths[j]) * std::clamp(u, 0.0, 1.0);
+        }
+        if (best <= 1.0) {
+            out.found = true;
+            out.segment = i;
+            out.along = std::clamp(best, 0.0, 1.0);
+            out.at = lerp(a, b, out.along);
+        }
+    }
+    return out;
+}
+
+// How far a join may reach along the closed outline from `s` (forward for way > 0, back otherwise), up to `reach`: it
+// stops short of the outline's next corner (a turn of more than about 20°).
+double smooth_reach(const Contour& outline, const std::vector<double>& lengths, double s, double way, double reach) {
+    const std::size_t n = outline.size();
+    const auto [index, t] = place_of(lengths, s);
+    const auto span = [&](std::size_t k) { return lengths[k + 1] - lengths[k]; };
+    const auto direction = [&](std::size_t k) { return unit(sub(outline[(k + 1) % n], outline[k])); };
+    std::size_t k = index;
+    double walked = way > 0 ? (1 - t) * span(k) : t * span(k);
+    for (std::size_t guard = 0; walked < reach && guard < n; ++guard) {
+        const std::size_t next = way > 0 ? (k + 1) % n : (k + n - 1) % n;
+        if (span(next) > 1e-9 && span(k) > 1e-9 && dot(direction(k), direction(next)) < 0.94) return walked * 0.9;
+        walked += span(next);
+        k = next;
+    }
+    return std::min(reach, walked);
+}
+
+// How far an open line may be followed from its place (`segment`, `along`) before its next corner (a turn of more than
+// about 20°) or its end, up to `reach`.
+double corner_free(const Contour& line, std::size_t segment, double along, double reach) {
+    double walked = distance(lerp(line[segment], line[segment + 1], along), line[segment + 1]);
+    P direction = unit(sub(line[segment + 1], line[segment]));
+    for (std::size_t i = segment + 1; i + 1 < line.size() && walked < reach; ++i) {
+        const double span = distance(line[i], line[i + 1]);
+        if (span < 1e-9) continue;
+        const P next = unit(sub(line[i + 1], line[i]));
+        if (dot(direction, next) < 0.94) return walked * 0.9;
+        direction = next;
+        walked += span;
+    }
+    return std::min(reach, walked);
+}
+
+// The point `reach` along an open line from its place, and the line's direction there.
+P point_along(const Contour& line, std::size_t segment, double along, double reach, P& direction) {
+    P here = lerp(line[segment], line[segment + 1], along);
+    direction = unit(sub(line[segment + 1], line[segment]));
+    for (std::size_t i = segment; i + 1 < line.size(); ++i) {
+        const double span = distance(here, line[i + 1]);
+        if (distance(line[i], line[i + 1]) > 1e-9) direction = unit(sub(line[i + 1], line[i]));
+        if (span >= reach) return lerp(here, line[i + 1], span > 0 ? reach / span : 0.0);
+        reach -= span;
+        here = line[i + 1];
+    }
+    return here;
+}
+
+}  // namespace
+
+Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec) {
     Tail out;
-    const std::vector<double> lengths = lengths_of(guide);
-    const double total = lengths.back();
-    const bool clockwise = shoelace(guide) > 0;
+    if (outline.size() < 3 || guide.size() < 3) return out;
+    const std::vector<double> guide_lengths = lengths_of(guide);
+    const std::vector<double> lengths = lengths_of(outline);
     const bool bent = !spec.bends.empty();
     const bool notch = spec.kind == "inward";
+    // its root: where the line from the balloon's middle to what it points at leaves the outline — a tail points from
+    // the middle of its balloon at the speaker — and the way out of the balloon there, across the outline
     const P target = bent ? spec.bends.front() : (spec.has_via ? spec.via : spec.tip);
-    // (it leaves the outline on the line from the balloon's middle to what it points at: a tail points from the middle
-    // of its balloon at the speaker)
-    const double at = facing(guide, lengths, centre, target);
-    const double half = std::max(1.0, std::min(spec.base, total * 0.3) / 2);
-    const P left = point_at(guide, lengths, at - half);
-    const P right = point_at(guide, lengths, at + half);
-    out.left = left;
-    out.right = right;
-    const P middle = lerp(left, right, 0.5);
-    const double half_chord = std::max(1e-6, distance(left, right) / 2);
-    const P chord = unit(sub(right, left));
-    const P into = clockwise ? inward(chord) : mul(inward(chord), -1.0);  // (into the balloon, across the base)
-    const P side0 = unit(sub(left, middle));                              // (from the base's middle to its left end)
+    const double at = facing(guide, guide_lengths, centre, target);
+    const P root = point_at(guide, guide_lengths, at);
+    const double asked = std::max(0.5, std::min(spec.base, guide_lengths.back() * 0.25) / 2);
+    double half = asked;
+    // (across the chord under the tail's base, half its width either side of the root: the same for a root on a corner
+    // of the outline's many short edges as for one in the middle of an edge, and a mirror image for a mirrored tail)
+    const P along_outline = unit(sub(point_at(guide, guide_lengths, at + asked), point_at(guide, guide_lengths, at - asked)));
+    const P out_of = shoelace(guide) > 0 ? mul(inward(along_outline), -1.0) : inward(along_outline);
+    const P normal = notch ? mul(out_of, -1.0) : out_of;  // (a notch runs into the balloon)
+    const double depth = std::max(1.0, spec.depth);
+    out.left = root;
+    out.right = root;
+    if (distance(root, spec.tip) < 1e-6) return out;
 
-    Contour left_side;   // (from the base's left end to the tip, the tip not included)
-    Contour right_side;  // (the same on the right)
-    const auto offset_sign = [&](P normal) { return dot(normal, side0) >= 0 ? 1.0 : -1.0; };
-    if (bent || spec.bolt) {
-        Contour path{middle};
-        if (bent) {
-            path.insert(path.end(), spec.bends.begin(), spec.bends.end());
-        } else {  // (a lightning bolt: the middle line steps aside twice)
-            const P along = sub(spec.tip, middle);
-            const P across = inward(unit(along));
-            path.push_back(add(lerp(middle, spec.tip, 0.38), mul(across, half_chord * 0.9)));
-            path.push_back(add(lerp(middle, spec.tip, 0.62), mul(across, -half_chord * 0.6)));
-        }
-        path.push_back(spec.tip);
-        std::vector<double> along{0.0};
-        for (std::size_t i = 0; i + 1 < path.size(); ++i) along.push_back(along.back() + distance(path[i], path[i + 1]));
-        const double length = std::max(1e-6, along.back());
-        const double sign = offset_sign(inward(unit(sub(path[1], path[0]))));
-        left_side.push_back(left);
-        right_side.push_back(right);
-        for (std::size_t i = 1; i + 1 < path.size(); ++i) {
-            const P n0 = inward(unit(sub(path[i], path[i - 1])));
-            const P n1 = inward(unit(sub(path[i + 1], path[i])));
-            const P mitre = unit(add(n0, n1));
-            const double scale = std::min(2.5, 1 / std::max(0.2, dot(mitre, n0)));
-            const double width = half_chord * (1 - along[i] / length) * scale * sign;
-            left_side.push_back(add(path[i], mul(mitre, width)));
-            right_side.push_back(sub(path[i], mul(mitre, width)));
-        }
-    } else {
-        P control = spec.has_via ? spec.via : lerp(middle, spec.tip, 0.5);
-        const bool bow = spec.kind == "wedge" && !spec.has_via;
-        if (bow) {  // (a drawn tail bows a little, away from the balloon's middle: a comma, not a needle)
-            const P d = sub(spec.tip, middle);
-            const double side = cross(d, sub(middle, centre)) >= 0 ? 1.0 : -1.0;
-            control = {control.x - d.y * 0.16 * side, control.y + d.x * 0.16 * side};
-        }
-        const double length = distance(middle, control) + distance(control, spec.tip);
-        const bool zigzag = spec.kind == "zigzag";
-        const int steps = zigzag ? 16 : std::clamp(static_cast<int>(std::ceil(length / 5)), 24, 160);
-        // (across the tail: the way its width lies where it bends, on the side its base's left end is)
-        const P run = sub(spec.tip, middle);
-        P across = inward(unit(hyp(run.x, run.y) > 1e-9 ? run : sub(control, middle)));
-        if (dot(across, side0) < 0) across = mul(across, -1.0);
-        if (zigzag) {  // (its sides step in and out about its middle line, full at the base and to a point)
-            const P d0 = sub(control, middle);
-            const double sign = offset_sign(inward(unit(hyp(d0.x, d0.y) > 1e-9 ? d0 : run)));
-            for (int i = 0; i < steps; ++i) {
+    // As wide as asked where it leaves the balloon: its sides run straight on into the balloon, wider there, and the
+    // outline falls away from the root — so it is made, measured across where its sides meet the outline, and made again
+    // that much slimmer (up to five times: within a hundredth of what was asked).
+    Contour left_side, right_side;
+    Meeting left, right;
+    for (int pass = 0; pass < 6; ++pass) {
+        Contour middle;
+        std::vector<double> wide;
+        left_side.clear();
+        right_side.clear();
+        // its middle line, from inside the balloon (a notch: from outside it) through the root to the tip, and how wide
+        // the tail is at each of its points: as wide as asked at the root, slimming to the tip — and inside the balloon as
+        // much wider as it slims outside, so that its sides pass through the outline without a corner there
+        const auto within = [&](double slimming, double length) { return std::min(2.0, 1 + slimming * depth / std::max(1e-6, length)); };
+        if (bent || spec.bolt) {  // (折れ線のしっぽ, a lightning bolt: straight between its bends)
+            Contour path{root};
+            if (bent) {
+                path.insert(path.end(), spec.bends.begin(), spec.bends.end());
+            } else {  // (the middle line steps aside twice, the same way for every bolt)
+                const P across = inward(unit(sub(spec.tip, root)));
+                path.push_back(add(lerp(root, spec.tip, 0.38), mul(across, half * 0.9)));
+                path.push_back(add(lerp(root, spec.tip, 0.62), mul(across, -half * 0.6)));
+            }
+            path.push_back(spec.tip);
+            std::vector<double> run{0.0};
+            for (std::size_t i = 0; i + 1 < path.size(); ++i) run.push_back(run.back() + distance(path[i], path[i + 1]));
+            const double length = std::max(1e-6, run.back());
+            middle.push_back(sub(root, mul(unit(sub(path[1], path[0])), depth)));
+            wide.push_back(half * within(1.0, length));
+            for (std::size_t i = 0; i < path.size(); ++i) {
+                middle.push_back(path[i]);
+                wide.push_back(half * (1 - run[i] / length));
+            }
+        } else if (spec.kind == "straight") {
+            const P along = unit(sub(spec.tip, root));
+            middle.push_back(sub(root, mul(along, depth)));
+            wide.push_back(half * within(1.0, distance(root, spec.tip)));
+            const int steps = 16;
+            for (int i = 0; i <= steps; ++i) {
                 const double t = static_cast<double>(i) / steps;
-                const double u = 1 - t;
-                const P here{u * u * middle.x + 2 * u * t * control.x + t * t * spec.tip.x, u * u * middle.y + 2 * u * t * control.y + t * t * spec.tip.y};
-                const P d{2 * u * (control.x - middle.x) + 2 * t * (spec.tip.x - control.x), 2 * u * (control.y - middle.y) + 2 * t * (spec.tip.y - control.y)};
-                const double width = half_chord * u * (i % 2 != 0 ? 1.6 : 0.55);
-                const double blend = std::min(1.0, t / 0.4);
-                const double eased = blend * blend * (3 - 2 * blend);
-                const P over = unit(lerp(side0, mul(inward(unit(d)), sign), eased));
-                if (i == 0) {
-                    left_side.push_back(left);
-                    right_side.push_back(right);
-                } else {
-                    left_side.push_back(add(here, mul(over, width)));
-                    right_side.push_back(sub(here, mul(over, width)));
-                }
+                middle.push_back(lerp(root, spec.tip, t));
+                wide.push_back(half * (1 - t));
             }
         } else {
-            // each side one curve from its end of the base to the tip, bending about the middle line's bend — no
-            // wave in it: full at the base, then (a bowed tail) quickly to a point, or (a straight one) evenly
-            const double belly = half_chord * (bow ? 0.31 : 0.5);
-            const P bend_left = add(control, mul(across, belly));
-            const P bend_right = sub(control, mul(across, belly));
-            for (int i = 0; i < steps; ++i) {
+            // a curve that leaves the balloon straight across its outline and bends to the tip (through `via`, when the
+            // tail has one): no bend at all when the tip lies straight out, the same bend for the same place
+            P c1, c2;
+            if (spec.has_via) {
+                c1 = add(root, mul(normal, distance(root, spec.via) * 2 / 3));
+                c2 = lerp(spec.tip, spec.via, 2.0 / 3);
+            } else {
+                const double reach = distance(root, spec.tip);
+                const double forward = std::max(dot(sub(spec.tip, root), normal), reach * 0.2);
+                const P bend = add(root, mul(normal, forward * 0.5));
+                c1 = lerp(root, bend, 2.0 / 3);
+                c2 = lerp(spec.tip, bend, 2.0 / 3);
+            }
+            const bool zigzag = spec.kind == "zigzag";
+            const double length = distance(root, c1) + distance(c1, c2) + distance(c2, spec.tip);
+            const int steps = zigzag ? 16 : std::clamp(static_cast<int>(std::ceil(length / 4)), 24, 200);
+            middle.push_back(sub(root, mul(normal, depth)));
+            wide.push_back(half * within(zigzag ? 1.0 : 1.1, length));
+            for (int i = 0; i <= steps; ++i) {
                 const double t = static_cast<double>(i) / steps;
                 const double u = 1 - t;
-                left_side.push_back(i == 0 ? left : P{u * u * left.x + 2 * u * t * bend_left.x + t * t * spec.tip.x, u * u * left.y + 2 * u * t * bend_left.y + t * t * spec.tip.y});
-                right_side.push_back(i == 0 ? right : P{u * u * right.x + 2 * u * t * bend_right.x + t * t * spec.tip.x, u * u * right.y + 2 * u * t * bend_right.y + t * t * spec.tip.y});
+                const double w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+                middle.push_back({w0 * root.x + w1 * c1.x + w2 * c2.x + w3 * spec.tip.x, w0 * root.y + w1 * c1.y + w2 * c2.y + w3 * spec.tip.y});
+                // (full at the root, slimming evenly to a point; a zigzag's sides step in and out)
+                double width = half * static_cast<double>(libm::powf(static_cast<float>(u), 1.1f));
+                if (zigzag && i > 0) width = half * u * (i % 2 != 0 ? 1.6 : 0.55);
+                wide.push_back(i == steps ? 0.0 : width);
             }
         }
+        // its two sides: the middle line's points moved across it by the width there (a bend's corner mitred)
+        const std::size_t count = middle.size();
+        for (std::size_t i = 0; i + 1 < count; ++i) {
+            const P before = unit(sub(middle[i], middle[i == 0 ? 0 : i - 1]));
+            const P after = unit(sub(middle[i + 1], middle[i]));
+            const P run = i == 0 ? after : unit(add(before, after));
+            const double cosine = i == 0 ? 1.0 : dot(run, after);
+            const double scale = std::min(2.5, 1 / std::max(0.4, cosine));
+            const P across = mul(inward(run), wide[i] * scale);
+            left_side.push_back(add(middle[i], across));
+            right_side.push_back(sub(middle[i], across));
+        }
+        left_side.push_back(spec.tip);
+        right_side.push_back(spec.tip);
+        // where its sides leave the balloon's outline: the two ends of its base
+        left = first_meeting(left_side, outline, lengths);
+        right = first_meeting(right_side, outline, lengths);
+        if (!left.found || !right.found) break;
+        const double across = distance(left.at, right.at);
+        if (across < 1e-6 || std::fabs(across - 2 * asked) <= 0.01 * asked) break;
+        half = std::clamp(half * (2 * asked / across), asked * 0.5, asked);
     }
-    // the shape: the base's two ends reach into the balloon (out of it, for a notch), not part of the outline
-    const double depth = std::max(1.0, spec.depth);
-    const P away = mul(into, notch ? -depth : depth);
+
     Shape& shape = out.shape;
     shape.cut = notch;
-    shape.points.push_back(add(left, away));
-    for (const P& p : left_side) shape.points.push_back(p);
-    shape.points.push_back(spec.tip);
-    for (std::size_t i = right_side.size(); i-- > 0;) shape.points.push_back(right_side[i]);
-    shape.points.push_back(add(right, away));
+    for (const P& p : left_side) push(shape.points, p);
+    for (std::size_t i = right_side.size() - 1; i-- > 0;) push(shape.points, right_side[i]);
     shape.stroke.assign(shape.points.size(), 1);
-    shape.stroke.front() = 0;                          // (from inside the balloon to the base's left end)
-    shape.stroke[shape.points.size() - 2] = 0;         // (from the base's right end back inside)
-    shape.stroke.back() = 0;                           // (across, inside)
+    shape.stroke.back() = 0;  // (across its base, inside the balloon: not part of the outline)
 
-    // the rounded joins: a patch in each notch between the balloon's outline and the tail's side
-    const bool joined = spec.fillet > 0.5 && !notch && !bent && !spec.bolt && spec.kind != "zigzag";
-    if (joined) {
-        const double inset = std::max(1.5, spec.fillet * 0.35);
-        const auto join = [&](const Contour& side, P corner, double from, double way) {
-            double side_length = 0.0;
-            for (std::size_t i = 0; i + 1 < side.size(); ++i) side_length += distance(side[i], side[i + 1]);
-            // (the point `reach` along the tail's side from the corner, and the side's direction there)
-            const auto along_side = [&](double reach, P& direction) {
-                double walked = 0.0;
-                direction = unit(sub(side.size() > 1 ? side[1] : spec.tip, side[0]));
-                for (std::size_t i = 0; i + 1 < side.size(); ++i) {
-                    const double span = distance(side[i], side[i + 1]);
-                    direction = unit(sub(side[i + 1], side[i]));
-                    if (walked + span >= reach) return lerp(side[i], side[i + 1], span > 0 ? (reach - walked) / span : 0.0);
-                    walked += span;
-                }
-                return side.back();
-            };
-            // (a sharp notch — a tail leaning along the balloon — is rounded further than a blunt one)
-            P unused;
-            const double sharp = sharpness(unit(sub(point_at(guide, lengths, from + way * spec.fillet), corner)),
-                                           unit(sub(along_side(std::min(spec.fillet, side_length * 0.4), unused), corner)));
-            const double reach_side = std::min(spec.fillet * sharp, side_length * 0.45);
-            const double reach_body = std::min(spec.fillet * sharp, total * 0.12);
-            if (reach_side < 0.5 || reach_body < 0.5) return;
-            P side_direction;
-            const P on_side = along_side(reach_side, side_direction);
-            const P on_body = point_at(guide, lengths, from + way * reach_body);
-            const P body_direction = direction_at(guide, lengths, from + way * reach_body);
-            const P body_in = clockwise ? inward(body_direction) : mul(inward(body_direction), -1.0);
-            // (the tail's inside, across its side: toward its other side)
-            P tail_in = inward(side_direction);
-            if (dot(tail_in, sub(middle, corner)) < 0) tail_in = mul(tail_in, -1.0);
-            out.joins.push_back(patch(corner, on_body, body_in, mul(body_direction, -way), on_side, tail_in, mul(side_direction, -1.0), inset));
-        };
-        join(left_side, left, at - half, -1.0);
-        join(right_side, right, at + half, 1.0);
-    }
+    if (left.found) out.left = left.at;
+    if (right.found) out.right = right.at;
+    if (notch || !(spec.fillet > 0.5) || inside(outline, spec.tip)) return out;  // (a tip inside its balloon: nothing to join)
+
+    // the joins: the notch between the outline and each side rounded a little, from the outline round to the side,
+    // leaving both along their own directions. The outline itself is as it was everywhere else.
+    const double total = lengths.back();
+    const auto join = [&](const Contour& side, const Contour& other, const Meeting& met, const Meeting& far_side) {
+        if (!met.found) return;
+        // (the way along the outline that leads away from the tail)
+        double way = 1.0;
+        if (far_side.found) {
+            double gap = std::fmod(met.s - far_side.s, total);
+            if (gap > total / 2) gap -= total;
+            if (gap < -total / 2) gap += total;
+            way = gap < 0 ? -1.0 : 1.0;
+        }
+        const double on_outline = smooth_reach(outline, lengths, met.s, way, spec.fillet);
+        const double on_tail = corner_free(side, met.segment, met.along, spec.fillet);
+        P side_direction;
+        const P on_side = point_along(side, met.segment, met.along, on_tail, side_direction);
+        if (on_outline < 0.5 || on_tail < 0.5) return;
+        const P on_body = point_at(outline, lengths, met.s + way * on_outline);
+        const P body_direction = direction_at(outline, lengths, met.s + way * on_outline);
+        const P body_in = shoelace(outline) > 0 ? inward(body_direction) : mul(inward(body_direction), -1.0);
+        // (the tail's inside, across its side: toward its other side)
+        P tail_in = inward(side_direction);
+        const std::size_t opposite = std::min(met.segment + 1, other.size() - 1);
+        if (dot(tail_in, sub(other[opposite], side[std::min(met.segment + 1, side.size() - 1)])) < 0) tail_in = mul(tail_in, -1.0);
+        out.joins.push_back(patch(met.at, on_body, body_in, mul(body_direction, -way), on_side, tail_in, mul(side_direction, -1.0),
+                                  std::max(1.0, std::min(on_outline, on_tail) * 0.35)));
+    };
+    join(left_side, right_side, left, right);
+    join(right_side, left_side, right, left);
     return out;
 }
 
@@ -987,6 +1082,34 @@ std::vector<Shape> dashed(const std::vector<Shape>& shapes, double on, double of
     return out;
 }
 
+namespace {
+
+// Whether a strip `reach` either side of a run would fold over itself: somewhere the run turns so tightly that the
+// strip's inner edge would run backwards (what its two bends take of a segment, reach × tan of half each turn, is more
+// than the segment). A bend too sharp for a mitre is not counted: it has its own round join.
+bool folds(const Contour& points, bool closed, double reach) {
+    const std::size_t n = points.size();
+    if (n < 3) return false;
+    std::vector<double> taken(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!closed && (i == 0 || i + 1 == n)) continue;
+        const P n0 = inward(unit(sub(points[i], points[(i + n - 1) % n])));
+        const P n1 = inward(unit(sub(points[(i + 1) % n], points[i])));
+        const P sum = add(n0, n1);
+        const double length = hyp(sum.x, sum.y);
+        const double cosine = length > 1e-9 ? dot(mul(sum, 1 / length), n0) : 0.0;
+        if (cosine * kMitre < 1.0) continue;
+        taken[i] = reach * std::sqrt(std::max(0.0, 1 - cosine * cosine)) / cosine;
+    }
+    const std::size_t segments = closed ? n : n - 1;
+    for (std::size_t i = 0; i < segments; ++i) {
+        if (taken[i] + taken[(i + 1) % n] > distance(points[i], points[(i + 1) % n]) * 0.9) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int height, bool round_ends) {
     std::vector<std::vector<path_raster::XY>> pieces;
     if (!(reach > 0)) return rendered(path_raster::Rasterizer(), width, height);
@@ -1006,6 +1129,44 @@ Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int he
         if (run.closed && points.size() > 2 && distance(points.front(), points.back()) < 1e-9) points.pop_back();
         const std::size_t n = points.size();
         if (n < 2) continue;
+        if (folds(points, run.closed, reach)) {
+            // (a run that turns tighter than the ribbon is wide — a bubble smaller than its line, a corner rounder than
+            // the line is thick: a strip would fold over itself there and leave a hole. Each of its segments is its
+            // own box and each bend's outer side its own wedge, all the same way round: their union has no fold.)
+            const auto piece = [&](Contour made) {
+                if (std::fabs(shoelace(made)) < 1e-12) return;
+                if (shoelace(made) > 0) std::reverse(made.begin(), made.end());
+                pieces.push_back(as_xy(made));
+            };
+            const std::size_t segments = run.closed ? n : n - 1;
+            for (std::size_t i = 0; i < segments; ++i) {
+                const P a = points[i];
+                const P b = points[(i + 1) % n];
+                const P across = mul(inward(unit(sub(b, a))), reach);
+                piece({add(a, across), add(b, across), sub(b, across), sub(a, across)});
+            }
+            for (std::size_t i = 0; i < n; ++i) {
+                if (!run.closed && (i == 0 || i + 1 == n)) continue;
+                const P here = points[i];
+                const P to = unit(sub(points[(i + 1) % n], here));
+                const P n0 = inward(unit(sub(here, points[(i + n - 1) % n])));
+                const P n1 = inward(to);
+                const P sum = add(n0, n1);
+                const double length = hyp(sum.x, sum.y);
+                const double cosine = length > 1e-9 ? dot(mul(sum, 1 / length), n0) : 0.0;
+                if (cosine * kMitre < 1.0) {
+                    disc(here);
+                    continue;
+                }
+                const double side = dot(n0, to) > 0 ? -1.0 : 1.0;  // (the bend's outer side)
+                piece({here, add(here, mul(n0, side * reach)), add(here, mul(sum, side * reach / (length * cosine))), add(here, mul(n1, side * reach))});
+            }
+            if (round_ends && !run.closed) {
+                if (run.cut_first) disc(points.front());
+                if (run.cut_last) disc(points.back());
+            }
+            continue;
+        }
         // a strip along the run: its left edge forward, its right edge back — the same way round whatever way the
         // run turns, so the strips of a group are one union under the non-zero rule
         Contour left, right;

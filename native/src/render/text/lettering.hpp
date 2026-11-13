@@ -33,16 +33,20 @@ std::int64_t px(double mm, int dpi);
 // _inner(kind, w, h, pad, depth): the room for the words inside the shape (`corner`: a rounded balloon's corner in px,
 // style.corner_mm; negative: its usual one).
 std::pair<double, double> inner(std::string_view kind, double w, double h, double pad, const core::Json& depth, double corner = -1.0);
-// hug_power(kind, st) and _hug_keep(kind, st): the oval the letters are kept in — its power (2.6 for speech, thought
-// and whisper: fuller than an ellipse; 2 for the others, and for a line with hand: false or a wobble, as before) and
-// the share of the box it takes (a burst's valleys; core::kOvalRoom for the fuller oval, which the true ellipse of the
-// box then holds — fukidashi@1, SPEC BALLOON-01; 1 otherwise). A balloon sized for its words is the smallest such
-// oval round them, over the share (app/lettering, service/letter).
+// hug_power(kind, st) and _hug_keep(kind, st), for a balloon sized for its words (app/lettering, service/letter): the
+// smallest oval of that power round the words, over the share, is the balloon's box. The power: 2.6 for speech,
+// thought and whisper (the letters' oval, fuller than an ellipse), 2 for the others and for a line with hand: false
+// or a wobble. The share: a burst's valleys; for the fuller oval core::kOvalRoom — 0.955 of the letters' box, which is
+// 1 / 1.035 of the balloon's (fukidashi@1, SPEC BALLOON-01: the balloon's true ellipse holds the letters' oval); 1
+// otherwise.
 double hug_power(std::string_view kind, const core::Json& st);
 double hug_keep(std::string_view kind, const core::Json& st);
-// The share for the letters of a line that is there: `drawn_by_hand` (the line has a hand-drawn outline, whose box did
-// not grow when the book was read — core/fukidashi.hpp) keeps the fuller oval at 0.955 of its box, as it was.
-double fit_keep(std::string_view kind, const core::Json& st, bool drawn_by_hand);
+// The box a line's letters are set in (mm): the line's own (its w or 40, its h or 20), but an oval's letters in their
+// own box inside it (core::letter_box — for an oval grown from a book of before, the box it had there).
+struct LettersBox {
+    double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+};
+LettersBox letters_box(const core::StoryLine& line);
 // fukidashi@1: how far out of a shape a point lies — 1 on its edge, less inside — the shape about its middle, half
 // sizes a × b: a capsule, or a convex outline given about its middle (a polygon's); an ellipse otherwise.
 double shape_gauge(std::string_view kind, double x, double y, double a, double b, const std::vector<std::array<double, 2>>* outline = nullptr);

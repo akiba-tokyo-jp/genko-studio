@@ -111,7 +111,6 @@ Face collection_face(Face f, const Json& index) {
 // float(value or fallback)
 double float_or(const Json& value, double fallback) { return core::py_truthy(value) ? core::to_float(value) : fallback; }
 std::string kind_of(const core::StoryLine& line) { return line.balloon.empty() ? std::string("speech") : line.balloon; }
-double mm_or(const core::Num& value, double fallback) { return value.truthy() ? value.value() : fallback; }
 
 Image blank(std::int64_t w, std::int64_t h) {
     return Image::create("RGBA", {static_cast<int>(w), static_cast<int>(h)}, Ink{0, 0, 0, 0});
@@ -1420,6 +1419,11 @@ bool hand_drawn(const Json& st) {
 
 double hug_power(std::string_view kind, const Json& st) { return one_of(kind, kUneven) && hand_drawn(st) ? kHandPower : 2.0; }
 
+LettersBox letters_box(const core::StoryLine& line) {
+    const std::array<double, 4> box = core::letter_box(line);
+    return {box[0], box[1], box[2] != 0 ? box[2] : 40.0, box[3] != 0 ? box[3] : 20.0};  // (line.w_mm or 40, line.h_mm or 20)
+}
+
 double hug_keep(std::string_view kind, const Json& st) {
     if (kind == "shout") {
         const Json& depth = at(st, "spike_depth");
@@ -1427,13 +1431,6 @@ double hug_keep(std::string_view kind, const Json& st) {
     }
     if (one_of(kind, kUneven) && hand_drawn(st)) return core::kOvalRoom;
     return 1.0;
-}
-
-double fit_keep(std::string_view kind, const Json& st, bool drawn_by_hand) {
-    // (a balloon drawn by hand — a path — keeps its box when a book of before is read: its letters' oval is 0.955 of
-    // it, as it was)
-    if (drawn_by_hand && one_of(kind, kUneven) && hand_drawn(st)) return 0.955;
-    return hug_keep(kind, st);
 }
 
 double shape_gauge(std::string_view kind, double x, double y, double a, double b, const std::vector<std::array<double, 2>>* outline) {
@@ -1652,10 +1649,11 @@ RubyPlaces ruby_places(const core::StoryLine& line, int dpi, const std::optional
     const Json& rotate = at(st, "rotate_deg");
     if (core::py_truthy(rotate) && std::fabs(core::to_float(rotate)) > 0.01) out.exact = false;  // (its group drawn turned)
     // where the lettering's top left lies on the page (as paint_text puts it)
-    const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);
-    const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
-    const double cx = static_cast<double>(x) + static_cast<double>(px(mm_or(line.w_mm, 40), dpi)) / 2;
-    const double cy = static_cast<double>(y) + static_cast<double>(px(mm_or(line.h_mm, 20), dpi)) / 2;
+    const LettersBox box = letters_box(line);
+    const std::int64_t x = px(box.x + float_or(at(st, "text_dx_mm"), 0), dpi);
+    const std::int64_t y = px(box.y + float_or(at(st, "text_dy_mm"), 0), dpi);
+    const double cx = static_cast<double>(x) + static_cast<double>(px(box.w, dpi)) / 2;
+    const double cy = static_cast<double>(y) + static_cast<double>(px(box.h, dpi)) / 2;
     const bool corner = kind_of(line) == "none";
     const auto left = static_cast<double>(corner ? x : core::py_round_int(cx + layout.corner_x));
     const auto top = static_cast<double>(corner ? y : core::py_round_int(cy + layout.corner_y));
@@ -1743,8 +1741,9 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const Json spec = core::py_truthy(font_value) ? font_value : (kind == "sfx" || !font_path ? Json() : Json(*font_path));
     const Face face = face_of(spec, kind == "sfx" ? kDefaultSfx : kDefaultDialogue);
     const Rgb fill = fill_of(st);
-    const std::int64_t w = px(mm_or(line.w_mm, 40), dpi);
-    const std::int64_t h = px(mm_or(line.h_mm, 20), dpi);
+    // (the box the letters are set in: the line's own — an oval's letters in their own box inside it, fukidashi@1)
+    const std::int64_t w = px(letters_box(line).w, dpi);
+    const std::int64_t h = px(letters_box(line).h, dpi);
     const bool vertical = line.wrap == "vertical";
     const bool tcy = core::py_truthy(at(st, "tcy"));
     std::int64_t em = 0;
@@ -1835,17 +1834,17 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             throw core::Error("image_too_large", "the text is too large to set at this resolution");
     }
     const bool hug = shape.empty() && one_of(kind, kHugged);
-    const bool by_hand = line.path && !line.path->empty();  // (a balloon drawn by hand: its outline, its box their bounds)
-    const double keep = hug ? fit_keep(kind, st, by_hand) : 1.0;
-    const double power = hug_power(kind, st);
-    // (an oval whose box grew when a book of before was read: the box's pixels are rounded again, by up to one — the
-    // letters' oval is taken a pixel of the box bigger, so it is never smaller than it was: no letter is set smaller)
-    const double spare = hug && !by_hand && keep == core::kOvalRoom ? 1.0 : 0.0;
-    const double oval_w = (static_cast<double>(w) + spare) * keep;
-    const double oval_h = (static_cast<double>(h) + spare) * keep;
+    // (the letters' oval: for speech, thought and whisper the oval it always was — fuller than an ellipse, 0.955 of the
+    // letters' box —, which the true ellipse of the balloon holds; a line with hand: false or a wobble keeps the true
+    // ellipse of its box, as before)
+    const bool fuller = hug && one_of(kind, kUneven) && hand_drawn(st);
+    const double keep = !hug ? 1.0 : fuller ? 0.955 : hug_keep(kind, st);
+    const double power = fuller ? kHandPower : 2.0;
+    const double oval_w = static_cast<double>(w) * keep;
+    const double oval_h = static_cast<double>(h) * keep;
     // (fukidashi@1: a capsule and a polygon hold the letters in their own shape; the ovals and the bursts in an oval)
     const bool shaped = hug && (kind == "capsule" || kind == "polygon");
-    const double corner_px = core::py_truthy(at(st, "corner_mm")) ? core::to_float(at(st, "corner_mm")) / 25.4 * dpi : -1.0;
+    const double corner_px = at(st, "corner_mm").is_number() ? core::to_float(at(st, "corner_mm")) / 25.4 * dpi : -1.0;  // (0: square corners)
     std::vector<std::array<double, 2>> sides_outline;
     if (hug && kind == "polygon") {
         const double a = static_cast<double>(w) / 2, b = static_cast<double>(h) / 2;
@@ -2114,11 +2113,12 @@ Point lettering_at(const core::StoryLine& line, int dpi, double corner_x, double
         const PointD o = shape_origin(line, st, dpi, shape);
         return Point{static_cast<int>(core::py_round_int(o.x + corner_x)), static_cast<int>(core::py_round_int(o.y + corner_y))};
     }
-    const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);
-    const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
+    const LettersBox box = letters_box(line);
+    const std::int64_t x = px(box.x + float_or(at(st, "text_dx_mm"), 0), dpi);
+    const std::int64_t y = px(box.y + float_or(at(st, "text_dy_mm"), 0), dpi);
     if (kind_of(line) == "none") return Point{static_cast<int>(x), static_cast<int>(y)};
-    const double cx = static_cast<double>(x) + static_cast<double>(px(mm_or(line.w_mm, 40), dpi)) / 2;
-    const double cy = static_cast<double>(y) + static_cast<double>(px(mm_or(line.h_mm, 20), dpi)) / 2;
+    const double cx = static_cast<double>(x) + static_cast<double>(px(box.w, dpi)) / 2;
+    const double cy = static_cast<double>(y) + static_cast<double>(px(box.h, dpi)) / 2;
     return Point{static_cast<int>(core::py_round_int(cx + corner_x)), static_cast<int>(core::py_round_int(cy + corner_y))};
 }
 
@@ -2611,10 +2611,11 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
         shape = std::make_shared<const LayoutShape>(LayoutShape{layout->image.width(), layout->image.height(), layout->em, layout->corner_x,
                                                                 layout->corner_y});
     }
-    const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);  // (the words moved inside the balloon)
-    const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
-    const std::int64_t w = px(mm_or(line.w_mm, 40), dpi);
-    const std::int64_t h = px(mm_or(line.h_mm, 20), dpi);
+    const LettersBox set_in = letters_box(line);  // (the letters' own box: an oval's inside its balloon's)
+    const std::int64_t x = px(set_in.x + float_or(at(st, "text_dx_mm"), 0), dpi);  // (the words moved inside the balloon)
+    const std::int64_t y = px(set_in.y + float_or(at(st, "text_dy_mm"), 0), dpi);
+    const std::int64_t w = px(set_in.w, dpi);
+    const std::int64_t h = px(set_in.h, dpi);
     const double cx = static_cast<double>(x) + static_cast<double>(w) / 2;
     const double cy = static_cast<double>(y) + static_cast<double>(h) / 2;
     const std::string kind = kind_of(line);

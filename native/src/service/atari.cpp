@@ -534,7 +534,9 @@ Json assign_frames(const Json& ops, const core::Page& page) {
 Json line_from_input(const Json& item, const core::Page& page, const Json& atari) {
     const std::string text = core::py_strip(py_str(core::py_or(py_get(item, "text"), Json(""))));
     if (text.empty()) throw core::PyValueError("text が空");
-    std::string balloon = py_str(core::py_or(py_get(item, "balloon"), Json("speech")));
+    const Json said = py_get(item, "balloon");  // (none, or empty: a spoken line, its shape by its words when it is measured)
+    const bool kind_given = py_truthy(said);
+    std::string balloon = kind_given ? py_str(said) : std::string("speech");
     double x = 0, y = 0, w = 0, h = 0;
     if (core::truthy_at(item, "box01")) {
         if (!py_truthy(atari)) throw core::PyValueError("box01 はアタリの画像の中の位置。アタリが無いページでは x_mm, y_mm を使う");
@@ -555,7 +557,8 @@ Json line_from_input(const Json& item, const core::Page& page, const Json& atari
                 if (nl == std::string::npos) break;
                 start = nl + 1;
             }
-            balloon = letter::shape_for(breaks, balloon);  // (fukidashi@1: a tall line of one or two columns in a capsule)
+            // (fukidashi@1: a line that says no kind, one tall column, in a capsule; a kind that is said is kept)
+            if (!kind_given) balloon = letter::shape_for(breaks, Json());
             const auto measured = letter::measure(breaks, balloon);
             w = measured[0], h = measured[1];
         } else {

@@ -1,0 +1,351 @@
+{
+ "old_book": [
+  [
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「今日はいい天気」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     14.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L1"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「今日はいい天気」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     49.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L5"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「今日はいい天気」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     84.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L9"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「今日はいい天気」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     119.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L13"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「そうだね」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     154.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L17"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「そうだね」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     189.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L21"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「そうだね」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     224.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L25"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「手描き」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     259.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L29"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 1,
+    "message": "台詞「なめらか」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     60.0,
+     259.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L30"
+    }
+   }
+  ],
+  [],
+  [
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「よこがきです」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     14.0,
+     44.0,
+     24.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L56"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「よこがきです」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     156.0,
+     14.0,
+     44.0,
+     24.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L59"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「よこがきです」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     49.0,
+     44.0,
+     24.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L60"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「よこがきです」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     156.0,
+     49.0,
+     44.0,
+     24.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L63"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「よこがきです」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     84.0,
+     44.0,
+     24.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L64"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「たてに長いフキダシ」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     125.0,
+     26.0,
+     44.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L68"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「長い台詞をそのまま入れて折り…」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     196.0,
+     30.0,
+     44.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L70"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「長い台詞をそのまま入れて折り…」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     12.0,
+     246.0,
+     30.0,
+     36.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L74"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_too_small",
+    "page": 3,
+    "message": "台詞「長い台詞をそのまま入れて折り…」の文字が 2.4 mm まで小さくなっている（フキダシを大きくするか、文を短く）",
+    "box": [
+     60.0,
+     246.0,
+     24.0,
+     36.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L75"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 3,
+    "message": "台詞「長い台詞をそのまま入れて折り…」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     108.0,
+     246.0,
+     30.0,
+     44.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "L76"
+    }
+   }
+  ],
+  []
+ ],
+ "old_book2": [
+  [],
+  [
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 2,
+    "message": "台詞「仕上がりのきわ」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     166.7,
+     30.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "Q1"
+    }
+   },
+   {
+    "level": "warning",
+    "code": "text_outside_frame",
+    "page": 2,
+    "message": "台詞「手描きでない」が基本枠の外にある（裁ちずれで切れるおそれ）",
+    "box": [
+     166.7,
+     170.0,
+     40.0,
+     30.0
+    ],
+    "target": {
+     "kind": "line",
+     "id": "Q6"
+    }
+   }
+  ]
+ ]
+}

@@ -24,6 +24,7 @@
 
 #include "core/fukidashi.hpp"
 #include "core/model.hpp"
+#include "formats/checks.hpp"
 #include "formats/pillow_save.hpp"
 #include "fukidashi_books.hpp"
 #include "render/page.hpp"
@@ -87,7 +88,9 @@ double plane_at(const clean::Plane& plane, double x, double y) {  // (between th
     return (v(x0, y0) * (1 - tx) + v(x0 + 1, y0) * tx) * (1 - ty) + (v(x0, y0 + 1) * (1 - tx) + v(x0 + 1, y0 + 1) * tx) * ty;
 }
 
-std::filesystem::path old_book_dir() { return std::filesystem::path(genko::test::test_data("fukidashi/old_book").toStdString()); }
+std::filesystem::path old_book_dir(const QString& name = QStringLiteral("old_book")) {
+    return std::filesystem::path(genko::test::test_data(QStringLiteral("fukidashi/") + name).toStdString());
+}
 
 Json payload_of(const Document& doc) {
     QTemporaryDir dir;
@@ -234,13 +237,15 @@ private slots:
         }
     }
 
-    // A tail leaves the balloon from its outline: the two ends of its base lie on it, the base as wide as asked along it;
-    // rounded, the join's curve begins on the outline too.
+    // A tail leaves the balloon from its outline: the two ends of its base lie on it, either side of its root (where the
+    // line from the balloon's middle to the tip leaves the outline) and as far from it as each other, the base as wide
+    // as asked; rounded, each join's curve begins on the outline and ends on the tail's side, a small one.
     void aTailLeavesFromTheOutline() {
         const clean::Box box{100, 100, 500, 400};
         const clean::P centre{300, 250};
-        for (const clean::Contour& outline : {clean::ellipse(box), clean::rounded(box, 90.0), clean::rounded(box, 0.0)}) {
+        for (const clean::Contour& outline : {clean::ellipse(box), clean::rounded(box, 90.0), clean::rounded(box, 150.0)}) {
             const std::vector<double> lengths = clean::lengths_of(outline);
+            const double total = lengths.back();
             const auto off_outline = [&](clean::P p) {
                 double best = 1e9;
                 for (std::size_t i = 0; i < outline.size(); ++i) {
@@ -251,54 +256,214 @@ private slots:
                 }
                 return best;
             };
-            for (const clean::P tip : {clean::P{620, 520}, clean::P{300, 20}, clean::P{-40, 300}, clean::P{560, 250}}) {
-                clean::TailSpec spec;
-                spec.tip = tip;
-                spec.base = 90.0;
-                spec.fillet = 24.0;
-                spec.depth = 40.0;
-                const clean::Tail tail = clean::tail(outline, centre, spec);
-                QVERIFY(off_outline(tail.left) < 1e-6);
-                QVERIFY(off_outline(tail.right) < 1e-6);
-                // (the base's ends are the tail's own points: its sides begin there)
-                const auto has = [&](clean::P p) {
-                    return std::any_of(tail.shape.points.begin(), tail.shape.points.end(), [&](clean::P q) { return std::hypot(p.x - q.x, p.y - q.y) < 1e-9; });
-                };
-                QVERIFY(has(tail.left) && has(tail.right));
-                // (as wide as asked, along the outline: the way from one end to the other past where the tail faces)
-                const double at = clean::facing(outline, lengths, centre, tip);
-                QVERIFY(std::hypot(clean::point_at(outline, lengths, at - 45).x - tail.left.x, clean::point_at(outline, lengths, at - 45).y - tail.left.y) < 1e-6);
-                QVERIFY(std::hypot(clean::point_at(outline, lengths, at + 45).x - tail.right.x, clean::point_at(outline, lengths, at + 45).y - tail.right.y) < 1e-6);
-                // (two joins, each a curve from the outline to the tail's side; only the curve is part of the line)
-                QCOMPARE(tail.joins.size(), std::size_t{2});
-                for (const clean::Shape& join : tail.joins) {
-                    std::size_t first = join.stroke.size(), last = 0;
-                    for (std::size_t i = 0; i < join.stroke.size(); ++i) {
-                        if (!join.stroke[i]) continue;
-                        first = std::min(first, i);
-                        last = std::max(last, i + 1);
+            for (const clean::P tip : {clean::P{620, 520}, clean::P{300, 20}, clean::P{-40, 300}, clean::P{560, 250}, clean::P{300, 560}, clean::P{40, 60}}) {
+                for (const bool bent : {false, true}) {
+                    clean::TailSpec spec;
+                    spec.tip = tip;
+                    spec.base = 80.0;
+                    spec.fillet = 12.0;
+                    spec.depth = 40.0;
+                    if (bent) {
+                        spec.has_via = true;
+                        // (a bend handle outside the balloon, off the straight way to the tip)
+                        const double away = std::hypot(tip.x - centre.x, tip.y - centre.y);
+                        spec.via = {centre.x + (tip.x - centre.x) * 0.85 - (tip.y - centre.y) / away * 30, centre.y + (tip.y - centre.y) * 0.85 + (tip.x - centre.x) / away * 30};
+                        QVERIFY(!clean::inside(outline, spec.via));
                     }
-                    QVERIFY(first < last);
-                    QVERIFY(off_outline(join.points[first]) < 1e-6);
-                    QVERIFY(off_outline(join.points[last % join.points.size()]) > 1.0);
+                    const clean::Tail tail = clean::tail(outline, outline, centre, spec);
+                    QVERIFY(off_outline(tail.left) < 1e-6);
+                    QVERIFY(off_outline(tail.right) < 1e-6);
+                    // (the root, and the base's two ends along the outline from it: half the width each way, the same)
+                    const double root = clean::facing(outline, lengths, centre, bent ? spec.via : tip);
+                    const auto along = [&](clean::P p) {  // (how far along the outline from the root, the short way)
+                        double best = 1e9, where = 0.0;
+                        for (double d = -80; d <= 80; d += 0.05) {
+                            const clean::P q = clean::point_at(outline, lengths, root + d);
+                            const double off = std::hypot(p.x - q.x, p.y - q.y);
+                            if (off < best) best = off, where = d;
+                        }
+                        return where;
+                    };
+                    const double left = along(tail.left), right = along(tail.right);
+                    QVERIFY2(left * right < 0, qPrintable(QStringLiteral("%1 %2").arg(left).arg(right)));
+                    // (the sides are the same distance from the tail's middle line; along an outline that turns under one of
+                    // them and runs straight under the other, that is a few px more on the one)
+                    QVERIFY2(std::fabs(std::fabs(left) - std::fabs(right)) <= 3.2,
+                             qPrintable(QStringLiteral("tip %1, %2 bent %3: %4 %5").arg(tip.x).arg(tip.y).arg(bent).arg(left).arg(right)));
+                    // (as wide as asked, measured straight across between the two ends of its base: along the outline, which
+                    // bows between them, a little more)
+                    QVERIFY2(std::fabs(std::hypot(tail.left.x - tail.right.x, tail.left.y - tail.right.y) - 80.0) <= 0.8, qPrintable(QString::number(std::hypot(tail.left.x - tail.right.x, tail.left.y - tail.right.y))));
+                    QVERIFY2(std::fabs(left) + std::fabs(right) >= 80.0 - 1.0 && std::fabs(left) + std::fabs(right) <= 80.0 * 1.05,
+                             qPrintable(QStringLiteral("tip %1, %2 bent %3: %4 %5").arg(tip.x).arg(tip.y).arg(bent).arg(left).arg(right)));
+                    QVERIFY(total > 0);
+                    // (two joins, each a curve from the outline to the tail's side; only the curve is part of the line; small:
+                    // no further along the outline than asked)
+                    QVERIFY2(tail.joins.size() == 2, qPrintable(QStringLiteral("tip %1, %2 bent %3: %4 joins of an outline of %5").arg(tip.x).arg(tip.y).arg(bent).arg(tail.joins.size()).arg(outline.size())));
+                    for (const clean::Shape& join : tail.joins) {
+                        std::size_t first = join.stroke.size(), last = 0;
+                        for (std::size_t i = 0; i < join.stroke.size(); ++i) {
+                            if (!join.stroke[i]) continue;
+                            first = std::min(first, i);
+                            last = std::max(last, i + 1);
+                        }
+                        QVERIFY(first < last);
+                        QVERIFY(off_outline(join.points[first]) < 1e-6);
+                        QVERIFY2(off_outline(join.points[last % join.points.size()]) > 1.0,
+                                 qPrintable(QStringLiteral("tip %1, %2 bent %3: %4").arg(tip.x).arg(tip.y).arg(bent).arg(off_outline(join.points[last % join.points.size()]))));
+                        const double reach = std::min(std::hypot(join.points[first].x - tail.left.x, join.points[first].y - tail.left.y),
+                                                      std::hypot(join.points[first].x - tail.right.x, join.points[first].y - tail.right.y));
+                        QVERIFY2(reach <= 12.0 + 1e-6, qPrintable(QString::number(reach)));
+                    }
+                    // (without a join: a corner, no shape added)
+                    spec.fillet = 0.0;
+                    QVERIFY(clean::tail(outline, outline, centre, spec).joins.empty());
                 }
             }
         }
     }
 
-    // The join has no corner: along the edge of a balloon with a tail, the line's inner side turns nowhere by more than
-    // a rounded join's share — no pixel of the page between the line and the fill is left white inside the notch, and
-    // the notch's corner pixel itself (where the outline and a tail without a join meet) is inside the fill.
+    // A tail whose tip lies straight out from its root has no bend, and is its own mirror image: each point of its
+    // left side mirrors the point of its right side, to a hair. A tip a hair off either way gives tails that mirror each
+    // other (the bend does not jump from one side to the other).
+    void aTailStraightOutHasNoBend() {
+        const clean::Box box{100, 100, 500, 400};
+        const clean::Contour outline = clean::ellipse(box);
+        const clean::P centre{300, 250};
+        clean::TailSpec spec;
+        spec.base = 70.0;
+        spec.fillet = 10.0;
+        spec.depth = 30.0;
+        const auto mirrored = [&](const clean::Shape& one, const clean::Shape& other, double slack) {
+            // (every point of one, mirrored in the line x = 300, lies on the other's outline)
+            for (const clean::P p : one.points) {
+                const clean::P m{600 - p.x, p.y};
+                double best = 1e9;
+                for (std::size_t i = 0; i < other.points.size(); ++i) {
+                    const clean::P a = other.points[i], b = other.points[(i + 1) % other.points.size()];
+                    const double dx = b.x - a.x, dy = b.y - a.y;
+                    const double t = std::clamp(((m.x - a.x) * dx + (m.y - a.y) * dy) / std::max(1e-12, dx * dx + dy * dy), 0.0, 1.0);
+                    best = std::min(best, std::hypot(m.x - (a.x + dx * t), m.y - (a.y + dy * t)));
+                }
+                if (best > slack) return false;
+            }
+            return true;
+        };
+        for (const double tip_y : {560.0, 430.0, -60.0}) {  // (below, far and near; above)
+            spec.tip = {300, tip_y};
+            const clean::Tail straight = clean::tail(outline, outline, centre, spec);
+            QVERIFY(mirrored(straight.shape, straight.shape, 1e-6));
+            // (outside the balloon — past its root, at y 400 below and y 100 above — never wider than its base: no bend)
+            for (const clean::P p : straight.shape.points) {
+                if (tip_y > 250 ? p.y >= 400.0 : p.y <= 100.0) QVERIFY(std::fabs(p.x - 300) <= 35.0 + 1e-6);
+            }
+            QCOMPARE(straight.joins.size(), std::size_t{2});
+            QVERIFY(mirrored(straight.joins[0], straight.joins[1], 1e-6));
+            spec.tip = {300.4, tip_y};
+            const clean::Tail a = clean::tail(outline, outline, centre, spec);
+            spec.tip = {299.6, tip_y};
+            const clean::Tail b = clean::tail(outline, outline, centre, spec);
+            QVERIFY(mirrored(a.shape, b.shape, 1e-6));
+            QVERIFY(mirrored(a.shape, straight.shape, 1.0));  // (and next to none of a bend)
+        }
+    }
+
+    // The balloon's own outline is as it is without a tail everywhere but at the tail's root: its fill and its line, away
+    // from the tail and its two small joins, are the tail-less balloon's — an oval, a capsule and a rounded box, a tip
+    // eight ways, near and far, straight and bent.
+    void theBodyIsUntouchedAwayFromTheTail_data() {
+        QTest::addColumn<int>("body");
+        QTest::addColumn<bool>("bent");
+        for (const int body : {0, 1, 2}) {
+            for (const bool bent : {false, true}) {
+                QTest::newRow(qPrintable(QStringLiteral("%1%2").arg(body == 0 ? "oval" : body == 1 ? "capsule" : "rounded").arg(bent ? ", bent" : ""))) << body << bent;
+            }
+        }
+    }
+    void theBodyIsUntouchedAwayFromTheTail() {
+        QFETCH(int, body);
+        QFETCH(bool, bent);
+        const int w = 560, h = 480;
+        const clean::Box box = body == 1 ? clean::Box{200, 110, 320, 370} : clean::Box{130, 130, 430, 350};
+        const clean::P centre{box.cx(), box.cy()};
+        const clean::Contour outline = body == 0 ? clean::ellipse(box) : body == 1 ? clean::rounded(box, 60.0) : clean::rounded(box, 66.0);
+        const double width = 8.0, base = 44.0, fillet = 12.0;
+        const std::vector<clean::Shape> alone{clean::whole(outline)};
+        const clean::Plane fill0 = clean::fill_plane(alone, w, h);
+        clean::Plane band0 = clean::ribbon_plane(clean::edge_runs(alone), width, w, h);
+        for (std::size_t i = 0; i < band0.values.size(); ++i) band0.values[i] *= fill0.values[i];
+        const double ways[8][2] = {{0, 1}, {0.7, 0.7}, {1, 0}, {0.7, -0.7}, {0, -1}, {-0.7, -0.7}, {-1, 0}, {-0.7, 0.7}};
+        for (const auto& way : ways) {
+            for (const double reach : {190.0, 235.0}) {
+                clean::TailSpec spec;
+                spec.tip = {centre.x + way[0] * reach, centre.y + way[1] * reach};
+                spec.base = base;
+                spec.fillet = fillet;
+                spec.depth = 30.0;
+                if (bent) {
+                    spec.has_via = true;
+                    spec.via = {centre.x + way[0] * reach * 0.7 - way[1] * 50, centre.y + way[1] * reach * 0.7 + way[0] * 50};
+                }
+                const clean::Tail tail = clean::tail(outline, outline, centre, spec);
+                std::vector<clean::Shape> shapes{clean::whole(outline), tail.shape};
+                for (const clean::Shape& join : tail.joins) shapes.push_back(join);
+                const clean::Plane fill = clean::fill_plane(shapes, w, h);
+                clean::Plane band = clean::ribbon_plane(clean::edge_runs(shapes), width, w, h);
+                for (std::size_t i = 0; i < band.values.size(); ++i) band.values[i] *= fill.values[i];
+                // (near the tail: inside it or its joins, or within the line's width and a little of their edges)
+                std::vector<const clean::Contour*> parts{&tail.shape.points};
+                for (const clean::Shape& join : tail.joins) parts.push_back(&join.points);
+                const auto near_tail = [&](double x, double y) {
+                    for (const clean::Contour* part : parts) {
+                        if (clean::inside(*part, {x, y})) return true;
+                        for (std::size_t i = 0; i < part->size(); ++i) {
+                            const clean::P a = (*part)[i], b = (*part)[(i + 1) % part->size()];
+                            const double dx = b.x - a.x, dy = b.y - a.y;
+                            const double t = std::clamp(((x - a.x) * dx + (y - a.y) * dy) / std::max(1e-12, dx * dx + dy * dy), 0.0, 1.0);
+                            if (std::hypot(x - (a.x + dx * t), y - (a.y + dy * t)) <= width + 2.5) return true;
+                        }
+                    }
+                    return false;
+                };
+                int compared = 0, touched = 0;
+                for (int y = 0; y < h; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        const float f = fill.at(x, y), f0 = fill0.at(x, y), b = band.at(x, y), b0 = band0.at(x, y);
+                        if (std::fabs(f - f0) < 1e-3f && std::fabs(b - b0) < 1e-3f) continue;
+                        if (near_tail(x + 0.5, y + 0.5)) {
+                            ++touched;
+                            continue;
+                        }
+                        QFAIL(qPrintable(QStringLiteral("the balloon differs at %1, %2, away from its tail (toward %3, %4)").arg(x).arg(y).arg(way[0]).arg(way[1])));
+                    }
+                    compared += w;
+                }
+                QVERIFY(touched > 100 && compared > 0);  // (the tail is there)
+                // (and what the joins change of the balloon's own line is small: within the join's reach of the base's ends)
+                const double hold = fillet + width + 3;
+                for (int y = 0; y < h; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        if (fill0.at(x, y) < 0.999f || band0.at(x, y) < 0.999f || band.at(x, y) > 0.5f) continue;  // (the balloon's line, taken away)
+                        if (clean::inside(tail.shape.points, {x + 0.5, y + 0.5})) continue;                           // (under the tail: the way in)
+                        const double off = std::min(std::hypot(x + 0.5 - tail.left.x, y + 0.5 - tail.left.y), std::hypot(x + 0.5 - tail.right.x, y + 0.5 - tail.right.y));
+                        QVERIFY2(off <= hold, qPrintable(QStringLiteral("the balloon's line is gone %1 px from the tail's base at %2, %3").arg(off).arg(x).arg(y)));
+                    }
+                }
+            }
+        }
+    }
+
+    // The join has no corner and nothing else: the joins add the two small notches to the union and the line runs
+    // through each without a break.
     void aRoundedJoinFillsTheNotch() {
         const clean::Box box{100, 100, 500, 400};
         const clean::Contour outline = clean::ellipse(box);
         clean::TailSpec spec;
         spec.tip = {600, 520};
-        spec.base = 100.0;
+        spec.base = 80.0;
         spec.depth = 50.0;
-        const clean::Tail sharp = clean::tail(outline, {300, 250}, spec);
-        spec.fillet = 30.0;
-        const clean::Tail round = clean::tail(outline, {300, 250}, spec);
+        const clean::Tail sharp = clean::tail(outline, outline, {300, 250}, spec);
+        spec.fillet = 14.0;
+        const clean::Tail round = clean::tail(outline, outline, {300, 250}, spec);
         const auto covered = [&](const clean::Tail& tail) {
             std::vector<clean::Shape> shapes{clean::whole(outline), tail.shape};
             for (const clean::Shape& join : tail.joins) shapes.push_back(join);
@@ -307,15 +472,13 @@ private slots:
             for (const float v : fill.values) sum += v;
             return sum;
         };
-        // (the joins add a little to the union — the two notches — and nothing else)
         const double more = covered(round) - covered(sharp);
-        QVERIFY2(more > 20.0 && more < 2 * 30.0 * 30.0, qPrintable(QString::number(more)));
-        // (and the line runs through the join without a break: one run round the whole group)
+        QVERIFY2(more > 4.0 && more < 2 * 14.0 * 14.0, qPrintable(QString::number(more)));
         std::vector<clean::Shape> shapes{clean::whole(outline), round.shape};
         for (const clean::Shape& join : round.joins) shapes.push_back(join);
-        const clean::Plane band = clean::ribbon_plane(clean::edge_runs(shapes), 8.0, 700, 600);
+        const std::vector<clean::Run> runs = clean::edge_runs(shapes);
+        const clean::Plane band = clean::ribbon_plane(runs, 8.0, 700, 600);
         const clean::Plane fill = clean::fill_plane(shapes, 700, 600);
-        // (walking just inside the union's edge near a join, the line is there all the way)
         for (const clean::Shape& join : round.joins) {
             for (std::size_t i = 0; i < join.points.size(); ++i) {
                 if (!join.stroke[i]) continue;
@@ -324,6 +487,33 @@ private slots:
                 QVERIFY(plane_at(fill, p.x, p.y) > 0.2);
             }
         }
+    }
+
+    // A bubble smaller than its line is wide (a thought's last bubble with a thick line): black through and through, no
+    // pin-hole where the line folds over itself.
+    void aBubbleSmallerThanItsLineIsSolid() {
+        for (const double radius : {11.8, 6.0, 3.2, 14.0}) {  // (a 1 mm bubble at 600 dpi; smaller; one just under the 14.2 px line)
+            const std::vector<clean::Shape> shapes{clean::whole(clean::circle({60.3, 59.6}, radius))};
+            const clean::Plane fill = clean::fill_plane(shapes, 120, 120);
+            const clean::Plane ribbon = clean::ribbon_plane(clean::edge_runs(shapes), 14.2, 120, 120);
+            for (int y = 0; y < 120; ++y) {
+                for (int x = 0; x < 120; ++x) {
+                    if (fill.at(x, y) > 0.0f) QVERIFY2(ribbon.at(x, y) > 0.999f, qPrintable(QStringLiteral("r %1 at %2, %3: %4").arg(radius).arg(x).arg(y).arg(ribbon.at(x, y))));
+                }
+            }
+        }
+        // (a box of no size, or none a pixel wide, is nothing: no outline, no NaN)
+        QVERIFY(clean::cloud(clean::Box{10, 10, 10, 10}, 8).empty());
+        for (const clean::Contour& outline : {clean::ellipse(clean::Box{10, 10, 10, 30}), clean::rounded(clean::Box{10, 10, 10, 10}, 3.0), clean::squircle(clean::Box{5, 5, 5, 9}),
+                                             clean::polygon(clean::Box{5, 5, 5, 5}, 8, 1.0), clean::burst(clean::Box{5, 5, 5, 5}, 12, 0.2, 0.0, {}),
+                                             clean::sawtooth(clean::Box{5, 5, 5, 5}, 12, 0.1), clean::cloud(clean::Box{5, 5, 9, 5}, 8)}) {
+            for (const clean::P p : outline) QVERIFY(std::isfinite(p.x) && std::isfinite(p.y));
+            const clean::Plane fill = clean::fill_plane({clean::whole(outline)}, 20, 40);
+            for (const float v : fill.values) QVERIFY(std::isfinite(v) && v == 0.0f);
+        }
+        const Document thin = one_line("cloud", Json{{"w_mm", 0.01}, {"h_mm", 0.01}, {"tail", Json::array({60, 60})}});
+        const Image page = page_picture(thin, 150);
+        QVERIFY(page.width() > 0);
     }
 
     // --- drawn ---------------------------------------------------------------------------------------------------------
@@ -335,6 +525,7 @@ private slots:
         QTest::newRow("600 dpi, the kinds") << 600 << 0;
         QTest::newRow("600 dpi, the tails") << 600 << 1;
         QTest::newRow("150 dpi, the tails") << 150 << 1;
+        QTest::newRow("150 dpi, the other tails and the joined balloons") << 150 << 2;
     }
     void aTileIsThePageCutThere() {
         QFETCH(int, dpi);
@@ -474,6 +665,62 @@ private slots:
         }
     }
 
+    // Two balloons that are the same but for their place are the same pixels; and a balloon whose tail points straight
+    // down (or up) from its middle is its own mirror image on the page, within a level of 255: nothing of a tail leans by
+    // chance. (300 dpi: the box 500..1100 px, its middle 800.)
+    void theSameBalloonIsTheSamePixels() {
+        const auto drawn = [](double x_mm, const Json& tail_by, int dpi) {
+            const Document doc = one_line("speech", Json{{"x_mm", x_mm}, {"w_mm", 50.8}, {"h_mm", 40.64}, {"text", "あ"},
+                                                         {"tails", Json::array({Json{{"to", Json::array({x_mm + 25.4 + tail_by[0].get<double>(), 60.32 + tail_by[1].get<double>()})}}})}});
+            const genko::render::Size size{static_cast<int>(8.5 * dpi), static_cast<int>(5.0 * dpi)};
+            Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+            const genko::render::text::LetterParts balloon_only{true, false, false, false};
+            genko::render::text::clear_balloon_cache();
+            genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+            return page;
+        };
+        for (const Json& by : {Json::array({0.0, 42.0}), Json::array({0.0, -42.0}), Json::array({0.0, 30.0})}) {
+            const Image here = drawn(42.333333333333336, by, 300);   // (500 px)
+            const Image there = drawn(67.73333333333333, by, 300);   // (800 px: 300 px to the right)
+            const genko::render::Box a{400, 0, 1200, here.height()};
+            const genko::render::Box b{700, 0, 1500, there.height()};
+            QVERIFY2(here.crop(a).tobytes() == there.crop(b).tobytes(), by.dump().c_str());
+            const Grey g = grey_of(here.crop(a));
+            int unlike = 0, dark = 0;
+            for (int y = 0; y < g.h; ++y) {
+                for (int x = 0; x < g.w / 2; ++x) {
+                    unlike += std::abs(g.at(x, y) - g.at(g.w - 1 - x, y)) > 1 ? 1 : 0;
+                    dark += g.at(x, y) < 128 ? 1 : 0;
+                }
+            }
+            QVERIFY(dark > 500);
+            QVERIFY2(unlike == 0, qPrintable(QStringLiteral("%1: %2 pixels are not mirrored").arg(QString::fromStdString(by.dump())).arg(unlike)));
+        }
+        // (a tail to the right and the same tail to the left: mirror images of each other)
+        const Grey right = grey_of(drawn(42.333333333333336, Json::array({44.0, 12.0}), 300).crop(genko::render::Box{200, 0, 1400, 1500}));
+        const Grey left = grey_of(drawn(42.333333333333336, Json::array({-44.0, 12.0}), 300).crop(genko::render::Box{200, 0, 1400, 1500}));
+        int unlike = 0;
+        for (int y = 0; y < right.h; ++y) {
+            for (int x = 0; x < right.w; ++x) unlike += std::abs(right.at(x, y) - left.at(right.w - 1 - x, y)) > 1 ? 1 : 0;
+        }
+        QCOMPARE(unlike, 0);
+    }
+
+    // style.corner_mm: 0 is square corners (a rounded balloon with it is a box), not "not set".
+    void aCornerOfZeroIsSquare() {
+        const Image box = page_part(one_line("box"), 300, 30, 30, 70, 60);
+        const Image rounded = page_part(one_line("rounded"), 300, 30, 30, 70, 60);
+        const Image square = page_part(one_line("rounded", Json{{"style", Json{{"corner_mm", 0}}}}), 300, 30, 30, 70, 60);
+        QVERIFY(rounded.tobytes() != box.tobytes());
+        const Grey a = grey_of(square), b = grey_of(box);
+        // (the outline: the corner pixel of the box is line in both — the letters' room differs, so only the edge is held)
+        const int cx = static_cast<int>(std::lround(10 / 25.4 * 300)), cy = cx;
+        QVERIFY(a.at(cx + 1, cy + 1) < 60 && b.at(cx + 1, cy + 1) < 60);
+        QVERIFY(grey_of(rounded).at(cx + 1, cy + 1) > 200);
+        // (and a box takes round corners when it is given some)
+        QVERIFY(grey_of(page_part(one_line("box", Json{{"style", Json{{"corner_mm", 6}}}}), 300, 30, 30, 70, 60)).at(cx + 1, cy + 1) > 200);
+    }
+
     // A tone box keeps its tone: dots inside the frame, about a tenth of it dark, lined up with the page (the same dots
     // in a tile), under the letters.
     void aToneBoxKeepsItsTone() {
@@ -553,112 +800,337 @@ private slots:
     }
 
     // A book of before (no "balloon_geometry"): read, each hand-drawn oval's box is 1.035 times as big about its middle
-    // — and nothing else of any line changes.
+    // — its letters' box (core::letter_box) the box it had, to the last bit —, what it holds from its corner (the balloon
+    // eraser's cuts, the path its letters follow) moved to stay where it was on the page, a border_mm of 0 made the
+    // hairline it drew; and nothing else of any line changes. Both books of before: old_book, old_book2.
+    void aBookOfBeforeGrowsItsOvals_data() {
+        QTest::addColumn<QString>("name");
+        QTest::newRow("old_book") << QStringLiteral("old_book");
+        QTest::newRow("old_book2") << QStringLiteral("old_book2");
+    }
     void aBookOfBeforeGrowsItsOvals() {
-        const Json before = Json::parse(genko::test::read_bytes(QString::fromStdString((old_book_dir() / "project.json").string())));
+        QFETCH(QString, name);
+        const std::filesystem::path dir = old_book_dir(name);
+        const Json before = Json::parse(genko::test::read_bytes(QString::fromStdString((dir / "project.json").string())));
         QVERIFY(!before.contains("balloon_geometry"));
-        const genko::storage::LoadResult read = genko::storage::load_document(old_book_dir());
+        const genko::storage::LoadResult read = genko::storage::load_document(dir);
         QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
         const Document& doc = read.document;
         QCOMPARE(doc.story.size(), before["story"].size());
-        int grown = 0;
+        int grown = 0, moved = 0, hairlines = 0;
         for (std::size_t i = 0; i < doc.story.size(); ++i) {
             const genko::core::StoryLine& line = doc.story[i];
             const Json& was = before["story"][i];
             const std::string kind = was.value("balloon", std::string("speech"));
-            const Json style = was.value("style", Json::object());
+            Json style = was.value("style", Json::object());
+            if (!style.is_object()) style = Json::object();
             const bool oval = kind == "speech" || kind == "thought" || kind == "whisper";
             const bool has_path = was.contains("path") && !was["path"].is_null();
             const bool by_hand = oval && style.value("hand", true) && style.value("wobble", 0.0) == 0.0 && !has_path;
             const double x = was["x_mm"].get<double>(), y = was["y_mm"].get<double>(), w = was["w_mm"].get<double>(), h = was["h_mm"].get<double>();
+            // (the letters' box: the box of before, exactly — whether the balloon's grew or not)
+            const std::array<double, 4> letters = genko::core::letter_box(line);
+            QVERIFY2(letters[0] == x && letters[1] == y && letters[2] == w && letters[3] == h, line.id.c_str());
+            Json want = style;
+            if (want.contains("border_mm") && want["border_mm"] == Json(0.0)) {
+                want["border_mm"] = genko::core::kHairlineMm;
+                ++hairlines;
+            }
             if (!by_hand) {
                 QCOMPARE(line.x_mm.value(), x);
-                QCOMPARE(line.y_mm.value(), y);
                 QCOMPARE(line.w_mm.value(), w);
+                QCOMPARE(line.y_mm.value(), y);
                 QCOMPARE(line.h_mm.value(), h);
             } else {
                 ++grown;
-                QVERIFY(std::fabs(line.w_mm.value() - w * 1.035) < 0.0006);
-                QVERIFY(std::fabs(line.h_mm.value() - h * 1.035) < 0.0006);
-                QVERIFY(std::fabs((line.x_mm.value() + line.w_mm.value() / 2) - (x + w / 2)) < 0.0011);
-                QVERIFY(std::fabs((line.y_mm.value() + line.h_mm.value() / 2) - (y + h / 2)) < 0.0011);
+                QVERIFY(std::fabs(line.w_mm.value() - w * 1.035) < 1e-9);
+                QVERIFY(std::fabs(line.h_mm.value() - h * 1.035) < 1e-9);
+                QVERIFY(std::fabs((line.x_mm.value() + line.w_mm.value() / 2) - (x + w / 2)) < 1e-9);
+                QVERIFY(std::fabs((line.y_mm.value() + line.h_mm.value() / 2) - (y + h / 2)) < 1e-9);
+                // (from its corner: each point as far from the new corner as it is on the page)
+                const double dx = x - line.x_mm.value(), dy = y - line.y_mm.value();
+                const auto shifted = [&](Json points) {
+                    for (Json& point : points) point = Json::array({point[0].get<double>() + dx, point[1].get<double>() + dy});
+                    return points;
+                };
+                const auto close = [](const Json& a, const Json& b) {
+                    if (a.size() != b.size()) return false;
+                    for (std::size_t k = 0; k < a.size(); ++k) {
+                        if (std::fabs(a[k][0].get<double>() - b[k][0].get<double>()) > 1e-9 || std::fabs(a[k][1].get<double>() - b[k][1].get<double>()) > 1e-9) return false;
+                    }
+                    return true;
+                };
+                if (style.contains("text_path")) {
+                    QVERIFY(close(line.style["text_path"], shifted(style["text_path"])));
+                    want["text_path"] = line.style["text_path"];
+                    ++moved;
+                }
+                if (style.contains("cuts")) {
+                    QCOMPARE(line.style["cuts"].size(), style["cuts"].size());
+                    for (std::size_t k = 0; k < style["cuts"].size(); ++k) {
+                        QVERIFY(close(line.style["cuts"][k]["points"], shifted(style["cuts"][k]["points"])));
+                        QCOMPARE(line.style["cuts"][k]["width_mm"], style["cuts"][k]["width_mm"]);
+                    }
+                    want["cuts"] = line.style["cuts"];
+                    ++moved;
+                }
             }
-            // (its words, style and tails as they were)
+            // (its words, tails and the rest of its style as they were)
             QCOMPARE(line.text, was["text"].get<std::string>());
-            QVERIFY(line.style == style);
+            QVERIFY2(line.style == want, (line.id + " " + line.style.dump() + " / " + want.dump()).c_str());
+            QCOMPARE(Json(line.tails), was.value("tails", Json::array()));
         }
-        QVERIFY2(grown >= 30, qPrintable(QString::number(grown)));
+        if (name == QLatin1String("old_book")) {
+            QVERIFY2(grown >= 30, qPrintable(QString::number(grown)));
+        } else {
+            QCOMPARE(grown, 12);
+            QCOMPARE(moved, 4);       // (two lines on a path, two balloons cut)
+            QCOMPARE(hairlines, 4);   // (an oval, a box, a rounded box, an oval that is not hand-drawn)
+        }
     }
 
-    // The letters of a book of before keep their size: every line of the book main 5cf6551a wrote is set at the em it was
-    // set at there, its ink as big, at 150 and at 600 dpi (old_letters.json: recorded from that build).
+    // The letters of a book of before keep their size: every line of the books main 5cf6551a wrote is set at the em it
+    // was set at there, its ink as big, at 150, 350, 600 and 1200 dpi (old_letters.json: recorded from that build's
+    // libraries).
+    void theLettersOfABookOfBeforeKeepTheirSize_data() {
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<int>("dpi");
+        for (const char* name : {"old_book", "old_book2"}) {
+            for (const int dpi : {150, 350, 600, 1200}) QTest::newRow(qPrintable(QStringLiteral("%1 at %2").arg(name).arg(dpi))) << QString::fromLatin1(name) << dpi;
+        }
+    }
     void theLettersOfABookOfBeforeKeepTheirSize() {
-        const Json was = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/old_letters.json"))));
-        const Document doc = genko::storage::load_document(old_book_dir()).document;
+        QFETCH(QString, name);
+        QFETCH(int, dpi);
+        const Json was = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/old_letters.json"))))[name.toStdString()];
+        const Document doc = genko::storage::load_document(old_book_dir(name)).document;
         int checked = 0;
         QStringList unlike;
         for (const genko::core::StoryLine& line : doc.story) {
-            for (const int dpi : {150, 600}) {
-                const Json& old = was[line.id][std::to_string(dpi)];
-                const genko::render::text::Layout layout = genko::render::text::text_layout(line, dpi);
-                const std::array<int, 2> ink = ink_size(layout.image);
-                ++checked;
-                if (layout.em != old["em"].get<std::int64_t>() || ink[0] != old["ink"][0].get<int>() || ink[1] != old["ink"][1].get<int>()) {
-                    unlike << QStringLiteral("%1 (%2) at %3: em %4 ink %5×%6, was em %7 ink %8×%9")
-                                  .arg(QString::fromStdString(line.id), QString::fromStdString(line.balloon)).arg(dpi).arg(layout.em).arg(ink[0]).arg(ink[1])
-                                  .arg(old["em"].get<std::int64_t>()).arg(old["ink"][0].get<int>()).arg(old["ink"][1].get<int>());
-                }
+            if (!was.contains(line.id)) continue;  // (letters on a path: no lettering of their own — held by the page's letters below)
+            const Json& old = was[line.id][std::to_string(dpi)];
+            const genko::render::text::Layout layout = genko::render::text::text_layout(line, dpi);
+            const std::array<int, 2> ink = ink_size(layout.image);
+            ++checked;
+            if (layout.em != old["em"].get<std::int64_t>() || ink[0] != old["ink"][0].get<int>() || ink[1] != old["ink"][1].get<int>()) {
+                unlike << QStringLiteral("%1 (%2): em %3 ink %4×%5, was em %6 ink %7×%8")
+                              .arg(QString::fromStdString(line.id), QString::fromStdString(line.balloon)).arg(layout.em).arg(ink[0]).arg(ink[1])
+                              .arg(old["em"].get<std::int64_t>()).arg(old["ink"][0].get<int>()).arg(old["ink"][1].get<int>());
             }
         }
-        QVERIFY(checked > 150);
+        QVERIFY(checked >= 15);
         QVERIFY2(unlike.isEmpty(), qPrintable(unlike.join(QStringLiteral("\n"))));
     }
 
-    // Saved, the book says its balloons' generation; read again it does not grow twice; and saved again it is the same
-    // bytes. A book of now (made by this build) is read back as it was written.
-    void aBookGrowsOnlyOnce() {
-        const Document first = genko::storage::load_document(old_book_dir()).document;
-        QTemporaryDir dir;
-        const std::filesystem::path saved = std::filesystem::path(dir.path().toStdString()) / "saved";
-        for (const char* name : {"saved", "again", "fresh"}) std::filesystem::create_directories(std::filesystem::path(dir.path().toStdString()) / name);
-        genko::test::write_project(first, saved);
-        const Json payload = Json::parse(genko::test::read_bytes(QString::fromStdString((saved / "project.json").string())));
-        QCOMPARE(payload.value("balloon_geometry", std::int64_t{0}), genko::core::kBalloonGeometry);
-        QVERIFY(!names_feature(payload));  // (nothing of it needs a build of now)
-        const Document second = genko::storage::load_document(saved).document;
-        QCOMPARE(second.story.size(), first.story.size());
-        for (std::size_t i = 0; i < first.story.size(); ++i) {
-            QCOMPARE(second.story[i].x_mm.value(), first.story[i].x_mm.value());
-            QCOMPARE(second.story[i].y_mm.value(), first.story[i].y_mm.value());
-            QCOMPARE(second.story[i].w_mm.value(), first.story[i].w_mm.value());
-            QCOMPARE(second.story[i].h_mm.value(), first.story[i].h_mm.value());
+    // …and are the same pixels at the same places: each page's letters alone (no balloon), drawn on nothing, are the
+    // bytes main 5cf6551a's libraries drew — the letters in ovals that grew, on a path that moved with its box, moved
+    // by text_dx_mm, turned (old_letter_layers.json: the sha256 of each page's letters at 150 and 600 dpi).
+    void theLettersOfABookOfBeforeAreTheSamePixels() {
+        const Json was = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/old_letter_layers.json"))));
+        const genko::render::text::LetterParts only_letters{false, true, true, true};
+        int pages = 0;
+        for (const char* name : {"old_book", "old_book2"}) {
+            const Document doc = genko::storage::load_document(old_book_dir(QString::fromLatin1(name))).document;
+            for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+                const std::vector<const genko::core::StoryLine*> lines = doc.story_for_page(doc.page(i).index);
+                for (const int dpi : {150, 600}) {
+                    genko::render::text::clear_balloon_cache();
+                    const genko::render::Size size = genko::render::render_page(doc.page(i), dpi, {}, &doc).image.size();
+                    Image sheet = Image::create("RGBA", size, genko::render::Ink{0, 0, 0, 0});
+                    genko::render::text::draw_lines(genko::render::text::whole_page(sheet), lines, dpi, std::nullopt, false, nullptr, {}, nullptr, &only_letters);
+                    const std::string want = was[name][std::to_string(i + 1)][std::to_string(dpi)].get<std::string>();
+                    QVERIFY2(genko::storage::sha256_hex(sheet.tobytes()) == want, qPrintable(QStringLiteral("%1 page %2 at %3 dpi").arg(name).arg(i + 1).arg(dpi)));
+                    ++pages;
+                }
+            }
         }
-        const std::filesystem::path again = std::filesystem::path(dir.path().toStdString()) / "again";
-        genko::test::write_project(second, again);
-        QVERIFY(genko::test::read_bytes(QString::fromStdString((again / "project.json").string())) ==
-                genko::test::read_bytes(QString::fromStdString((saved / "project.json").string())));
-        // (the page drawn from the book in memory and from the book saved and read again: the same pixels)
-        QVERIFY(page_picture(first, 150, 1).tobytes() == page_picture(second, 150, 1).tobytes());
+        QCOMPARE(pages, 12);
+    }
+
+    // The checks tell a book of before what they told it: its issues — their codes, lines, words and boxes — are those
+    // main 5cf6551a's libraries reported (old_issues.json), though its ovals' boxes grew: an oval 0.3 mm inside the trim,
+    // 0.4 mm past the frame, two ovals sharing 14 % (the checks measure the letters' box).
+    void theChecksTellABookOfBeforeWhatTheyToldIt() {
+        const Json was = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/old_issues.json"))));
+        for (const char* name : {"old_book", "old_book2"}) {
+            const Document doc = genko::storage::load_document(old_book_dir(QString::fromLatin1(name))).document;
+            for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+                const Json issues = genko::formats::checks::page_issues(doc, doc.page(i));
+                std::string where;
+                QVERIFY2(genko::test::same_content(issues, was[name][i], &where), (std::string(name) + " page " + std::to_string(i + 1) + ": " + where).c_str());
+            }
+        }
+        // (the grown balloons themselves do cross those lines: without the letters' box the book would be told more)
+        const Document doc = genko::storage::load_document(old_book_dir(QStringLiteral("old_book2"))).document;
+        const genko::core::Rect trim = doc.page(1).trim_rect_mm();
+        int past = 0;
+        for (const genko::core::StoryLine& line : doc.story) {
+            if (line.id == "Q1" && line.x_mm.value() + line.w_mm.value() > trim.x.value() + trim.width.value() + 0.01) ++past;
+        }
+        QCOMPARE(past, 1);
+    }
+
+    // The balloon eraser's stroke stays where it went: where the stroke of a book of before crosses the balloon's edge
+    // (as the balloon is drawn now), the line is gone; the same balloon without its cuts has its line there.
+    void aCutStaysWhereItWent() {
+        const std::filesystem::path dir = old_book_dir(QStringLiteral("old_book2"));
+        const Json before = Json::parse(genko::test::read_bytes(QString::fromStdString((dir / "project.json").string())));
+        Document doc = genko::storage::load_document(dir).document;
+        doc.story.erase(std::remove_if(doc.story.begin(), doc.story.end(), [](const genko::core::StoryLine& line) { return line.id != "P3" && line.id != "P4"; }), doc.story.end());
+        Document uncut = doc;
+        for (genko::core::StoryLine& line : uncut.story) line.style.erase("cuts");
+        const int dpi = 300;
+        const Grey cut_page = grey_of(page_picture(doc, dpi));
+        const Grey whole_page = grey_of(page_picture(uncut, dpi));
+        int crossings = 0;
+        for (const Json& was : before["story"]) {
+            const std::string id = was["id"].get<std::string>();
+            if (id != "P3" && id != "P4") continue;
+            const genko::core::StoryLine& line = *std::find_if(doc.story.begin(), doc.story.end(), [&](const genko::core::StoryLine& l) { return l.id == id; });
+            // (the stroke on the page, as the book of before had it: from the corner it had)
+            const double x0 = was["x_mm"].get<double>(), y0 = was["y_mm"].get<double>();
+            const Json& points = was["style"]["cuts"][0]["points"];
+            const double cx = line.x_mm.value() + line.w_mm.value() / 2, cy = line.y_mm.value() + line.h_mm.value() / 2;
+            const double rx = line.w_mm.value() / 2, ry = line.h_mm.value() / 2;
+            const auto level = [&](double x, double y) { return ((x - cx) / rx) * ((x - cx) / rx) + ((y - cy) / ry) * ((y - cy) / ry) - 1; };
+            for (std::size_t k = 0; k + 1 < points.size(); ++k) {
+                const double ax = x0 + points[k][0].get<double>(), ay = y0 + points[k][1].get<double>();
+                const double bx = x0 + points[k + 1][0].get<double>(), by = y0 + points[k + 1][1].get<double>();
+                for (int step = 0; step < 400; ++step) {
+                    const double t0 = step / 400.0, t1 = (step + 1) / 400.0;
+                    const double l0 = level(ax + (bx - ax) * t0, ay + (by - ay) * t0), l1 = level(ax + (bx - ax) * t1, ay + (by - ay) * t1);
+                    if ((l0 < 0) == (l1 < 0)) continue;
+                    // (just inside the edge there: the line's middle)
+                    const double t = l0 < 0 ? t0 : t1;
+                    double px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
+                    px += (cx - px) * 0.012, py += (cy - py) * 0.012;
+                    const int ix = static_cast<int>(px / 25.4 * dpi), iy = static_cast<int>(py / 25.4 * dpi);
+                    QVERIFY2(whole_page.at(ix, iy) < 100, qPrintable(QStringLiteral("%1: no line at %2, %3 without the cut").arg(QString::fromStdString(id)).arg(ix).arg(iy)));
+                    QVERIFY2(cut_page.at(ix, iy) > 230, qPrintable(QStringLiteral("%1: the cut is not at %2, %3").arg(QString::fromStdString(id)).arg(ix).arg(iy)));
+                    ++crossings;
+                }
+            }
+        }
+        QVERIFY2(crossings >= 3, qPrintable(QString::number(crossings)));
+        // (and away from the strokes the balloons are whole: the two pages differ only near them)
+        QVERIFY(cut_page.v != whole_page.v);
+    }
+
+    // A border_mm of 0 drew a hairline before and draws no line now: a book of before keeps its hairline (the line is
+    // made kHairlineMm, one pixel at any resolution), a line of now with 0 has none — and a book of now that has one
+    // says its balloons' generation, so the 0 is not made a hairline when it is read back.
+    void aHairlineOfBeforeStaysAHairline() {
+        Document old = genko::storage::load_document(old_book_dir(QStringLiteral("old_book2"))).document;
+        for (const char* id : {"P5", "P6", "P7", "P8"}) {
+            const genko::core::StoryLine& line = *std::find_if(old.story.begin(), old.story.end(), [&](const genko::core::StoryLine& l) { return l.id == id; });
+            QCOMPARE(line.style["border_mm"], Json(genko::core::kHairlineMm));
+            for (const int dpi : {150, 600}) {
+                // (its outline: dark pixels along its box's left edge at its middle row — one pixel of line, about)
+                Document alone = old;
+                alone.story.erase(std::remove_if(alone.story.begin(), alone.story.end(), [&](const genko::core::StoryLine& l) { return l.id != id; }), alone.story.end());
+                alone.story.front().text = "あ";
+                const Grey g = grey_of(page_part(alone, dpi, line.x_mm.value() - 2, line.y_mm.value() + line.h_mm.value() / 2 - 0.5, 6, 1, 0));
+                int dark = 0;
+                double ink = 0.0;
+                for (int x = 0; x < g.w; ++x) {
+                    dark += g.at(x, g.h / 2) < 160 ? 1 : 0;
+                    ink += (255 - g.at(x, g.h / 2)) / 255.0;
+                }
+                const bool second_line = std::string(id) == "P7";  // (its double line: a second hairline inside)
+                QVERIFY2(dark >= 1 && ink >= 0.75 && ink <= (second_line ? 2.6 : 1.3), qPrintable(QStringLiteral("%1 at %2: %3 dark, %4 of ink").arg(id).arg(dpi).arg(dark).arg(ink)));
+            }
+        }
+        // (a line of now: no line at all with 0)
+        const Document now = one_line("box", Json{{"style", Json{{"border_mm", 0}}}, {"text", "あ"}});
+        const Grey g = grey_of(page_part(now, 600, 38, 59.5, 6, 1));
+        QVERIFY(std::all_of(g.v.begin(), g.v.end(), [](char c) { return static_cast<unsigned char>(c) == 255; }));
+        // (…kept through a save: the book says its generation though it has no oval)
+        const Json payload = payload_of(now);
+        QCOMPARE(payload.value("balloon_geometry", std::int64_t{0}), genko::core::kBalloonGeometry);
+        QTemporaryDir dir;
+        const std::filesystem::path saved = std::filesystem::path(dir.path().toStdString()) / "now";
+        std::filesystem::create_directories(saved);
+        genko::test::write_project(now, saved);
+        QCOMPARE(genko::storage::load_document(saved).document.story.front().style["border_mm"], Json(0.0));
+    }
+
+    // Saved, the book says its balloons' generation; read again it does not grow twice; and saved again it is the same
+    // bytes. A book of now (made by this build) is read back as it was written. What the book says is read in any form
+    // JSON writes a whole number in; what cannot be read opens read-only and grows nothing.
+    void aBookGrowsOnlyOnce() {
+        QTemporaryDir dir;
+        for (const char* name : {"saved", "again", "fresh", "old_book2", "again2"}) std::filesystem::create_directories(std::filesystem::path(dir.path().toStdString()) / name);
+        for (const char* name : {"old_book", "old_book2"}) {
+            const Document first = genko::storage::load_document(old_book_dir(QString::fromLatin1(name))).document;
+            const std::filesystem::path saved = std::filesystem::path(dir.path().toStdString()) / (std::string(name) == "old_book" ? "saved" : "old_book2");
+            genko::test::write_project(first, saved);
+            const Json payload = Json::parse(genko::test::read_bytes(QString::fromStdString((saved / "project.json").string())));
+            QCOMPARE(payload.value("balloon_geometry", std::int64_t{0}), genko::core::kBalloonGeometry);
+            QVERIFY(!names_feature(payload));  // (nothing of it needs a build of now)
+            const Document second = genko::storage::load_document(saved).document;
+            QCOMPARE(second.story.size(), first.story.size());
+            for (std::size_t i = 0; i < first.story.size(); ++i) {
+                QCOMPARE(second.story[i].x_mm.value(), first.story[i].x_mm.value());
+                QCOMPARE(second.story[i].y_mm.value(), first.story[i].y_mm.value());
+                QCOMPARE(second.story[i].w_mm.value(), first.story[i].w_mm.value());
+                QCOMPARE(second.story[i].h_mm.value(), first.story[i].h_mm.value());
+                QVERIFY(second.story[i].style == first.story[i].style);
+            }
+            const std::filesystem::path again = std::filesystem::path(dir.path().toStdString()) / (std::string(name) == "old_book" ? "again" : "again2");
+            genko::test::write_project(second, again);
+            QVERIFY(genko::test::read_bytes(QString::fromStdString((again / "project.json").string())) ==
+                    genko::test::read_bytes(QString::fromStdString((saved / "project.json").string())));
+            // (the page drawn from the book in memory and from the book saved and read again: the same pixels)
+            QVERIFY(page_picture(first, 150, 0).tobytes() == page_picture(second, 150, 0).tobytes());
+        }
+        const std::filesystem::path fresh = std::filesystem::path(dir.path().toStdString()) / "fresh";
 
         // a book of now: its ovals are not grown when it is read back
         const Document now = one_line("speech");
-        const std::filesystem::path fresh = std::filesystem::path(dir.path().toStdString()) / "fresh";
         genko::test::write_project(now, fresh);
         const Document back = genko::storage::load_document(fresh).document;
         QCOMPARE(back.story.front().w_mm.value(), 50.0);
         QCOMPARE(back.story.front().h_mm.value(), 40.0);
         QCOMPARE(back.story.front().x_mm.value(), 40.0);
-        // (a book without an oval says nothing: there is nothing to grow — and nothing is added to what it was saved as)
+        // (a book without an oval or a border of 0 says nothing: there is nothing a book of before is read for)
         QVERIFY(!payload_of(one_line("box")).contains("balloon_geometry"));
         QVERIFY(!payload_of(blank_book()).contains("balloon_geometry"));
         QVERIFY(payload_of(one_line("thought")).contains("balloon_geometry"));
-        // (a book of a later generation keeps what it says)
-        Json later = payload_of(now);
-        later["balloon_geometry"] = 3;
-        const Document read_later = genko::storage::load_document_payload(later, fresh).document;
+        // (what the book says, in any form of a whole number: 2.0 is 2; a later generation is kept)
+        Json said = payload_of(now);
+        said["balloon_geometry"] = 2.0;
+        const genko::storage::LoadResult as_float = genko::storage::load_document_payload(said, fresh);
+        QVERIFY2(as_float.document.read_only_reason.empty(), as_float.document.read_only_reason.c_str());
+        QCOMPARE(as_float.document.story.front().w_mm.value(), 50.0);
+        said["balloon_geometry"] = 3;
+        const Document read_later = genko::storage::load_document_payload(said, fresh).document;
         QCOMPARE(read_later.balloon_geometry, std::int64_t{3});
         QCOMPARE(read_later.story.front().w_mm.value(), 50.0);
         QCOMPARE(payload_of(read_later)["balloon_geometry"].get<std::int64_t>(), std::int64_t{3});
+        // (1, or none: a book of before)
+        said["balloon_geometry"] = 1;
+        QCOMPARE(genko::storage::load_document_payload(said, fresh).document.story.front().w_mm.value(), 51.75);
+        said.erase("balloon_geometry");
+        QCOMPARE(genko::storage::load_document_payload(said, fresh).document.story.front().w_mm.value(), 51.75);
+        // (what cannot be read — "2", 2.5, true, 0 — opens read-only and grows nothing: a book that may say 2 is never grown again)
+        for (const Json& broken : {Json("2"), Json(2.5), Json(true), Json(0), Json::array({2})}) {
+            said["balloon_geometry"] = broken;
+            const genko::storage::LoadResult result = genko::storage::load_document_payload(said, fresh);
+            QVERIFY2(!result.document.read_only_reason.empty(), broken.dump().c_str());
+            QCOMPARE(result.document.story.front().w_mm.value(), 50.0);
+            const bool reported = std::any_of(result.report.issues.begin(), result.report.issues.end(),
+                                              [](const auto& issue) { return issue.pointer == "/balloon_geometry"; });
+            QVERIFY2(reported, broken.dump().c_str());
+        }
+        // (a point or box text — type@1 — is not set in a balloon: its box is never grown)
+        genko::core::StoryLine typed = now.story.front();
+        QVERIFY(genko::core::legacy_oval(typed));
+        typed.native_type = Json{{"shape", "box"}};
+        QVERIFY(!genko::core::legacy_oval(typed));
+        QVERIFY(!genko::core::migrate_legacy_line(typed));
+        QCOMPARE(typed.w_mm.value(), 50.0);
+        typed.native_type = Json{{"shape", "point"}};
+        QVERIFY(!genko::core::legacy_oval(typed));
     }
 
     // A balloon of now is sized for its words as the letters are fitted: the smallest true ellipse round them (the
@@ -695,6 +1167,7 @@ private slots:
         const Document doc = genko::test::clean_book();
         write("clean-150-kinds.png", page_picture(doc, 150, 0));
         write("clean-150-tails.png", page_picture(doc, 150, 1));
+        write("clean-150-tails-more.png", page_picture(doc, 150, 2));
         // (parts of the 600 dpi pages, pixel for pixel: 84 mm is 1984 px)
         const struct {
             const char* name;
@@ -703,15 +1176,19 @@ private slots:
         } parts[] = {{"clean-600-kinds-a.png", 0, 12, 10}, {"clean-600-kinds-b.png", 0, 104, 10}, {"clean-600-kinds-c.png", 0, 12, 86},
                      {"clean-600-kinds-d.png", 0, 104, 86}, {"clean-600-kinds-e.png", 0, 12, 162}, {"clean-600-kinds-f.png", 0, 104, 162},
                      {"clean-600-kinds-g.png", 0, 12, 213}, {"clean-600-kinds-h.png", 0, 104, 213},
-                     {"clean-600-tails-a.png", 1, 12, 6}, {"clean-600-tails-b.png", 1, 104, 6}, {"clean-600-tails-c.png", 1, 12, 82},
-                     {"clean-600-tails-d.png", 1, 104, 82}, {"clean-600-tails-e.png", 1, 12, 158}, {"clean-600-tails-f.png", 1, 104, 158},
-                     {"clean-600-joined.png", 1, 12, 213}, {"clean-600-joined-b.png", 1, 104, 213}};
+                     {"clean-600-tails-a.png", 1, 12, 6}, {"clean-600-tails-b.png", 1, 104, 6}, {"clean-600-tails-c.png", 1, 12, 92},
+                     {"clean-600-tails-d.png", 1, 104, 92}, {"clean-600-tails-e.png", 1, 12, 178}, {"clean-600-tails-f.png", 1, 104, 178},
+                     {"clean-600-tails-g.png", 2, 12, 6}, {"clean-600-tails-h.png", 2, 104, 6}, {"clean-600-tails-i.png", 2, 12, 92},
+                     {"clean-600-tails-j.png", 2, 104, 92}, {"clean-600-joined.png", 2, 12, 172}, {"clean-600-joined-b.png", 2, 104, 172},
+                     {"clean-600-foot-a.png", 2, 12, 210}, {"clean-600-foot-b.png", 2, 104, 210}};
         for (const auto& part : parts) write(part.name, page_part(doc, 600, part.x, part.y, 84, 84, part.page));
         // (the same pages made black and white, as the monochrome print: a part)
         write("clean-600-mono.png", genko::render::to_bitonal(page_part(doc, 600, 12, 6, 84, 84, 1)).convert("L"));
         // (the book of before, as this build draws it: beside the pictures main's build made of it)
         const Document old = genko::storage::load_document(old_book_dir()).document;
         for (std::size_t i = 0; i < old.pages.size(); ++i) write("after-" + std::to_string(i + 1) + ".png", page_picture(old, 200, i));
+        const Document old2 = genko::storage::load_document(old_book_dir(QStringLiteral("old_book2"))).document;
+        for (std::size_t i = 0; i < old2.pages.size(); ++i) write("after2-" + std::to_string(i + 1) + ".png", page_picture(old2, 200, i));
     }
 };
 

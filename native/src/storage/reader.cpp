@@ -578,9 +578,10 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     // core::type_text::validate_type below)
     if (const Json* native = find(data, "native_type"); native != nullptr && !native->is_null()) line.native_type = *native;
     check_keys(data, kLineKeys, at, "line");
-    // (a book of before fukidashi@1: its hand-drawn ovals' boxes grown so that the letters keep their size in the true
-    // ellipse — core/fukidashi.hpp; the book says its balloons' generation from its next save)
-    if (grow_ovals_) core::grow_legacy_oval(line);
+    // (a book of before fukidashi@1: its hand-drawn ovals' boxes grown — their letters' boxes the boxes they had —, what
+    // they hold from their corner moved with them, a border_mm of 0 made the hairline it drew: core/fukidashi.hpp; the
+    // book says its balloons' generation from its next save)
+    if (grow_ovals_) core::migrate_legacy_line(line);
     return line;
 }
 
@@ -1517,10 +1518,27 @@ core::Document Reader::migrate(const Json& payload) {
     const auto binding = binding_value.is_string() ? core::binding_from(binding_value.get<std::string>()) : std::nullopt;
     if (!binding) format_error("/binding", core::py_repr(binding_value) + " is not a valid Binding");
 
-    // (fukidashi@1: the generation of the balloons' geometry — none, or less than this build's: a book of before)
+    // (fukidashi@1: the generation of the balloons' geometry. None: a book of before, brought to this build's as it is
+    // read. A whole number in any form JSON writes it — 2, 2.0 — is what the book says; 1 is a book of before. Anything
+    // else cannot be read: the book opens read-only, and nothing of it is grown — a book that may say 2 is never
+    // grown again)
     std::int64_t balloon_geometry = 1;
-    if (const Json* generation = find(payload, "balloon_geometry"); generation != nullptr && generation->is_number_integer()) {
-        balloon_geometry = generation->get<std::int64_t>();
+    if (const Json* generation = find(payload, "balloon_geometry"); generation != nullptr && !generation->is_null()) {
+        bool read = false;
+        if (generation->is_number_integer() || generation->is_number_unsigned()) {
+            balloon_geometry = generation->get<std::int64_t>();
+            read = balloon_geometry >= 1;
+        } else if (generation->is_number_float()) {
+            const double value = generation->get<double>();
+            if (value >= 1 && value <= 1e6 && value == std::floor(value)) {
+                balloon_geometry = static_cast<std::int64_t>(value);
+                read = true;
+            }
+        }
+        if (!read) {
+            issue("broken_value", "/balloon_geometry", {}, "the book's balloon_geometry must be a whole number from 1, not " + core::py_repr(*generation));
+            balloon_geometry = core::kBalloonGeometry;
+        }
     }
     grow_ovals_ = balloon_geometry < core::kBalloonGeometry;
 

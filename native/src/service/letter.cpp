@@ -315,8 +315,9 @@ Json look_style(const Json& look, const std::string& balloon) {
     return style;
 }
 
-std::string shape_for(const std::vector<std::string>& breaks, const std::string& balloon, double em) {
-    if (balloon != "speech") return balloon;
+std::string shape_for(const std::vector<std::string>& breaks, const Json& given, double em) {
+    // (a kind that is said is kept, whatever the words: only a line that says none is given its shape here)
+    if (!given.is_null()) return core::py_str(given);
     std::size_t columns = 0;
     std::size_t longest = 0;
     for (const std::string& b : breaks) {
@@ -324,10 +325,8 @@ std::string shape_for(const std::vector<std::string>& breaks, const std::string&
         ++columns;
         longest = std::max(longest, text::length(b));
     }
-    if (columns == 0 || columns > 2) return balloon;
-    const double text_w = em * static_cast<double>(columns) + em * kLeading * static_cast<double>(columns - 1);
-    const double text_h = em * static_cast<double>(longest);
-    return text_h >= 3 * text_w ? std::string("capsule") : balloon;
+    (void)em;  // (one column: as wide as its letters are high)
+    return columns == 1 && longest >= 5 ? std::string("capsule") : std::string("speech");
 }
 
 std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em) {
@@ -622,13 +621,14 @@ std::pair<std::vector<BalloonPlacement>, std::vector<studio::Issue>> place_page(
         for (std::size_t li = 0; li < lines.size(); ++li) {
             const Json& line = lines[li];
             const std::string path = "/panels/" + std::to_string(pi) + "/lines/" + std::to_string(li);
-            const std::string balloon = core::py_str(core::py_get(line, "balloon", Json("speech")));
+            const Json said = core::py_get(line, "balloon");  // (none: a spoken line, its shape by its words)
+            const std::string balloon = said.is_null() ? std::string("speech") : core::py_str(said);
             Json style = look_style(kinds.contains(balloon) ? kinds[balloon] : Json::object(), balloon);
             if (balloon == "aside") style["rotate_deg"] = li % 2 == 0 ? kAsideTilt : -kAsideTilt;  // (呟き: leaning one way then the other)
             const double em = core::to_float(core::py_or(core::py_get(style, "size_mm"), Json(kEmMm)));
             const std::vector<std::string> breaks = strings_of(core::py_get(line, "breaks", Json::array()));
-            // (fukidashi@1: a tall line of one or two columns is said in a capsule)
-            const std::string drawn = shape_for(breaks, balloon, em);
+            // (fukidashi@1: a line that says no kind, one tall column, is said in a capsule; a kind that is said is kept)
+            const std::string drawn = shape_for(breaks, said, em);
             const std::array<double, 2> size = measure(breaks, drawn, em);
             const Json beat_id = core::py_get(line, "beat_id");
             const Json speaker_id = speakers.is_object() && beat_id.is_string() && speakers.contains(beat_id.get<std::string>())

@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "core/balloon_tails.hpp"
 #include "core/command_bus.hpp"
 #include "core/fukidashi.hpp"
 #include "core/model.hpp"
@@ -181,18 +182,20 @@ private slots:
         QVERIFY(now[1] > 5.0 * 5 * 1.2);
     }
 
-    // A tall line of one or two columns is said in a capsule; anything else keeps its kind.
+    // A line that says no kind, one column of five characters or more, is said in a capsule; a kind that is said is kept —
+    // a line that says speech stays an oval — and two columns stay an oval.
     void aTallLineIsSaidInACapsule() {
-        QCOMPARE(letter::shape_for({"そうなんだよね"}, "speech"), std::string("capsule"));              // (1 column, 7 high)
-        QCOMPARE(letter::shape_for({"そうなんだよねえ", "ほんとうにそうだ"}, "speech"), std::string("capsule"));  // (2 columns 12 mm wide, 40 mm high)
-        QCOMPARE(letter::shape_for({"そうだ"}, "speech"), std::string("capsule"));                        // (5 × 15 mm: three times)
-        QCOMPARE(letter::shape_for({"うん"}, "speech"), std::string("speech"));
-        QCOMPARE(letter::shape_for({"そうなんだ", "ほんとに"}, "speech"), std::string("speech"));        // (12 × 25 mm)
-        QCOMPARE(letter::shape_for({"ああああああああ", "いいいいいいいい", "うううううううう"}, "speech"), std::string("speech"));  // (three columns)
-        for (const char* kind : {"thought", "whisper", "shout", "rounded", "box", "narration", "sfx", "none"}) {
-            QCOMPARE(letter::shape_for({"そうなんだよね"}, kind), std::string(kind));
+        const Json none;
+        QCOMPARE(letter::shape_for({"そうなんだよね"}, none), std::string("capsule"));  // (one column of seven)
+        QCOMPARE(letter::shape_for({"そうなんだ"}, none), std::string("capsule"));      // (five: 5 × 25 mm, five times as tall as wide)
+        QCOMPARE(letter::shape_for({"そうだね"}, none), std::string("speech"));         // (four)
+        QCOMPARE(letter::shape_for({"うん"}, none), std::string("speech"));
+        QCOMPARE(letter::shape_for({"そうなんだよねえ", "ほんとうにそうだ"}, none), std::string("speech"));  // (two columns: an oval)
+        QCOMPARE(letter::shape_for({"ああああああああ", "いいいいいいいい", "うううううううう"}, none), std::string("speech"));
+        for (const char* kind : {"speech", "thought", "whisper", "shout", "rounded", "box", "narration", "sfx", "none", "capsule"}) {
+            QCOMPARE(letter::shape_for({"そうなんだよね"}, Json(kind)), std::string(kind));  // (said: kept)
         }
-        // (its size: round ends on the narrow side, the words reaching a little into them — narrower than the oval was, and
+        // (its size: round ends on the narrow side, the words reaching a little into them — narrower than the oval is, and
         // the letters set in it at their size)
         const auto capsule = letter::measure({"そうなんだよね"}, "capsule");
         const auto oval = letter::measure({"そうなんだよね"}, "speech");
@@ -207,31 +210,58 @@ private slots:
         QCOMPARE(genko::render::text::text_layout(doc2.story.front(), 600).em, std::int64_t{118});
     }
 
-    // A page lettered from its plan: the tall line is placed as a capsule, the others as their kinds; the ops made of
-    // the placements add them so.
-    void aPlannedPageIsLetteredWithCapsules() {
+    // A page lettered from its plan: a line that says speech is an oval however tall; a line that says no kind, one tall
+    // column, is placed as a capsule; the ops made of the placements add them so.
+    void aPlannedPageIsLetteredAsItSays() {
         const Json plan = Json::parse(R"({"page": 1, "tiers": [{"h": 1.0, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]}],
             "panels": [{"slot": "p1", "shot": "MS", "characters": [{"id": "a", "pos": "right"}, {"id": "b", "pos": "left"}],
                         "lines": [{"beat_id": "b1", "balloon": "speech", "breaks": ["そうなんだよね"]},
-                                  {"beat_id": "b2", "balloon": "speech", "breaks": ["ほんとに", "そうかな"]},
-                                  {"beat_id": "b3", "balloon": "thought", "breaks": ["どうなんだろうね"]}]}]})");
+                                  {"beat_id": "b2", "breaks": ["ほんとうにそう"]},
+                                  {"beat_id": "b3", "balloon": "thought", "breaks": ["どうなんだろうね"]},
+                                  {"beat_id": "b4", "breaks": ["そうかな", "どうかな"]}]}]})");
         genko::service::Work work{blank_book(), Json::array()};
         const genko::service::layout::CompiledLayout compiled = genko::service::layout::apply_layout(work, Json(1), plan, "ai:test");
         const auto [placements, issues] = letter::place_page(plan, compiled, Json::parse(R"({"characters": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]})"),
-                                                             Json{{"b1", "a"}, {"b2", "b"}, {"b3", "a"}});
-        QCOMPARE(placements.size(), std::size_t{3});
-        QCOMPARE(placements[0].balloon, std::string("capsule"));
-        QVERIFY(placements[0].h_mm > placements[0].w_mm * 2.5);
-        QCOMPARE(placements[1].balloon, std::string("speech"));
+                                                             Json{{"b1", "a"}, {"b2", "b"}, {"b3", "a"}, {"b4", "b"}});
+        QCOMPARE(placements.size(), std::size_t{4});
+        QCOMPARE(placements[0].balloon, std::string("speech"));   // (said: an oval, one column of seven though it is)
+        QCOMPARE(placements[1].balloon, std::string("capsule"));  // (not said: one tall column)
+        QVERIFY(placements[1].h_mm > placements[1].w_mm * 2.5);
         QCOMPARE(placements[2].balloon, std::string("thought"));
+        QCOMPARE(placements[3].balloon, std::string("speech"));   // (not said, two columns: an oval)
         work.apply(letter::placements_to_ops(Json(1), placements, compiled), "genko");
-        QCOMPARE(work.doc.story.size(), std::size_t{3});
-        QCOMPARE(work.doc.story[0].balloon, std::string("capsule"));
+        QCOMPARE(work.doc.story.size(), std::size_t{4});
+        QCOMPARE(work.doc.story[1].balloon, std::string("capsule"));
         for (const genko::core::StoryLine& line : work.doc.story) {
             QVERIFY(!line.style.contains("hand"));  // (nothing of the look of before is written)
             QCOMPARE(genko::render::text::text_layout(line, 600).em, std::int64_t{118});
         }
         QVERIFY(genko::core::uses_fukidashi(work.doc));
+    }
+
+    // A tail's tip is hidden by a capsule and a polygon where they are — not where the ellipse of their box would be: the
+    // corner of a capsule's box and the cut corner of a polygon's are outside them; a balloon grown over a tail pushes
+    // its tip out past its own outline.
+    void aTipIsHiddenByTheShapeItself() {
+        using genko::core::tail_hidden;
+        Document doc = run_ops(blank_book(), Json::array({line_op("capsule", Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 14}, {"h_mm", 40}})}));
+        const genko::core::StoryLine& capsule = doc.story.front();
+        QVERIFY(tail_hidden(capsule, Json::array({47.0, 60.0})));    // (its middle)
+        QVERIFY(tail_hidden(capsule, Json::array({53.0, 72.0})));    // (by its straight side: inside it, outside the ellipse of its box)
+        QVERIFY(!tail_hidden(capsule, Json::array({41.0, 41.0})));   // (its box's corner: outside its round end)
+        QVERIFY(tail_hidden(capsule, Json::array({47.0, 41.0})));    // (the round end's top)
+        QVERIFY(!tail_hidden(capsule, Json::array({55.0, 60.0})));
+        Document sided = run_ops(blank_book(), Json::array({line_op("polygon", Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 40}})}));
+        const genko::core::StoryLine& octagon = sided.story.front();
+        QVERIFY(tail_hidden(octagon, Json::array({60.0, 60.0})));
+        QVERIFY(tail_hidden(octagon, Json::array({79.5, 66.0})));    // (by its flat side: inside it, outside the circle of its box)
+        QVERIFY(!tail_hidden(octagon, Json::array({43.0, 43.0})));   // (its box's corner: cut off)
+        QVERIFY(!tail_hidden(octagon, Json::array({81.0, 60.0})));
+        // (a capsule moved over its tail: the tip goes out past the capsule's own edge, the way it lay from the middle)
+        doc = run_ops(doc, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"tails", Json::array({Json{{"to", Json::array({62.0, 60.0})}}})}}}));
+        doc = run_ops(doc, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"w_mm", 40}}}));  // (now 40 × 40: a circle, 20 mm to its edge)
+        const Json tip = doc.story.front().tails.front()["to"];
+        QVERIFY2(std::fabs(tip[0].get<double>() - (60.0 + 20.0 + 3.0)) < 0.02 && std::fabs(tip[1].get<double>() - 60.0) < 0.02, tip.dump().c_str());
     }
 };
 
