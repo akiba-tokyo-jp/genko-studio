@@ -121,6 +121,32 @@ private slots:
         else{QVERIFY2(accepted,"user image must be placed from the existing read-only library");const auto& layers=result.page(0).layers;const auto& target=*std::find_if(layers.begin(),layers.end(),[](const auto&l){return l.role==core::LayerRole::Ink;});QCOMPARE(target.patches.size(),std::size_t(1));QCOMPARE(*target.patches[0].png,original.toStdString());QCOMPARE(target.patches[0].attrs["box"],Json::array({4.0,7.0,12.0,6.0}));const auto image=render::render_page(result.page(0),72,render::proof_options()).image;QCOMPARE(image.getpixel(image.width()/2,image.height()/2),(std::vector<double>{12,123,234}));}
         QVERIFY(manifest.open(QIODevice::ReadOnly));QCOMPARE(manifest.readAll(),QByteArray::fromStdString(library));QVERIFY(picture.open(QIODevice::ReadOnly));QCOMPARE(picture.readAll(),original);QVERIFY(external.open(QIODevice::ReadOnly));QCOMPARE(external.readAll(),original);
     }
+    // name-lines: in an agents' book (strict gates), before a page's name is approved an agent stamps no picture
+    // material on the name or the draft layer (the rough is lines: refused, the book as it was); a drawn part (lines)
+    // goes on the name layer; a person stamps the picture there, and so does the agent once the name is approved.
+    void anAgentStampsNoPictureOnANameNotApproved(){
+        QTemporaryDir cfg;QVERIFY(cfg.isValid());const auto previous=qgetenv("GENKO_CONFIG_DIR");
+        struct Restore{QByteArray value;~Restore(){if(value.isNull())qunsetenv("GENKO_CONFIG_DIR");else qputenv("GENKO_CONFIG_DIR",value);}}restore{previous};qputenv("GENKO_CONFIG_DIR",cfg.path().toUtf8());
+        const auto root=cfg.path()+"/materials";QVERIFY(QDir().mkpath(root));render::save_png(render::Image::create("RGBA",{2,1},render::Ink{12,123,234,255}),core::path_from_utf8((root+"/u-blue.png").toStdString()));
+        const auto library=Json::array({Json{{"id","u-blue"},{"kind","image"},{"name","青い画像"},{"file","u-blue.png"},{"width_mm",12},{"aspect",.5}}}).dump();
+        QFile manifest(root+"/library.json");QVERIFY(manifest.open(QIODevice::WriteOnly));QCOMPARE(manifest.write(QByteArray::fromStdString(library)),qint64(library.size()));manifest.close();
+        auto doc=core::new_episode("ネームの線",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"mono"));doc.strict_gates=true;
+        const core::CommandBus bus(render::ops_registry());
+        const auto stamp=[](const char* material,const char* layer){return Json::array({Json{{"op","stamp_material"},{"page",1},{"material_id",material},{"layer",layer},{"x_mm",10},{"y_mm",10}}});};
+        for(const char* layer:{"name","draft"}){
+            std::string error;
+            try{(void)bus.apply(doc,stamp("u-blue",layer),core::Actor("ai:test"));}catch(const core::ApplyError& e){error=e.what();}
+            QVERIFY2(error.find("draws the rough as lines on the name layer")!=std::string::npos,(std::string(layer)+": "+error).c_str());
+            const auto person=bus.apply(doc,stamp("u-blue",layer),core::Actor("human:test")).doc;const auto& made=person.page(0).layers;
+            QVERIFY(std::any_of(made.begin(),made.end(),[&](const auto& l){return core::to_string(l.role)==layer && l.patches.size()==1;}));
+        }
+        const auto lines=bus.apply(doc,stamp("mark-汗","name"),core::Actor("ai:test")).doc;
+        const auto& name=*std::find_if(lines.page(0).layers.begin(),lines.page(0).layers.end(),[](const auto& l){return l.role==core::LayerRole::Name;});
+        QVERIFY(name.stroke_count()>0 || !name.patches.empty());
+        doc.edit_page(0).name_ok=true;
+        const auto approved=bus.apply(doc,stamp("u-blue","draft"),core::Actor("ai:test")).doc;
+        QVERIFY(std::any_of(approved.page(0).layers.begin(),approved.page(0).layers.end(),[](const auto& l){return l.role==core::LayerRole::Draft && l.patches.size()==1;}));
+    }
     void drawnBuiltinKinds_data(){QTest::addColumn<QString>("material");QTest::newRow("lines")<<QString("mark-汗");QTest::newRow("lettering")<<QString("sfx-ドーン");}
     void letteringPutsALineAsTheMaterialHasIt() {
         // 描き文字 (ops._apply_one): a line set as the material has it, centred where asked and as wide as asked (the

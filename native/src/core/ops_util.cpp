@@ -152,6 +152,19 @@ LayerRole stroke_role(const std::string& layer_name) {
 
 bool gated(const Document& doc) { return doc.strict_gates || py_truthy(doc.studio); }
 
+void refuse_unnamed_picture(const OpContext& c, const Page& page, LayerRole role, const Json& asset) {
+    if (role != LayerRole::Name && role != LayerRole::Draft) return;
+    if (c.actor.can_approve() || page.name_ok || !gated(c.doc)) return;
+    if (asset.is_string() && c.doc.studio.is_object()) {
+        const Json assets = py_get(c.doc.studio, "assets", Json::object());
+        const Json meta = assets.is_object() ? py_get(assets, asset.get<std::string>(), Json::object()) : Json::object();
+        if (meta.is_object() && py_equals(py_get(meta, "kind", Json()), Json("atari"))) return;  // (a person's scanned atari)
+    }
+    throw OpError("page " + page.index.repr() + ": before the name is approved an agent draws the rough as lines on the name layer " +
+                  "(trace_prims, add_shape, add_stroke), not a picture on the " + (role == LayerRole::Name ? "name" : "draft") +
+                  " layer");
+}
+
 std::vector<std::int64_t> rgb3(const Json& value, std::string_view what) {
     std::vector<std::int64_t> rgb;
     try {

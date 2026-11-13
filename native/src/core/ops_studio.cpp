@@ -1455,6 +1455,7 @@ void adopt_candidate(OpContext& c, const StudioHooks& hooks) {
     if (to != "draft" && !page.name_ok) {
         throw OpError("page " + page.index.repr() + ": art can be adopted only after the name is approved");
     }
+    if (to == "draft") refuse_unnamed_picture(c, page, LayerRole::Draft);  // (an agent's rough is lines, not a picture)
     const Json candidates = py_get(panel, "candidates", Json::array());
     const Json* found = by_id(candidates, Json(text_or(c.op, "candidate_id", "")));
     if (found == nullptr) throw OpError("no candidate " + py_str(op_get(c.op, "candidate_id")));
@@ -1640,6 +1641,7 @@ void place_asset(OpContext& c, const StudioHooks& hooks) {
     if ((to == "art" || to == "bg") && doc.strict_gates && !page.name_ok) {
         throw OpError("page " + page.index.repr() + ": approve the name first (strict_gates)");
     }
+    refuse_unnamed_picture(c, page, role, Json(asset));  // (an agent's rough is lines, not a picture)
     const Frame* frame = truthy_at(c.op, "frame_id") ? &leaf(page, c.op["frame_id"]) : nullptr;
     Layer layer;
     layer.id = new_id();

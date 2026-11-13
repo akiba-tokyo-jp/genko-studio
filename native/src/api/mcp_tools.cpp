@@ -29,7 +29,9 @@ namespace {
 
 // genko/mcp/server.py INSTRUCTIONS
 constexpr std::string_view kInstructions = R"(Genko は漫画原稿のシステム。文章も絵も作らない。あなた（エージェント）が企画書・脚本・ネーム計画を書き、
-Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
+Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。
+ネームのラフ（アタリ）は線で描く: submit_name でコマができたら、apply_ops でそのページのネームのレイヤーに、人形（add_mannequin・add_figure）を置いて trace_prims（kind pencil）で鉛筆の線にし、物や背景は add_shape、ほかの線は add_stroke で描く。ネームの段階で画像を生成・取り込み・貼り付けしない。
+作画の絵はネームの承認の後に、あなたが別の道具で生成し、import_image（または take_panel_art）で取り込む。
 進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
 コマ割りは緩急で決める（規則の「コマ割りの緩急」）。layout_ideas でそのページの案の束を出して選び、崩してから submit_name に出す。
@@ -84,7 +86,8 @@ const std::vector<ToolSpec>& table() {
          {{"project", Kind::Str, false, std::nullopt}, {"path", Kind::Str, true, Json()}, {"png_base64", Kind::Str, true, Json()}, {"session", Kind::Str, true, Json()}}},
         {"generation_request",
          R"(絵の依頼パックを作る（Genko は生成しない）。コマは page+frame_id、設定画は character_id、背景の参照は location_id。
-        purpose: panel_art / draft / character_sheet / location。mode: new / edit / inpaint（regions に領域 id、
+        purpose: panel_art / draft / character_sheet / location（panel_art と draft はネームの承認の後。承認の前のネームのラフは画像にせず、
+        apply_ops でネームのレイヤーに線で描く: trace_prims・add_shape・add_stroke）。mode: new / edit / inpaint（regions に領域 id、
         "face:<人物 id>"、"person:<人物 id>" か rect_mm）/ upscale。複数人物のコマで一人だけ直すときは focus_character。
         修正は parent に元の候補 id。tool は tools.json のツール id（例 openai:gpt-image-1）。
         返す: request（サイズの候補、prompt の ja/en/tags、avoid、keepout、figures）、files（ガイドと参照画像の場所）、inbox。

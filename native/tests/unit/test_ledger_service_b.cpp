@@ -48,6 +48,7 @@
 #include "core/json.hpp"
 #include "core/mannequin.hpp"
 #include "core/model.hpp"
+#include "core/ops_schema.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -636,6 +637,45 @@ Json fake_agent_run(const QString& dir, const char* scenario, QString& problem) 
     problem = run_problem(run);
     if (!problem.isEmpty()) return Json();
     return genko::test::read_json(dir + QStringLiteral("/run.json"));
+}
+
+// --- name-lines: the rough of a name is lines -------------------------------------------------------------------------
+
+// The name layer of a page as the skill finds it: inspect target=snapshot of the page, the layer whose role is name.
+std::string name_layer_of(StudioService& agent, int page) {
+    const ToolResult r = agent.call("inspect", Json::array({kBook, "snapshot"}), Json{{"page", page}});
+    if (!r.ok) return {};
+    for (const Json& p : r.data["snapshot"]["pages"]) {
+        for (const Json& layer : p["layers"]) {
+            if (layer["role"] == Json("name")) return layer["id"].get<std::string>();
+        }
+    }
+    return {};
+}
+
+// The skill's example of drawing the rough (the ```json block after 「ネームのラフを描く」): the arguments of apply_ops.
+Json skill_rough_example() {
+    const std::string skill = genko::service::data::skill();
+    const std::size_t section = skill.find("- ネームのラフを描く:");
+    if (section == std::string::npos) return Json();
+    const std::size_t open = skill.find("```json", section);
+    const std::size_t close = open == std::string::npos ? open : skill.find("```", open + 7);
+    if (close == std::string::npos) return Json();
+    return genko::core::parse_python_json(skill.substr(open + 7, close - open - 7));
+}
+
+// The layers of a page with this role.
+std::vector<genko::core::Layer> layers_of(const fs::path& book, int page, genko::core::LayerRole role) {
+    const genko::core::Document doc = genko::service::load_episode(book);
+    std::vector<genko::core::Layer> out;
+    for (const genko::core::Layer& layer : doc.page(static_cast<std::size_t>(page - 1)).layers) {
+        if (layer.role == role) out.push_back(layer);
+    }
+    return out;
+}
+
+bool issue_is(const ToolResult& r, const std::string& code, const std::string& words) {
+    return !r.ok && !r.issues.empty() && r.issues[0].code == code && has(r.issues[0].message, words);
 }
 
 }  // namespace
@@ -1565,6 +1605,180 @@ private slots:
         const Json next = genko::core::py_get(report, "next");
         QVERIFY(next.is_array() && !next.empty());
         QVERIFY(report.value("skill_chars", 0) > 1000);
+    }
+    // --- name-lines: the rough of a name is lines (this build's own) ---------------------------------------------------
+
+    // Before a page's name is approved an agent draws its rough as lines: the skill's own example (the name layer's
+    // lines kept in their panels, a figure and a mannequin traced in pencil, a box, a line, the figures taken away) sent
+    // to apply_ops with the name layer found as the skill says, goes through and leaves pencil lines on the name layer
+    // only (nothing printed drawn, nothing placed, no 3D left).
+    void anAgentDrawsTheRoughOfANameAsLines() {
+        const fs::path root = folder(QStringLiteral("rough"));
+        StudioService agent(root, "ai:test");
+        const std::string made = make_demo(agent, 1, false);
+        QVERIFY2(made.empty(), made.c_str());
+        const fs::path book = root / kBook;
+        const std::string name = name_layer_of(agent, 1);
+        QVERIFY(!name.empty());
+        Json example = skill_rough_example();
+        QVERIFY2(example.is_object() && example["ops"].is_array() && example["ops"].size() == 8, example.dump().c_str());
+        std::set<std::string> kinds;
+        for (Json& op : example["ops"]) {
+            kinds.insert(op["op"].get<std::string>());
+            QCOMPARE(op["page"], Json(1));
+            if (op.contains("layer_id")) op["layer_id"] = name;
+        }
+        QVERIFY((kinds == std::set<std::string>{"set_layer", "add_figure", "add_mannequin", "trace_prims", "add_shape", "add_stroke", "delete_prim"}));
+        const std::size_t before = layers_of(book, 1, genko::core::LayerRole::Name).at(0).stroke_count();
+        const ToolResult drawn = agent.call("apply_ops", Json::array({kBook, example["ops"]}), Json{{"commit", example["commit"]}});
+        QVERIFY2(drawn.ok, drawn.to_dict().dump().c_str());
+        const genko::core::Document doc = genko::service::load_episode(book);
+        const genko::core::Page& page = doc.page(0);
+        QVERIFY(!page.name_ok);
+        const std::vector<genko::core::Layer> names = layers_of(book, 1, genko::core::LayerRole::Name);
+        QCOMPARE(names.size(), std::size_t{1});
+        QVERIFY2(names[0].stroke_count() > before + 10, std::to_string(names[0].stroke_count()).c_str());  // (the figures' many lines, the box, the line)
+        for (const genko::core::StrokePtr& stroke : names[0].strokes->items) QCOMPARE(stroke->kind, std::string("pencil"));
+        for (const genko::core::Layer& layer : page.layers) {
+            QVERIFY(layer.kind != genko::core::LayerKind::Placed);
+            if (layer.role != genko::core::LayerRole::Name) QCOMPARE(layer.stroke_count(), std::size_t{0});
+        }
+        QVERIFY(names[0].panel_each);
+        QCOMPARE(page.prims.size(), std::size_t{0});
+    }
+
+    // Before a page's name is approved an agent puts no picture on the name or the draft: place_asset to either, a
+    // draft asked of the image tool (generation_request purpose draft), take_panel_art of a draft request and adopt
+    // as the draft are refused, saying to draw the rough as lines, and the book is as it was. A person does each of
+    // them; once the name is approved the agent does too.
+    void anAgentPutsNoPictureOnANameNotApproved() {
+        const fs::path root = folder(QStringLiteral("no_pictures"));
+        StudioService agent(root, "ai:test");
+        StudioService person(root, "human:leaf");
+        const std::string made = make_demo(agent, 2, false);
+        QVERIFY2(made.empty(), made.c_str());
+        const fs::path book = root / kBook;
+        const std::string frame = first_leaf(book, 1).id;
+        const auto saved = [&book] { return genko::storage::read_file(book / "project.json"); };
+        const ToolResult imported = agent.call("import_image", Json::array({kBook}), Json{{"png_base64", genko::core::b64encode(flat_png(64, 64, render::Ink{90, 90, 90}))}});
+        QVERIFY2(imported.ok, imported.to_dict().dump().c_str());
+        const std::string asset = imported.data["asset"].get<std::string>();
+        const auto place = [&](int page, const char* to) {
+            return Json::array({Json{{"op", "place_asset"}, {"page", page}, {"asset", asset}, {"to", to}, {"frame_id", first_leaf(book, page).id}}});
+        };
+        std::string before = saved();
+        for (const char* to : {"draft", "name"}) {
+            const Json r = agent.call("apply_ops", Json::array({kBook, place(1, to)}), Json{{"commit", true}}).to_dict();
+            const Json said = genko::core::py_get(r, "error");
+            QVERIFY2(!r.value("ok", true) && has(said, "ネームのレイヤーに線で描きます") && has(said, "trace_prims") &&
+                         has(genko::core::py_get(r, "detail"), "draws the rough as lines on the name layer"),
+                     r.dump().c_str());
+            QVERIFY(saved() == before);
+        }
+        const Json draft_asked = Json{{"page", 1}, {"frame_id", frame}, {"purpose", "draft"}};
+        const auto requests = [&book] {
+            std::size_t n = 0;
+            std::error_code ec;
+            for (fs::directory_iterator it(book / "studio" / "requests", ec), end; !ec && it != end; it.increment(ec)) ++n;
+            return n;
+        };
+        const std::size_t asked_before = requests();
+        const ToolResult asked = agent.call("generation_request", Json::array({kBook}), draft_asked);
+        QVERIFY2(issue_is(asked, "name_not_approved", "線で描く"), asked.to_dict().dump().c_str());
+        QVERIFY(saved() == before);
+        QCOMPARE(requests(), asked_before);  // (no request written)
+        // (panel art before the name: the hint names the lines too, not a draft picture)
+        const ToolResult art = agent.call("generation_request", Json::array({kBook}), Json{{"page", 1}, {"frame_id", frame}});
+        QVERIFY2(issue_is(art, "name_not_approved", "trace_prims") && !has(art.issues[0].message, "purpose=draft"), art.to_dict().dump().c_str());
+        // a person asks for the draft and imports a picture as its candidate: the agent neither takes nor adopts it
+        const ToolResult personal = person.call("generation_request", Json::array({kBook}), draft_asked);
+        QVERIFY2(personal.ok, personal.to_dict().dump().c_str());
+        const std::string request = personal.data["request"]["id"].get<std::string>();
+        const Json px = personal.data["request"]["size"]["suggested_px"];
+        write_file(utf8_path(personal.data["inbox"]) / "a.png", panel_png(px));
+        write_file(utf8_path(personal.data["inbox"]) / "b.png", decoy_png(px_of(px, 0), px_of(px, 1)));
+        const auto image = [&request](const char* file) {
+            return Json{{"file", "studio/inbox/" + request + "/" + file}, {"origin", Json{{"kind", "agent"}, {"tool_id", kTool}}}};
+        };
+        before = saved();
+        const ToolResult taken = agent.call("take_panel_art", Json::array({kBook, request, image("a.png")}), Json::object());
+        QVERIFY2(issue_is(taken, "name_not_approved", "線で描く"), taken.to_dict().dump().c_str());
+        QVERIFY(saved() == before);
+        const ToolResult candidates = person.call("import_images", Json::array({kBook, request, Json::array({image("a.png")})}), Json::object());
+        QVERIFY2(candidates.ok, candidates.to_dict().dump().c_str());
+        const std::string candidate = candidates.data["candidates"][0].get<std::string>();
+        before = saved();
+        const Json adopted = agent.call("adopt", Json::array({kBook, candidate}), Json{{"page", 1}, {"frame_id", frame}, {"to", "draft"}}).to_dict();
+        QVERIFY2(!adopted.value("ok", true) && has(genko::core::py_get(adopted, "error"), "線で描きます"), adopted.dump().c_str());
+        QVERIFY(saved() == before);
+        QVERIFY(layers_of(book, 1, genko::core::LayerRole::Draft).empty());
+        // a person does each
+        const ToolResult person_adopts = person.call("adopt", Json::array({kBook, candidate}), Json{{"page", 1}, {"frame_id", frame}, {"to", "draft"}});
+        QVERIFY2(person_adopts.ok, person_adopts.to_dict().dump().c_str());
+        for (const char* to : {"draft", "name"}) {
+            const ToolResult r = person.call("apply_ops", Json::array({kBook, place(1, to)}), Json{{"commit", true}});
+            QVERIFY2(r.ok, r.to_dict().dump().c_str());
+        }
+        QCOMPARE(layers_of(book, 1, genko::core::LayerRole::Draft).size(), std::size_t{2});
+        // once the names are approved the agent's pictures go on the draft as before
+        const Json approved = HumanService(book, "human:leaf").approve_name(Json::array({1, 2}));
+        QVERIFY2(approved.value("ok", false), approved.dump().c_str());
+        const ToolResult placed = agent.call("apply_ops", Json::array({kBook, place(2, "draft")}), Json{{"commit", true}});
+        QVERIFY2(placed.ok, placed.to_dict().dump().c_str());
+        QCOMPARE(layers_of(book, 2, genko::core::LayerRole::Draft).size(), std::size_t{1});
+        const ToolResult again = agent.call("generation_request", Json::array({kBook}), draft_asked);
+        QVERIFY2(again.ok, again.to_dict().dump().c_str());
+        const ToolResult took = agent.call("take_panel_art", Json::array({kBook, request, image("b.png")}), Json::object());
+        QVERIFY2(took.ok, took.to_dict().dump().c_str());
+    }
+
+    // The work item of a page with no name yet names apply_ops beside submit_name, and says the rough is drawn with
+    // lines on the name layer (the figures traced, shapes) and not with pictures.
+    void thePlanPageItemSaysToDrawTheRoughWithLines() {
+        const fs::path root = folder(QStringLiteral("plan_page"));
+        StudioService agent(root, "ai:test");
+        const std::string made = make_demo(agent, 0, false);
+        QVERIFY2(made.empty(), made.c_str());
+        const ToolResult next = agent.call("next", Json::array({kBook}), Json{{"limit", 10}});
+        QVERIFY2(next.ok, next.to_dict().dump().c_str());
+        std::size_t seen = 0;
+        for (const Json& item : next.data["items"]) {
+            if (item["kind"] != Json("plan_page")) continue;
+            ++seen;
+            QCOMPARE(item["tools"], Json::array({"inspect", "submit_name", "apply_ops", "render"}));
+            for (const char* words : {"ネームのレイヤー", "add_mannequin", "add_figure", "trace_prims", "add_shape", "画像は使わない"}) {
+                QVERIFY2(has(item["why"], words), item.dump().c_str());
+            }
+        }
+        QVERIFY(seen > 0);
+    }
+
+    // What an agent reads says the same: the rules (a name is drawn as rough lines, no pictures pasted), the MCP
+    // server's instructions and generation_request's description (the rough with lines on the name layer, the
+    // pictures after the name is approved), and the skill's ops are the ones apply_ops takes, with keys the ops have.
+    void theGuidesSayTheRoughIsLines() {
+        const std::string rules = genko::service::data::rules();
+        QVERIFY(has(rules, "線のラフ（アタリ）") && has(rules, "画像も貼らない") && !has(rules, "絵はまだ描かない"));
+        const std::string said = std::string(genko::api::mcp::instructions());
+        for (const char* words : {"trace_prims", "add_shape", "add_stroke", "ネームのレイヤー", "ネームの段階で画像を生成・取り込み・貼り付けしない"}) {
+            QVERIFY2(has(said, words), words);
+        }
+        const genko::api::mcp::ToolSpec* asked = genko::api::mcp::find_tool("generation_request");
+        QVERIFY(asked != nullptr);
+        QVERIFY(has(std::string(asked->description), "trace_prims") && has(std::string(asked->description), "ネームの承認の後"));
+        const std::string skill = genko::service::data::skill();
+        QVERIFY(!has(skill, "作画（生成した絵をコマに置く）") && has(skill, "作画（ネームの承認の後に、生成した絵をコマに置く）"));
+        const Json example = skill_rough_example();
+        QVERIFY(example.is_object());
+        const Json& schema = genko::core::ops_schema();
+        for (const Json& op : example["ops"]) {
+            const Json* shape = nullptr;
+            for (const Json& entry : schema) {
+                if (entry["op"] == op["op"]) shape = &entry;
+            }
+            QVERIFY2(shape != nullptr, op.dump().c_str());
+            for (const auto& [key, value] : op.items()) QVERIFY2(key == "op" || shape->contains(key), (op.dump() + ": " + key).c_str());
+        }
     }
 };
 

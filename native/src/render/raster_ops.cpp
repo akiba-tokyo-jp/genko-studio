@@ -2755,6 +2755,7 @@ void stamp_material(OpContext& c) {
     // ops._paint_target before the kind is looked at further (its errors come first; a page without an ink layer gets one)
     Layer& target = core::paint_target(c.doc.edit_page(at), c.op);
     if (kind == "image") {
+        core::refuse_unnamed_picture(c, c.doc.page(at), target.role);  // (an agent's rough is lines, not a picture)
         const std::optional<MaterialPicture> picture = material_picture(material);
         if (!picture) throw OpError("the picture file of this material is missing");
         // float(op.get("width_mm") or material.get("width_mm") or 60), its height by the aspect, and where its middle goes

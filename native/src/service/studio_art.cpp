@@ -7,9 +7,11 @@
 #include <cmath>
 #include <exception>
 
+#include "core/actor.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -52,6 +54,17 @@ namespace {
 
 constexpr std::int64_t kMaxImagePixels = 120'000'000;  // ops.MAX_IMAGE_PIXELS
 constexpr std::uintmax_t kMaxImportBytes = 64ULL * 1024 * 1024;
+
+// (name-lines: the rough of a name is lines) What an agent is told when it would bring a picture into a page whose name
+// is not approved yet: the rough is drawn on the name layer as lines, the pictures come after the name is approved.
+constexpr std::string_view kRoughIsLines =
+    "ラフはネームのレイヤーに線で描く（apply_ops で add_mannequin・add_figure の人形を trace_prims の kind pencil で線にし、"
+    "物や背景は add_shape、ほかの線は add_stroke）。画像はネームの承認の後、作画で使う";
+
+// An agent (one who cannot approve) on a page of an agents' book whose name is not approved yet.
+bool before_the_name(const std::string& actor, const core::Document& doc, const core::Page& page) {
+    return !core::can_approve(actor) && core::gated(doc) && !page.name_ok;
+}
 
 const char* const kStandingNotes[] = {"composition と pose は構図の参考。線をなぞらせる必要はない", "画像に文字・フキダシ・効果音を描かせない。台詞は Genko が描く"};
 
@@ -364,7 +377,12 @@ ToolResult StudioService::generation_request(const Json& a) {
         const auto at = page_at(doc, page);
         if (!at) return fail(py_str(page) + " ページはない", "no_page", "/page");
         if (purpose == "panel_art" && !doc.page(*at).name_ok) {
-            return fail(py_str(page) + " ページのネームが承認されていない（絵の依頼は承認後。ラフは purpose=draft）", "name_not_approved", "/page");
+            return fail(py_str(page) + " ページのネームが承認されていない（絵の依頼は承認後。" + std::string(kRoughIsLines) + "）", "name_not_approved",
+                        "/page");
+        }
+        if (purpose == "draft" && before_the_name(actor_, doc, doc.page(*at))) {
+            return fail(py_str(page) + " ページのネームが承認されていない（承認の前のネームに画像の下描きは作らない。" + std::string(kRoughIsLines) + "）",
+                        "name_not_approved", "/purpose");
         }
     }
     genreq::Pack pack;
@@ -742,6 +760,14 @@ ToolResult StudioService::take_panel_art(const Json& a) {
     const Json page(core::to_int(util::item(target, "page")));
     const Json frame_id(py_str(target["frame_id"]));
     const Json to = core::py_equals(py_get(*request, "purpose"), Json("draft")) ? Json("draft") : Json("art");
+    if (core::py_equals(to, Json("draft"))) {  // (refused before anything is imported: the book stays as it was)
+        const core::Document doc = load_episode(path);
+        const auto at = page_at(doc, page);
+        if (at && before_the_name(actor_, doc, doc.page(*at))) {
+            return fail(py_str(page) + " ページのネームが承認されていない（承認の前のネーム・下描きに画像は置かない。" + std::string(kRoughIsLines) + "）",
+                        "name_not_approved", "/request_id");
+        }
+    }
     Json steps = Json::array();
     const auto stop = [&steps](const char* step, const ToolResult& result) {
         steps.push_back(Json::object({{"step", step}, {"ok", false}}));
