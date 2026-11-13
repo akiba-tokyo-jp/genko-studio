@@ -33,10 +33,17 @@ endif()
 # window system) stays the computer's own: Ubuntu 24.04's desktop has them (package/README-ja.md names the packages),
 # and a library the system builds with others (libtiff with JBIG-KIT, GPL) is never put in the folder. (Qt writes the
 # regular expressions into its script unquoted: one plain expression a library, no parentheses or bars.)
+set(_genko_deploy_extra)
+if(WIN32)
+  # (windeployqt's Direct3D 12 shader compiler, dxcompiler.dll and dxil.dll, is for Qt's D3D12 drawing, which Genko — Qt
+  # Widgets and OpenGL — never uses: not shipped, so the SBOM's list of what is shipped stays whole)
+  set(_genko_deploy_extra DEPLOY_TOOL_OPTIONS --no-system-dxc-compiler)
+endif()
 qt_generate_deploy_app_script(
   TARGET genko
   OUTPUT_SCRIPT GENKO_DEPLOY_SCRIPT
   NO_UNSUPPORTED_PLATFORM_ERROR
+  ${_genko_deploy_extra}
   # (the screenless platform too: `genko` for scripts and the command line where there is no display)
   INCLUDE_PLUGINS qoffscreen
   POST_INCLUDE_REGEXES "/libxcb-cursor[.]so" "/libxcb-icccm[.]so" "/libxcb-image[.]so" "/libxcb-keysyms[.]so"
