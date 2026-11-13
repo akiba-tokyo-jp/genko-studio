@@ -372,7 +372,7 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     std::optional<Profile> profile;
     std::optional<core::RgbMode> first_rgb;
     double dpi = 72.0;
-    const core::Actor actor(std::string(core::kLegacyActor));
+    const core::Actor actor{std::string(core::kLegacyActor)};  // (braces: MSVC reads the parenthesised form as a function)
     for (std::size_t i = 0; i < pictures.size(); ++i) {
         const Picture p = opened(pictures[i], options.open);
         if (const auto camera = render::picture_camera(*p.doc, p.doc->page(p.page), nullptr); camera && camera->focal_length_35mm) {
