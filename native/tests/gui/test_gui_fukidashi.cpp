@@ -1387,6 +1387,14 @@ private slots:
                        {"style", Json{{"spike_alt", 0.5}}}});
             s.put(Json{{"op", "add_line"}, {"text", "そうなんだ"}, {"balloon", "capsule"}, {"x_mm", 150}, {"y_mm", 110}, {"w_mm", 9.5}, {"h_mm", 31}});
             s.window->show_dock(QStringLiteral("フキダシ"));
+            QTRY_VERIFY_WITH_TIMEOUT(s.palette().pictures_drawn(), 30000);
+            const QString shade = QLatin1String(mode) == QLatin1String("light") ? QString() : QStringLiteral("-dark");
+            // the window as it is with the palette open beside 台詞 and a look chosen for the next line (the text tool's
+            // settings say it: パレットの形); and those settings alone
+            s.window->arm_balloon_preset(QStringLiteral("double"));
+            QTest::qWait(300);
+            QVERIFY(s.window->grab().save(dir + QStringLiteral("/gui-window%1.png").arg(shade)));
+            QVERIFY(s.window->text_settings()->grab().save(dir + QStringLiteral("/gui-armed%1.png").arg(shade)));
             s.window->balloon_dock()->setFloating(true);
             s.window->balloon_dock()->resize(440, 920);  // (every preset in sight: four across)
             QTRY_VERIFY_WITH_TIMEOUT(s.palette().pictures_drawn(), 30000);
@@ -1411,7 +1419,6 @@ private slots:
             } else {
                 QVERIFY(box->grab().save(dir + QStringLiteral("/gui-panel%1.png").arg(suffix)));
             }
-            if (QLatin1String(mode) == QLatin1String("light")) QVERIFY(s.window->grab().save(dir + QStringLiteral("/gui-window.png")));
             app::settings()->remove(QStringLiteral("ui/theme"));
         }
         app::theme::apply(qApp);

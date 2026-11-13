@@ -90,7 +90,7 @@
 - ドック「フキダシ」（app/balloon_palette、main_window_fukidashi）: プリセット 32 個（下）。絵は draw_group が描く（40 × 34 mm の紙を 56 dpi × 画面の倍率で。線なしだけ灰色の紙）。初めて見せたときに 4 枚ずつ描き、プロセスの中で使い回す。キー（矢印・Enter・Space）、ツールチップ、右クリック（選んだ台詞に当てる／次に置く台詞に使う）。ウィンドウ → フキダシ、ページ → 台詞 → フキダシのパレットを開く（`act_balloon_palette`）。台詞のタブの隣、初めは閉じている。写植の並び（作業の段階）に入れた。配置は saveState に入る（objectName「フキダシ」）。
 - 選んだときの動き: このページの台詞を選んでいて文字ツールを持っていなければ、その台詞に当てる（`edit_line` 1 つ）。そうでなければ次に置く台詞の形（文字ツールに持ち替え、type_new_line・balloon_drawn が読む。別のプリセットか文字ツールの「フキダシ」を選ぶまで続く）。台詞パネルの「コマに追加」とストーリーエディターは、自分の種類の欄があるので、パレットの形は使わない。
 - 寸法: app/lettering の measure は capsule・polygon を service::letter::measure で測る（式は 1 つ）。polygon の寸法は service に足した（polygon_room）。polygon の角の数は place_at・refit がスタイルから読む。
-- プリセット（鍵 / 名前）: oval ふつう、oval_tail しっぽつき、capsule 縦長、capsule_wide 横長、rounded 角丸、squircle ふっくら角丸、box 四角、narration ナレーション、cloud もくもく、thought_cloud 心の声（雲）、thought 心の声（泡）、shout 叫び、shout_alt 叫び（長短）、shout_sharp 叫び（鋭い）、electric 電子音、flash フラッシュ、whisper ささやき、long_dash 長い破線、wave ふるえ声、double 二重線、thick 太い線、no_line 線なし、polygon8 八角形、polygon6 六角形、black_oval ベタ白抜き、black_shout ベタの叫び、black_flash ベタフラ、dotted_box 点線の囲み、tone_box トーンの囲み、fancy_box 飾り枠、inward_tail 内向きしっぽ、two_tails しっぽ 2 本。
+- プリセット（鍵 / 名前）: oval 普通、oval_tail しっぽつき、capsule 縦長、capsule_wide 横長、rounded 角丸、squircle ふっくら角丸、box 四角、narration ナレーション、cloud もくもく、thought_cloud 心の声（雲）、thought 心の声（泡）、shout 叫び、shout_alt 叫び（長短）、shout_sharp 叫び（鋭い）、electric 電子音、flash フラッシュ、whisper ささやき、long_dash 長い破線、wave ふるえ声、double 二重線、thick 太い線、no_line 線なし、polygon8 八角形、polygon6 六角形、black_oval ベタ白抜き、black_shout ベタの叫び、black_flash ベタフラ、dotted_box 点線の囲み、tone_box トーンの囲み、fancy_box 飾り枠、inward_tail 内向きしっぽ、two_tails しっぽ 2 本。
 - 作らなかったもの: つないだ 2 つ（`group`）のプリセット。つなぎは台詞 2 本の鍵なので、1 本を置く・1 本に当てるプリセットでは作れない（右クリック「次の台詞のフキダシとつなげる」は前のまま）。
 - commands.json: 4 つ足した（ウィンドウ → フキダシ、フキダシのパレットを開く、フキダシの形の 2 つ）。消した命令は無い。保存してあるショートカットは、ウィンドウの命令ごとに `shortcuts/<名前>` を引くだけなので、知らない名前の設定が残っていても読まれず、何も起きない（preferences.cpp）。
 
@@ -124,6 +124,42 @@
 - パレットの絵は 56 dpi（× 画面の倍率）なので、飾り枠の角飾りやトーンの点は実際より粗く見える。
 - polygon の寸法は角を丸める前の多角形で測る。奇数の角（5・7・9・11）は 2% の余裕を足している（試験は 5〜12 角で文字が 5 mm のまま収まることを見る）。
 - 内向きのしっぽにしたときの先の置き場所（縁までの 0.55）は、箱の楕円で測る（四角や多角形でも中に入る）。
+
+#### レビュー（d48c3f60..14a425c5 の読むだけのレビュー。P1 なし・P2 4 件・P3 10 件）と直したこと
+- P2-1 切れ込み（inward）がフキダシに置いていかれる: core の `move_line` が、しっぽを言わずに箱を動かす・大きさを変えるとき、inward のしっぽだけ箱と一緒に動かす（動かしただけなら同じだけ、大きさを変えたら箱の中の同じ割合へ。`to`・`via`・`vias`）。ほかのしっぽは前のまま（ページの上で指す所。隠れた先は外へ）。同じ op をもう一度当てても同じ結果（op は文書だけから決まる）。画面: 内向きの先（●）はドラッグしても中に留まる（縁までの 0.9）。「しっぽをまっすぐにする」はしっぽの種類を保つ（内向きが見えないくさびにならない。ギザギザ・消えるも保つ）。
+- P2-2 つないだフキダシ（`group`）にパレットの形: つないだ台詞の全部に種類と見た目の鍵を当てる（1 回の apply_ops＝取り消し 1 回）。しっぽは選んだ台詞だけ。文字の色の決まりは 1 本ずつ。
+- P2-3 前の `wobble` を外すと文字が小さくなる: パレット（preset_style_change）と線のふるえ（set_wave）の両方で、`wobble` が効いていて、結果が楕円で、`hand` が false でなければ `hand: false` を書く（`hand: true` のときも）。
+- P2-4 カプセルは箱で形が決まる: AI 向けの文（apply_ops・propose_lines の説明、SKILL.md の表とネームの項、drawing.md、integrations の写し、docs/AGENT.md）を直した（箱の長い辺が長い辺、大きさを省いた add_line は 40×20 mm、edit_line で変えたら move_line で箱を合わせる、目安の寸法）。画面: 種類のメニュー（ページ → 台詞 → フキダシの形、右クリック）とパレットで capsule・polygon へ／から変えると、同じ取り消しの中で箱を言葉に合わせて作り直す（真ん中を保つ。lettering::refit_for_kind）。ほかの種類どうしは箱を変えない。台詞パネルの「台詞を直す」とストーリーエディターは前から作り直している（右上を保つ）。core の edit_line はそのまま。
+- P3-1 白い文字: ベタの白い文字は、文字の色が無いか黒い台詞にだけ。白い文字を戻すのは前の塗りが黒かったときだけ（白抜き文字は触らない）。
+- P3-2 効かない行: 点線の囲みに角の丸み・線のふるえを出さない、飾り枠に角の丸みを出さない、心の声にしっぽの形を出さない。
+- P3-3 触っていない欄が書く: 新しい欄は、出している値と同じ（表示の刻みの半分以内）なら op を出さない（story_panel の left_as_shown）。しっぽの付け根の丸みは、1 本目の値が同じなら出さない（しっぽごとの違いをそろえない）。前からの「しっぽの幅」は、同じなら move_line（しっぽ）を出さない。ただし前からの欄がどれもそうであるように、欄を離れるとスタイルの edit_line は出る（test_gui_lines が見ている前からの動き。変えていない）。
+- P3-4 何も変わらない選択: op も取り消しの 1 回も作らず、「もう「◯◯」です」と知らせる。
+- P3-5 内向きと外向きが混じったしっぽ: しっぽのプリセットでは、向きの違うしっぽが 1 本でもあればプリセットのしっぽに置き換える。
+- P3-6 文の正しさ: propose_lines（balloon を省いて形が言葉で決まるのは、x_mm・y_mm だけを出したとき。box01 は speech のまま）、docs/AGENT.md（add_line の既定は speech）、入らないときの目安（service::letter::fits）を capsule・polygon の寸法で数える。
+- P3-7 試験: 下の「試験」。
+- P3-8 画面の倍率: QEvent::DevicePixelRatioChange で絵を描き直す。
+- P3-9 次に置く形が見えない: 文字ツールのオプションに「パレットの形: ◯◯」と「外す」。文字ツールの「フキダシ」を選び直しても外れる（前から）。
+- P3-10 文言: パレットの「普通」、種類の「ささやき（破線）」「フラッシュ（放射状の線）」（前の名前で付けたショートカットは preferences::renamed で引き継ぐ。commands.json の old_names）、「元に戻す で取り消せます」、ドックの説明。
+
+#### レビューの直しで変えた既存の試験の期待値（どれも意図した変更。緩めていない）
+- test_fukidashi_service aNotchStaysInsideItsBalloon → aNotchGoesWithItsBalloon: 箱を 40×30 → 60×50 にしたとき、切れ込みは「元の場所のまま」ではなく箱と一緒に動く（[58, 50] → [67, 56.67]）。P2-1 の決まり。ほかのしっぽ・検査の指摘は前のまま。
+- test_gui_lines aBalloonsOwnMenu（しっぽをまっすぐにする）: ギザギザのしっぽをまっすぐにしても種類が残る（`{"to": …}` → `{"to": …, "kind": "zigzag"}`）。P2-1。
+- core/data/commands.json: 種類 2 つの名前（id も名前）が変わり、old_names に前の名前が入る。
+- docs/ops.schema.json: native の一覧と同じ文（move_line の tails）。
+- test_gui_fukidashi（群 B2 の試験）: 種類を capsule・polygon へ変える op が 2 つ（edit_line と move_line）になる、ベタは利用者の赤い文字を白にしない、など上の決まりに合わせた。
+- 変えていないもの: 画素・PSD・opentype・project.json の sha256、道具の inputSchema の sha256、ネームの見本の input_hash。
+
+#### レビューの直しの後に確かめたこと（Linux Release。関係する試験だけ）
+- 前と同じ 152 本の実行ファイル（上の一覧）を、全部を作り直してから 3 本並べて流した: 試験の関数 2989 件が合格、不合格 0、スキップ 25（内訳は前と同じ）。sha256 を取り直した試験は無い。全体の試験・ASan・Debug・test_soak_app は流していない。
+- 試験: test_gui_fukidashi は 12 件（つないだフキダシに当てる aPickOnAJoinedBalloonTakesEveryMember、切れ込みとフキダシ aNotchGoesWithItsBalloon を足した。手描き風の試験は、wobble を外すと文字の組み方が変わる箱を探して使い、`hand: false` が入ること・組み方が変わらないことを線のふるえとパレットの両方で見る。寸法の試験は手で計算した数と比べる。パレットの項目の名前とツールチップも「無くなった言葉」の検査に入れた。右クリックのメニューは item_menu から試す）。test_fukidashi_service は 19 件（aNotchGoesWithItsBalloon: 動かす・大きさを変える・同じ op をもう一度・しっぽを言った move_line。aPlanSaysCapsuleAndPolygon: ネーム計画の capsule・polygon が写植まで届く・目安の字数）。
+- 画面の絵（作業用の場所）: gui-palette.png・gui-panel.png・gui-window.png（パレットを台詞の隣に開き、次に置く形を選んだ所。文字ツールのオプションに「パレットの形: 二重線」と「外す」）・gui-armed.png と、それぞれの -dark。日本語は字で出ていて、切れている所は無い（右のタブの見出しは、タブが多いと「フキ…」と省略される。前からのタブの動き）。
+
+#### 残り・気を付けること（レビューの後）
+- フキダシをドラッグしている途中の絵では、切れ込みは離すまで元の場所に見える（離したときに動く）。確かめたのは離した後の op と結果だけ。
+- `move_line` 以外で台詞を動かす op（整列・変形・用紙の変更など）で切れ込みがどう動くかは見ていない。
+- つないだフキダシで capsule・polygon へ／から変えると、1 本ずつ真ん中を保って箱を作り直す。箱が小さくなって離れることがある（短い半径の 1.2 倍までは首でつながる）。
+- 「しっぽをまっすぐにする」が種類を保つのは、全部の種類（前はくさびに戻していた）。
+- 種類 2 つの名前を変えたので、`genko commands` の id も変わる（前の名前は old_names）。
 
 ## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12
 
