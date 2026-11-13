@@ -98,6 +98,13 @@ jobs:
           git -C "$env:GENKO_VCPKG" checkout --quiet $baseline
           & "$env:GENKO_VCPKG\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+      - name: vcpkg binary cache (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-exe-${{ hashFiles('native/vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-exe-${{ hashFiles('native/vcpkg.json') }}-
       - name: Configure and build (Release, without the test suites)
         shell: pwsh
         run: |
@@ -114,11 +121,18 @@ jobs:
           cd native
           # (Windows では初めてのビルド: MSVC の警告でビルドを止めない。GENKO_WERROR は Linux の試験ビルドで生きている)
           cmake --preset windows-release -DGENKO_BUILD_TESTS=OFF -DGENKO_WERROR=OFF
-          cmake --build ..\build\windows-release
+          # (-k 0: 誤りがあっても止めずに、全部の誤りを一度に出す)
+          cmake --build ..\build\windows-release -- -k 0
           # (cpack: chocolatey にも同名のものがあるので、cmake と同じ場所のものを使う)
           $cpack = Join-Path (Split-Path (Get-Command cmake).Source) 'cpack.exe'
           Set-Location ..\build\windows-release
           & $cpack -B "$env:RUNNER_TEMP\pkg"
+      - name: vcpkg binary cache (save, also after a failed build)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-exe-${{ hashFiles('native/vcpkg.json') }}-${{ github.run_id }}
       - name: 動くかだけ確かめる（展開した配布物で 版・本を作る・調べる・描き出す）
         shell: pwsh
         env:
