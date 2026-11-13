@@ -17,7 +17,68 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13（この節が最新）
+## 書体の追加（F1: ファイル・ライセンス・一覧）— 2026-11-14
+
+### 利用者の決定（2026-11-13）
+- 「書体も足りない気がするのですよね」「フォント追加は、任せます 使えるものであれば可能な限り追加してください」。同梱の日本語書体がまんがには少ない。追加する書体の選び方は任せる。使えるものはできるだけ多く入れる。
+
+### F1 でしたこと（ブランチ `native/fonts`。C++・.qrc・CMake には触れていない。ビルドもしていない）
+- `native/resources/fonts/` に書体ファイルを 40 個足した（合計 157.5 MB。既存の 6 個と合わせて 46 個・177.9 MB。画面用の IBM Plex Sans JP は別）。どれも元のファイルのまま（改変なし・名前も元のまま）。
+- ライセンス文は書体ごとに `native/resources/fonts/licenses/`（OFL は `<書体>-OFL.txt`、littlelimit の 2 書体は `k8x12-LICENSE.txt`・`misaki-LICENSE.txt`）。`THIRD_PARTY.md` の「同梱フォント・アイコン」に 3 行足した。
+- 一覧は `native/resources/fonts/FONTS.json`（genko-fonts@1）。46 書体それぞれに、ファイル・sha256・書体名・太さ・**アプリ用の短いキーの案**・画面に出す日本語名・用途の区分（台詞・ナレーション・叫び・丸ゴシック・かわいい・手書き・筆・ホラー・機械・効果音・その他）・かなが揃っているか・漢字の数（JIS 第 1・第 2 水準、常用）と `kanji: full|partial|none`・縦書きの対応（GSUB の vert／vrt2、vhea・vmtx）・ライセンス・著作権表示・予約フォント名・出典（コミットや ZIP の sha256）・改変の有無。
+- 見本（コミットしない。Pillow で描いた。Genko はビルドしていない）: 作業用の `fonts-work/samples/genko-fonts-01.png`〜`04.png`。書体に無い字は赤い×の箱で出す（別の書体で埋めない）。全ページを目で見て、崩れる書体が無いことを確かめた。
+
+### 選んだ決まり
+1. ライセンス: SIL OFL 1.1 か、同じだけ自由なもの（アプリへの同梱と、出力の商用利用をはっきり許すもの）。出典に置かれたライセンス文を読んで確かめる。「個人利用のみ無料」や独自の条件、IPA フォントライセンスは入れない。
+2. 出典: google/fonts の 1 つのコミット（`b78877b777ed3a18a1b431b0df7d8ee3f84c2e5f`）。取ったファイルは、そのコミットの木の blob の ID と照らした。既存の 6 個も同じコミットのファイルと 1 バイトも違わない。google/fonts に無いものは、作者の配布サイトから取れて、そこでライセンスを読めたものだけ（okoneya.jp の源暎 2 書体、littlelimit.net のドット 2 書体）。
+3. まんがでの使い道が違う書体を選ぶ。似た書体は入れない。1 つの書体の太さは 1〜2 個まで。
+4. 技術: FreeType 2.14 で開ける静的な TrueType。可変フォントは入れていない（自分で静的に切り出したものも無い）。かな・約物・英数字・漢字の揃い方を数えて `FONTS.json` に書く。かなだけ・漢字が一部だけの飾り書体も入れるが、印を付ける。
+5. 大きさ: 12 MB を超えるファイルは入れない（しっぽり明朝 B1・しっぽりアンチック B1 を外した）。
+
+### 入れた書体（キーの案 → ファイル）
+- 台詞: `antique_genei` GenEiAntiqueNv6-M（源暎アンチック。アンチゴチ 1 ファイル）、`antique_shippori` ShipporiAntique-Regular、`antigothic_medium`・`antigothic_bold` ZenKakuGothicAntique（アンチゴチ 1 ファイル）、`antique_zen` ZenAntique-Regular、`gothic_regular` ZenKakuGothicNew-Regular、`gothic_seed` LINESeedJP-Bold
+- ナレーション: `mincho_shippori` ShipporiMincho-Regular、`mincho_hina` HinaMincho-Regular、`klee` KleeOne-SemiBold（教科書体）
+- 叫び: `gothic_black` ZenKakuGothicNew-Black、`gothic_kiwami` GenEiKiwamiGo（源暎きわみゴ）、`mincho_black` ZenOldMincho-Black、`mincho_tokumin` KaiseiTokumin-ExtraBold
+- 丸ゴシック: `maru_regular` ZenMaruGothic-Regular、`maru_black` ZenMaruGothic-Black
+- かわいい・ポップ: `pop_mochiy` MochiyPopOne、`pop_rocknroll` RocknRollOne、`cute_hachimaru` HachiMaruPop、`cute_kiwi` KiwiMaru-Medium、`mincho_decol` KaiseiDecol-Medium、`cute_cherry` CherryBombOne（かなだけ）、`cute_daruma` DarumadropOne（かなだけ）
+- 手書き: `hand_kurenaido` ZenKurenaido、`marker_yusei` YuseiMagic、`hand_slackside` SlacksideOne（かなだけ）
+- 筆: `brush_syuku` YujiSyuku、`brush_boku` YujiBoku、`brush_potta` PottaOne
+- ホラー: `horror_tegomin` NewTegomin、`horror_chokoku` Chokokutai（かなだけ）
+- 機械・ドット: `dot16` DotGothic16、`dot12` k8x12、`dot8` misaki_gothic_2nd、`stick` Stick、`techno_monomaniac` MonomaniacOne（かなだけ）
+- 効果音: `sfx_outline` RampartOne（立体の袋文字）、`sfx_inline` TrainOne（漢字は第 1 水準だけ）、`sfx_aoboshi` AoboshiOne（かなだけ）
+- その他: `narrow_lubrifont` WDXLLubrifontJPN（長体。10.3 MB）
+
+### 字の揃い方で気を付ける所（どれも `FONTS.json` に書いてある）
+- 漢字が無い（`kanji: none`）: cute_cherry・cute_daruma・hand_slackside・horror_chokoku・techno_monomaniac・sfx_aoboshi。漢字が一部（`partial`）: sfx_inline（第 1 水準 2,965 字だけ。常用は 2,106／2,136）。
+- 全角の「！」「？」が無い: cute_daruma・hand_slackside・techno_monomaniac（半角の `!` `?` はある）。sfx_aoboshi は「『』」と単独の「゛゜」が無い。
+- 「ゔ」が無い: dot12・dot8・narrow_lubrifont（「ヴ」はある）。単独の「゛゜」が無い: 既存の sfx（デラゴシック）、pop_mochiy。
+- 「―」（U+2015）と「～」（U+FF5E）: ZEN の各書体としっぽりアンチックなどは持たないが、アプリの似た字への置き換え（fonts.cpp の kLookalike。― → —、～ → 〜）で出る。置き換えた後も無い約物は `punctuation_missing_after_lookalike`。
+- 縦書き: dot12・dot8 は vert も vhea・vmtx も無い。cute_daruma は vert はあるが vhea・vmtx が無い。ほかは vert・vrt2・vhea・vmtx を持つ。
+- しっぽりアンチックは第 2 水準が 4 字足りない（3,386／3,390。`full` の扱い）。
+- dot12・dot8 は輪郭のほかに埋め込みビットマップ（EBDT／EBLC）を持つ。
+
+### いまの読み込み方（F2 の前提）
+- 文字入れの 6 書体は `native/resources/genko_text.qrc`（接頭辞 `/genko/text`、別名がキー）を `qt_add_big_resources` で `genko_render` に組み込んでいる（`native/src/render/CMakeLists.txt`）。`render/draw.cpp` の `with_text_font`・`bundled_bytes` が `:/genko/text/<キー>` をまるごとメモリへ読む（上限 256 MB）。ファイルのパスを書けば外のフォントも使える（`fonts.cpp` の `face_of`）。
+- キーの一覧はソースに直に書いてある: `render/text/fonts.cpp`（kBundled。合成の antique もここ）、`render/draw.cpp` の `bundled_text_font`、`formats/psd_text.cpp` の `bundled_font`、`render/psd_type.cpp`（PSD のフォント名）、`core/ops_book.cpp`（ops の検査）、`app/lettering.cpp` の `bundled_fonts()`（GUI の一覧と日本語名）、`service/lint.cpp`（名前）、`api/cli.cpp`（doctor の「bundled font missing」）。
+
+### F2 がすること
+1. **置き方を決める（勧め: 追加の 40 個はファイルとして導入する）**。157.5 MB を `qt_add_big_resources` で `genko_render` に組み込むと、それを静的に結ぶ実行物（本体・CLI・試験の実行物それぞれ）が同じだけ大きくなり、ビルドの場所も配布物も膨らむ。既存の 6 個と pillow_default はいまのまま組み込み（基準画像・試験が変わらない）、追加分は `share/genko-studio/fonts/`（Windows は実行物の隣）へ `install(FILES …)` し、キー → ファイルは `FONTS.json`（これも導入する）から引くのがよい。開発中・試験では、ソースの `native/resources/fonts/` を見る道（既存の資源の探し方に合わせる）が要る。組み込みを選ぶなら .qrc に 40 行足すだけで済むが、大きさを測ってから決めること。
+2. キーを登録する: 上の「キーの一覧」の全箇所と `docs/ops.schema.json`（フォントの説明があれば）。キーは案なので、変えるなら `FONTS.json` も直す。
+3. 合成の書体: 既定の `antique`（かな mincho・ほか gothic）は変えない（既存の本の見た目が変わるため）。アンチゴチ 1 ファイルの書体（antique_genei・antigothic_medium・antigothic_bold）は合成が要らない。かなだけ・漢字が一部の書体は、`FONTS.json` の `composite_suggestions`（例: cute_cherry のかな＋maru_black の漢字、horror_chokoku＋mincho_black）のように、漢字側を似た太さの書体にした合成のキーとして出すのがよい。
+4. 無い字の代わり: いまの `Fonts::path_for` は「書体の相方 → gothic → sfx」の順。`kanji: none|partial` の書体と、全角「！？」の無い書体で、代わりの書体が黙って混ざる。合成の相方を決めるか、GUI・lint で「この書体は漢字を持たない」と知らせる。全角「！？」→ 半角への置き換えを kLookalike に足すかも決める。
+5. GUI: `bundled_fonts()` の一覧を、`FONTS.json` の `categories` の順の区分ごとに分けて出す（47 個を 1 列に並べない）。日本語名は `name_ja`、使い道は `use_ja`。見本の絵を出すなら Genko で描き直す。
+6. 配布物と試験: `native/package/sbom.cmake` の `fonts` の行（書体名の列。源暎は OFL-1.1、k8x12・美咲は `LicenseRef-…`）、`native/tests/package/test_package.cpp` の `licenses/fonts` の `*-OFL.txt` の数（いま 7 → **39**。F1 でファイルを足したので、この試験は F2 で直すまで落ちる）と `k8x12-LICENSE.txt`・`misaki-LICENSE.txt` の確認、`THIRD_PARTY.md` の「まだ登録していない」の書き換え、導入するフォントの数・sha256 の試験（`FONTS.json` と照らす）、doctor の検査。
+7. 手引き: `docs/AGENT.md`（249 行目あたりの書体の説明）、`native/resources/studio/guide/SKILL.md`（42〜43 行目あたりのジャンルごとの勧め）、`integrations/*/genko-manga/SKILL.md` に、区分ごとの使い分けを足す（例: ホラーの台詞 horror_tegomin、機械の声 dot16・stick、叫び gothic_black・gothic_kiwami・mincho_black、手紙・心の声 klee、時代もの brush_syuku）。
+8. 縦書き・ルビ・ふちどりで 46 書体が崩れないかを、Genko の描画で見る（F1 の見本は横組みだけ）。PSD への書き出し（psd_type のフォント名）も足す。
+
+### 入れなかったもの
+- **欲しいが取れなかった**: 源界明朝・装甲明朝・廻想体（フロップデザイン。flopdesign.com がこの環境からの取得に 403 を返す。ホラーの本命）、自家製 Rounded M+・源柔ゴシック（jikasei.me に繋がらない）、OSDN に置かれたもの（osdn.net に繋がらない）。
+- **ライセンス文を出典で確かめられなかった・条件が合わない**: M PLUS Rounded 1c（google/fonts のその書体の場所に OFL.txt が無い）、IPA フォントライセンスのもの（IPAex、やさしさアンチック、GL-アンチックなど。決まりにより入れない）、独自の「フリー」条件の書体（衡山毛筆フォント、青柳衡山、玉ねぎ楷書激、けいふぉんと、あんずもじ、851 チカラヅヨク、ニコモジ、ラノベ POP、g_コミックホラーなど。条件を読んで確かめていない。入れていない）。
+- **技術**: M PLUS 1 Code・Kapakana・Noto Sans JP・Noto Serif JP・Murecho・M PLUS 1／2（可変フォントだけ。M PLUS 1 Code は全角「！？」も無い。Kapakana は「。「」！？」が無い）、源暎ラテゴ・ラテミン（TTC だけ。予約フォント名があるので切り出すなら改名が要る）、Rock 3D・Shizuru・Palette Mosaic（全角の「！？…」などが多く欠ける）。
+- **似ているので外した**: Zen Antique Soft、Shippori Antique B1（13.1 MB）、Shippori Mincho B1（15.2 MB）、Yuji Mai、Klee One Regular、Kosugi・Kosugi Maru（Apache-2.0）、BIZ UDGothic・BIZ UDMincho、Kaisei Opti・Kaisei HarunoUmi、M PLUS 1p（第 2 水準が一部）、Sawarabi Gothic・Mincho、Tsukimi Rounded、Otomanopee One、びぜんアンチック、源暎ぽっぷる、棘丸ゴシック、k8x12L・k8x12S・美咲ゴシック・美咲明朝。
+- **足りない区分**: 本物の毛筆（行書・草書）と、かすれ・にじみの強いホラー書体は、決まりに合うものが取れる所に無かった。利用者が持つフォントは、いまもファイルのパスで使える。
+
+## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合
 
 ### 利用者の決定（2026-11-13）
 - 「吹き出しが少しいびつに見える」「いびつにせずに今風の漫画の吹き出しを各種作って置けるように」。続けて「手描き風は消して良いです」、すでにある本のフキダシは「全部を今風に描く」。
