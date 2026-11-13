@@ -17,6 +17,7 @@
 #include <algorithm>
 
 #include "app/ask.hpp"
+#include "app/balloon_palette.hpp"
 #include "app/canvas.hpp"
 #include "app/ime.hpp"
 #include "app/lettering.hpp"
@@ -120,6 +121,7 @@ void MainWindow::build_line_menus(QMenu* pages) {
     QMenu* lines = pages->addMenu(QStringLiteral("台詞"));
     lines->addAction(action("act_line_type"));
     lines->addAction(action("act_balloon_pen"));
+    lines->addAction(action("act_balloon_palette"));  // (フキダシのパレットを開く: main_window_fukidashi.cpp)
     lines->addSeparator();
     lines->addAction(action("act_line_edit"));
     lines->addAction(action("act_line_wrap"));
@@ -219,11 +221,22 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
         }
         const lettering::Marks marks = lettering::parse_marks(*typed);
         const core::Frame* frame = target->frame_at(Num(x_mm), Num(y_mm));
-        const TextToolSettings::LineFields fields = text_settings_->line_fields(tool);
-        const Json box = lettering::place_at(x_mm, y_mm, marks.text, fields.balloon, fields.vertical, frame);
+        TextToolSettings::LineFields fields = text_settings_->line_fields(tool);
+        // (フキダシ: the palette's preset chosen for the next line — its kind, its look's keys and its tails)
+        const BalloonPreset* preset = armed_balloon_preset();
+        if (preset != nullptr) {
+            fields.balloon = preset->kind;
+            for (const auto& [key, value] : preset->style.items()) fields.style[key] = value;
+            if (preset->across) fields.vertical = false;
+        }
+        const Json box = lettering::place_at(x_mm, y_mm, marks.text, fields.balloon, fields.vertical, frame, fields.style);
         Json op{{"op", "add_line"}, {"page", target->index.json()}, {"text", marks.text}, {"balloon", fields.balloon}};
         for (const auto& [key, value] : box.items()) op[key] = value;
         if (!fields.style.empty()) op["style"] = fields.style;
+        if (preset != nullptr && !preset->tails.empty()) {
+            op["tails"] = preset_tails(*preset, core::to_float(box["x_mm"]), core::to_float(box["y_mm"]), core::to_float(box["w_mm"]),
+                                       core::to_float(box["h_mm"]));
+        }
         if (frame != nullptr) op["frame_id"] = frame->id;
         lettering::put_ruby(op, marks, nullptr, false);
         if (!marks.emphasis_runs.empty()) op["emphasis_runs"] = marks.emphasis_runs;
@@ -264,7 +277,11 @@ void MainWindow::balloon_drawn(const Json& outline) {
             return;
         }
         const lettering::Marks marks = lettering::parse_marks(*typed);
-        const TextToolSettings::LineFields fields = text_settings_->line_fields();
+        TextToolSettings::LineFields fields = text_settings_->line_fields();
+        if (const BalloonPreset* preset = armed_balloon_preset()) {  // (フキダシ: the palette's look on the outline drawn)
+            fields.balloon = preset->kind;
+            for (const auto& [key, value] : preset->style.items()) fields.style[key] = value;
+        }
         const std::string kind = fields.balloon != "sfx" && fields.balloon != "none" && fields.balloon != "narration" ? fields.balloon : "speech";
         Json op{{"op", "add_line"}, {"page", target->index.json()}, {"text", marks.text}, {"balloon", kind}, {"path", outline},
                 {"wrap", fields.vertical ? "vertical" : "horizontal"}};
@@ -475,22 +492,17 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
             });
         });
         QMenu* kinds = menu->addMenu(QStringLiteral("しっぽの形"));
-        for (const auto& [key, label] : {std::pair{"wedge", "くさび"}, {"zigzag", "ギザギザ"}, {"fade", "消える"}, {"bubbles", "泡（心の声）"}}) {
-            QAction* act = kinds->addAction(QString::fromUtf8(label));
+        // (fukidashi@1: まっすぐ and 内向き — a notch cut into the balloon — with the ones of before; the 台詞 panel's しっぽの形)
+        for (const auto& [name, label] : StoryPanel::tail_kinds()) {
+            const std::string key = name.toStdString();
+            QAction* act = kinds->addAction(label);
             act->setCheckable(true);
-            act->setChecked(std::all_of(tails.begin(), tails.end(), [key = key](const Json& t) {
+            act->setChecked(std::all_of(tails.begin(), tails.end(), [&key](const Json& t) {
                 const Json kind = core::get_or(t, "kind", Json());
                 return (core::py_truthy(kind) ? core::py_str(kind) : std::string("wedge")) == key;
             }));
-            connect(act, &QAction::triggered, this, [apply_now, tails_op, kind = std::string(key)] {
-                apply_now([tails_op, kind](const core::StoryLine& l) {
-                    Json kinded = Json::array();
-                    for (Json t : PageCanvas::tails_of(l)) {
-                        t["kind"] = kind;
-                        kinded.push_back(t);
-                    }
-                    return tails_op(l, kinded);
-                });
+            connect(act, &QAction::triggered, this, [apply_now, tails_op, kind = key] {
+                apply_now([tails_op, kind](const core::StoryLine& l) { return tails_op(l, StoryPanel::tails_as(l, kind)); });
             });
         }
     }

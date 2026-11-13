@@ -12,6 +12,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -44,6 +45,13 @@ public:
     void move(int delta);
     // The line chosen in the list (none: no line, or one not on this page).
     const core::StoryLine* line() const;
+    // fukidashi@1: the tails' kinds and their names (しっぽの形, here and in a balloon's own menu); a line's tails all
+    // given a kind (one turned inward has its tip moved inside the balloon, one turned back out moved outside again);
+    // and how far a line's outline trembles as the field shows it (style.wave_mm, or a line of before's wobble as the
+    // wave it is drawn with).
+    static const std::vector<std::pair<QString, QString>>& tail_kinds();
+    static core::Json tails_as(const core::StoryLine& l, const std::string& kind);
+    static double shown_wave(const core::StoryLine& l);
 
     // The list and the words
     QListWidget* list = nullptr;
@@ -72,7 +80,6 @@ public:
     QComboBox* latin = nullptr;
     QComboBox* mark = nullptr;
     QPushButton* outline_colour = nullptr;
-    QDoubleSpinBox* wobble = nullptr;
     QCheckBox* double_line = nullptr;
     QSpinBox* spikes = nullptr;
     QDoubleSpinBox* spike_depth = nullptr;
@@ -82,6 +89,21 @@ public:
     QDoubleSpinBox* text_dx = nullptr;
     QDoubleSpinBox* text_dy = nullptr;
     QDoubleSpinBox* tail_width = nullptr;
+    // fukidashi@1 (SPEC BALLOON-01): the balloon's shape, each shown only for the kinds it changes — the corners' radius
+    // (自動: the kind's own; 0: square corners), the fuller rounded box, a polygon's sides, the trembling outline, a
+    // burst's every other point shorter, the outline dashed; and its tails' kind (inward: a notch) and how far their
+    // join with the balloon is rounded (自動: the renderer's own; 0: a corner). Each change is one edit_line of that key.
+    // (The hand-drawn look's 線の揺れ is gone: a line of before that holds style.wobble shows it as the trembling it is
+    // drawn with.)
+    QDoubleSpinBox* corner = nullptr;
+    QCheckBox* squircle = nullptr;
+    QSpinBox* sides = nullptr;
+    QDoubleSpinBox* wave = nullptr;
+    QDoubleSpinBox* spike_alt = nullptr;
+    QDoubleSpinBox* dash = nullptr;
+    QComboBox* tail_kind = nullptr;
+    QDoubleSpinBox* tail_fillet = nullptr;
+    QFormLayout* style_form = nullptr;
     QCheckBox* path_curve = nullptr;
     QDoubleSpinBox* ruby_scale = nullptr;
     QCheckBox* mono_ruby = nullptr;
@@ -111,6 +133,13 @@ private:
     void style_changed();
     void pick_style_colour(const char* key, const QString& title, const QColor& fallback);
     void set_tail_width();
+    // fukidashi@1: one key of the chosen line's style set (null: back to the kind's own); its trembling; its tails' kind
+    // and their join's rounding; and which of these rows the line's kind has.
+    void set_shape_key(const char* key, const core::Json& value);
+    void set_wave();
+    void set_tail_kind();
+    void set_tail_fillet();
+    void show_shape_rows(const core::StoryLine& l);
     void pick_gradient();
     void pick_outline_colour();
     void reset_style();

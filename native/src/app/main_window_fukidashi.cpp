@@ -1,0 +1,100 @@
+// フキダシ (fukidashi@1, SPEC BALLOON-01; the user's 「今風の漫画の吹き出しを各種作って置けるように」): the palette of balloons
+// in the window. Its dock (a tab beside 台詞, in ウィンドウ, kept with the layout as every dock), and what a pick does:
+// the chosen line takes the preset's look — one edit_line, one step of 取り消し —, or the preset becomes the look of the
+// next line the text tool places (type_new_line and balloon_drawn read it: main_window_lines.cpp), until another is
+// picked or the text tool's own フキダシ is chosen.
+
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDockWidget>
+#include <QListWidget>
+#include <QMenu>
+
+#include "app/balloon_palette.hpp"
+#include "app/canvas.hpp"
+#include "app/main_window.hpp"
+#include "app/tool_settings.hpp"
+#include "render/text/lettering.hpp"
+
+namespace genko::app {
+
+using core::Json;
+
+void MainWindow::build_balloon_actions() {
+    make("act_balloon_palette", QStringLiteral("フキダシのパレットを開く"), [this] { show_dock(QStringLiteral("フキダシ")); }, {},
+         QStringLiteral("今風のフキダシの形を選んで、選んだ台詞に当てるか、次に置く台詞の形にします"));
+}
+
+void MainWindow::build_balloon_dock() {
+    balloon_palette_ = new BalloonPalette(this);
+    balloon_dock_ = new QDockWidget(QStringLiteral("フキダシ"), this);
+    balloon_dock_->setObjectName(QStringLiteral("フキダシ"));
+    balloon_dock_->setWidget(balloon_palette_);
+    balloon_dock_->setMinimumWidth(200);
+    // (for occasional work: its tab has a close button and it joins the row of tabs when opened)
+    balloon_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::RightDockWidgetArea, balloon_dock_);
+    tabifyDockWidget(lines_dock_, balloon_dock_);  // (beside the lines it shapes)
+    balloon_dock_->hide();  // (ウィンドウ → フキダシ, ページ → 台詞 → フキダシのパレットを開く, or the 写植 stage brings it)
+    view_menu_->addAction(balloon_dock_->toggleViewAction());
+    connect(balloon_palette_, &BalloonPalette::picked, this, [this](const QString& key, const QString& how) { use_balloon_preset(key, how); });
+    // (the text tool's own フキダシ chosen: that kind, plain — the palette's look is let go)
+    connect(text_settings_->balloon, &QComboBox::activated, this, [this](int) { arm_balloon_preset(QString()); });
+}
+
+const BalloonPreset* MainWindow::armed_balloon_preset() const { return balloon_preset(armed_balloon_); }
+
+void MainWindow::arm_balloon_preset(const QString& key) {
+    const BalloonPreset* preset = balloon_preset(key);
+    armed_balloon_ = preset != nullptr ? key : QString();
+    if (balloon_palette_ != nullptr) balloon_palette_->mark(armed_balloon_);
+    if (preset == nullptr) return;
+    // the text tool in hand, its settings saying the kind: the next click on the page places a line of this look
+    text_settings_->make->setCurrentIndex(std::max(0, text_settings_->make->findData(QStringLiteral("line"))));
+    text_settings_->balloon->setCurrentIndex(std::max(0, text_settings_->balloon->findData(QString::fromLatin1(preset->kind))));
+    if (text_settings_->draw_balloon->isChecked()) text_settings_->draw_balloon->setChecked(false);  // (its own shape, not one drawn by hand)
+    if (!PageCanvas::is_text_tool(canvas_->tool()) || (preset->across && canvas_->tool() != QLatin1String("text_h"))) {
+        choose_tool(preset->across ? QStringLiteral("text_h") : QStringLiteral("text"));
+    }
+    flash(QStringLiteral("フキダシ「%1」を選びました。置きたい所をクリックして、台詞を打ちます").arg(QString::fromUtf8(preset->name)), 6000);
+}
+
+bool MainWindow::restyle_with_balloon_preset(const QString& key) {
+    const BalloonPreset* preset = balloon_preset(key);
+    const core::StoryLine* line = canvas_->selected_line_id ? line_by_id(*canvas_->selected_line_id) : nullptr;
+    if (preset == nullptr) return false;
+    if (line == nullptr) {
+        flash(QStringLiteral("先に選択ツールで、形を変える台詞（フキダシ）をクリックして選びます"), 4000);
+        return false;
+    }
+    if (!render::text::shape_of(*line).empty()) {  // (a point or box text of a type layer's kind: it has no balloon)
+        flash(QStringLiteral("この文字はフキダシに入っていません。フキダシの形は、台詞に当てます"), 5000);
+        return false;
+    }
+    const bool drawn = line->path.has_value() && !line->path->empty();
+    const std::string id = line->id;
+    if (!apply_ops(Json::array({preset_restyle_op(*preset, *line)}))) return false;
+    canvas_->selected_line_id = id;
+    on_line_selected(id, false);
+    flash(drawn ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻すで戻ります）").arg(QString::fromUtf8(preset->name))
+                : QStringLiteral("選んだ台詞のフキダシを「%1」にしました（元に戻すで戻ります）").arg(QString::fromUtf8(preset->name)),
+          4000);
+    return true;
+}
+
+void MainWindow::use_balloon_preset(const QString& key, const QString& how) {
+    if (balloon_preset(key) == nullptr) return;
+    const core::StoryLine* line = canvas_->selected_line_id ? line_by_id(*canvas_->selected_line_id) : nullptr;
+    // (a line of this page chosen, and the text tool not in hand: that line takes the look; else the next line placed)
+    const core::Page* page = current_page();
+    const bool here = line != nullptr && page != nullptr && line->page_index == page->index;
+    const bool to_line = how == QLatin1String("line") || (how.isEmpty() && here && !PageCanvas::is_text_tool(canvas_->tool()));
+    if (to_line) {
+        restyle_with_balloon_preset(key);
+        if (balloon_palette_ != nullptr) balloon_palette_->mark(armed_balloon_);  // (the mark stays on the look the next line takes)
+        return;
+    }
+    arm_balloon_preset(key);
+}
+
+}  // namespace genko::app

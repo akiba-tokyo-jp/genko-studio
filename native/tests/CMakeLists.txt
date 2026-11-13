@@ -874,6 +874,10 @@ if(GENKO_BUILD_APP)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them
   genko_test(test_gui_lines SOURCES gui/test_gui_lines.cpp DEPS genko_app GUI TIMEOUT 900)
+  # フキダシ (fukidashi@1, SPEC BALLOON-01) in the window: the kinds of now in every menu, no control of the hand-drawn
+  # look, the 台詞 panel's settings of a balloon's shape, the palette of balloons (its pictures, a pick restyling the
+  # chosen line or shaping the next one placed), the window's measure of a capsule against the auto-lettering's
+  genko_test(test_gui_fukidashi SOURCES gui/test_gui_fukidashi.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # TEXT-01 in the window: the ruby typed with the input method (the table's "gui" cases), the ruby settings beside the
   # select tool, 要確認 marked, reassigned and cleared, Undo, 台詞の検索・置換, 縦書き・横書き, saved and read back
   genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

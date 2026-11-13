@@ -281,13 +281,15 @@ private slots:
         QVERIFY(lines != nullptr);
         QStringList order;
         for (QAction* a : lines->actions()) order << (a->isSeparator() ? QStringLiteral("|") : a->text());
-        QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("|"),
+        // (fukidashi@1: フキダシのパレットを開く after フキダシを手で描く — test_gui_fukidashi)
+        QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("フキダシのパレットを開く"),
+                                     QStringLiteral("|"),
                                      QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("ワープテキスト…"),
                                      QStringLiteral("フキダシの形"), QStringLiteral("選んだ台詞を消す"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
                                      QStringLiteral("シェイプに変換")}));
         QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
         QVERIFY(shapes != nullptr);
-        QCOMPARE(shapes->actions().size(), 15);
+        QCOMPARE(shapes->actions().size(), 17);  // (fukidashi@1: 縦長（カプセル） and 多角形（機械の声） with Python's 15)
         QCOMPARE(shapes->actions().front()->text(), QStringLiteral("普通（楕円）"));
         QCOMPARE(shapes->actions().back()->text(), QStringLiteral("飾り枠（テーマ・題目）"));
         // the 台詞 panel: a tab of the right row (not closed: as Python's), scrolling on a small screen
@@ -301,7 +303,7 @@ private slots:
         // ツールの設定: the text tool's page (TextToolSettings), and the select tool's with the chosen line's lettering
         auto* settings = s.window->text_settings();
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("text")), static_cast<QWidget*>(settings));
-        QCOMPARE(settings->balloon->count(), 15);
+        QCOMPARE(settings->balloon->count(), 17);  // (fukidashi@1: with the capsule and the polygon)
         QCOMPARE(settings->balloon->currentData().toString(), QStringLiteral("speech"));
         QVERIFY(settings->vertical->isChecked());
         QCOMPARE(settings->draw_balloon->text(), QStringLiteral("フキダシを手で描く"));
@@ -742,7 +744,7 @@ private slots:
         emit panel.outline->editingFinished();
         const Json style = Json::parse(R"({"outline_mm": 0.5, "border_mm": 0.35,
             "fill": "white", "rotate_deg": null, "skew_deg": null, "arc": null, "latin": "rotate", "emphasis_mark": "sesame",
-            "wobble": null, "double": null, "spikes": null, "spike_depth": null,
+            "double": null, "spikes": null, "spike_depth": null,
             "fill_opacity": null, "text_dx_mm": null, "text_dy_mm": null, "path_curve": null, "ruby_scale": null,
             "mono_ruby": null})");
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", style}}).dump());

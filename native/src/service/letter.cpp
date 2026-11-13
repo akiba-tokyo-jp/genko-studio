@@ -8,6 +8,8 @@
 #include "core/pynum.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/text/balloon_clean.hpp"
+#include "render/text/lettering.hpp"
 #include "service/pyfmt.hpp"
 #include "service/result.hpp"
 #include "service/text.hpp"
@@ -329,7 +331,7 @@ std::string shape_for(const std::vector<std::string>& breaks, const Json& given,
     return columns == 1 && longest >= 5 ? std::string("capsule") : std::string("speech");
 }
 
-std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em) {
+std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em, int sides) {
     std::vector<std::string> cols;
     for (const std::string& b : breaks) {
         if (!b.empty()) cols.push_back(b);
@@ -363,10 +365,41 @@ std::array<double, 2> measure(const std::vector<std::string>& breaks, const std:
         const double length = core::py_max(2 * radius, longer + 2 * fit + 2 * (radius - into));
         return text_w <= text_h ? std::array<double, 2>{2 * radius, length} : std::array<double, 2>{length, 2 * radius};
     }
+    if (balloon == "polygon") {
+        // (fukidashi@1: the block with the fit's pad round it, made as much bigger as puts its corners on the sides)
+        const double fit = em * kFitPad;
+        const double grow = polygon_room(sides);
+        return {(text_w + 2 * fit) * grow, (text_h + 2 * fit) * grow};
+    }
     double pad = in(balloon, {"none", "aside"}) ? 0.0 : em / 4;
     if (in(balloon, {"dotted_box", "tone_box", "fancy_box"})) pad *= 3;
     if (balloon == "electric") return {(text_w + 2 * pad) / 0.76, (text_h + 2 * pad) / 0.76};
     return {text_w + 2 * pad, text_h + 2 * pad};
+}
+
+double polygon_room(int sides) {
+    // (the polygon of a square box, its corners sharp: how far past its sides the corners of a block as big as the box
+    // lie — the same for a box of any shape, the polygon being stretched with it. A polygon of an odd number of sides
+    // is not the same above and below: the block sits where it needs the least room, as the renderer's fit moves the
+    // letters, and 2% is left for the steps that fit moves them by. The polygon's corners come from render/libm_float,
+    // the same bits everywhere)
+    const double half = 1000.0;
+    const int n = sides == 0 ? 8 : std::clamp(sides, 5, 12);
+    std::vector<std::array<double, 2>> outline;
+    for (const render::text::clean::P& p : render::text::clean::polygon(render::text::clean::Box{-half, -half, half, half}, n, 0.0)) {
+        outline.push_back({p.x, p.y});
+    }
+    const auto room_at = [&](double dy) {
+        double worst = 1.0;
+        for (const double x : {-half, half}) {
+            for (const double y : {-half, half}) worst = core::py_max(worst, render::text::shape_gauge("polygon", x, y + dy, half, half, &outline));
+        }
+        return worst;
+    };
+    if (n % 2 == 0) return room_at(0.0);
+    double best = room_at(0.0);
+    for (int step = -16; step <= 16; ++step) best = core::py_min(best, room_at(half * static_cast<double>(step) / 40.0));  // (up or down, 0.4 of the block at most)
+    return best * 1.02;
 }
 
 std::string fits(const Box& rect, const std::string& balloon, std::size_t others, double em) {

@@ -18,6 +18,7 @@
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/tategaki.hpp"
+#include "service/letter.hpp"
 
 namespace genko::app::lettering {
 
@@ -243,8 +244,10 @@ QString general(double x) {
 const std::vector<std::pair<QString, QString>>& kinds() {
     static const std::vector<std::pair<QString, QString>> list = {
         {"speech", "普通（楕円）"},
+        {"capsule", "縦長（カプセル）"},
         {"rounded", "角丸"},
         {"box", "四角"},
+        {"polygon", "多角形（機械の声）"},
         {"cloud", "雲（もくもく）"},
         {"thought", "心の声（泡つき）"},
         {"shout", "叫び（トゲ）"},
@@ -317,7 +320,14 @@ std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_c
     return out;
 }
 
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em) {
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em, int sides) {
+    if (one_of(balloon, {"capsule", "polygon"})) {
+        // (fukidashi@1: sized as the auto-lettering sizes them — service::letter::measure, the one formula)
+        std::vector<std::string> words;
+        for (const auto& b : breaks) words.push_back(render::text::utf8(b));
+        const std::array<double, 2> box = service::letter::measure(words, std::string(balloon), em, sides);
+        return {box[0], box[1]};
+    }
     std::vector<std::u32string> cols;
     for (const auto& b : breaks) {
         if (!b.empty()) cols.push_back(b);
@@ -349,17 +359,17 @@ std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std
     return {text_w + 2 * pad, text_h + 2 * pad};
 }
 
-std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm) {
+std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm, int sides) {
     const double em = kEmMm;
     const std::u32string words = render::text::u32(text);
     double w = 0, h = 0;
     if (vertical) {
-        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (one_of(balloon, {"speech", "thought", "shout", "whisper"}) ? 1.5 : 1.1)));
+        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (one_of(balloon, {"speech", "thought", "shout", "whisper", "capsule", "polygon"}) ? 1.5 : 1.1)));
         const std::int64_t per = std::max<std::int64_t>(2, std::min<std::int64_t>(fits, balloon == "sfx" ? 4 : 7));  // (a manga column: about 7)
-        std::tie(w, h) = measure(columns(words, per), balloon);
+        std::tie(w, h) = measure(columns(words, per), balloon, em, sides);
     } else {
         const std::int64_t per = std::max<std::int64_t>(4, core::py_trunc_int((max_w_mm * 0.8) / em));
-        std::tie(h, w) = measure(columns(words, per), balloon);  // (the same box turned: rows across, characters along)
+        std::tie(h, w) = measure(columns(words, per), balloon, em, sides);  // (the same box turned: rows across, characters along)
     }
     return {core::py_round(core::py_min(w, max_w_mm), 2), core::py_round(core::py_min(h, max_h_mm), 2)};
 }
@@ -377,18 +387,28 @@ Json place_new(const core::Document& doc, const core::Page& page, const core::Fr
                 {"wrap", vertical ? "vertical" : "horizontal"}};
 }
 
+int sides_of(const Json& style) {
+    // (style.sides as the renderer reads it: 0 when none is said, or it is not a number of sides)
+    if (!style.is_object()) return 0;
+    const auto found = style.find("sides");
+    if (found == style.end() || !found->is_number()) return 0;
+    const double sides = found->is_number_integer() ? static_cast<double>(found->get<std::int64_t>()) : found->get<double>();
+    return sides >= 5 && sides <= 12 ? static_cast<int>(sides) : 0;
+}
+
 Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon, bool vertical) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w);
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style));
     const Num right = line.x_mm + line.w_mm;
     return Json{{"x_mm", core::py_round((right - Num(w)).value(), 2)}, {"y_mm", line.y_mm.json()}, {"w_mm", w}, {"h_mm", h}};
 }
 
-Json place_at(double x_mm, double y_mm, const std::string& text, const std::string& balloon, bool vertical, const core::Frame* frame) {
+Json place_at(double x_mm, double y_mm, const std::string& text, const std::string& balloon, bool vertical, const core::Frame* frame,
+              const Json& style) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 160.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w);
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(style));
     Num x(x_mm - w / 2);
     Num y(y_mm - h / 2);
     if (frame != nullptr) {

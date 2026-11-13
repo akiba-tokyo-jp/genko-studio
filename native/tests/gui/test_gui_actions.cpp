@@ -469,7 +469,8 @@ private slots:
         // act_purge_histories, act_purge_all, act_purge_video_cache) — test_gui_output —, 表示 → ピクセル縦横比 ▸ 9 (act_pixel_aspect_custom
         // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 804＋16)
         // (and コマ割り K2's 1: ページ → コマ → コマ割りの案を出す… (act_komawari) — test_gui_komawari: 820＋1)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{821});
+        // (and 今風のフキダシ B2's 1: ページ → 台詞 → フキダシのパレットを開く (act_balloon_palette) — test_gui_fukidashi: 821＋1)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{822});
         {
             // (コマ割り K2: its words, tip, keys and place — what it does: test_gui_komawari)
             QAction* ideas = w->action(QStringLiteral("act_komawari"));
