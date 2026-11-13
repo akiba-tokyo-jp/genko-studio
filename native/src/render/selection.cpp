@@ -993,7 +993,7 @@ std::optional<Json> combine(const std::optional<Json>& current, const Json& area
                             const core::Document* episode) {
     if (!current || how == "replace") {
         const bool plain = area.is_object() && (core::py_truthy(area.value("poly", Json())) || core::py_truthy(area.value("mask", Json())));
-        return plain ? area : resolve(area, page, episode);
+        return plain ? Json(area) : resolve(area, page, episode);
     }
     const std::string key = how == "add" ? "union" : how == "subtract" ? "subtract" : how == "intersect" ? "intersect" : "";
     if (key.empty()) throw core::OpError("how must be replace, add, subtract or intersect");

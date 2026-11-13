@@ -509,7 +509,7 @@ std::optional<core::Json> read_library_papers(const std::filesystem::path& confi
         const auto version = data.find("genko_brush_papers");
         if (version == data.end() || !version->is_number_integer() || *version != 1) return std::nullopt;
         const auto papers = data.find("papers");
-        if (papers != data.end() && papers->is_object()) return *papers;
+        if (papers != data.end() && papers->is_object()) return Json(*papers);
     } catch (const core::Error&) {
     }
     return std::nullopt;

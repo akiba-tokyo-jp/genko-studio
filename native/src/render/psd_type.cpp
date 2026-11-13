@@ -931,7 +931,7 @@ Json para_from_upstream(const Json& s, bool vertical) {
     if (!s.is_object()) return out;
     if (const Json* v = key(s, "align"); v != nullptr && v->is_string()) {
         for (std::size_t i = 0; i < kUpstreamAligns.size(); ++i) {
-            if (*v == kUpstreamAligns[i]) out["align"] = align_of(static_cast<int>(i), vertical);
+            if (v->get_ref<const std::string&>() == kUpstreamAligns[i]) out["align"] = align_of(static_cast<int>(i), vertical);
         }
     }
     for (const auto& [from, to] : {std::pair<const char*, const char*>{"first_line_indent_pt", "first_indent_mm"}, {"start_indent_pt", "start_indent_mm"},

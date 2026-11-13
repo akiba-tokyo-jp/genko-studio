@@ -90,7 +90,7 @@ struct Beside {
         const fs::path file = fs::canonical(*context.beside / given, ec);  // (its links followed)
         if (ec) return std::nullopt;
         const fs::path inside = file.lexically_relative(folder);
-        if (inside.empty() || inside.native().starts_with("..") || inside.is_absolute()) return std::nullopt;  // (out of the folder)
+        if (inside.empty() || (inside.native().size() >= 2 && inside.native()[0] == '.' && inside.native()[1] == '.') || inside.is_absolute()) return std::nullopt;  // (out of the folder)
         if (const auto known = read.find(file); known != read.end()) {
             if (!known->second) return std::nullopt;
             core::PictureValue again = *known->second;

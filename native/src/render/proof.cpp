@@ -1,6 +1,19 @@
 #include "render/proof.hpp"
 
 #include <lcms2.h>
+
+namespace {
+// A parametric curve's parameters: Little CMS 2.16 took cmsGetToneCurveParams away for the first segment's (Ubuntu 24.04
+// has 2.14, vcpkg 2.19).
+[[maybe_unused]] const cmsFloat64Number* genko_tone_curve_params(const cmsToneCurve* curve) {
+#if LCMS_VERSION >= 2160
+    const cmsCurveSegment* segment = cmsGetToneCurveSegment(0, curve);
+    return segment == nullptr ? nullptr : segment->Params;
+#else
+    return cmsGetToneCurveParams(curve);
+#endif
+}
+}  // namespace
 #include <zlib.h>
 
 #include <algorithm>
@@ -901,7 +914,7 @@ std::string curve_kind(const cmsToneCurve* curve) {
     if (curve == nullptr) return "";
     const int type = cmsGetToneCurveParametricType(curve);
     if (type == 1) {
-        const cmsFloat64Number* p = cmsGetToneCurveParams(curve);
+        const cmsFloat64Number* p = genko_tone_curve_params(curve);
         char text[32];
         std::snprintf(text, sizeof text, "gamma %.4g", p != nullptr ? p[0] : 1.0);
         return text;

@@ -10,6 +10,16 @@
 #include "imaging_glue.h"
 #include "resample_region.h"
 #include "row_bands.h"
+#if defined(_WIN32)
+// (libImaging's ImPlatform.h brings in <windows.h>, whose old empty near and far macros would take Genko's own names; its
+// FAR and NEAR stay, empty, for Windows' headers that come later)
+#undef near
+#undef far
+#undef NEAR
+#undef FAR
+#define NEAR
+#define FAR
+#endif
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif

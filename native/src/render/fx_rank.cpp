@@ -10,9 +10,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdint>
 #include <cmath>
 #include <functional>
 #include <limits>
+#if defined(_MSC_VER)
+#include <intrin.h>  // (_mul128)
+#endif
 
 namespace genko::render::fx {
 
@@ -315,7 +319,55 @@ std::vector<float> surface_naive(const Window& src, const Rect& out, int r, floa
 
 // The bins of one colour slid along a row: a bin a value (`value[b]` whole units, increasing) and its count; each coarse
 // bin's count, its values' sum and their squares' sum (whole numbers, 128 bits: the same whatever order they came in).
+#if defined(__SIZEOF_INT128__)
 __extension__ typedef __int128 Wide;  // (GCC's and Clang's 128-bit whole numbers)
+#else
+// MSVC has no 128-bit whole number: the same sums in two 64-bit halves (two's complement), with what Weighted does with
+// them — a 64-bit value, its sign (±1) times it, that times a 64-bit value (_mul128), sums, and the double nearest
+// (rounded as a 128-bit number's conversion is: the top 64 bits with the rest as a sticky bit, then scaled).
+struct Wide {
+    std::uint64_t lo = 0;
+    std::int64_t hi = 0;
+    Wide() = default;
+    Wide(std::int64_t v) : lo(static_cast<std::uint64_t>(v)), hi(v < 0 ? -1 : 0) {}  // NOLINT(google-explicit-constructor)
+    Wide& operator+=(const Wide& o) {
+        const std::uint64_t sum = lo + o.lo;
+        hi = static_cast<std::int64_t>(static_cast<std::uint64_t>(hi) + static_cast<std::uint64_t>(o.hi) + (sum < lo ? 1u : 0u));
+        lo = sum;
+        return *this;
+    }
+    // (only of values that fit 64 bits: what Weighted multiplies)
+    std::int64_t narrow() const { return static_cast<std::int64_t>(lo); }
+    friend Wide operator*(const Wide& a, const Wide& b) {
+        Wide out;
+        std::int64_t high = 0;
+        out.lo = static_cast<std::uint64_t>(_mul128(a.narrow(), b.narrow(), &high));
+        out.hi = high;
+        return out;
+    }
+    friend Wide operator*(int a, const Wide& b) { return Wide(a) * b; }
+    explicit operator double() const {
+        const bool negative = hi < 0;
+        std::uint64_t ulo = lo, uhi = static_cast<std::uint64_t>(hi);
+        if (negative) {  // (the magnitude)
+            ulo = ~ulo + 1;
+            uhi = ~uhi + (ulo == 0 ? 1u : 0u);
+        }
+        double m;
+        if (uhi == 0) {
+            m = static_cast<double>(ulo);
+        } else {
+            const int bits = 64 - std::countl_zero(uhi);  // (the high half's bits: 1..64)
+            std::uint64_t top = (uhi << (64 - bits)) | (bits == 64 ? 0 : ulo >> bits);
+            if (bits == 64) top = uhi;
+            const std::uint64_t rest = bits == 64 ? ulo : ulo << (64 - bits);
+            if (rest != 0) top |= 1u;  // (sticky: below the rounding bit of a 53-bit double)
+            m = std::ldexp(static_cast<double>(top), bits);
+        }
+        return negative ? -m : m;
+    }
+};
+#endif
 
 struct Weighted {
     int fine_bits = 4;

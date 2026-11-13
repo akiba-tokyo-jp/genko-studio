@@ -638,7 +638,7 @@ std::optional<Json> style_of(std::string_view payload, const psd_shapes::Placeme
         }
         const Json style = core::layer_style_spec(effects_of(o, placement, notes));
         if (style.is_null()) return std::nullopt;
-        return style;
+        return Json(style);
     } catch (const std::exception& error) {
         notes.push_back(std::string("レイヤー効果を読めませんでした（") + error.what() + "）");
         return std::nullopt;

@@ -51,13 +51,13 @@ std::optional<Json> bible(const core::Document& doc) {
 std::optional<Json> script(const core::Document& doc) {
     const Json* script = core::get(doc.studio, "script");
     if (script == nullptr || script->is_null()) return std::nullopt;
-    return *script;
+    return Json(*script);
 }
 
 std::optional<Json> name(const core::Document& doc, const Num& index) {
     const core::Page* page = page_at(doc, index);
     if (page == nullptr || !page->plan || !core::py_truthy(*page->plan) || !has_name(*page->plan)) return std::nullopt;
-    return *page->plan;
+    return Json(*page->plan);
 }
 
 std::vector<std::pair<Num, Json>> names(const core::Document& doc) {
@@ -80,7 +80,7 @@ std::optional<Json> name_review(const core::Document& doc, const Num& index) {
     const Json reviews = core::py_get(*record, "reviews", Json::object());
     const Json review = core::py_get(reviews, "name", Json());
     if (review.is_null()) return std::nullopt;
-    return review;
+    return Json(review);
 }
 
 std::vector<Json> open_tickets(const core::Document& doc, const std::optional<std::string>& kind) {

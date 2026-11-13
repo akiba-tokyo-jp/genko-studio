@@ -15,5 +15,8 @@
     {"name": "libavif", "default-features": false, "features": ["aom"]},
     "zstd",
     {"name": "libraw", "default-features": false, "features": ["dng-lossy"]}
+  ],
+  "overrides": [
+    {"name": "nlohmann-json", "version": "3.11.3", "port-version": 1}
   ]
 }
