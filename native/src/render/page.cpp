@@ -3582,8 +3582,11 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
         }
     }
     const Box area = region ? *region : whole;
-    InkCanvas canvas = paper ? InkCanvas(*page.color, region ? page_background(page, ctx.size, false).crop(area) : page_background(page, ctx.size, false))
-                             : InkCanvas(*page.color, size_of(area));
+    // (a lambda, not ?: — MSVC copies the operands of ?:, and an InkCanvas is not copied)
+    InkCanvas canvas = [&]() -> InkCanvas {
+        if (paper) return InkCanvas(*page.color, region ? page_background(page, ctx.size, false).crop(area) : page_background(page, ctx.size, false));
+        return InkCanvas(*page.color, size_of(area));
+    }();
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (!core::has_groups(layers)) {
         for (const Layer& layer : layers) {
