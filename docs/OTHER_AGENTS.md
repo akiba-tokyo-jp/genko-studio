@@ -77,7 +77,8 @@ genko export PROJ ./sns --format sns --long-edge 1600 --spreads          # 見�
 ## マネキン（M9-3）
 
 ポーズを指定したいときは、コマの中にマネキン（棒人形）を置く。人間は `genko apply PROJ ops.json`、エージェントは `apply_ops` で置ける
-（ネームの段階で、構図を固めるためにエージェントが置いてもよい）。
+（ネームの段階で、構図を固めるためにエージェントが置いてもよい）。ネームのラフは、置いたマネキンを `trace_prims`（`kind: "pencil"`）で
+ネームのレイヤーに鉛筆の線にして描く。物や背景は `add_shape`、ほかの線は `add_stroke`。ネームの承認の前は、エージェントはネーム・下描きに画像を置かない。
 
 ```json
 {"op": "add_mannequin", "page": 1, "pos": [120, 200, 0], "height_mm": 90, "preset": "walk"}

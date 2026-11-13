@@ -36,7 +36,7 @@ op ごとの引数の形は `inspect` の `target: "ops"`（`op` に名前）で
   - `balloon` の形に `electric`（電子音: 電話・テレビの声。角のあるギザギザの縁と稲妻のしっぽ）。
   - `path`（手で描いた形のフキダシ、`set_balloon_path` でも）。
   - フキダシの大きさと位置は `move_line` の `w_mm`・`h_mm`・`x_mm`・`y_mm`（`edit_line` では変わらない）。
-- 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする。
+- 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする（`layer_id` にネームのレイヤー〔`snapshot` の role `name`〕、`kind: "pencil"` で描くと、それがネームのラフになる。ネームのレイヤーは印刷されず、ネームの承認の前でも描ける。承認の前のネーム・下描きに、エージェントは画像を置かない）。
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format` の既定は png。ほかの形式は人に頼まれたときだけ: pdf・tiff・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
