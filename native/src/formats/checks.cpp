@@ -517,6 +517,8 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
         if (tails.empty() && line->tail) tails.push_back(Json{{"to", Json::array({line->tail->x.json(), line->tail->y.json()})}});
         for (const Json& tail : tails) {
             const Json* to = core::dict_get(tail, "to");
+            const Json* tail_kind = core::dict_get(tail, "kind");
+            if (tail_kind != nullptr && *tail_kind == Json("inward")) continue;  // (fukidashi@1: a notch's tip is inside)
             if (to != nullptr && core::py_truthy(*to) && core::tail_hidden(*line, *to)) {
                 out.push_back(issue("warning", "tail_hidden", page,
                                     "台詞「" + short_text + "」の尾がフキダシの中に埋もれている（誰の台詞か分からない）。move_line の tail で先を外に出す",

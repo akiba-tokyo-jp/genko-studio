@@ -20,7 +20,6 @@ Box body_of(const Figure& f) { return service::as_box(f.body); }
 
 const double kTailPastMm[2] = {3.0, 8.0};
 constexpr double kFitPad = 0.15;  // balloons.FIT_PAD
-constexpr double kHandPower = 2.6;
 
 bool in(const std::string& value, std::initializer_list<const char*> names) {
     return std::any_of(names.begin(), names.end(), [&value](const char* name) { return value == name; });
@@ -30,11 +29,11 @@ bool ellipse_kind(const std::string& balloon) { return in(balloon, {"speech", "t
 std::optional<double> spiked(const std::string& balloon) { return balloon == "shout" ? std::optional<double>(0.26) : std::nullopt; }
 const char* const kJoined[] = {"speech", "rounded", "thought", "whisper"};
 
-// balloons.hug_power and _hug_keep for the style letter gives them ({} or {"spike_depth": …})
-double hug_power(const std::string& kind) { return in(kind, {"speech", "thought", "whisper"}) ? kHandPower : 2.0; }
+// balloons.hug_power and _hug_keep for the style letter gives them ({} or {"spike_depth": …}): every oval a true
+// ellipse (fukidashi@1, SPEC BALLOON-01), a burst's letters inside its valleys
+double hug_power(const std::string&) { return 2.0; }
 double hug_keep(const std::string& kind, std::optional<double> spike) {
     if (kind == "shout") return 1 - core::py_max(0.05, core::py_min(0.6, spike.value_or(0.2))) - 0.02;
-    if (in(kind, {"speech", "thought", "whisper"})) return 0.955;
     return 1.0;
 }
 
@@ -312,6 +311,21 @@ Json look_style(const Json& look, const std::string& balloon) {
     return style;
 }
 
+std::string shape_for(const std::vector<std::string>& breaks, const std::string& balloon, double em) {
+    if (balloon != "speech") return balloon;
+    std::size_t columns = 0;
+    std::size_t longest = 0;
+    for (const std::string& b : breaks) {
+        if (b.empty()) continue;
+        ++columns;
+        longest = std::max(longest, text::length(b));
+    }
+    if (columns == 0 || columns > 2) return balloon;
+    const double text_w = em * static_cast<double>(columns) + em * kLeading * static_cast<double>(columns - 1);
+    const double text_h = em * static_cast<double>(longest);
+    return text_h >= 3 * text_w ? std::string("capsule") : balloon;
+}
+
 std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em) {
     std::vector<std::string> cols;
     for (const std::string& b : breaks) {
@@ -333,6 +347,18 @@ std::array<double, 2> measure(const std::vector<std::string>& breaks, const std:
         const auto oval = ellipse_around(block_points(rects, em * kFitPad), hug_power(balloon));
         const double keep = hug_keep(balloon, spiked(balloon));
         return {oval[0] / keep, oval[1] / keep};
+    }
+    if (balloon == "capsule") {
+        // (fukidashi@1: round ends on the block's narrow side, the block's corners a little way into them — the block
+        // with the fit's pad round it, 0.3 em more beside it)
+        const double fit = em * kFitPad;
+        const double narrow = core::py_min(text_w, text_h);
+        const double far = core::py_max(text_w, text_h);
+        const double radius = narrow / 2 + fit + em * 0.3;
+        const double corner = narrow / 2 + fit;
+        const double into = std::sqrt(radius * radius - corner * corner);  // (how far into a round end the corners reach)
+        const double length = core::py_max(2 * radius, far + 2 * fit + 2 * (radius - into));
+        return text_w <= text_h ? std::array<double, 2>{2 * radius, length} : std::array<double, 2>{length, 2 * radius};
     }
     double pad = in(balloon, {"none", "aside"}) ? 0.0 : em / 4;
     if (in(balloon, {"dotted_box", "tone_box", "fancy_box"})) pad *= 3;
@@ -597,7 +623,9 @@ std::pair<std::vector<BalloonPlacement>, std::vector<studio::Issue>> place_page(
             if (balloon == "aside") style["rotate_deg"] = li % 2 == 0 ? kAsideTilt : -kAsideTilt;  // (呟き: leaning one way then the other)
             const double em = core::to_float(core::py_or(core::py_get(style, "size_mm"), Json(kEmMm)));
             const std::vector<std::string> breaks = strings_of(core::py_get(line, "breaks", Json::array()));
-            const std::array<double, 2> size = measure(breaks, balloon, em);
+            // (fukidashi@1: a tall line of one or two columns is said in a capsule)
+            const std::string drawn = shape_for(breaks, balloon, em);
+            const std::array<double, 2> size = measure(breaks, drawn, em);
             const Json beat_id = core::py_get(line, "beat_id");
             const Json speaker_id = speakers.is_object() && beat_id.is_string() && speakers.contains(beat_id.get<std::string>())
                                         ? speakers[beat_id.get<std::string>()]
@@ -632,7 +660,7 @@ std::pair<std::vector<BalloonPlacement>, std::vector<studio::Issue>> place_page(
             if (!spot) spot = find_spot(rect, size, placed, figs, speaker_id, near, &room);
             if (!spot) {
                 issues.push_back(error("balloon_overflow", path, "コマ " + slot + " に台詞が入らない（" + fixed(size[0], 0) + "×" + fixed(size[1], 0) + " mm）",
-                                       fits(rect, balloon, placed.size(), em) + "。台詞を短くする、breaks で列を分ける、" +
+                                       fits(rect, drawn, placed.size(), em) + "。台詞を短くする、breaks で列を分ける、" +
                                            "台詞を別のコマに移す、コマを大きくする"));
                 continue;
             }
@@ -648,7 +676,7 @@ std::pair<std::vector<BalloonPlacement>, std::vector<studio::Issue>> place_page(
             item.line_index = static_cast<std::int64_t>(li);
             item.beat_id = core::py_get(line, "beat_id", Json(""));
             item.text = joined(breaks, "\n");
-            item.balloon = balloon == "aside" ? "none" : balloon;
+            item.balloon = balloon == "aside" ? "none" : drawn;
             item.x_mm = core::py_round(box[0], 2);
             item.y_mm = core::py_round(box[1], 2);
             item.w_mm = core::py_round(box[2], 2);

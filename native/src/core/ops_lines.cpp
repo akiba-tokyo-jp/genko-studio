@@ -43,11 +43,12 @@ namespace genko::core {
 
 namespace {
 
-// balloons.SHAPES and balloons.TAIL_KINDS
-constexpr std::array<std::string_view, 16> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
+// balloons.SHAPES and balloons.TAIL_KINDS; fukidashi@1 (SPEC BALLOON-01): the kinds capsule and polygon, the tail
+// kind inward (a notch cut into the balloon)
+constexpr std::array<std::string_view, 18> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
                                                    "electric", "flash", "whisper", "narration", "sfx",      "none",
-                                                   "picture", "dotted_box", "tone_box", "fancy_box"};
-constexpr std::array<std::string_view, 5> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles"};
+                                                   "picture", "dotted_box", "tone_box", "fancy_box", "capsule", "polygon"};
+constexpr std::array<std::string_view, 6> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles", "inward"};
 
 // ops.FEATURES: the OpenType forms a line's style may ask for
 constexpr std::array<std::string_view, 25> kFeatures{"jp78", "jp83", "jp90", "jp04", "trad", "expt", "nlck", "hojo", "hwid",
@@ -75,6 +76,9 @@ constexpr StyleKey kStyleKeys[] = {
     {"fill_rgb", Kind::List},     {"fill_opacity", Kind::Float}, {"text_dx_mm", Kind::Float},   {"text_dy_mm", Kind::Float},
     {"path_curve", Kind::Bool},   {"cuts", Kind::Cuts},          {"ruby_scale", Kind::Float},   {"mono_ruby", Kind::Bool},
     {"below_layer", Kind::Str},   {"hand", Kind::Bool},          {"periods", Kind::Bool},
+    // fukidashi@1 (SPEC BALLOON-01; `hand` above is kept for the books and calls of before, and changes nothing drawn)
+    {"corner_mm", Kind::Float},   {"squircle", Kind::Bool},      {"sides", Kind::Int},          {"wave_mm", Kind::Float},
+    {"spike_alt", Kind::Float},   {"dash_mm", Kind::Float},
 };
 
 template <std::size_t N>
@@ -166,7 +170,7 @@ std::optional<Point> parse_tail(const Json& value) {
     return Point{Num(x), Num(y)};
 }
 
-// ops._parse_tails: [{"to": [x, y], "via"?, "vias"?, "width_mm"?, "kind"?}] (an item may be the [x, y] alone)
+// ops._parse_tails: [{"to": [x, y], "via"?, "vias"?, "width_mm"?, "kind"?, "fillet_mm"?}] (an item may be the [x, y] alone)
 std::vector<Json> parse_tails(const Json& raw) {
     std::vector<Json> tails;
     for (Json item : iterate(py_or(raw, Json::array()))) {
@@ -183,6 +187,12 @@ std::vector<Json> parse_tails(const Json& raw) {
             tail.erase("via");
         }
         if (truthy_at(item, "width_mm")) tail["width_mm"] = to_float(item["width_mm"]);
+        if (const Json* fillet = get(item, "fillet_mm"); fillet != nullptr && !fillet->is_null()) {
+            // (fukidashi@1: how far the tail's join with the balloon is rounded; 0: a corner)
+            const double reach = to_float(*fillet);
+            if (!(0 <= reach && reach <= 20)) throw OpError("a tail's fillet_mm must be between 0 and 20");
+            tail["fillet_mm"] = reach;
+        }
         if (truthy_at(item, "kind") && item["kind"] != Json("wedge")) {
             if (!item["kind"].is_string() || !listed(kTailKinds, item["kind"].get_ref<const std::string&>())) {
                 throw OpError("tail kind must be one of " + joined(kTailKinds));
@@ -448,6 +458,12 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
         if (key == "scale_x") must(0.3 <= number() && number() <= 3, "scale_x must be between 0.3 and 3");
         if (key == "spike_jitter") must(0 <= number() && number() <= 1, "spike_jitter must be between 0 and 1");
         if (key == "bumps") must(5 <= number() && number() <= 60, "bumps must be between 5 and 60");
+        // (fukidashi@1)
+        if (key == "corner_mm") must(0 <= number() && number() <= 50, "corner_mm must be between 0 and 50");
+        if (key == "sides") must(5 <= number() && number() <= 12, "sides must be between 5 and 12");
+        if (key == "wave_mm") must(0 <= number() && number() <= 3, "wave_mm must be between 0 and 3");
+        if (key == "spike_alt") must(0 <= number() && number() <= 0.8, "spike_alt must be between 0 and 0.8");
+        if (key == "dash_mm") must(0.2 <= number() && number() <= 10, "dash_mm must be between 0.2 and 10");
         out[key] = std::move(kept);
     }
     return out;
@@ -519,6 +535,7 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
     for (Json& tail : tails) {
         const Json* tip = get(tail, "to");
         if (tip == nullptr || !py_truthy(*tip) || !tail_hidden(line, *tip)) continue;
+        if (const Json* kind = get(tail, "kind"); kind != nullptr && *kind == Json("inward")) continue;  // (a notch: its tip is inside)
         double dx = to_float(subscript(*tip, 0)) - cx;
         double dy = to_float(subscript(*tip, 1)) - cy;
         if (std::abs(dx) + std::abs(dy) < 1e-6) {

@@ -40,6 +40,7 @@
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
+#include "core/fukidashi.hpp"
 #include "core/komawari.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
@@ -60,7 +61,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 28> kTopKeys{
+constexpr std::array<std::string_view, 29> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -73,6 +74,8 @@ constexpr std::array<std::string_view, 28> kTopKeys{
     "global_light",
     // type@1 (PC5 G-0)
     "type_styles",
+    // fukidashi@1 (the generation of the balloons' geometry: core/fukidashi.hpp)
+    "balloon_geometry",
     // variables@1 (PC5 I-d)
     "variables",
     // image-assets@1 (PC5 I-f)
@@ -190,6 +193,8 @@ private:
     std::size_t color_bytes_ = 0;
     // LoadOptions::assets_of_page: the page being read now is not that one (its strokes and pictures are left unread)
     bool skip_assets_ = false;
+    // fukidashi@1: the book does not say its balloons' generation (a book of before): its hand-drawn ovals grow as read
+    bool grow_ovals_ = false;
     std::unordered_set<std::string> nonfinite_;
     std::unordered_map<std::string, core::StrokeListPtr> blobs_;  // strokes read in this load (Python's blobcache)
     // Scope is one book load; immutable bytes are owned by the resulting layers.
@@ -573,6 +578,9 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     // core::type_text::validate_type below)
     if (const Json* native = find(data, "native_type"); native != nullptr && !native->is_null()) line.native_type = *native;
     check_keys(data, kLineKeys, at, "line");
+    // (a book of before fukidashi@1: its hand-drawn ovals' boxes grown so that the letters keep their size in the true
+    // ellipse — core/fukidashi.hpp; the book says its balloons' generation from its next save)
+    if (grow_ovals_) core::grow_legacy_oval(line);
     return line;
 }
 
@@ -1509,6 +1517,13 @@ core::Document Reader::migrate(const Json& payload) {
     const auto binding = binding_value.is_string() ? core::binding_from(binding_value.get<std::string>()) : std::nullopt;
     if (!binding) format_error("/binding", core::py_repr(binding_value) + " is not a valid Binding");
 
+    // (fukidashi@1: the generation of the balloons' geometry — none, or less than this build's: a book of before)
+    std::int64_t balloon_geometry = 1;
+    if (const Json* generation = find(payload, "balloon_geometry"); generation != nullptr && generation->is_number_integer()) {
+        balloon_geometry = generation->get<std::int64_t>();
+    }
+    grow_ovals_ = balloon_geometry < core::kBalloonGeometry;
+
     std::vector<core::StoryLine> story;
     {
         const Json lines = items_at(payload, "story", "");
@@ -1707,6 +1722,7 @@ core::Document Reader::migrate(const Json& payload) {
     }
     doc.revision = truthy_at(payload, "revision") ? core::py_int(*find(payload, "revision")) : 0;
     doc.start_side = asis_opt_str(payload, "start_side", "");
+    doc.balloon_geometry = std::max(balloon_geometry, core::kBalloonGeometry);  // (fukidashi@1: grown as read, above)
     doc.strict_gates = to_bool(payload, "strict_gates", false);
     doc.studio = dict_or_empty(payload, "studio");
 
@@ -2148,7 +2164,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 H-f (core/pixel_aspect.hpp)
            feature == core::kPixelAspectFeature ||
            // komawari@1 (core/komawari.hpp)
-           feature == core::kKomawariFeature;
+           feature == core::kKomawariFeature ||
+           // fukidashi@1 (core/fukidashi.hpp)
+           feature == core::kFukidashiFeature;
 }
 
 int project_version(const Json& payload) {

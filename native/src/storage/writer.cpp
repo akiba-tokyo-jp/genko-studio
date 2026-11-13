@@ -32,6 +32,7 @@
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
+#include "core/fukidashi.hpp"
 #include "core/komawari.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
@@ -672,6 +673,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // komawari@1 (コマ割り K1): a panel over the others (差し込み・重ね), named while a panel has it
     std::erase(features, std::string(core::kKomawariFeature));
     if (core::uses_over_panels(doc)) features.emplace_back(core::kKomawariFeature);
+    // fukidashi@1 (SPEC BALLOON-01): the balloon kinds, style keys and tails a build of before cannot draw, named while
+    // a line or a type layer's record uses one
+    std::erase(features, std::string(core::kFukidashiFeature));
+    if (core::uses_fukidashi(doc)) features.emplace_back(core::kFukidashiFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -686,6 +691,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["episode"] = doc.episode.json();
     out["binding"] = core::to_string(doc.binding);
     out["start_side"] = opt_string(doc.start_side);
+    // (fukidashi@1: the generation of the balloons' geometry its ovals were lettered for, said while it has an oval — a
+    // book without the key is one of before, whose hand-drawn ovals grow when it is read: core/fukidashi.hpp)
+    if (core::has_ovals(doc)) out["balloon_geometry"] = doc.balloon_geometry;
     out["strict_gates"] = doc.strict_gates;
     out["autosave"] = doc.autosave;
     out["font_path"] = doc.font_path;

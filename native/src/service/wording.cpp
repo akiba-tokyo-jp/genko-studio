@@ -437,7 +437,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a pose needs a name", "ポーズには名前がいります"));
         r.push_back(rule("despeckle what must be .*", "ゴミ取りで取るものは、黒い点・白い穴・両方から選びます"));
         r.push_back(rule("spike_jitter must be between 0 and 1", "トゲの乱れは 0〜1 です"));
-        r.push_back(rule("tail kind must be one of .*", "しっぽの形は、くさび・ギザギザ・消える・泡から選びます"));
+        r.push_back(rule("tail kind must be one of .*", "しっぽの形は、くさび・まっすぐ・ギザギザ・消える・泡・内向きから選びます"));
+        // (fukidashi@1, SPEC BALLOON-01)
+        r.push_back(rule("a tail's fillet_mm must be between 0 and 20", "しっぽの付け根の丸みは 0〜20 mm です"));
+        r.push_back(rule("corner_mm must be between 0 and 50", "フキダシの角の丸みは 0〜50 mm です"));
+        r.push_back(rule("sides must be between 5 and 12", "多角形のフキダシの角の数は 5〜12 です"));
+        r.push_back(rule("wave_mm must be between 0 and 3", "フキダシの線の震えは 0〜3 mm です"));
+        r.push_back(rule(R"(spike_alt must be between 0 and 0\.8)", "トゲの長短の差は 0〜0.8 です"));
+        r.push_back(rule(R"(dash_mm must be between 0\.2 and 10)", "破線の 1 本の長さは 0.2〜10 mm です"));
         r.push_back(rule("the ruler is fixed.*", "この定規は固定されています（先に固定を外します）"));
         r.push_back(rule("this ruler has no line to draw.*", "この定規には描ける線がありません（向きだけの定規です）"));
         r.push_back(rule("unknown feature .*", "その字形の指定（フォントの機能）は使えません"));
