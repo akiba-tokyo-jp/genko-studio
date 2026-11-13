@@ -177,7 +177,9 @@ const std::vector<ToolSpec>& table() {
          R"(アタリの手書き台詞を読んだ結果を提案する。lines: [{text（列は 
  で区切る）, balloon?, speaker?,
         box01: [x, y, w, h]（アタリ画像の中の 0..1）か x_mm, y_mm（w_mm, h_mm は省略可）}]。確定は人間。重ね表示を返す。
-        balloon は apply_ops の説明にある種類。省くと言葉で決まる（1 列で 5 字以上なら capsule、ほかは speech）。)",
+        balloon は apply_ops の説明にある種類で、省くと speech。x_mm, y_mm で出して w_mm, h_mm を省くと、箱は言葉に合わせて
+        決まり、balloon も省いていれば形も言葉で決まる（1 列で 5 字以上なら capsule、ほかは speech）。box01 のときは箱も
+        形（省けば speech）もそのまま。)",
          {{"project", Kind::Str, false, std::nullopt}, {"page", Kind::Int, false, std::nullopt}, {"lines", Kind::ListDict, false, std::nullopt}, {"session", Kind::Str, true, Json()}}},
         {"proposals",
          R"(コマ割りと台詞の提案の一覧（status: open / all）。)",
@@ -266,13 +268,17 @@ const std::vector<ToolSpec>& table() {
         set_placement など。一覧は inspect target=schemas ではなく genko://ops）。承認・ロック・ファイル読み込みの op は使えない
         （import_psd だけは読める: path は原稿のフォルダからの相対パスか、--root の中の絶対パス）。返事の results に、
         一部の op が見つけたもの・作ったもの（replace_text の件数と場所、import_psd のレイヤー）が入る。
-        台詞のフキダシ（add_line・edit_line）: balloon は speech（楕円）/ capsule（1 列の短い台詞。縦書きは縦長、横書きは横長）/
+        台詞のフキダシ（add_line・edit_line）: balloon は speech（楕円）/ capsule（両端の丸い形。1 列の短い台詞に）/
         rounded / box / polygon（多角形。機械の声）/ cloud / thought / shout / electric / flash / whisper / narration /
         dotted_box / tone_box / fancy_box / sfx / none。style の形の鍵: corner_mm 0〜50（角の丸み。0 で四角）、squircle（rounded を
         ふっくら）、sides 5〜12（polygon の角の数。既定 8）、wave_mm 0〜3（ふるえる線）、spike_alt 0〜0.8（shout のトゲを 1 本おきに
         短く）、dash_mm 0.2〜10（破線の 1 本の長さ）、double、border_mm（0 で線なし）。しっぽは tails: [{to, via?, vias?, width_mm?,
         kind?: wedge / straight / zigzag / fade / bubbles / inward（フキダシに切れ込む。to はフキダシの中）, fillet_mm? 0〜20
-        （付け根の丸み。0 で角）}]。フキダシはどれも同じ今風の線で描く（手描き風は無い）。)",
+        （付け根の丸み。0 で角）}]。フキダシはどれも同じ今風の線で描く（手描き風は無い）。
+        形は箱（x_mm・y_mm・w_mm・h_mm）に合わせて描かれる。capsule は箱の長い辺が長い辺になる（縦長の箱なら縦長、横長の箱なら
+        横長。文字の向きでは決まらない）。大きさを省いた add_line の箱は 40×20 mm。edit_line は箱を変えないので、capsule や
+        polygon に変えたら move_line の w_mm・h_mm で言葉に合う箱にする（目安: 縦書き 1 列の capsule は幅 9.5 mm・高さ
+        字数×5＋4 mm、polygon は言葉の縦横に 1.5 mm を足して 1.4 倍）。)",
          {{"project", Kind::Str, false, std::nullopt}, {"ops", Kind::ListDict, false, std::nullopt}, {"commit", Kind::Bool, false, Json(false)}, {"session", Kind::Str, true, Json()}}},
         {"record_review",
          R"(プレビューを見た自己点検の結果を残す（同じネームで点検を繰り返さないため）。)",

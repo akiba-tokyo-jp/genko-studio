@@ -26,6 +26,7 @@
 #include "service/layout.hpp"
 #include "service/letter.hpp"
 #include "service/wording.hpp"
+#include "studio/schemas.hpp"
 #include "testsupport.hpp"
 
 using genko::core::Document;
@@ -147,16 +148,48 @@ private slots:
         QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(sentence(said)).hasMatch(), qPrintable(said));
     }
 
-    // A balloon moved or grown over its tails: a tail whose tip it now covers is pushed out past its outline — a notch
-    // (an inward tail) is meant to lie inside, and stays; and the book's checks do not call a notch a hidden tail.
-    void aNotchStaysInsideItsBalloon() {
-        Document doc = run_ops(blank_book(), Json::array({line_op("speech", Json{{"tails", Json::array({Json{{"to", Json::array({58, 50})}, {"kind", "inward"}},
-                                                                                                         Json{{"to", Json::array({84, 74})}}})}})}));
-        doc = run_ops(doc, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"w_mm", 60}, {"h_mm", 50}}}));
-        const genko::core::StoryLine& line = doc.story.front();
-        QCOMPARE(line.tails[0]["to"], Json::array({58.0, 50.0}));  // (the notch: where it was)
-        QVERIFY(line.tails[1]["to"] != Json::array({84.0, 74.0}));  // (the tail the bigger balloon covered: moved out)
-        for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) QVERIFY2(issue.value("code", std::string()) != "tail_hidden", issue.dump().c_str());
+    // A balloon moved or resized without saying its tails: a tail whose tip it now covers is pushed out past its outline;
+    // a notch (an inward tail) is a place in the balloon and goes with it — moved by as much, or the same share of the
+    // way across a resized box, with the point it bends through —; the other tails stay where they point on the page.
+    // The same op on the same book gives the same book (a replay), and the book's checks do not call a notch a hidden
+    // tail. A move_line that says its tails leaves them as said.
+    void aNotchGoesWithItsBalloon() {
+        const Json tails = Json::array({Json{{"to", Json::array({58, 50})}, {"kind", "inward"}}, Json{{"to", Json::array({84, 74})}}});
+        const Document placed = run_ops(blank_book(), Json::array({line_op("speech", Json{{"tails", tails}})}));  // (40, 40, 40 × 30)
+        // made bigger from its corner (60 × 50): the notch the same share across (18/40 of 60, 10/30 of 50)
+        const Json grow = Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"w_mm", 60}, {"h_mm", 50}}});
+        Document doc = run_ops(placed, grow);
+        {
+            const genko::core::StoryLine& line = doc.story.front();
+            QCOMPARE(line.tails[0], (Json{{"to", Json::array({67.0, 56.67})}, {"kind", "inward"}}));
+            QVERIFY(genko::core::tail_hidden(line, line.tails[0]["to"]));
+            QVERIFY(line.tails[1]["to"] != Json::array({84.0, 74.0}));  // (the tail the bigger balloon covered: moved out)
+            QVERIFY(!genko::core::tail_hidden(line, line.tails[1]["to"]));
+            for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) QVERIFY2(issue.value("code", std::string()) != "tail_hidden", issue.dump().c_str());
+        }
+        // (the same op on the same book again — a journal's replay: the same lines)
+        const Document again = run_ops(placed, grow);
+        QCOMPARE(again.story.front().tails, doc.story.front().tails);
+        QCOMPARE(again.story.front().w_mm.value(), 60.0);
+        // moved by (4, 3) mm: the notch by as much, the other tail where it points
+        doc = run_ops(placed, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 44}, {"y_mm", 43}}}));
+        QCOMPARE(doc.story.front().tails[0], (Json{{"to", Json::array({62.0, 53.0})}, {"kind", "inward"}}));
+        QCOMPARE(doc.story.front().tails[1], (Json{{"to", Json::array({84.0, 74.0})}}));
+        QCOMPARE(doc.story.front().tail->x.value(), 62.0);  // (the line's first tail, as the single tail of before reads it)
+        // (moved and back: where it was)
+        doc = run_ops(doc, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 40}, {"y_mm", 40}}}));
+        QCOMPARE(doc.story.front().tails, placed.story.front().tails);
+        // a notch that bends through a point: the point with it; moved and made wider at once
+        const Json bent = Json::array({Json{{"to", Json::array({58, 50})}, {"via", Json::array({70, 52})}, {"kind", "inward"}}});
+        doc = run_ops(placed, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"tails", bent}},
+                                           Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 50}, {"w_mm", 80}}}));
+        QCOMPARE(doc.story.front().tails[0], (Json{{"to", Json::array({86.0, 50.0})}, {"via", Json::array({110.0, 52.0})}, {"kind", "inward"}}));
+        // tails said with the move: as said, the notch too
+        doc = run_ops(placed, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 60}, {"tails", tails}}}));
+        QCOMPARE(doc.story.front().tails[0], (Json{{"to", Json::array({58.0, 50.0})}, {"kind", "inward"}}));
+        // a move_line that changes nothing of the box: nothing of the tails
+        doc = run_ops(placed, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 40}, {"w_mm", 40}}}));
+        QCOMPARE(doc.story.front().tails, placed.story.front().tails);
     }
 
     // The auto-lettering's sizes: an oval is the smallest true ellipse round its words — the letters set in a balloon of
@@ -237,6 +270,60 @@ private slots:
             QCOMPARE(genko::render::text::text_layout(line, 600).em, std::int64_t{118});
         }
         QVERIFY(genko::core::uses_fukidashi(work.doc));
+    }
+
+    // A name plan may say capsule and polygon (name_plan@1's kinds): the plan is taken as it is, the page lettered so —
+    // each in the box measured for its shape, its letters at their size —, and the hint of a line that does not fit
+    // counts the letters a capsule and a polygon take in the panel as their boxes are measured.
+    void aPlanSaysCapsuleAndPolygon() {
+        const Json plan = Json::parse(R"({"page": 1, "turn_role": "setup", "template": null,
+            "tiers": [{"h": 1.0, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]}],
+            "panels": [{"slot": "p1", "shot": "MS", "angle": "eye", "characters": [{"id": "a", "pos": "right"}, {"id": "b", "pos": "left"}],
+                        "lines": [{"beat_id": "b1", "balloon": "capsule", "breaks": ["そうなんだ"]},
+                                  {"beat_id": "b2", "balloon": "polygon", "breaks": ["ジュシン", "カンリョウ"]},
+                                  {"beat_id": "b3", "balloon": "capsule", "breaks": ["うん"]}]}]})");
+        // (the plan's schema takes the two kinds, and still refuses a kind it does not know)
+        const Json& schema = genko::studio::schema("name_plan@1");
+        for (const auto& issue : genko::studio::validate(genko::studio::fill_nulls(plan, schema), schema)) {
+            QVERIFY2(issue.path.find("balloon") == std::string::npos, (issue.path + ": " + issue.message).c_str());
+        }
+        Json unknown = plan;
+        unknown["panels"][0]["lines"][0]["balloon"] = "pill";
+        bool refused = false;
+        for (const auto& issue : genko::studio::validate(genko::studio::fill_nulls(unknown, schema), schema)) refused = refused || issue.path.find("balloon") != std::string::npos;
+        QVERIFY(refused);
+        genko::service::Work work{blank_book(), Json::array()};
+        const genko::service::layout::CompiledLayout compiled = genko::service::layout::apply_layout(work, Json(1), plan, "ai:test");
+        const auto [placements, issues] = letter::place_page(plan, compiled, Json::parse(R"({"characters": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]})"),
+                                                             Json{{"b1", "a"}, {"b2", "b"}, {"b3", "a"}});
+        for (const auto& issue : issues) QVERIFY2(issue.severity != "error", issue.message.c_str());
+        QCOMPARE(placements.size(), std::size_t{3});
+        QCOMPARE(placements[0].balloon, std::string("capsule"));
+        QCOMPARE(placements[0].w_mm, 9.5);     // (one column of five: 5 + 4.5 mm wide, 25 + 4.07 mm tall)
+        QCOMPARE(placements[0].h_mm, 29.07);
+        QCOMPARE(placements[1].balloon, std::string("polygon"));
+        QCOMPARE(placements[1].w_mm, 19.09);   // (13.5 × 26.5 mm of words, √2 times)
+        QCOMPARE(placements[1].h_mm, 37.48);
+        QCOMPARE(placements[2].balloon, std::string("capsule"));
+        work.apply(letter::placements_to_ops(Json(1), placements, compiled), "genko");
+        QCOMPARE(work.doc.story.size(), std::size_t{3});
+        QCOMPARE(work.doc.story[0].balloon, std::string("capsule"));
+        QCOMPARE(work.doc.story[1].balloon, std::string("polygon"));
+        for (const genko::core::StoryLine& line : work.doc.story) QCOMPARE(genko::render::text::text_layout(line, 600).em, std::int64_t{118});
+        QVERIFY(genko::core::uses_fukidashi(work.doc));
+        // the hint's count: a panel 30 × 62 mm (26 × 58 of room) takes a capsule of ten letters in a column
+        // ((58 − 4.07) / 5) and three columns ((26 − 4.5 + 2) / 7), a polygon of seven ((58 / √2 − 1.5) / 5) and two
+        // columns ((26 / √2 − 1.5 + 2) / 7) — a box, eleven and three
+        const genko::service::Box panel{0.0, 0.0, 30.0, 62.0};
+        QVERIFY2(letter::fits(panel, "capsule").find("1 列 10 字・3 列まで") != std::string::npos, letter::fits(panel, "capsule").c_str());
+        QVERIFY2(letter::fits(panel, "polygon").find("1 列 7 字・2 列まで") != std::string::npos, letter::fits(panel, "polygon").c_str());
+        QVERIFY2(letter::fits(panel, "box").find("1 列 11 字・3 列まで") != std::string::npos, letter::fits(panel, "box").c_str());
+        // (what the hint counts is what the measure gives: ten in a capsule's column fit the room's 58 mm, eleven do not;
+        // seven in a polygon's, not eight)
+        QVERIFY(letter::measure({"あいうえおかきくけこ"}, "capsule")[1] <= 58.0);
+        QVERIFY(letter::measure({"あいうえおかきくけこさ"}, "capsule")[1] > 58.0);
+        QVERIFY(letter::measure({"あいうえおかき"}, "polygon")[1] <= 58.0);
+        QVERIFY(letter::measure({"あいうえおかきく"}, "polygon")[1] > 58.0);
     }
 
     // A tail's tip is hidden by a capsule and a polygon where they are — not where the ellipse of their box would be: the

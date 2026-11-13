@@ -34,10 +34,12 @@
 #include "app/inject.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
+#include "core/balloon_tails.hpp"
 #include "core/fukidashi.hpp"
 #include "core/pynum.hpp"
 #include "gui_support.hpp"
@@ -157,6 +159,9 @@ Json snapshot(const core::StoryLine& l) {
                 {"tail", l.tail ? Json::array({l.tail->x.json(), l.tail->y.json()}) : Json()}};
 }
 
+// A value with its keys in order of their names: two styles that hold the same, whatever order they were written in.
+std::string canon(const Json& value) { return nlohmann::json::parse(value.dump()).dump(); }
+
 int dark_pixels(const QImage& image) {
     int n = 0;
     for (int y = 0; y < image.height(); ++y)
@@ -187,6 +192,10 @@ private slots:
         for (const auto& kind : app::lettering::kinds()) labels << kind.second;
         QCOMPARE(labels.size(), 17);
         QCOMPARE(labels.mid(0, 5), QStringList({QStringLiteral("普通（楕円）"), kCapsule, QStringLiteral("角丸"), QStringLiteral("四角"), kPolygon}));
+        // (two kinds said as they are drawn — dashes, lines spreading out; keys chosen under their names of before stay)
+        QVERIFY(labels.contains(QStringLiteral("ささやき（破線）")) && labels.contains(QStringLiteral("フラッシュ（放射状の線）")));
+        QCOMPARE(app::preferences::old_names(QStringLiteral("ささやき（破線）")), QStringList{QStringLiteral("ささやき（点線）")});
+        QCOMPARE(app::preferences::old_names(QStringLiteral("フラッシュ（放射状の線）")), QStringList{QStringLiteral("フラッシュ（放射線）")});
         QCOMPARE(app::lettering::kind_label("capsule"), kCapsule);
         QCOMPARE(app::lettering::kind_label("polygon"), kPolygon);
         // 1 ページ → 台詞 → フキダシの形
@@ -202,9 +211,28 @@ private slots:
                 if (a->menu() != nullptr && a->text() == QStringLiteral("フキダシの形")) own = a->menu();
             QVERIFY(own != nullptr);
             QCOMPARE(texts(own), labels);
+            // (a kind that holds its letters as an oval does: the kind alone, the box as it was)
+            for (QAction* a : own->actions())
+                if (a->text() == QStringLiteral("雲（もくもく）")) a->trigger();
+            QCOMPARE(s.ops.size(), std::size_t{2});
+            QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "cloud"}}));
+            // to a polygon, which holds its letters in its own shape: the kind, and in the same step the box fitted to
+            // the words about its middle — an eight-sided box for one column of five (6.5 × 26.5 mm of words, √2 times)
+            const Json before = snapshot(*s.line(id));
             for (QAction* a : own->actions())
                 if (a->text() == kPolygon) a->trigger();
-            QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "polygon"}}));
+            QCOMPARE(s.ops.size(), std::size_t{4});
+            QCOMPARE(s.ops[2], (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "polygon"}}));
+            QCOMPARE(s.ops[3]["op"], Json("move_line"));
+            QCOMPARE(s.line(id)->balloon, std::string("polygon"));
+            QVERIFY(std::fabs(s.line(id)->w_mm.value() - 9.19) <= 0.011);
+            QVERIFY(std::fabs(s.line(id)->h_mm.value() - 37.48) <= 0.011);
+            QVERIFY(std::fabs(s.line(id)->x_mm.value() + s.line(id)->w_mm.value() / 2 - 75.0) <= 0.011);  // (its middle where it was)
+            QVERIFY(std::fabs(s.line(id)->y_mm.value() + s.line(id)->h_mm.value() / 2 - 72.0) <= 0.011);
+            QCOMPARE(render::text::text_layout(*s.line(id), 600).em, std::int64_t{118});
+            s.trigger("act_undo");  // (one step: the kind and the box together)
+            QCOMPARE(snapshot(*s.line(id)), before);
+            s.trigger("act_redo");
             QCOMPARE(s.line(id)->balloon, std::string("polygon"));
         }
         // 3 the 台詞 panel (its list names the kind by its first word)
@@ -226,40 +254,85 @@ private slots:
         editor->close();
         // (the menu's command sets the chosen line's kind)
         s.choose(id);
+        const std::size_t count = s.ops.size();
         for (QAction* a : shapes->actions())
             if (a->text() == kCapsule) a->trigger();
-        QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "capsule"}}));
+        QCOMPARE(s.ops.size(), count + 2);
+        QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "capsule"}}));
+        QCOMPARE(s.ops[count + 1]["op"], Json("move_line"));
+        // (a capsule for one column of five: 9.5 mm wide, its round ends 4.07 mm past the 25 mm of letters — not the
+        // polygon's box with round ends)
+        QCOMPARE(s.line(id)->w_mm.value(), 9.5);
+        QCOMPARE(s.line(id)->h_mm.value(), 29.07);
+        QVERIFY(std::fabs(s.line(id)->x_mm.value() + 4.75 - 75.0) <= 0.011);
         QTRY_VERIFY(s.panel().list->item(0)->text().contains(QStringLiteral("〔縦長〕")));  // (the panel follows an edit a moment later)
+        // …and from it to an oval again: the oval's box for those words, not a pill's
+        for (QAction* a : shapes->actions())
+            if (a->text() == QStringLiteral("普通（楕円）")) a->trigger();
+        QCOMPARE(s.line(id)->balloon, std::string("speech"));
+        QVERIFY(s.line(id)->w_mm.value() != 9.5 && s.line(id)->h_mm.value() > 33.0);  // (an oval round one column of five: taller than the capsule)
+        QCOMPARE(render::text::text_layout(*s.line(id), 600).em, std::int64_t{118});
     }
 
     // The hand-drawn look has no control left (the 台詞 panel's 線の揺れ is gone, nothing offers 手描き風 for a balloon); a
     // line of before that holds style.hand and style.wobble opens, is listed, and is edited without losing them — and
     // the trembling its wobble is drawn as can be set from 線のふるえ, its letters keeping the oval they were fitted in.
     void noControlOfTheHandDrawnLookIsLeft() {
-        Studio s([](core::Document& doc) {
-            core::StoryLine old;
-            old.id = "old1";
-            old.page_index = doc.page(0).index;
-            old.text = "むかしの\n台詞";
-            old.balloon = "speech";
-            old.wrap = "vertical";
-            old.x_mm = core::Num(60);
-            old.y_mm = core::Num(60);
-            old.w_mm = core::Num(30);
-            old.h_mm = core::Num(26);
-            old.frame_id = doc.page(0).leaf_frames().front()->id;
-            old.style = Json{{"hand", false}, {"wobble", 0.5}};
-            doc.story.push_back(old);
-            core::StoryLine hand = old;
-            hand.id = "old2";
-            hand.x_mm = core::Num(100);
-            hand.style = Json{{"hand", true}};
-            doc.story.push_back(hand);
+        // lines of before, in an oval where their letters are set one way as a line with a wobble was fitted (in the true
+        // ellipse of its box) and another way as an oval without one is (in the letters' oval, a little inside): taking
+        // the wobble away without saying hand: false would set them differently
+        // (how a line's letters are set: their size and the picture of them — its columns)
+        const auto set_of = [](const core::StoryLine& line) {
+            const render::text::Layout layout = render::text::text_layout(line, 600);
+            return std::array<std::int64_t, 3>{layout.em, layout.image.width(), layout.image.height()};
+        };
+        core::StoryLine old;
+        old.text = "むかしの台\nむかしの詞";
+        old.balloon = "speech";
+        old.wrap = "vertical";
+        old.x_mm = core::Num(40);
+        old.y_mm = core::Num(60);
+        std::array<std::int64_t, 3> as_set{};
+        {
+            const std::array<double, 2> roomy = service::letter::measure({"むかしの台", "むかしの詞"}, "speech");
+            bool found = false;
+            for (int percent = 110; percent >= 70 && !found; --percent) {
+                for (const double wide : {1.0, 1.3, 0.85}) {
+                    old.w_mm = core::Num(core::py_round(roomy[0] * wide * percent / 100.0, 2));
+                    old.h_mm = core::Num(core::py_round(roomy[1] * percent / 100.0, 2));
+                    core::StoryLine with = old, without = old;
+                    with.style = Json{{"wobble", 0.5}};
+                    as_set = set_of(with);
+                    found = as_set[0] == 118 && set_of(without) != as_set;
+                    if (found) break;
+                }
+            }
+            QVERIFY2(found, "no box tells the two fits apart");
+        }
+        Studio s([&old](core::Document& doc) {
+            const struct {
+                const char* id;
+                double x;
+                Json style;
+            } lines[] = {{"old1", 30, Json{{"hand", false}, {"wobble", 0.5}}}, {"old2", 60, Json{{"hand", true}, {"wobble", 0.4}}},
+                         {"old3", 90, Json{{"wobble", 0.6}}},                   {"old4", 120, Json{{"wobble", 0.5}}},
+                         {"old5", 150, Json{{"hand", true}, {"wobble", 0.5}}}};
+            for (const auto& each : lines) {
+                core::StoryLine line = old;
+                line.id = each.id;
+                line.page_index = doc.page(0).index;
+                line.x_mm = core::Num(each.x);
+                line.frame_id = doc.page(0).leaf_frames().front()->id;
+                line.style = each.style;
+                doc.story.push_back(line);
+            }
         });
         QVERIFY(s.window->book().read_only_reason.empty());
         QVERIFY(s.line("old1") != nullptr);
         QCOMPARE(s.line("old1")->style, (Json{{"hand", false}, {"wobble", 0.5}}));
-        // no control named for the wobble; no words of the hand-drawn look on the panel or the text tool's settings
+        for (const char* id : {"old1", "old2", "old3", "old4", "old5"}) QCOMPARE(set_of(*s.line(id)), as_set);
+        // no control named for the wobble; no words of the hand-drawn look on the panel, the text tool's settings or the
+        // palette (its items' names and tooltips too)
         QVERIFY(s.panel().findChild<QWidget*>(QStringLiteral("story_wobble")) == nullptr);
         QVERIFY(s.window->findChild<QWidget*>(QStringLiteral("story_wobble")) == nullptr);
         QVERIFY(s.window->findChild<QWidget*>(QStringLiteral("story_hand")) == nullptr);
@@ -273,6 +346,15 @@ private slots:
                 if (const auto* button = qobject_cast<QAbstractButton*>(w)) words += button->text();
                 for (const QString& word : gone) QVERIFY2(!words.contains(word), qPrintable(words));
             }
+        }
+        QVERIFY(s.palette().list()->count() > 0);
+        for (int i = 0; i < s.palette().list()->count(); ++i) {
+            const QString words = s.palette().list()->item(i)->text() + s.palette().list()->item(i)->toolTip();
+            for (const QString& word : gone) QVERIFY2(!words.contains(word), qPrintable(words));
+        }
+        for (const app::BalloonPreset& preset : app::balloon_presets()) {
+            const QString words = QString::fromUtf8(preset.name) + QString::fromUtf8(preset.tip);
+            for (const QString& word : gone) QVERIFY2(!words.contains(word), qPrintable(words));
         }
         // (and no command of the menus: ページ → 台詞 and a balloon's own menu)
         std::function<void(const QMenu*)> walk = [&](const QMenu* menu) {
@@ -297,8 +379,11 @@ private slots:
         QCOMPARE(s.line("old1")->style["wobble"], Json(0.5));
         QCOMPARE(s.line("old1")->style["hand"], Json(false));
         QCOMPARE(s.line("old1")->style["border_mm"], Json(0.6));
-        // its trembling shown as it is drawn (0.03 × 0.5 × 26 mm), and set: the wobble gives way to the amount said
-        QCOMPARE(s.panel().wave->value(), 0.39);
+        // its trembling shown as it is drawn (0.03 × 0.5 × the box's narrow side), and set: the wobble gives way to the
+        // amount said
+        s.choose("old1");
+        const double narrow = std::min(old.w_mm.value(), old.h_mm.value());
+        QCOMPARE(s.panel().wave->value(), std::min(3.0, core::py_round(0.03 * 0.5 * narrow, 2)));
         const std::size_t before = s.ops.size();
         emit s.panel().wave->editingFinished();  // (left as it was: no edit)
         QCOMPARE(s.ops.size(), before);
@@ -306,20 +391,48 @@ private slots:
         emit s.panel().wave->editingFinished();
         QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", "old1"}, {"style", Json{{"wave_mm", 0.2}, {"wobble", nullptr}}}}));
         QVERIFY(!s.line("old1")->style.contains("wobble"));
-        QCOMPARE(s.line("old1")->style["hand"], Json(false));  // (its letters stay in the ellipse they were fitted in)
+        QCOMPARE(s.line("old1")->style["hand"], Json(false));  // (said already: its letters stay in the ellipse they were fitted in)
+        QCOMPARE(set_of(*s.line("old1")), as_set);
         s.trigger("act_undo");
         QCOMPARE(s.line("old1")->style["wobble"], Json(0.5));
         QVERIFY(!s.line("old1")->style.contains("wave_mm"));
+        // a line whose hand says true, and one that says no hand: the wobble gone, hand: false is written with it — the
+        // letters set as they were (without it they would be set smaller or in other columns: the fixture's box)
+        for (const char* id : {"old2", "old3"}) {
+            s.choose(id);
+            s.panel().wave->setValue(0.25);
+            emit s.panel().wave->editingFinished();
+            QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"style", Json{{"wave_mm", 0.25}, {"wobble", nullptr}, {"hand", false}}}}));
+            QCOMPARE(canon(s.line(id)->style), canon(Json{{"hand", false}, {"wave_mm", 0.25}}));
+            QCOMPARE(set_of(*s.line(id)), as_set);
+            core::StoryLine bare = *s.line(id);
+            bare.style.erase("hand");
+            QVERIFY(set_of(bare) != as_set);
+        }
+        // …and the same through the palette: a look of now takes the wobble away, and says hand: false with it
+        for (const char* id : {"old4", "old5"}) {
+            s.choose(id);
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("double")));
+            QCOMPARE(canon(s.line(id)->style), canon(Json{{"hand", false}, {"double", true}}));
+            QCOMPARE(set_of(*s.line(id)), as_set);
+            s.trigger("act_undo");
+            QVERIFY(s.line(id)->style.contains("wobble"));
+            QCOMPARE(set_of(*s.line(id)), as_set);
+        }
+        // (a kind that is no oval has no such ellipse: nothing is said of hand)
+        s.choose("old4");
+        QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("rounded")));
+        QCOMPARE(s.line("old4")->style, Json::object());
         // 既定の設定に戻す takes the keys of before away with the others
-        s.choose("old2");
+        s.choose("old5");
         s.panel().reset->click();
-        QVERIFY(!s.line("old2")->style.contains("hand"));
+        QVERIFY(s.line("old5")->style.empty());
         // saved and read again: the book still opens
         s.session->save_now();
         QVERIFY(s.session->wait_saved(std::chrono::milliseconds(20000)));
         const core::Document back = gui_test::read_book(gui_test::path_of(s.tmp.path() + "/book"));
         QVERIFY(back.read_only_reason.empty());
-        QCOMPARE(back.story.size(), std::size_t{2});
+        QCOMPARE(back.story.size(), std::size_t{5});
     }
 
     // Each new setting of the 台詞 panel writes its one key in one edit_line, which one 取り消し takes back; a field left
@@ -339,6 +452,10 @@ private slots:
         const std::string cloud = add("cloud");
         const std::string flash = add("flash");
         const std::string narration = add("narration");
+        const std::string dotted = add("dotted_box");
+        const std::string fancy = add("fancy_box");
+        const std::string tone = add("tone_box");
+        const std::string thought = add("thought", Json{{"tails", Json::array({Json{{"to", Json::array({50, 100})}}})}});
         const std::string sfx = add("sfx");
         auto& p = s.panel();
         QFormLayout* form = p.style_form;
@@ -367,6 +484,14 @@ private slots:
         QCOMPARE(rows(), QString());  // (a flash's spokes are its outline; it is drawn without tails)
         s.choose(narration);
         QCOMPARE(rows(), QStringLiteral("corner wave dash"));  // (a box without tails)
+        s.choose(tone);
+        QCOMPARE(rows(), QStringLiteral("corner wave dash"));
+        s.choose(fancy);
+        QCOMPARE(rows(), QStringLiteral("wave dash"));  // (its marks sit at square corners)
+        s.choose(dotted);
+        QCOMPARE(rows(), QString());  // (dots along a square edge: no corners, no trembling, no dashes)
+        s.choose(thought);
+        QCOMPARE(rows(), QStringLiteral("wave dash tail_fillet"));  // (its tails are always bubbles: no kind to choose)
         s.choose(sfx);
         QCOMPARE(rows(), QString());
         // (their names, for the tests and the screen readers; their words in Japanese)
@@ -525,6 +650,43 @@ private slots:
             for (int i = 0; i < 6; ++i) s.trigger("act_undo");
             QCOMPARE(snapshot(*s.line(speech)), before);
         }
+        // a field left as it shows makes no edit, whatever the line holds: a default written out (sides 8), more decimals
+        // than the field shows (2.123 mm), tails that differ from one another — none is rewritten by walking through
+        {
+            const std::string held = add("polygon", Json{{"style", Json{{"sides", 8}, {"corner_mm", 2.123}, {"wave_mm", 0.333}, {"dash_mm", 1.004}}},
+                                                         {"tails", Json::array({Json{{"to", Json::array({50, 100})}, {"fillet_mm", 1.0}, {"width_mm", 3.0}},
+                                                                                Json{{"to", Json::array({110, 100})}, {"fillet_mm", 2.0}, {"width_mm", 5.0}}})}});
+            s.choose(held);
+            const Json before = snapshot(*s.line(held));
+            const std::size_t count = s.ops.size();
+            QCOMPARE(p.corner->value(), 2.12);
+            QCOMPARE(p.tail_fillet->value(), 1.0);
+            for (QDoubleSpinBox* box : {p.corner, p.wave, p.dash, p.tail_fillet}) emit box->editingFinished();
+            emit p.sides->editingFinished();
+            QVERIFY2(s.ops.size() == count, s.last().dump().c_str());
+            QCOMPARE(snapshot(*s.line(held)), before);
+            // (しっぽの幅, a field of before, sends the line's style as every such field does — and no longer makes tails
+            // of different widths one width when it is left as it shows)
+            emit p.tail_width->editingFinished();
+            for (std::size_t i = count; i < s.ops.size(); ++i) QVERIFY2(!s.ops[i].contains("tails"), s.ops[i].dump().c_str());
+            QCOMPARE(snapshot(*s.line(held))["tails"], before["tails"]);
+            s.choose(held);
+            const std::size_t kept = s.ops.size();
+            // (changed, it is written — and then every tail takes it)
+            p.tail_fillet->setValue(3.0);
+            emit p.tail_fillet->editingFinished();
+            QCOMPARE(s.ops.size(), kept + 1);
+            QCOMPARE(s.line(held)->tails[0]["fillet_mm"], Json(3.0));
+            QCOMPARE(s.line(held)->tails[1]["fillet_mm"], Json(3.0));
+            QCOMPARE(s.line(held)->tails[1]["width_mm"], Json(5.0));
+            // (set and set back before the panel shows the line again: both are edits)
+            p.corner->setValue(4.0);
+            emit p.corner->editingFinished();
+            p.corner->setValue(2.12);
+            emit p.corner->editingFinished();
+            QCOMPARE(s.ops.size(), kept + 3);
+            QCOMPARE(s.line(held)->style["corner_mm"], Json(2.12));
+        }
         // a balloon's own menu offers the same kinds of tail
         {
             const std::unique_ptr<QMenu> menu = s.window->line_menu(speech);
@@ -588,7 +750,7 @@ private slots:
         QListWidget* list = s.palette().list();
         QCOMPARE(list->count(), static_cast<int>(presets.size()));
         QCOMPARE(list->viewMode(), QListView::IconMode);
-        QCOMPARE(list->item(0)->text(), QStringLiteral("ふつう"));
+        QCOMPARE(list->item(0)->text(), QStringLiteral("普通"));  // (as the kinds' menus say it: 普通（楕円）)
         for (int i = 0; i < list->count(); ++i) {
             QVERIFY(list->item(i)->toolTip().startsWith(list->item(i)->text()));
             QVERIFY(list->item(i)->toolTip().size() > list->item(i)->text().size() + 4);
@@ -635,6 +797,13 @@ private slots:
             for (const app::BalloonPreset& preset : presets) (void)app::preset_picture(preset, 1.5);
             qInfo("the palette's %d pictures drawn afresh in %lld ms", static_cast<int>(presets.size()), static_cast<long long>(clock.elapsed()));
         }
+        // moved to a screen of another scale: the pictures are drawn again at it
+        {
+            QEvent moved(QEvent::DevicePixelRatioChange);
+            QCoreApplication::sendEvent(&s.palette(), &moved);
+            QVERIFY(!s.palette().pictures_drawn());
+            QTRY_VERIFY_WITH_TIMEOUT(s.palette().pictures_drawn(), 30000);
+        }
         // the keys: the arrows move among the presets, Enter and Space pick the one in hand
         QSignalSpy picked(&s.palette(), &app::BalloonPalette::picked);
         list->setFocus();
@@ -666,7 +835,9 @@ private slots:
     }
 
     // A pick with a line chosen: that line takes the look — its kind and its look's keys, the keys of the look it had
-    // gone —, its words, place, size and tails kept; one edit_line, and one 取り消し gives the line back exactly.
+    // gone —, its words, place, face, colour and tails kept; to or from a capsule or a polygon its box is fitted to its
+    // words about its middle; all of it one step, and one 取り消し gives the line back exactly. A pick that would change
+    // nothing makes no step.
     void aPickRestylesTheChosenLine() {
         Studio s;
         const Json tails = Json::array({Json{{"to", Json::array({48.0, 104.0})}, {"via", Json::array({52.0, 96.0})}, {"width_mm", 5.0}}});
@@ -678,16 +849,17 @@ private slots:
         s.choose(id);
         const Json before = snapshot(*s.line(id));
         std::size_t count = s.ops.size();
-        s.window->use_balloon_preset(QStringLiteral("polygon6"));
-        QCOMPARE(s.ops.size(), count + 1);  // (one op: one step)
-        QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "polygon"},
-                                 {"style", Json{{"border_mm", nullptr}, {"spikes", nullptr}, {"spike_depth", nullptr}, {"spike_alt", nullptr}, {"sides", 6}}}}));
+        // a look of another kind that holds its letters as a burst does: the kind and the look, the box as it was
+        s.window->use_balloon_preset(QStringLiteral("double"));
+        QCOMPARE(s.ops.size(), count + 1);  // (one op)
+        QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "speech"},
+                                 {"style", Json{{"border_mm", nullptr}, {"spikes", nullptr}, {"spike_depth", nullptr}, {"spike_alt", nullptr}, {"double", true}}}}));
         {
             const core::StoryLine& l = *s.line(id);
-            QCOMPARE(l.balloon, std::string("polygon"));
-            // (the look's keys of before gone, the preset's set; the letters' own and the balloon's turn kept)
-            QCOMPARE(l.style, (Json{{"font", "maru"}, {"size_mm", 4.5}, {"text_dx_mm", 1.0}, {"rotate_deg", 5.0}, {"rgb", Json::array({200, 30, 30})}, {"sides", 6}}));
-            Json after = snapshot(l);
+            QCOMPARE(l.balloon, std::string("speech"));
+            // (the look's keys of before gone, the preset's set; the letters' own — their colour too — and the turn kept)
+            QCOMPARE(l.style, (Json{{"font", "maru"}, {"size_mm", 4.5}, {"text_dx_mm", 1.0}, {"rotate_deg", 5.0}, {"rgb", Json::array({200, 30, 30})}, {"double", true}}));
+            const Json after = snapshot(l);
             for (const char* same : {"id", "text", "wrap", "x", "y", "w", "h", "tails", "tail"}) QVERIFY2(after[same] == before[same], same);
         }
         QCOMPARE(s.canvas()->selected_line_id, std::optional<std::string>(id));  // (still the chosen line)
@@ -696,27 +868,58 @@ private slots:
         s.trigger("act_undo");
         QCOMPARE(snapshot(*s.line(id)), before);
         s.trigger("act_redo");
+        QCOMPARE(s.line(id)->balloon, std::string("speech"));
+        // the same look again: nothing to change — no op, no step, and the status says so
+        count = s.ops.size();
+        QVERIFY(!s.window->restyle_with_balloon_preset(QStringLiteral("double")));
+        QCOMPARE(s.ops.size(), count);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("選んだ台詞のフキダシは、もう「二重線」です"));
+        s.trigger("act_undo");  // (the step before is the first pick's: no step was made by the second)
+        QCOMPARE(snapshot(*s.line(id)), before);
+
+        // to a polygon, which holds its letters in its own shape: the kind and the look, and in the same step the box
+        // fitted to the words about its middle — six sides, 1.5 times the 13.5 × 16.5 mm of words
+        count = s.ops.size();
+        s.window->use_balloon_preset(QStringLiteral("polygon6"));
+        QCOMPARE(s.ops.size(), count + 2);
+        QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"balloon", "polygon"},
+                                     {"style", Json{{"border_mm", nullptr}, {"spikes", nullptr}, {"spike_depth", nullptr}, {"spike_alt", nullptr}, {"sides", 6}}}}));
+        QCOMPARE(s.ops[count + 1]["op"], Json("move_line"));
+        QVERIFY(!s.ops[count + 1].contains("tails"));
+        {
+            const core::StoryLine& l = *s.line(id);
+            QCOMPARE(l.balloon, std::string("polygon"));
+            QCOMPARE(l.w_mm.value(), 20.25);
+            QCOMPARE(l.h_mm.value(), 24.75);
+            QVERIFY(std::fabs(l.x_mm.value() + l.w_mm.value() / 2 - 77.0) <= 0.011);  // (its middle where it was)
+            QVERIFY(std::fabs(l.y_mm.value() + l.h_mm.value() / 2 - 74.0) <= 0.011);
+            const Json after = snapshot(l);
+            for (const char* same : {"id", "text", "wrap", "tails", "tail"}) QVERIFY2(after[same] == before[same], same);
+        }
+        s.trigger("act_undo");  // (one step)
+        QCOMPARE(snapshot(*s.line(id)), before);
+        s.trigger("act_redo");
         QCOMPARE(s.line(id)->balloon, std::string("polygon"));
-        // a click on the palette's item does the same
+        // a click on the palette's item does the same; from the polygon to an oval: fitted again, as an oval
         s.window->show_dock(QStringLiteral("フキダシ"));
         s.palette().draw_pictures();
         count = s.ops.size();
         QListWidget* list = s.palette().list();
         QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(s.palette().item(QStringLiteral("wave"))).center());
-        QCOMPARE(s.ops.size(), count + 1);
+        QCOMPARE(s.ops.size(), count + 2);
         QCOMPARE(s.line(id)->balloon, std::string("speech"));
         QCOMPARE(s.line(id)->style["wave_mm"], Json(0.4));
         QVERIFY(!s.line(id)->style.contains("sides"));
-        // ベタ白抜き: black inside, white letters; then a white balloon again: the white letters go with the black
+        QVERIFY(s.line(id)->w_mm.value() != 20.25);
+        // ベタ白抜き on letters of a colour the person chose: black inside, the letters' colour kept
         s.window->use_balloon_preset(QStringLiteral("black_oval"));
         QCOMPARE(s.line(id)->style["fill_rgb"], Json::array({0, 0, 0}));
-        QCOMPARE(s.line(id)->style["rgb"], Json::array({255, 255, 255}));
+        QCOMPARE(s.line(id)->style["rgb"], Json::array({200, 30, 30}));
         QVERIFY(!s.line(id)->style.contains("wave_mm"));
         s.window->use_balloon_preset(QStringLiteral("oval"));
         QVERIFY(!s.line(id)->style.contains("fill_rgb"));
         QVERIFY(!s.line(id)->style.contains("line_rgb"));
-        QVERIFY(!s.line(id)->style.contains("rgb"));
-        QCOMPARE(s.line(id)->style, (Json{{"font", "maru"}, {"size_mm", 4.5}, {"text_dx_mm", 1.0}, {"rotate_deg", 5.0}}));
+        QCOMPARE(s.line(id)->style, (Json{{"font", "maru"}, {"size_mm", 4.5}, {"text_dx_mm", 1.0}, {"rotate_deg", 5.0}, {"rgb", Json::array({200, 30, 30})}}));
         QCOMPARE(PageCanvas_tails(*s.line(id)), tails);  // (through all of it, its tail as it was)
         // a preset about its tails: the line's own tail keeps where it points and takes the kind (心の声の泡)…
         s.window->use_balloon_preset(QStringLiteral("thought_cloud"));
@@ -732,26 +935,83 @@ private slots:
         s.window->use_balloon_preset(QStringLiteral("inward_tail"));
         QCOMPARE(s.line(id)->tails.size(), std::size_t{1});
         QCOMPARE(s.line(id)->tails.front()["kind"], Json("inward"));
-        {
+        const auto inside_box = [&](const Json& tail) {
             const core::StoryLine& l = *s.line(id);
-            const double tx = l.tails.front()["to"][0].get<double>(), ty = l.tails.front()["to"][1].get<double>();
-            QVERIFY(tx > l.x_mm.value() && tx < l.x_mm.value() + l.w_mm.value() && ty > l.y_mm.value() && ty < l.y_mm.value() + l.h_mm.value());
-        }
+            const double tx = tail["to"][0].get<double>(), ty = tail["to"][1].get<double>();
+            return tx > l.x_mm.value() && tx < l.x_mm.value() + l.w_mm.value() && ty > l.y_mm.value() && ty < l.y_mm.value() + l.h_mm.value();
+        };
+        QVERIFY(inside_box(s.line(id)->tails.front()));
         s.window->use_balloon_preset(QStringLiteral("oval_tail"));
         QCOMPARE(s.line(id)->tails.size(), std::size_t{1});
         QVERIFY(!s.line(id)->tails.front().contains("kind"));
         QVERIFY(s.line(id)->tails.front()["to"][1].get<double>() > s.line(id)->y_mm.value() + s.line(id)->h_mm.value());
-        // every preset can be given to a line: the ops take each (no refusal), and undo goes back each time
+        // tails that point both ways — a notch and a tail that runs out: under either preset of tails, the preset's own
+        {
+            const core::StoryLine& l = *s.line(id);
+            const Json mixed = Json::array({Json{{"to", Json::array({l.x_mm.value() + l.w_mm.value() * 0.7, l.y_mm.value() + l.h_mm.value() * 0.6})}, {"kind", "inward"}},
+                                            Json{{"to", Json::array({l.x_mm.value() - 8.0, l.y_mm.value() + l.h_mm.value() + 12.0})}}});
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"tails", mixed}}})));
+            s.choose(id);
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("oval_tail")));
+            QCOMPARE(s.line(id)->tails.size(), std::size_t{1});
+            QVERIFY(!s.line(id)->tails.front().contains("kind"));
+            QVERIFY(!inside_box(s.line(id)->tails.front()));
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"tails", mixed}}})));
+            s.choose(id);
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("inward_tail")));
+            QCOMPARE(s.line(id)->tails.size(), std::size_t{1});
+            QCOMPARE(s.line(id)->tails.front()["kind"], Json("inward"));
+            QVERIFY(inside_box(s.line(id)->tails.front()));
+        }
+        // every preset can be given to a line: the ops take each (no refusal), one undo goes back each time; the one the
+        // line is already makes no step
+        int given = 0;
         for (const app::BalloonPreset& preset : app::balloon_presets()) {
+            s.choose(id);
             const Json was = snapshot(*s.line(id));
             count = s.ops.size();
-            QVERIFY2(s.window->restyle_with_balloon_preset(QString::fromLatin1(preset.key)), preset.key);
-            QVERIFY2(s.ops.size() == count + 1, preset.key);
+            if (!s.window->restyle_with_balloon_preset(QString::fromLatin1(preset.key))) {
+                QVERIFY2(s.ops.size() == count && snapshot(*s.line(id)) == was, preset.key);
+                continue;
+            }
+            ++given;
+            QVERIFY2(s.ops.size() > count, preset.key);
             QVERIFY2(s.line(id)->balloon == preset.kind, preset.key);
-            for (const auto& [key, value] : preset.style.items()) QVERIFY2(s.line(id)->style.at(key) == value, preset.key);
-            QVERIFY2(snapshot(*s.line(id))["text"] == was["text"] && snapshot(*s.line(id))["w"] == was["w"] && snapshot(*s.line(id))["x"] == was["x"], preset.key);
+            for (const auto& [key, value] : preset.style.items()) {
+                if (key != "rgb") QVERIFY2(s.line(id)->style.at(key) == value, preset.key);
+            }
+            QVERIFY2(snapshot(*s.line(id))["text"] == was["text"], preset.key);
+            QVERIFY2(render::text::text_layout(*s.line(id), 150).em > 0, preset.key);  // (it is set and drawn)
             s.trigger("act_undo");
             QVERIFY2(snapshot(*s.line(id)) == was, preset.key);
+        }
+        QVERIFY(given >= static_cast<int>(app::balloon_presets().size()) - 2);  // (all but the two it is: 普通, 内向きしっぽ)
+
+        // the letters' colour: ベタ gives white letters to a line whose letters are the usual black (none said, or black
+        // said), and a white balloon gives them back — white letters went with the black inside
+        for (const Json& said : {Json(), Json::array({0, 0, 0})}) {
+            Json op{{"op", "add_line"}, {"text", "くろい\nこえ"}, {"balloon", "speech"}, {"x_mm", 110}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 26}};
+            if (!said.is_null()) op["style"] = Json{{"rgb", said}};
+            const std::string plain = s.put(op);
+            s.choose(plain);
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("black_oval")));
+            QCOMPARE(canon(s.line(plain)->style), canon(Json{{"fill_rgb", Json::array({0, 0, 0})}, {"line_rgb", Json::array({0, 0, 0})}, {"rgb", Json::array({255, 255, 255})}}));
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("black_shout")));  // (ベタ to ベタ: the white letters stay)
+            QCOMPARE(s.line(plain)->style["rgb"], Json::array({255, 255, 255}));
+            QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("rounded")));
+            QCOMPARE(s.line(plain)->style, Json::object());
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "delete_line"}, {"id", plain}}})));
+        }
+        // 白抜き文字 — white letters with their own edge, on a white balloon or on none: the person's, left as they are
+        for (const char* kind : {"speech", "none", "sfx"}) {
+            const Json letters{{"rgb", Json::array({255, 255, 255})}, {"outline_mm", 0.6}, {"outline_rgb", Json::array({0, 0, 0})}};
+            const std::string white = s.put(Json{{"op", "add_line"}, {"text", "しろぬき"}, {"balloon", kind}, {"x_mm", 110}, {"y_mm", 100}, {"w_mm", 30}, {"h_mm", 26},
+                                                 {"style", letters}});
+            s.choose(white);
+            QVERIFY2(s.window->restyle_with_balloon_preset(QStringLiteral("rounded")), kind);
+            QCOMPARE(s.line(white)->balloon, std::string("rounded"));
+            QCOMPARE(s.line(white)->style, letters);
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "delete_line"}, {"id", white}}})));
         }
         // a line of before with a wobble: a look of now takes the trembling away with the look it was part of
         const std::string old = s.put(Json{{"op", "add_line"}, {"text", "むかし"}, {"balloon", "speech"}, {"x_mm", 110}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 24},
@@ -764,6 +1024,113 @@ private slots:
         count = s.ops.size();
         QVERIFY(!s.window->restyle_with_balloon_preset(QStringLiteral("oval")));
         QCOMPARE(s.ops.size(), count);
+    }
+
+    // A pick on one of joined balloons (style.group): they are drawn as one balloon — its inside, its line, its dashes
+    // and its second line from its first line —, so every one of them takes the kind and the look, in one step. Each
+    // keeps its words, its place, its face and its tails.
+    void aPickOnAJoinedBalloonTakesEveryMember() {
+        Studio s;
+        const std::string first = s.put(Json{{"op", "add_line"}, {"text", "それで"}, {"balloon", "speech"}, {"x_mm", 40}, {"y_mm", 60}, {"w_mm", 34}, {"h_mm", 26},
+                                             {"style", Json{{"group", "g1"}, {"font", "maru"}}}, {"tails", Json::array({Json{{"to", Json::array({36.0, 100.0})}}})}});
+        const std::string second = s.put(Json{{"op", "add_line"}, {"text", "どうした"}, {"balloon", "speech"}, {"x_mm", 66}, {"y_mm", 74}, {"w_mm", 30}, {"h_mm", 24},
+                                              {"style", Json{{"group", "g1"}}}});
+        const std::string apart = s.put(Json{{"op", "add_line"}, {"text", "べつ"}, {"balloon", "speech"}, {"x_mm", 120}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 24}});
+        const Json was_first = snapshot(*s.line(first)), was_second = snapshot(*s.line(second)), was_apart = snapshot(*s.line(apart));
+        // ベタ白抜き picked on the second: both black inside with white letters (on the second alone its letters would be
+        // white on the first line's white inside — unseen)
+        s.choose(second);
+        std::size_t count = s.ops.size();
+        QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("black_oval")));
+        QCOMPARE(s.ops.size(), count + 2);  // (one edit_line each, applied together)
+        for (const std::string& id : {first, second}) {
+            QCOMPARE(s.line(id)->style["fill_rgb"], Json::array({0, 0, 0}));
+            QCOMPARE(s.line(id)->style["line_rgb"], Json::array({0, 0, 0}));
+            QCOMPARE(s.line(id)->style["rgb"], Json::array({255, 255, 255}));
+            QCOMPARE(s.line(id)->style["group"], Json("g1"));
+        }
+        QCOMPARE(s.line(first)->style["font"], Json("maru"));
+        QCOMPARE(PageCanvas_tails(*s.line(first)), was_first["tails"]);
+        QCOMPARE(snapshot(*s.line(apart)), was_apart);  // (a line that is not joined: untouched)
+        QCOMPARE(s.window->last_notice(), QStringLiteral("つないだフキダシをまとめて「ベタ白抜き」にしました（元に戻す で取り消せます）"));
+        // (drawn: the joined balloon is black where its letters are white — the second line's middle)
+        {
+            const core::StoryLine& l = *s.line(second);
+            QVERIFY(s.canvas()->wait_rendered(60000));
+            const QImage page = s.canvas()->renderer().compose(s.canvas()->base_dpi());
+            const double px = s.canvas()->base_dpi() / 25.4;
+            const QRect box = QRectF(l.x_mm.value() * px, l.y_mm.value() * px, l.w_mm.value() * px, l.h_mm.value() * px).toAlignedRect().intersected(page.rect());
+            int dark = 0, light = 0;
+            for (int y = box.top(); y <= box.bottom(); ++y)
+                for (int x = box.left(); x <= box.right(); ++x) (qGray(page.pixel(x, y)) < 128 ? dark : light) += 1;
+            QVERIFY2(dark > light && light > 20, qPrintable(QStringLiteral("%1 dark, %2 light").arg(dark).arg(light)));
+        }
+        s.trigger("act_undo");  // (one step for both)
+        QCOMPARE(snapshot(*s.line(first)), was_first);
+        QCOMPARE(snapshot(*s.line(second)), was_second);
+        // 二重線 picked on the second: the first line, whose look the joined balloon is drawn with, takes it too
+        s.choose(second);
+        QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("double")));
+        QCOMPARE(s.line(first)->style["double"], Json(true));
+        QCOMPARE(s.line(second)->style["double"], Json(true));
+        QVERIFY(!s.window->restyle_with_balloon_preset(QStringLiteral("double")));  // (both are that look already: no step)
+        // a preset about its tails: the kind and the look for both, its tails for the picked line alone
+        s.choose(second);
+        QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("oval_tail")));
+        QCOMPARE(s.line(second)->tails.size(), std::size_t{1});
+        QCOMPARE(PageCanvas_tails(*s.line(first)), was_first["tails"]);
+        QVERIFY(!s.line(first)->style.contains("double"));
+        s.trigger("act_undo");
+        s.trigger("act_undo");
+        QCOMPARE(snapshot(*s.line(first)), was_first);
+        QCOMPARE(snapshot(*s.line(second)), was_second);
+    }
+
+    // An inward tail — a notch — is a place in its balloon: it goes with the balloon when that is dragged or resized on
+    // the page (the other tails stay where they point), 取り消し puts both back; its tip (●) dragged out of the balloon
+    // stops inside it; しっぽをまっすぐにする keeps it a notch.
+    void aNotchGoesWithItsBalloon() {
+        Studio s;
+        const Json tails = Json::array({Json{{"to", Json::array({64.0, 58.0})}, {"kind", "inward"}}, Json{{"to", Json::array({36.0, 92.0})}}});
+        const std::string id = s.put(Json{{"op", "add_line"}, {"text", "そとの\nこえ"}, {"balloon", "speech"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 30}, {"h_mm", 26},
+                                          {"tails", tails}});
+        s.choose(id);
+        const Json before = snapshot(*s.line(id));
+        // dragged by (4, 3) mm: the notch with it, the other tail where it points
+        inject::mouse_stroke(s.canvas(), {QPointF(55.0, 53.0), QPointF(57.0, 54.0), QPointF(59.0, 56.0)});
+        QCOMPARE(s.last(), (Json{{"op", "move_line"}, {"id", id}, {"x_mm", 44.0}, {"y_mm", 43.0}}));
+        QCOMPARE(s.line(id)->tails[0], (Json{{"to", Json::array({68.0, 61.0})}, {"kind", "inward"}}));
+        QCOMPARE(s.line(id)->tails[1], tails[1]);
+        QVERIFY(core::tail_hidden(*s.line(id), s.line(id)->tails[0]["to"]));
+        s.trigger("act_undo");
+        QCOMPARE(snapshot(*s.line(id)), before);
+        s.trigger("act_redo");
+        QCOMPARE(s.line(id)->tails[0]["to"], Json::array({68.0, 61.0}));
+        s.trigger("act_undo");
+        // made twice as wide and as tall from its corner: the notch the same share of the way across
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "move_line"}, {"id", id}, {"w_mm", 60}, {"h_mm", 52}}})));
+        QCOMPARE(s.line(id)->tails[0]["to"], Json::array({88.0, 76.0}));
+        QVERIFY(core::tail_hidden(*s.line(id), s.line(id)->tails[0]["to"]));
+        s.trigger("act_undo");
+        QCOMPARE(snapshot(*s.line(id)), before);
+        // its tip dragged far out of the balloon: it stops inside, on the way it was dragged
+        s.choose(id);
+        inject::mouse_stroke(s.canvas(), {QPointF(64.0, 58.0), QPointF(80.0, 60.0), QPointF(110.0, 64.0)});
+        QCOMPARE(s.last()["op"], Json("move_line"));
+        const Json dragged = s.last()["tails"][0];
+        QCOMPARE(dragged["kind"], Json("inward"));
+        QVERIFY(core::tail_hidden(*s.line(id), dragged["to"]));
+        QVERIFY(dragged["to"][0].get<double>() > 64.0 && dragged["to"][0].get<double>() < 70.0);  // (toward where it was dragged, inside the 40..70 mm of the balloon)
+        QCOMPARE(s.last()["tails"][1], tails[1]);
+        // (dragged inside the balloon: where it was let go)
+        inject::mouse_stroke(s.canvas(), {QPointF(dragged["to"][0].get<double>(), dragged["to"][1].get<double>()), QPointF(52.0, 50.0), QPointF(50.0, 48.0)});
+        QCOMPARE(s.last()["tails"][0]["to"], Json::array({50.0, 48.0}));
+        // しっぽをまっすぐにする: its bends go, its kind stays (a notch made a plain tail would point into its own balloon)
+        const std::unique_ptr<QMenu> menu = s.window->line_menu(id);
+        QVERIFY(menu != nullptr);
+        for (QAction* a : menu->actions())
+            if (a->text() == QStringLiteral("しっぽをまっすぐにする")) a->trigger();
+        QCOMPARE(s.last()["tails"], Json::array({Json{{"to", Json::array({50.0, 48.0})}, {"kind", "inward"}}, tails[1]}));
     }
 
     // A pick with no line chosen (or the text tool in hand): the look of the next line placed — the text tool taken,
@@ -785,6 +1152,13 @@ private slots:
         QCOMPARE(s.palette().list()->selectedItems(), QList<QListWidgetItem*>{s.palette().item(QStringLiteral("capsule"))});
         QVERIFY(!s.palette().item(QStringLiteral("oval"))->font().bold());
         QCOMPARE(s.window->text_settings()->balloon->currentData().toString(), QStringLiteral("capsule"));
+        // (said with the text tool's settings too, where it shows while the palette is closed)
+        auto* tool = s.window->text_settings();
+        QVERIFY(!s.window->balloon_dock()->isVisible());
+        QVERIFY(static_cast<QFormLayout*>(tool->layout())->isRowVisible(tool->preset_row));
+        QCOMPARE(tool->preset_name->text(), QStringLiteral("パレットの形: 縦長"));
+        QCOMPARE(tool->preset_clear->text(), QStringLiteral("外す"));
+        QVERIFY(!tool->preset_clear->toolTip().isEmpty());
         // typed where the text tool clicks: a capsule, its box the auto-lettering's for those words
         Json placed = s.type_at(QPointF(100.0, 150.0), QStringLiteral("そうなんだ"));
         QCOMPARE(placed["op"], Json("add_line"));
@@ -850,13 +1224,32 @@ private slots:
         const std::string chosen = s.window->book().story.back().id;
         s.choose(chosen);
         count = s.ops.size();
-        s.window->use_balloon_preset(QStringLiteral("double"), QStringLiteral("next"));
+        {
+            const std::unique_ptr<QMenu> menu = s.palette().item_menu(QStringLiteral("double"));
+            QVERIFY(menu != nullptr);
+            QCOMPARE(texts(menu.get()), QStringList({QStringLiteral("選んだ台詞のフキダシをこの形にする"), QStringLiteral("次に置く台詞をこの形にする")}));
+            menu->actions().at(1)->trigger();
+        }
         QCOMPARE(s.ops.size(), count);
         QCOMPARE(s.palette().marked(), QStringLiteral("double"));
+        QCOMPARE(tool->preset_name->text(), QStringLiteral("パレットの形: 二重線"));
+        QVERIFY(s.palette().item_menu(QStringLiteral("no such preset")) == nullptr);
+        // …and its 「選んだ台詞のフキダシをこの形にする」 ("line") restyles the chosen line though the text tool is in hand
         s.choose(chosen);
-        s.window->use_balloon_preset(QStringLiteral("thick"));  // (restyles: the mark stays on the next line's look)
-        QCOMPARE(s.ops.size(), count + 1);
+        s.trigger("act_text");
+        QVERIFY(s.canvas()->selected_line_id.has_value());
+        {
+            const std::unique_ptr<QMenu> menu = s.palette().item_menu(QStringLiteral("thick"));
+            menu->actions().at(0)->trigger();
+        }
+        QVERIFY(s.ops.size() > count);
+        QCOMPARE(s.line(chosen)->balloon, std::string("speech"));
         QCOMPARE(s.line(chosen)->style["border_mm"], Json(0.8));
+        // (it was the wide capsule: made an oval, its box is the oval's for its words — in that one step)
+        QCOMPARE(render::text::text_layout(*s.line(chosen), 600).em, std::int64_t{118});
+        s.trigger("act_undo");
+        QCOMPARE(s.line(chosen)->balloon, std::string("capsule"));
+        s.trigger("act_redo");
         QCOMPARE(s.palette().marked(), QStringLiteral("double"));
         QCOMPARE(s.palette().list()->selectedItems(), QList<QListWidgetItem*>{s.palette().item(QStringLiteral("double"))});
         // the text tool's own フキダシ chosen: the palette's look is let go, the kind chosen placed plain
@@ -865,12 +1258,19 @@ private slots:
         emit settings->balloon->activated(settings->balloon->currentIndex());
         QVERIFY(s.window->armed_balloon_preset() == nullptr);
         QCOMPARE(s.palette().marked(), QString());
+        QVERIFY(!static_cast<QFormLayout*>(tool->layout())->isRowVisible(tool->preset_row));
         QVERIFY(s.palette().list()->selectedItems().isEmpty());
         for (int i = 0; i < s.palette().list()->count(); ++i) QVERIFY(!s.palette().list()->item(i)->font().bold());
         s.trigger("act_text");
         placed = s.type_at(QPointF(100.0, 240.0), QStringLiteral("ふつう"));
         QCOMPARE(placed["balloon"], Json("rounded"));
         QVERIFY(!placed.contains("style"));
+        // 外す beside the look's name lets it go too
+        s.window->arm_balloon_preset(QStringLiteral("wave"));
+        QVERIFY(static_cast<QFormLayout*>(tool->layout())->isRowVisible(tool->preset_row));
+        tool->preset_clear->click();
+        QVERIFY(s.window->armed_balloon_preset() == nullptr);
+        QVERIFY(!static_cast<QFormLayout*>(tool->layout())->isRowVisible(tool->preset_row));
         // every line placed is drawn (none refused), and the book saves and reads back with its feature named
         s.session->save_now();
         QVERIFY(s.session->wait_saved(std::chrono::milliseconds(20000)));
@@ -883,19 +1283,40 @@ private slots:
     // The box the window gives a capsule and a polygon is the auto-lettering's (service::letter::measure): the one
     // formula; and the letters set in the box so made keep their full size.
     void theWindowMeasuresACapsuleAsTheAutoLettering() {
-        const std::vector<std::vector<std::string>> samples = {{"そうなんだ"}, {"うん"}, {"あいうえお", "かきくけこ"}, {"ねえ", "聞いて", "るの"}};
-        for (const auto& words : samples) {
+        // the window's measure (app::lettering) against sizes worked out by hand from the rule (5 mm letters, columns 2 mm
+        // apart, 0.75 mm round the words; a capsule's round ends of radius half its words' narrow side + 2.25 mm, the
+        // words' corners 0.75 mm inside them; a polygon the words' block √2 times as big for eight sides, 1.5 for six)
+        struct Sized {
+            std::vector<std::string> words;
+            const char* kind;
+            int sides;
+            double w, h;
+        };
+        const Sized sized[] = {
+            {{"そうなんだ"}, "capsule", 0, 9.5, 29.0718},                 // 5 + 4.5; 25 + 1.5 + 2 × (4.75 − √(4.75² − 3.25²))
+            {{"うん"}, "capsule", 0, 9.5, 14.0718},                       // 10 + 1.5 + 2.5718
+            {{"あいうえお", "かきくけこ"}, "capsule", 0, 16.5, 33.5132},  // 12 + 4.5; 25 + 1.5 + 2 × (8.25 − √(8.25² − 6.75²))
+            {{"そうなんだ"}, "polygon", 0, 9.1924, 37.4767},              // 6.5 × √2, 26.5 × √2
+            {{"あいうえお", "かきくけこ"}, "polygon", 0, 19.0919, 37.4767},
+            {{"あいうえお", "かきくけこ"}, "polygon", 8, 19.0919, 37.4767},
+            {{"あいうえお", "かきくけこ"}, "polygon", 6, 20.25, 39.75},   // 13.5 × 1.5, 26.5 × 1.5
+        };
+        for (const Sized& each : sized) {
             std::vector<std::u32string> breaks;
-            for (const std::string& w : words) breaks.push_back(render::text::u32(w));
-            for (const char* kind : {"capsule", "polygon"}) {
-                const std::array<double, 2> want = service::letter::measure(words, kind);
-                const std::pair<double, double> got = app::lettering::measure(breaks, kind);
-                QCOMPARE(got.first, want[0]);
-                QCOMPARE(got.second, want[1]);
-            }
-            const std::array<double, 2> six = service::letter::measure(words, "polygon", service::letter::kEmMm, 6);
-            QCOMPARE(app::lettering::measure(breaks, "polygon", app::lettering::kEmMm, 6).first, six[0]);
-            QVERIFY(six[0] > service::letter::measure(words, "polygon")[0]);  // (six sides cut further in than eight)
+            for (const std::string& w : each.words) breaks.push_back(render::text::u32(w));
+            const std::pair<double, double> got = app::lettering::measure(breaks, each.kind, app::lettering::kEmMm, each.sides);
+            const QString what = QStringLiteral("%1 %2 sides, %3 columns: %4 × %5").arg(QString::fromLatin1(each.kind)).arg(each.sides).arg(each.words.size()).arg(got.first).arg(got.second);
+            QVERIFY2(std::fabs(got.first - each.w) < 0.002 && std::fabs(got.second - each.h) < 0.002, qPrintable(what));
+            // (the auto-lettering's is the same function: the two cannot drift apart)
+            const std::array<double, 2> service = service::letter::measure(each.words, each.kind, service::letter::kEmMm, each.sides);
+            QCOMPARE(got.first, service[0]);
+            QCOMPARE(got.second, service[1]);
+        }
+        // (the same box turned for words across: one row of four in a wide capsule)
+        {
+            const Json across = app::lettering::place_at(100, 100, "ひとこと", "capsule", false, nullptr);
+            QCOMPARE(across["w_mm"].get<double>(), 24.07);
+            QCOMPARE(across["h_mm"].get<double>(), 9.5);
         }
         // (a one-column capsule: as wide as its round ends, taller than its words)
         const std::array<double, 2> capsule = service::letter::measure({"そうなんだ"}, "capsule");

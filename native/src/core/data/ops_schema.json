@@ -116,7 +116,7 @@
   "w_mm": "float? (the balloon's size: edit_line does not change it)",
   "h_mm": "float?",
   "tail": "[x,y]?",
-  "tails": "[{to, via?, width_mm?}]?",
+  "tails": "[{to, via?, vias?, width_mm?, kind?, fillet_mm?}]? (as edit_line's tails. Not given: the tails stay where they point on the page — a tip the moved or resized balloon would cover is put outside it —, but an inward tail, a notch, goes with the box)",
   "balloon": "str?"
  },
  {

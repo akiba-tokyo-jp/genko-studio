@@ -252,8 +252,8 @@ const std::vector<std::pair<QString, QString>>& kinds() {
         {"thought", "心の声（泡つき）"},
         {"shout", "叫び（トゲ）"},
         {"electric", "電子音（電話・テレビ）"},
-        {"flash", "フラッシュ（放射線）"},
-        {"whisper", "ささやき（点線）"},
+        {"flash", "フラッシュ（放射状の線）"},
+        {"whisper", "ささやき（破線）"},
         {"narration", "ナレーション（四角・しっぽなし）"},
         {"sfx", "効果音（描き文字）"},
         {"none", "文字だけ"},
@@ -402,6 +402,23 @@ Json refit(const core::StoryLine& line, const core::Frame* frame, const std::str
     const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style));
     const Num right = line.x_mm + line.w_mm;
     return Json{{"x_mm", core::py_round((right - Num(w)).value(), 2)}, {"y_mm", line.y_mm.json()}, {"w_mm", w}, {"h_mm", h}};
+}
+
+Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const Json& style_after) {
+    const std::string was = line.balloon.empty() ? std::string("speech") : line.balloon;
+    const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon"; };
+    if (was == kind || !(own_shape(was) || own_shape(kind))) return Json();
+    if (line.path && !line.path->empty()) return Json();              // (drawn by hand: its box is its outline's)
+    if (!render::text::shape_of(line).empty()) return Json();         // (a point or box text: not set in a balloon)
+    const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
+    const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
+    const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after));
+    const double cx = (line.x_mm + line.w_mm / Num(2)).value();
+    const double cy = (line.y_mm + line.h_mm / Num(2)).value();
+    const double x = core::py_round(cx - w / 2, 2);
+    const double y = core::py_round(cy - h / 2, 2);
+    if (x == line.x_mm.value() && y == line.y_mm.value() && w == line.w_mm.value() && h == line.h_mm.value()) return Json();
+    return Json{{"x_mm", x}, {"y_mm", y}, {"w_mm", w}, {"h_mm", h}};
 }
 
 Json place_at(double x_mm, double y_mm, const std::string& text, const std::string& balloon, bool vertical, const core::Frame* frame,

@@ -379,8 +379,21 @@ void MainWindow::toggle_selected_wrap() {
     apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", line->id}, {"wrap", vertical ? "vertical" : "horizontal"}}, move}));
 }
 
+Json MainWindow::balloon_kind_ops(const core::StoryLine& line, const std::string& kind) const {
+    // the kind, and — to or from a capsule or a polygon, which hold their letters in their own shape — the box fitted to
+    // the words about its middle, in the same step of 取り消し (lettering::refit_for_kind)
+    Json ops = Json::array({Json{{"op", "edit_line"}, {"id", line.id}, {"balloon", kind}}});
+    const Json box = lettering::refit_for_kind(line, frame_by_id(line.frame_id), kind, line.style);
+    if (box.is_object()) {
+        Json move{{"op", "move_line"}, {"id", line.id}};
+        for (const auto& [key, value] : box.items()) move[key] = value;
+        ops.push_back(std::move(move));
+    }
+    return ops;
+}
+
 void MainWindow::set_selected_balloon(const QString& kind) {
-    if (const core::StoryLine* line = selected_line_or_say()) apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", line->id}, {"balloon", kind.toStdString()}}}));
+    if (const core::StoryLine* line = selected_line_or_say()) apply_ops(balloon_kind_ops(*line, kind.toStdString()));
 }
 
 // --- a balloon's own menu -------------------------------------------------------------------------------------------
@@ -450,8 +463,8 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
         act->setCheckable(true);
         act->setChecked(QString::fromStdString(line->balloon) == key);
         const std::string kind = key.toStdString();
-        connect(act, &QAction::triggered, this, [apply_now, kind] {
-            apply_now([kind](const core::StoryLine& l) { return Json::array({Json{{"op", "edit_line"}, {"id", l.id}, {"balloon", kind}}}); });
+        connect(act, &QAction::triggered, this, [this, apply_now, kind] {
+            apply_now([this, kind](const core::StoryLine& l) { return balloon_kind_ops(l, kind); });
         });
     }
     const std::string turned = line->wrap == "vertical" ? "horizontal" : "vertical";
@@ -487,7 +500,12 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
         menu->addAction(QStringLiteral("しっぽをまっすぐにする"), this, [apply_now, tails_op] {
             apply_now([tails_op](const core::StoryLine& l) {
                 Json straight = Json::array();
-                for (const Json& t : PageCanvas::tails_of(l)) straight.push_back(Json{{"to", t["to"]}});
+                for (const Json& t : PageCanvas::tails_of(l)) {
+                    Json one{{"to", t["to"]}};
+                    // (its kind kept: an inward tail made a plain one would point into its own balloon, unseen)
+                    if (t.is_object() && core::truthy_at(t, "kind")) one["kind"] = t["kind"];
+                    straight.push_back(std::move(one));
+                }
                 return tails_op(l, straight);
             });
         });

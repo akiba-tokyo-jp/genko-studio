@@ -12,8 +12,11 @@
 
 #include "app/balloon_palette.hpp"
 #include "app/canvas.hpp"
+#include "app/lettering.hpp"
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "render/text/lettering.hpp"
 
 namespace genko::app {
@@ -40,6 +43,7 @@ void MainWindow::build_balloon_dock() {
     connect(balloon_palette_, &BalloonPalette::picked, this, [this](const QString& key, const QString& how) { use_balloon_preset(key, how); });
     // (the text tool's own フキダシ chosen: that kind, plain — the palette's look is let go)
     connect(text_settings_->balloon, &QComboBox::activated, this, [this](int) { arm_balloon_preset(QString()); });
+    connect(text_settings_, &TextToolSettings::presetCleared, this, [this] { arm_balloon_preset(QString()); });
 }
 
 const BalloonPreset* MainWindow::armed_balloon_preset() const { return balloon_preset(armed_balloon_); }
@@ -48,6 +52,8 @@ void MainWindow::arm_balloon_preset(const QString& key) {
     const BalloonPreset* preset = balloon_preset(key);
     armed_balloon_ = preset != nullptr ? key : QString();
     if (balloon_palette_ != nullptr) balloon_palette_->mark(armed_balloon_);
+    // (said with the text tool's settings too: the palette may be closed)
+    text_settings_->show_preset(preset != nullptr ? QString::fromUtf8(preset->name) : QString());
     if (preset == nullptr) return;
     // the text tool in hand, its settings saying the kind: the next click on the page places a line of this look
     text_settings_->make->setCurrentIndex(std::max(0, text_settings_->make->findData(QStringLiteral("line"))));
@@ -73,11 +79,41 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
     }
     const bool drawn = line->path.has_value() && !line->path->empty();
     const std::string id = line->id;
-    if (!apply_ops(Json::array({preset_restyle_op(*preset, *line)}))) return false;
+    // (to or from a capsule or a polygon: the box fitted to the words about its middle, in the same step)
+    const auto fitted = [this, preset](const core::StoryLine& l) {
+        Json after = l.style.is_object() ? l.style : Json::object();
+        const Json change = preset_style_change(*preset, l);
+        for (const auto& [name, value] : change.items()) {
+            if (value.is_null()) {
+                after.erase(name);
+            } else {
+                after[name] = value;
+            }
+        }
+        return lettering::refit_for_kind(l, frame_by_id(l.frame_id), preset->kind, after);
+    };
+    // (the lines joined with it: one balloon, drawn with its first line's inside and line — each takes the look)
+    std::vector<JoinedLine> joined;
+    if (const Json group = core::get_or(line->style, "group", Json()); core::py_truthy(group)) {
+        for (const core::StoryLine* other : book().story_for_page(line->page_index)) {
+            if (other->id != id && render::text::shape_of(*other).empty() && core::py_equals(core::get_or(other->style, "group", Json()), group)) {
+                joined.push_back(JoinedLine{other, fitted(*other)});
+            }
+        }
+    }
+    const Json ops = preset_restyle_ops(*preset, *line, fitted(*line), joined);
+    const QString name = QString::fromUtf8(preset->name);
+    if (ops.empty()) {  // (that look already: no edit, no step of 取り消し)
+        flash(QStringLiteral("選んだ台詞のフキダシは、もう「%1」です").arg(name), 4000);
+        return false;
+    }
+    const bool many = !joined.empty();
+    if (!apply_ops(ops)) return false;
     canvas_->selected_line_id = id;
     on_line_selected(id, false);
-    flash(drawn ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻すで戻ります）").arg(QString::fromUtf8(preset->name))
-                : QStringLiteral("選んだ台詞のフキダシを「%1」にしました（元に戻すで戻ります）").arg(QString::fromUtf8(preset->name)),
+    flash(drawn  ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻す で取り消せます）").arg(name)
+          : many ? QStringLiteral("つないだフキダシをまとめて「%1」にしました（元に戻す で取り消せます）").arg(name)
+                 : QStringLiteral("選んだ台詞のフキダシを「%1」にしました（元に戻す で取り消せます）").arg(name),
           4000);
     return true;
 }

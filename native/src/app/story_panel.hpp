@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -135,7 +136,9 @@ private:
     void set_tail_width();
     // fukidashi@1: one key of the chosen line's style set (null: back to the kind's own); its trembling; its tails' kind
     // and their join's rounding; and which of these rows the line's kind has.
-    void set_shape_key(const char* key, const core::Json& value);
+    // (`field` and what it shows now: a field left as the panel showed it makes no edit — left_as_shown)
+    void set_shape_key(const QWidget* field, double shown, double half_step, const char* key, const core::Json& value);
+    bool left_as_shown(const QWidget* field, double value, double half_step);
     void set_wave();
     void set_tail_kind();
     void set_tail_fillet();
@@ -155,6 +158,7 @@ private:
 
     MainWindow* window_ = nullptr;
     std::vector<std::string> line_ids_;
+    std::map<const QWidget*, double> shown_;  // (the shape fields and the tails' as last shown: show_picked)
     bool loading_ = false;
 };
 

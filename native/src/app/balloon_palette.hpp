@@ -4,6 +4,7 @@
 #include <QString>
 #include <QWidget>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@
 #include "core/model.hpp"
 
 class QListWidget;
+class QMenu;
 class QListWidgetItem;
 class QTimer;
 
@@ -48,11 +50,26 @@ const BalloonPreset* balloon_preset(const QString& key);
 const std::vector<std::string>& balloon_look_keys();
 // A preset's tails for a balloon's box (mm, the page's).
 core::Json preset_tails(const BalloonPreset& preset, double x_mm, double y_mm, double w_mm, double h_mm);
-// The one edit_line that gives a line the preset's look: its kind, its look's keys (the others of the look null), and
-// — a preset about its tails — its tails (a line that has tails keeps where they point, each taking the preset's
-// kind; one that has none, not as many as しっぽ 2 本 says, or tails pointing the other way — in or out — takes the
-// preset's own). The line's words, place and size are not in it.
-core::Json preset_restyle_op(const BalloonPreset& preset, const core::StoryLine& line);
+// The style change that gives a line the preset's look (only the keys that change): every key of the look the line
+// has and the preset does not say, null; the preset's own. Letters: ベタ's white only for a line whose letters are the
+// usual black (none said, or dark) — a colour the person chose stays; white letters go back to the usual only when
+// they went with a dark inside (白抜き文字 on a white or absent inside are left). A line of before whose wobble goes
+// and that is an oval then is given hand: false, so its letters stay in the ellipse they were fitted in.
+core::Json preset_style_change(const BalloonPreset& preset, const core::StoryLine& line);
+// A line joined with the picked one (the same style.group on its page), and the box it is refitted to (null: kept).
+struct JoinedLine {
+    const core::StoryLine* line = nullptr;
+    core::Json box;
+};
+// The ops that give a line the preset's look, applied together as one step: its edit_line — its kind, its look's keys
+// and, for a preset about its tails, its tails (a line that has tails keeps where they point, each taking the
+// preset's kind; one that has none, not as many as しっぽ 2 本 says, or any tail pointing the other way — in or out —
+// takes the preset's own) —; `box` ({x_mm, y_mm, w_mm, h_mm}; null: kept), the move_line that refits it (the preset's
+// tails said there, for that box); and for each line joined with it the kind and the look too (a joined balloon is
+// drawn with one inside and one line). Nothing that would change nothing: an empty list when the line is that look
+// already.
+core::Json preset_restyle_ops(const BalloonPreset& preset, const core::StoryLine& line, const core::Json& box = core::Json(),
+                              const std::vector<JoinedLine>& joined = {});
 // A preset's picture: a balloon of its look drawn by the renderer on white paper, `scale` device pixels a pixel.
 QImage preset_picture(const BalloonPreset& preset, double scale = 1.0);
 // The pictures' size (pixels of the screen, before the scale).
@@ -72,6 +89,9 @@ public:
     bool pictures_drawn() const { return next_ >= count_; }
     // A preset's item (none: nullptr).
     QListWidgetItem* item(const QString& key) const;
+    // A preset's own menu (the right click, the menu key; not shown): 選んだ台詞のフキダシをこの形にする (picked with
+    // "line") and 次に置く台詞をこの形にする ("next").
+    std::unique_ptr<QMenu> item_menu(const QString& key);
 
 signals:
     // A preset picked (a click, Enter or Space on it). `how`: "" as the window decides (the chosen line, or the next
@@ -79,6 +99,7 @@ signals:
     void picked(const QString& key, const QString& how);
 
 protected:
+    bool event(QEvent* event) override;
     void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;

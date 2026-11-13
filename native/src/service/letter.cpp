@@ -412,6 +412,21 @@ std::string fits(const Box& rect, const std::string& balloon, std::size_t others
     if (balloon == "sfx") {
         chars = py_floordiv(room_h, kSfxEmMm);
         cols = py_floordiv(room_w, kSfxEmMm);
+    } else if (balloon == "capsule") {
+        // (fukidashi@1, as measure sizes it: one column's round ends take 0.81 em of its height, the round sides 0.9 em
+        // of its width)
+        const double fit = em * kFitPad;
+        const double radius = em / 2 + fit + em * 0.3;
+        const double corner = em / 2 + fit;
+        const double ends = 2 * fit + 2 * (radius - std::sqrt(radius * radius - corner * corner));
+        chars = py_floordiv(room_h - ends, em);
+        cols = py_floordiv((room_w - 2 * fit - em * 0.6) + em * kLeading, em * (1 + kLeading));
+    } else if (balloon == "polygon") {
+        // (as measure sizes it: the words' block with the fit's pad, polygon_room times as big)
+        const double fit = em * kFitPad;
+        const double grow_by = polygon_room(0);
+        chars = py_floordiv(room_h / grow_by - 2 * fit, em);
+        cols = py_floordiv((room_w / grow_by - 2 * fit) + em * kLeading, em * (1 + kLeading));
     } else {
         const double grow_by = (ellipse_kind(balloon) || spiked(balloon)) ? std::pow(2.0, 0.5) / (1 - spiked(balloon).value_or(0.0)) : 1.0;
         const double pad = balloon == "none" ? 0.0 : em / 4;

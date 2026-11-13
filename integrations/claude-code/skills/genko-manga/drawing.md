@@ -33,12 +33,12 @@ op ごとの引数の形は `inspect` の `target: "ops"`（`op` に名前）で
 - 台詞: `add_line`・`edit_line` の
   - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "weight": "heavy"}]]`）。
   - `style`: `rotate_deg`（フキダシごと回す）、`skew_deg`・`arc`（描き文字の傾き・弓なり）、`weight`（`normal`・`bold`・`heavy`）・`italic`、`outline_rgb`（フチの色）、`latin`（`rotate` で 4 文字以上の英数字を寝かせる／`upright`）、`emphasis_mark`（`sesame`・`dot`）、`double`（二重線）・`spikes`・`spike_depth`（叫びのトゲ）。
-  - `balloon` の形: `speech`（楕円）・`capsule`（1 列の短い台詞。縦書きは縦長、横書きは横長）・`rounded`・`box`・`polygon`（多角形。機械の声）・`cloud`・`thought`・`shout`・`electric`（電子音: 電話・テレビの声。ギザギザの縁と稲妻のしっぽ）・`flash`・`whisper`・`narration`・`dotted_box`・`tone_box`・`fancy_box`・`sfx`・`none`。どれも同じ今風の線で描かれる（真の楕円、どの向きでも同じ太さの線）。
+  - `balloon` の形: `speech`（楕円）・`capsule`（両端の丸い形。1 列の短い台詞に。箱の長い辺が長い辺になり、文字の向きでは決まらない）・`rounded`・`box`・`polygon`（多角形。機械の声）・`cloud`・`thought`・`shout`・`electric`（電子音: 電話・テレビの声。ギザギザの縁と稲妻のしっぽ）・`flash`・`whisper`・`narration`・`dotted_box`・`tone_box`・`fancy_box`・`sfx`・`none`。どれも同じ今風の線で描かれる（真の楕円、どの向きでも同じ太さの線）。
   - フキダシの形の `style`: `corner_mm`（角の丸み 0〜50 mm。`rounded`・`box` など四角の種類・`polygon`。0 で四角い角、省くと種類ごとの丸み）、`squircle`（`rounded` を、辺がまっすぐに近く角が大きく丸い形に）、`sides`（`polygon` の角の数 5〜12、既定 8）、`wave_mm`（線を細かく波打たせる 0〜3 mm。ふるえる声）、`spike_alt`（`shout` のトゲを 1 本おきに短く 0〜0.8）、`dash_mm`（線を破線にして 1 本の長さを決める 0.2〜10 mm。`whisper` は省いても破線）、`border_mm`（線の太さ。0 で線なし）。ベタに白抜きは `fill_rgb`・`line_rgb` を黒、`rgb` を白に。
   - しっぽ `tails`: `[{to, via?, vias?, width_mm?, kind?, fillet_mm?}]`。`kind` は `wedge`（既定。輪郭から出て先へ曲がる）・`straight`・`zigzag`・`fade`（先へ消える）・`bubbles`（泡）・`inward`（フキダシに切れ込む。`to` はフキダシの中。コマの外の人の声に）。`fillet_mm`（付け根の丸み 0〜20 mm。0 で角、省くとほどよい丸み）。
   - 声ごとの選び方（会話・心の声・叫び・ささやき・機械の声・ナレーション・ふるえ・コマの外の声・縦 1 列の台詞）は案内書（SKILL.md）の「フキダシの形を選ぶ」の表。
   - `path`（手で描いた形のフキダシ、`set_balloon_path` でも）。
-  - フキダシの大きさと位置は `move_line` の `w_mm`・`h_mm`・`x_mm`・`y_mm`（`edit_line` では変わらない）。
+  - フキダシの大きさと位置は `move_line` の `w_mm`・`h_mm`・`x_mm`・`y_mm`（`edit_line` では変わらない）。大きさを省いた `add_line` の箱は 40×20 mm。`edit_line` で `capsule`・`polygon` に変えたら、`move_line` で言葉に合う箱にする（縦書き 1 列の `capsule` は幅 9.5 mm・高さ 字数×5＋4 mm が目安）。`move_line` でしっぽを言わずに箱を動かす・大きさを変えると、ふつうのしっぽは指している所のまま（箱に隠れる先は外へ出る）、`inward` のしっぽは箱と一緒に動く。
 - 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする（`layer_id` にネームのレイヤー〔`snapshot` の role `name`〕、`kind: "pencil"` で描くと、それがネームのラフになる。ネームのレイヤーは印刷されず、ネームの承認の前でも描ける。承認の前のネーム・下描きに、エージェントは画像を置かない）。
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。

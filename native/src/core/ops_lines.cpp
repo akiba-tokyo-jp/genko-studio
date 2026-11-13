@@ -611,6 +611,42 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
     }
 }
 
+// fukidashi@1: an inward tail is a notch cut into its balloon — its tip (and the point it bends through) is a place in
+// the balloon, not a speaker on the page. When the balloon is moved or resized without saying its tails, each inward
+// tail goes with the box: the same share of the way across it (to two decimals of a mm). The other tails stay where
+// they point on the page, as before.
+void inward_tails_with_box(StoryLine& line, const std::array<double, 4>& was) {
+    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
+    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
+    const double x = line.x_mm.value(), y = line.y_mm.value();
+    if (x == was[0] && y == was[1] && w == was[2] && h == was[3]) return;
+    const auto moved = [&](const Json& point) {
+        const double px = to_float(subscript(point, 0));
+        const double py = to_float(subscript(point, 1));
+        const double fx = was[2] != 0.0 ? (px - was[0]) / was[2] : 0.5;
+        const double fy = was[3] != 0.0 ? (py - was[1]) / was[3] : 0.5;
+        // (a box moved and not resized: the point moved by as much, not through its share of the box)
+        const double nx = w == was[2] ? px + (x - was[0]) : x + fx * w;
+        const double ny = h == was[3] ? py + (y - was[1]) : y + fy * h;
+        return Json(Json::array({py_round(nx, 2), py_round(ny, 2)}));
+    };
+    bool changed = false;
+    for (Json& tail : line.tails) {
+        const Json* kind = tail.is_object() ? get(tail, "kind") : nullptr;
+        if (kind == nullptr || *kind != Json("inward")) continue;
+        for (const char* key : {"to", "via"}) {
+            if (const Json* point = get(tail, key); point != nullptr && py_truthy(*point)) tail[key] = moved(*point);
+        }
+        if (const Json* vias = get(tail, "vias"); vias != nullptr && py_truthy(*vias)) {
+            Json bends = Json::array();
+            for (const Json& v : iterate(*vias)) bends.push_back(moved(v));
+            tail["vias"] = std::move(bends);
+        }
+        changed = true;
+    }
+    if (changed && !line.tails.empty()) line.tail = tail_point(subscript(line.tails.front(), "to"));
+}
+
 // What Python keeps that this build's book cannot hold, refused once the op has done everything Python does (so every
 // error Python gives comes first): a frame_id that is not a panel's id (Python keeps a number or a list there, which
 // this build's reader repairs), and a number that is not finite (Python writes NaN or Infinity into project.json).
@@ -860,6 +896,7 @@ void move_line(OpContext& c) {
     if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
     StoryLine& line = find_line(c.doc, py_str(*line_id));
     const double was_x = line.x_mm.value(), was_y = line.y_mm.value();
+    const std::array<double, 4> was_box{was_x, was_y, line.w_mm.truthy() ? line.w_mm.value() : 40.0, line.h_mm.truthy() ? line.h_mm.value() : 20.0};
     if (has(op, "x_mm")) line.x_mm = Num(to_float(op["x_mm"]));
     if (has(op, "y_mm")) line.y_mm = Num(to_float(op["y_mm"]));
     type_text::move_anchor(line, line.x_mm.value() - was_x, line.y_mm.value() - was_y);  // (type@1, PC5 G-a: a point text's anchor with it)
@@ -876,7 +913,10 @@ void move_line(OpContext& c) {
     }
     if (has(op, "balloon")) line.balloon = balloon_kind(op["balloon"]);
     const bool moved = has(op, "x_mm") || has(op, "y_mm") || has(op, "w_mm") || has(op, "h_mm");
-    if (!(has(op, "tail") || has(op, "tails")) && moved) tails_outside(line);
+    if (!(has(op, "tail") || has(op, "tails")) && moved) {
+        inward_tails_with_box(line, was_box);  // (fukidashi@1: a notch goes with its balloon)
+        tails_outside(line);
+    }
     require_kept(line);
 }
 

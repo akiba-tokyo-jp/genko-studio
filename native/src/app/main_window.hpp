@@ -1201,6 +1201,9 @@ private:
     void delete_selected_line();
     void toggle_selected_wrap();
     void set_selected_balloon(const QString& kind);
+    // The ops that give a line a balloon's kind as the kinds' menus do: edit_line, and — to or from a capsule or a
+    // polygon — the move_line that fits its box to its words about its middle (one step).
+    core::Json balloon_kind_ops(const core::StoryLine& line, const std::string& kind) const;
     std::optional<QString> panel_reference(const std::string& frame_id) const;
     void picture_balloon(const std::string& line_id);
     void draw_text_path(const std::string& line_id);

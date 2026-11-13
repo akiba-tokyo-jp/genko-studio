@@ -17,6 +17,7 @@
 
 #include "app/canvas.hpp"
 #include "app/theme.hpp"
+#include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/image.hpp"
@@ -50,13 +51,23 @@ bool is_white(const Json& colour) {
     return std::all_of(colour.begin(), colour.begin() + 3, [](const Json& c) { return c.is_number() && core::to_float(c) >= 255; });
 }
 
+// A dark colour (a black fill, black letters): none of red, green and blue above a quarter.
+bool is_dark(const Json& colour) {
+    if (!colour.is_array() || colour.size() < 3) return false;
+    return std::all_of(colour.begin(), colour.begin() + 3, [](const Json& c) { return c.is_number() && core::to_float(c) < 64; });
+}
+
+bool is_oval_kind(const std::string& kind) { return kind == "speech" || kind == "thought" || kind == "whisper"; }
+
+Json held(const core::StoryLine& line, const char* key) { return core::get_or(line.style, key, Json()); }
+
 }  // namespace
 
 const std::vector<BalloonPreset>& balloon_presets() {
     // (the kinds and the keys as SPEC BALLOON-01 names them; the names as the app says them — フキダシ, しっぽ, 台詞)
     static const std::vector<BalloonPreset> all = {
-        {"oval", "ふつう", "ふつうの台詞（楕円）", "speech", Json::object(), Json::array(), false, false},
-        {"oval_tail", "しっぽつき", "しっぽのついた、ふつうの台詞。置いたあと ● をドラッグして話し手へ向けます", "speech", Json::object(),
+        {"oval", "普通", "普通の台詞（楕円）", "speech", Json::object(), Json::array(), false, false},
+        {"oval_tail", "しっぽつき", "しっぽのついた、普通の台詞。置いたあと ● をドラッグして話し手へ向けます", "speech", Json::object(),
          Json::array({tail(-0.5, 0.85)}), true, false},
         {"capsule", "縦長", "1 列の短い台詞に合う、縦長のカプセル", "capsule", Json::object(), Json::array(), false, false},
         {"capsule_wide", "横長", "横書きのひとことに合う、横長のカプセル", "capsule", Json::object(), Json::array(), false, true},
@@ -73,7 +84,7 @@ const std::vector<BalloonPreset>& balloon_presets() {
         {"shout_sharp", "叫び（鋭い）", "細かく鋭いトゲの叫び。悲鳴や怒鳴り声に", "shout", Json{{"spikes", 24}, {"spike_depth", 0.3}}, Json::array(), false,
          false},
         {"electric", "電子音", "ギザギザの輪郭。電話・テレビ・スピーカーの声に", "electric", Json::object(), Json::array(), false, false},
-        {"flash", "フラッシュ", "放射線で囲む、ひらめきや衝撃のひとこと", "flash", Json::object(), Json::array(), false, false},
+        {"flash", "フラッシュ", "放射状の線で囲む、ひらめきや衝撃のひとこと", "flash", Json::object(), Json::array(), false, false},
         {"whisper", "ささやき", "破線のフキダシ。小声やひそひそ話に", "whisper", Json::object(), Json::array(), false, false},
         {"long_dash", "長い破線", "長めの破線。弱い声や遠くの声に", "whisper", Json{{"dash_mm", 2.5}}, Json::array(), false, false},
         {"wave", "ふるえ声", "線が細かく波打つフキダシ。おびえた声・ふるえる声に", "speech", Json{{"wave_mm", 0.4}}, Json::array(), false, false},
@@ -84,7 +95,7 @@ const std::vector<BalloonPreset>& balloon_presets() {
         {"polygon6", "六角形", "六角形のフキダシ。機械の声・通信の声に", "polygon", Json{{"sides", 6}}, Json::array(), false, false},
         {"black_oval", "ベタ白抜き", "黒いフキダシに白い文字。重い声や不気味な声に", "speech", black(), Json::array(), false, false},
         {"black_shout", "ベタの叫び", "黒いトゲのフキダシに白い文字。怒りや絶叫に", "shout", black(), Json::array(), false, false},
-        {"black_flash", "ベタフラ", "黒いフキダシを放射線で囲む（ベタフラッシュ）", "flash", black(), Json::array(), false, false},
+        {"black_flash", "ベタフラ", "黒いフキダシを放射状の線で囲む（ベタフラッシュ）", "flash", black(), Json::array(), false, false},
         {"dotted_box", "点線の囲み", "点線の四角。見出しやメモに", "dotted_box", Json::object(), Json::array(), false, false},
         {"tone_box", "トーンの囲み", "薄いトーンを敷いた四角。見出しや解説に", "tone_box", Json::object(), Json::array(), false, false},
         {"fancy_box", "飾り枠", "二重線と四隅の飾りの四角。題目やテーマに", "fancy_box", Json::object(), Json::array(), false, false},
@@ -123,29 +134,67 @@ Json preset_tails(const BalloonPreset& preset, double x_mm, double y_mm, double 
     return out;
 }
 
-Json preset_restyle_op(const BalloonPreset& preset, const core::StoryLine& line) {
+Json preset_style_change(const BalloonPreset& preset, const core::StoryLine& line) {
     Json style = Json::object();
     for (const std::string& key : balloon_look_keys()) {
         if (line.style.contains(key)) style[key] = nullptr;
     }
-    // (white letters go with the black they were on: a line turned from ベタ to a white balloon gets its letters back)
-    if (line.style.contains("rgb") && is_white(line.style["rgb"]) && !preset.style.contains("rgb")) style["rgb"] = nullptr;
-    for (const auto& [key, value] : preset.style.items()) style[key] = value;
-    Json op{{"op", "edit_line"}, {"id", line.id}, {"balloon", preset.kind}};
-    if (!style.empty()) op["style"] = std::move(style);
+    const Json letters = held(line, "rgb");
+    for (const auto& [key, value] : preset.style.items()) {
+        // (ベタ: white letters for a line whose letters are the usual black — a colour the person chose is kept)
+        if (key == "rgb" && !(letters.is_null() || is_dark(letters))) continue;
+        style[key] = value;
+    }
+    // (white letters that went with a black inside go with it: a line turned from ベタ to a white balloon gets its
+    // letters back. White letters on a white or absent inside — 白抜き文字 with their own edge — are the person's)
+    if (!preset.style.contains("rgb") && is_white(letters) && is_dark(held(line, "fill_rgb"))) style["rgb"] = nullptr;
+    // (a line of before whose wobble goes: its letters were fitted in its box's own ellipse — hand false keeps them
+    // there, whatever hand said)
+    if (core::py_truthy(held(line, "wobble")) && is_oval_kind(preset.kind) && held(line, "hand") != Json(false)) style["hand"] = false;
+    // only what changes
+    Json change = Json::object();
+    for (const auto& [key, value] : style.items()) {
+        const auto now = line.style.find(key);
+        if (value.is_null() ? now == line.style.end() : (now != line.style.end() && *now == value)) continue;
+        change[key] = value;
+    }
+    return change;
+}
+
+Json preset_restyle_ops(const BalloonPreset& preset, const core::StoryLine& line, const Json& box, const std::vector<JoinedLine>& joined) {
+    Json ops = Json::array();
+    const auto restyled = [&preset](const core::StoryLine& l) {
+        Json op{{"op", "edit_line"}, {"id", l.id}};
+        if ((l.balloon.empty() ? std::string("speech") : l.balloon) != preset.kind) op["balloon"] = preset.kind;
+        Json style = preset_style_change(preset, l);
+        if (!style.empty()) op["style"] = std::move(style);
+        return op;
+    };
+    const auto resized = [](const core::StoryLine& l, const Json& to) {
+        Json op{{"op", "move_line"}, {"id", l.id}};
+        for (const auto& [key, value] : to.items()) op[key] = value;
+        return op;
+    };
+    Json edit = restyled(line);
+    Json tails;  // (null: its tails as they are)
     if (preset.about_tails) {
         const Json now = PageCanvas::tails_of(line);
         const Json& first = preset.tails.front();
         const std::string kind = first.contains("kind") ? first["kind"].get<std::string>() : std::string("wedge");
-        const bool inward_now = !now.empty() && std::all_of(now.begin(), now.end(), [](const Json& t) { return t.is_object() && t.value("kind", "") == "inward"; });
-        const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
-        const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
-        const bool counted = preset.tails.size() > 1 && now.size() != preset.tails.size();  // (しっぽ 2 本: as many as it says)
-        if (now.empty() || counted || (kind == "inward") != inward_now) {
-            // (none, not as many as the preset is about, or tails that point the other way — in or out: the preset's own)
-            op["tails"] = preset_tails(preset, line.x_mm.value(), line.y_mm.value(), w, h);
+        const auto inward = [](const Json& t) { return t.is_object() && core::get_or(t, "kind", Json()) == Json("inward"); };
+        // (tails that point the other way — any notch under a preset of tails that run out, any tail that runs out
+        // under the preset of a notch —, none, or not as many as しっぽ 2 本 says: the preset's own)
+        const bool other_way = kind == "inward" ? !std::all_of(now.begin(), now.end(), inward) : std::any_of(now.begin(), now.end(), inward);
+        const bool counted = preset.tails.size() > 1 && now.size() != preset.tails.size();
+        if (now.empty() || counted || other_way) {
+            const bool sized = box.is_object();
+            const double x = sized ? core::to_float(box["x_mm"]) : line.x_mm.value();
+            const double y = sized ? core::to_float(box["y_mm"]) : line.y_mm.value();
+            const double w = sized ? core::to_float(box["w_mm"]) : (line.w_mm.truthy() ? line.w_mm.value() : 40.0);
+            const double h = sized ? core::to_float(box["h_mm"]) : (line.h_mm.truthy() ? line.h_mm.value() : 20.0);
+            tails = preset_tails(preset, x, y, w, h);
         } else {
-            Json tails = Json::array();  // (every tail kept where it points, each of the preset's kind)
+            Json kept = Json::array();  // (every tail kept where it points, each of the preset's kind)
             for (std::size_t i = 0; i < now.size(); ++i) {
                 Json t = now[i];
                 const Json& from = preset.tails[std::min(i, preset.tails.size() - 1)];
@@ -154,12 +203,30 @@ Json preset_restyle_op(const BalloonPreset& preset, const core::StoryLine& line)
                 } else {
                     t.erase("kind");
                 }
-                tails.push_back(std::move(t));
+                kept.push_back(std::move(t));
             }
-            if (tails != now) op["tails"] = std::move(tails);
+            if (kept != now) tails = std::move(kept);
         }
     }
-    return op;
+    // the line: its kind and look, then — refitted — its box, the tails the preset gives said with the box they are for
+    // (a move_line that says its tails leaves them as said)
+    if (box.is_object()) {
+        if (edit.size() > 2) ops.push_back(std::move(edit));
+        Json move = resized(line, box);
+        if (!tails.is_null()) move["tails"] = std::move(tails);
+        ops.push_back(std::move(move));
+    } else {
+        if (!tails.is_null()) edit["tails"] = std::move(tails);
+        if (edit.size() > 2) ops.push_back(std::move(edit));
+    }
+    // the lines joined with it (style.group): one balloon — its inside, its line, its dashes come from its first line —,
+    // so each takes the kind and the look too; their words, places, faces and tails are their own
+    for (const JoinedLine& other : joined) {
+        Json more = restyled(*other.line);
+        if (more.size() > 2) ops.push_back(std::move(more));
+        if (other.box.is_object()) ops.push_back(resized(*other.line, other.box));
+    }
+    return ops;
 }
 
 QSize preset_picture_size() {
@@ -227,7 +294,7 @@ BalloonPalette::BalloonPalette(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     auto* note = new QLabel(QStringLiteral("形をクリックすると、選んだ台詞のフキダシがその形になります。"
-                                           "台詞を選んでいないとき（と文字ツールを持っているとき）は、次に置く台詞の形になります。"));
+                                           "台詞を選んでいないときや、文字ツールを使っているときは、次に置く台詞の形になります。"));
     note->setWordWrap(true);
     layout->addWidget(note);
     theme::hint(note);  // (hidden when hints are off: its words are then this panel's tooltip)
@@ -277,6 +344,14 @@ QListWidgetItem* BalloonPalette::item(const QString& key) const {
     return nullptr;
 }
 
+std::unique_ptr<QMenu> BalloonPalette::item_menu(const QString& key) {
+    if (item(key) == nullptr) return nullptr;
+    auto menu = std::make_unique<QMenu>(this);
+    menu->addAction(QStringLiteral("選んだ台詞のフキダシをこの形にする"), this, [this, key] { emit picked(key, QStringLiteral("line")); });
+    menu->addAction(QStringLiteral("次に置く台詞をこの形にする"), this, [this, key] { emit picked(key, QStringLiteral("next")); });
+    return menu;
+}
+
 void BalloonPalette::mark(const QString& key) {
     // the look the next line takes: its item chosen (the list's highlight), in heavier letters, and the one in hand. A
     // pick that only restyled a line leaves the highlight on the marked look, or on none (the item in hand stays where
@@ -313,6 +388,15 @@ void BalloonPalette::draw_some(int most) {
 
 void BalloonPalette::draw_pictures() { draw_some(count_); }
 
+bool BalloonPalette::event(QEvent* event) {
+    // (moved to a screen of another scale: the pictures drawn again at it, a few at a time as when first shown)
+    if (event->type() == QEvent::DevicePixelRatioChange && list_ != nullptr && next_ > 0) {
+        next_ = 0;
+        if (isVisible() && !timer_->isActive()) timer_->start();
+    }
+    return QWidget::event(event);
+}
+
 void BalloonPalette::changeEvent(QEvent* event) {
     QWidget::changeEvent(event);
     // (the look changed — light, dark, the brightness: the marked item's colour with it)
@@ -337,11 +421,7 @@ bool BalloonPalette::eventFilter(QObject* watched, QEvent* event) {
         // (the menu key: at the current item; the mouse: at the item under it)
         QListWidgetItem* at = asked->reason() == QContextMenuEvent::Mouse ? list_->itemAt(list_->viewport()->mapFrom(list_, asked->pos())) : list_->currentItem();
         if (at == nullptr) return true;
-        const QString key = at->data(kKey).toString();
-        QMenu menu(this);
-        menu.addAction(QStringLiteral("選んだ台詞のフキダシをこの形にする"), this, [this, key] { emit picked(key, QStringLiteral("line")); });
-        menu.addAction(QStringLiteral("次に置く台詞をこの形にする"), this, [this, key] { emit picked(key, QStringLiteral("next")); });
-        menu.exec(asked->globalPos());
+        if (const std::unique_ptr<QMenu> menu = item_menu(at->data(kKey).toString())) menu->exec(asked->globalPos());
         return true;
     }
     return QWidget::eventFilter(watched, event);

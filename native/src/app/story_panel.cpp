@@ -260,20 +260,20 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     connect(corner, &QDoubleSpinBox::editingFinished, this, [this] {
         carry_on("set_shape_key", [this] {
             if (corner->value() < 0) corner->setValue(corner->minimum());  // (below 0: 自動)
-            set_shape_key("corner_mm", corner->value() < 0 ? Json() : Json(corner->value()));
+            set_shape_key(corner, corner->value(), 0.005, "corner_mm", corner->value() < 0 ? Json() : Json(corner->value()));
         });
     });
     squircle = new QCheckBox(QStringLiteral("角をふっくら丸くする"));
     squircle->setToolTip(QStringLiteral("辺はまっすぐに近く、角を大きく丸くした形にします（角丸のフキダシ）"));
     connect(squircle, &QCheckBox::clicked, this, [this](bool on) {
-        carry_on("set_shape_key", [this, on] { set_shape_key("squircle", on ? Json(true) : Json()); });
+        carry_on("set_shape_key", [this, on] { set_shape_key(squircle, on ? 1.0 : 0.0, 0.5, "squircle", on ? Json(true) : Json()); });
     });
     sides = new QSpinBox;
     sides->setRange(5, 12);
     sides->setValue(8);
     sides->setToolTip(QStringLiteral("多角形のフキダシの角の数（5〜12。初めは 8）"));
     connect(sides, &QSpinBox::editingFinished, this, [this] {
-        carry_on("set_shape_key", [this] { set_shape_key("sides", sides->value() != 8 ? Json(sides->value()) : Json()); });
+        carry_on("set_shape_key", [this] { set_shape_key(sides, sides->value(), 0.5, "sides", sides->value() != 8 ? Json(sides->value()) : Json()); });
     });
     wave = own_spin(0, 3, 0.1, QStringLiteral(" mm"), QStringLiteral("なし"), "set_wave", &StoryPanel::set_wave);
     wave->setToolTip(QStringLiteral("フキダシの線を細かく波打たせます（ふるえる声・おびえた声に。0 でなめらか）"));
@@ -284,7 +284,9 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     spike_alt->setSpecialValueText(QStringLiteral("そろえる"));
     spike_alt->setToolTip(QStringLiteral("叫びのトゲを 1 本おきに短くします（大きいほど長短の差がつく）"));
     connect(spike_alt, &QDoubleSpinBox::editingFinished, this, [this] {
-        carry_on("set_shape_key", [this] { set_shape_key("spike_alt", spike_alt->value() > 0 ? Json(spike_alt->value()) : Json()); });
+        carry_on("set_shape_key", [this] {
+            set_shape_key(spike_alt, spike_alt->value(), 0.005, "spike_alt", spike_alt->value() > 0 ? Json(spike_alt->value()) : Json());
+        });
     });
     dash = new QDoubleSpinBox;
     dash->setRange(0, 10);
@@ -296,7 +298,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     connect(dash, &QDoubleSpinBox::editingFinished, this, [this] {
         carry_on("set_shape_key", [this] {
             if (dash->value() > 0 && dash->value() < 0.2) dash->setValue(0.2);  // (the shortest dash)
-            set_shape_key("dash_mm", dash->value() > 0 ? Json(dash->value()) : Json());
+            set_shape_key(dash, dash->value(), 0.005, "dash_mm", dash->value() > 0 ? Json(dash->value()) : Json());
         });
     });
     tail_kind = new QComboBox;
@@ -663,6 +665,10 @@ void StoryPanel::show_picked() {
                                tail_fillet->minimum()));
     tail_fillet->setEnabled(!tails_now.empty());
     show_shape_rows(*l);
+    shown_.clear();  // (what each of these fields shows now: one left so makes no edit — left_as_shown)
+    for (const QDoubleSpinBox* box : {corner, wave, spike_alt, dash, tail_fillet, tail_width}) shown_[box] = box->value();
+    shown_[sides] = sides->value();
+    shown_[squircle] = squircle->isChecked() ? 1.0 : 0.0;
     path_curve->setVisible(l->path.has_value() && !l->path->empty());
     path_curve->setChecked(core::py_truthy(st["path_curve"]));
     ruby_scale->setValue(f("ruby_scale", 0.5));
@@ -860,6 +866,8 @@ void StoryPanel::pick_style_colour(const char* key, const QString& title, const 
 void StoryPanel::set_tail_width() {
     const core::StoryLine* l = line();
     if (l == nullptr || loading_ || l->tails.empty()) return;
+    // (left as the first tail's was shown: no edit, and tails of different widths are not made one width)
+    if (left_as_shown(tail_width, tail_width->value(), 0.005)) return;
     const double width = tail_width->value();
     Json tails = Json::array();
     for (const Json& t : l->tails) {
@@ -880,12 +888,6 @@ namespace {
 
 bool kind_in(const std::string& kind, std::initializer_list<const char*> names) {
     return std::any_of(names.begin(), names.end(), [&kind](const char* name) { return kind == name; });
-}
-
-// A style's number (none: nullopt), for comparing what a field says with what the line holds.
-std::optional<double> number_of(const Json& value) {
-    if (!value.is_number()) return std::nullopt;
-    return value.is_number_integer() ? static_cast<double>(value.get<std::int64_t>()) : value.get<double>();
 }
 
 }  // namespace
@@ -954,42 +956,49 @@ void StoryPanel::show_shape_rows(const core::StoryLine& l) {
     const bool drawn = l.path.has_value() && !l.path->empty();  // (a balloon drawn by hand: its outline is its own)
     const bool none = kind_in(kind, {"sfx", "none", "picture"});
     const bool squared = kind_in(kind, {"box", "narration", "dotted_box", "tone_box", "fancy_box"});
-    style_form->setRowVisible(corner, !drawn && (kind == "rounded" || squared || kind == "polygon"));
+    // (a dotted box is drawn as dots along its square edge and a fancy box has its marks at its square corners: no
+    // rounded corners for either, and no trembling line for the dots)
+    style_form->setRowVisible(corner, !drawn && (kind == "rounded" || (squared && kind != "dotted_box" && kind != "fancy_box") || kind == "polygon"));
     style_form->setRowVisible(squircle, !drawn && kind == "rounded");
     style_form->setRowVisible(sides, !drawn && kind == "polygon");
-    style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash"})));
+    style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash", "dotted_box"})));
     style_form->setRowVisible(spike_alt, !drawn && kind == "shout");
     style_form->setRowVisible(dash, !none && !kind_in(kind, {"dotted_box", "flash"}));
     // (a narration, a flash and the framed boxes are drawn without tails: render/text/balloons no_tail)
     const bool tailed = !none && !kind_in(kind, {"narration", "flash", "dotted_box", "tone_box", "fancy_box"});
-    style_form->setRowVisible(tail_kind, tailed);
+    style_form->setRowVisible(tail_kind, tailed && kind != "thought");  // (a thought's tails are always bubbles)
     style_form->setRowVisible(tail_fillet, tailed);
     corner->setEnabled(!squircle->isChecked() || kind != "rounded");  // (the fuller box has its own corners)
 }
 
-void StoryPanel::set_shape_key(const char* key, const Json& value) {
+bool StoryPanel::left_as_shown(const QWidget* field, double value, double half_step) {
+    // a field left as the panel showed it (within half of what it shows a step of): no edit, no step of 取り消し. What a
+    // line holds that the field cannot show exactly — more decimals, a value past its range, a default written out —
+    // is not rewritten by walking through the field.
+    const auto found = shown_.find(field);
+    if (found != shown_.end() && std::abs(value - found->second) < half_step) return true;
+    shown_[field] = value;
+    return false;
+}
+
+void StoryPanel::set_shape_key(const QWidget* field, double shown, double half_step, const char* key, const Json& value) {
     const core::StoryLine* l = line();
-    if (l == nullptr || loading_) return;
-    // (a field left as it was: no edit)
-    const auto held = l->style.find(key);
-    if (value.is_null()) {
-        if (held == l->style.end()) return;
-    } else if (held != l->style.end()) {
-        if (value.is_boolean() ? held->is_boolean() && held->get<bool>() == value.get<bool>() : number_of(*held) == number_of(value)) return;
-    }
+    if (l == nullptr || loading_ || left_as_shown(field, shown, half_step)) return;
     style(Json{{key, value}});
 }
 
 void StoryPanel::set_wave() {
     const core::StoryLine* l = line();
-    if (l == nullptr || loading_) return;
-    if (std::abs(wave->value() - shown_wave(*l)) < 1e-9) return;  // (left as it was)
+    if (l == nullptr || loading_ || left_as_shown(wave, wave->value(), 0.005)) return;
     Json change{{"wave_mm", wave->value() > 0 ? Json(wave->value()) : Json()}};
     if (l->style.contains("wobble")) {
         // a line of before: its wobble was drawn as this trembling; the amount said here takes its place. Its letters
-        // keep the oval they were fitted in (a line with a wobble was fitted in its box's own ellipse: hand false)
+        // keep the ellipse they were fitted in (a line with a wobble was fitted in its box's own ellipse, whatever
+        // its hand said: hand false says so from now)
         change["wobble"] = nullptr;
-        if (core::is_oval(*l) && core::py_truthy(core::get_or(l->style, "wobble", Json())) && !l->style.contains("hand")) change["hand"] = false;
+        if (core::is_oval(*l) && core::py_truthy(core::get_or(l->style, "wobble", Json())) && core::get_or(l->style, "hand", Json()) != Json(false)) {
+            change["hand"] = false;
+        }
     }
     style(change);
 }
@@ -1008,7 +1017,8 @@ void StoryPanel::set_tail_fillet() {
     if (l == nullptr || loading_) return;
     if (tail_fillet->value() < 0) tail_fillet->setValue(tail_fillet->minimum());  // (below 0: 自動)
     const Json before = PageCanvas::tails_of(*l);
-    if (before.empty()) return;
+    // (left as the first tail's was shown: no edit — tails that differ from one another stay as they are)
+    if (before.empty() || left_as_shown(tail_fillet, tail_fillet->value(), 0.005)) return;
     Json tails = Json::array();
     for (Json t : before) {
         if (!t.is_object()) continue;

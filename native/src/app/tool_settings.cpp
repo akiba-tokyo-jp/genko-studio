@@ -247,6 +247,22 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
     form->addRow(QStringLiteral("作るもの"), make);
     form->addRow(QStringLiteral("アンチエイリアス"), antialias);
     form->addRow(QStringLiteral("フキダシ"), balloon);
+    // (the palette's look for the next line, when one is chosen: its name and a way to let it go)
+    preset_row = new QWidget;
+    preset_row->setObjectName(QStringLiteral("text_preset"));
+    preset_name = new QLabel;
+    preset_name->setObjectName(QStringLiteral("text_preset_name"));
+    preset_name->setWordWrap(true);
+    preset_clear = new QPushButton(QStringLiteral("外す"));
+    preset_clear->setObjectName(QStringLiteral("text_preset_clear"));
+    preset_clear->setToolTip(QStringLiteral("パレットで選んだ形をやめて、上の「フキダシ」の種類で置きます"));
+    connect(preset_clear, &QPushButton::clicked, this, [this] { emit presetCleared(); });
+    auto* preset_line = new QHBoxLayout(preset_row);
+    preset_line->setContentsMargins(0, 0, 0, 0);
+    preset_line->addWidget(preset_name, 1);
+    preset_line->addWidget(preset_clear);
+    form->addRow(preset_row);
+    form->setRowVisible(preset_row, false);
     form->addRow(QString(), vertical);
     form->addRow(QString(), draw_balloon);
     form->addRow(QStringLiteral("書体"), font);
@@ -256,6 +272,11 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
     note->setWordWrap(true);
     theme::hint(note);
     form->addRow(note);
+}
+
+void TextToolSettings::show_preset(const QString& name) {
+    preset_name->setText(name.isEmpty() ? QString() : QStringLiteral("パレットの形: %1").arg(name));
+    static_cast<QFormLayout*>(layout())->setRowVisible(preset_row, !name.isEmpty());
 }
 
 TextToolSettings::LineFields TextToolSettings::line_fields(const QString& tool) const {

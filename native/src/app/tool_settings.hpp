@@ -62,6 +62,9 @@ public:
     };
     // `tool`: the text tool in hand — 横書き文字ツール ("text_h") sets across whatever 縦書き says (review P2-1).
     LineFields line_fields(const QString& tool = {}) const;
+    // フキダシ (fukidashi@1): the palette's look the next line takes, said here — 「パレットの形: 二重線」 with a button
+    // that lets it go (presetCleared) — so that it shows while the palette is closed; an empty name: none, the row hidden.
+    void show_preset(const QString& name);
 
     QComboBox* make = nullptr;
     QComboBox* antialias = nullptr;
@@ -70,6 +73,12 @@ public:
     QCheckBox* draw_balloon = nullptr;
     QComboBox* font = nullptr;
     QDoubleSpinBox* size = nullptr;
+    QWidget* preset_row = nullptr;
+    QLabel* preset_name = nullptr;
+    QPushButton* preset_clear = nullptr;
+
+signals:
+    void presetCleared();
 };
 
 class ToolSettings : public QWidget {

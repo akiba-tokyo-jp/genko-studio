@@ -48,6 +48,12 @@ core::Json place_new(const core::Document& doc, const core::Page& page, const co
 // refit(line, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm}, the balloon's top-right corner kept.
 core::Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon,
                  bool vertical);
+// fukidashi@1: the box a line is given when a person changes its balloon to or from a kind that holds its letters in
+// its own shape (a capsule, a polygon): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
+// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. Null when the kind does not change
+// that way (speech to shout, the same kind), the balloon is drawn by hand or the line is not set in a balloon, or the
+// box would not change. `style_after`: the style the line has then (a polygon's sides).
+core::Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const core::Json& style_after);
 // place_at(x_mm, y_mm, text, balloon, vertical, frame): {x_mm, y_mm, w_mm, h_mm, wrap}, centred where clicked (`style`:
 // the style the line is given — a polygon's sides size its box).
 core::Json place_at(double x_mm, double y_mm, const std::string& text, const std::string& balloon, bool vertical,

@@ -1051,8 +1051,9 @@ private slots:
         QVERIFY(find_action(menu.get(), QStringLiteral("くさび"))->isChecked());
         find_action(menu.get(), QStringLiteral("ギザギザ"))->trigger();
         QCOMPARE(s.last()["tails"], Json::array({Json{{"to", Json::array({34.0, 100.0})}, {"kind", "zigzag"}}}));
+        // (fukidashi@1: its bends go, its kind stays — a notch made a plain tail would point into its own balloon)
         find_action(menu.get(), QStringLiteral("しっぽをまっすぐにする"))->trigger();
-        QCOMPARE(s.last()["tails"], Json::array({Json{{"to", Json::array({34.0, 100.0})}}}));
+        QCOMPARE(s.last()["tails"], Json::array({Json{{"to", Json::array({34.0, 100.0})}, {"kind", "zigzag"}}}));
         find_action(menu.get(), QStringLiteral("しっぽを 1 本消す"))->trigger();
         QCOMPARE(s.last()["tails"], Json::array());
         find_action(menu.get(), QStringLiteral("つなげたフキダシを離す"))->trigger();
