@@ -360,8 +360,8 @@ private slots:
         QVERIFY(s.canvas()->editor() == nullptr);
         // Python's add_line: place_at(100.0, 150.0, …, "speech", vertical, the panel) and parse_marks
         QCOMPARE(s.ops.size(), std::size_t{1});
-        const Json want = Json::parse(R"({"op": "add_line", "page": 1, "text": "おはよう\n漢字の日", "balloon": "speech", "x_mm": 90.66,
-            "y_mm": 135.47, "w_mm": 18.67, "h_mm": 29.06, "wrap": "vertical", "frame_id": "", "ruby_runs": [["漢字", "かんじ"]],
+        const Json want = Json::parse(R"({"op": "add_line", "page": 1, "text": "おはよう\n漢字の日", "balloon": "speech", "x_mm": 90.34,
+            "y_mm": 134.96, "w_mm": 19.32, "h_mm": 30.08, "wrap": "vertical", "frame_id": "", "ruby_runs": [["漢字", "かんじ"]],
             "style_runs": [["日", {"scale": 1.4}]]})");
         Json got = s.last();
         QCOMPARE(got["frame_id"], Json(frame));
@@ -377,7 +377,7 @@ private slots:
         QVERIFY(drawn_as_book(s));
         const QImage after = shown(s);
         QVERIFY(after != before);
-        QVERIFY(ink_in(after, QRectF(90.66, 135.47, 18.67, 29.06), s.canvas()->base_dpi()) > ink_in(before, QRectF(90.66, 135.47, 18.67, 29.06), s.canvas()->base_dpi()));
+        QVERIFY(ink_in(after, QRectF(90.34, 134.96, 19.32, 30.08), s.canvas()->base_dpi()) > ink_in(before, QRectF(90.34, 134.96, 19.32, 30.08), s.canvas()->base_dpi()));
 
         // Esc drops the words
         s.trigger("act_text");
@@ -532,10 +532,11 @@ private slots:
         editor->moveCursor(QTextCursor::End);
         ime_commit(editor, QStringLiteral("です"));
         ctrl_enter(editor);
-        // edit_line, then move_line keeping the balloon's centre (Python's refit: 8.97 × 35.89 here)
+        // edit_line, then move_line keeping the balloon's centre (the refit: 9.29 × 37.14 here — fukidashi@1, SPEC BALLOON-01:
+        // an oval's box is 1.035 times what it was for the hand-drawn oval, so that its true ellipse holds the letters' oval)
         Json want = Json::array({Json{{"op", "edit_line"}, {"id", id}, {"text", "テストです"}, {"ruby_runs", Json::array()},
                                       {"emphasis_runs", Json::array()}, {"style_runs", Json::array()}},
-                                 Json{{"op", "move_line"}, {"id", id}, {"x_mm", 65.58}, {"y_mm", 74.78}, {"w_mm", 8.97}, {"h_mm", 35.89}}});
+                                 Json{{"op", "move_line"}, {"id", id}, {"x_mm", 65.42}, {"y_mm", 74.16}, {"w_mm", 9.29}, {"h_mm", 37.14}}});
         QCOMPARE(s.since(s.ops.size() - 2).dump(), want.dump());
         QVERIFY(drawn_as_book(s));
         // F2: the chosen line in place; the same words again change nothing
@@ -550,7 +551,7 @@ private slots:
         s.window->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"text", "テスト"}}}));
         s.trigger("act_line_wrap");
         want = Json::array({Json{{"op", "edit_line"}, {"id", id}, {"wrap", "horizontal"}},
-                            Json{{"op", "move_line"}, {"id", id}, {"x_mm", 67.75}, {"y_mm", 65.0}, {"w_mm", 22.37}, {"h_mm", 8.96}}});
+                            Json{{"op", "move_line"}, {"id", id}, {"x_mm", 66.97}, {"y_mm", 65.0}, {"w_mm", 23.15}, {"h_mm", 9.28}}});
         QCOMPARE(s.since(s.ops.size() - 2).dump(), want.dump());
         QVERIFY(drawn_as_book(s));
         // フキダシの形 from the menu
@@ -677,7 +678,7 @@ private slots:
         s.window->apply_ops(Json::array({Json{{"op", "select_frame"}, {"page", 2}, {"frame_id", frame}}}));
         panel.add();
         const Json added = Json::parse(R"({"op": "add_line", "page": 2, "text": "こんにちは", "speaker": "", "frame_id": "", "balloon": "speech",
-            "x_mm": 109.53, "y_mm": 16.0, "w_mm": 8.97, "h_mm": 35.89, "wrap": "vertical"})");
+            "x_mm": 109.21, "y_mm": 16.0, "w_mm": 9.29, "h_mm": 37.14, "wrap": "vertical"})");
         Json got = s.last();
         got["frame_id"] = "";
         QCOMPARE(got.dump(), added.dump());
@@ -712,7 +713,7 @@ private slots:
         const Json edited = Json::array(
             {Json{{"op", "edit_line"}, {"id", "P1"}, {"text", "直した台詞"}, {"speaker", "太郎"}, {"balloon", "thought"}, {"wrap", "horizontal"},
                   {"ruby_runs", Json::array()}, {"emphasis_runs", Json::array()}, {"style_runs", Json::array()}},
-             Json{{"op", "move_line"}, {"id", "P1"}, {"x_mm", 124.11}, {"y_mm", 20.0}, {"w_mm", 35.89}, {"h_mm", 8.97}}});
+             Json{{"op", "move_line"}, {"id", "P1"}, {"x_mm", 122.86}, {"y_mm", 20.0}, {"w_mm", 37.14}, {"h_mm", 9.29}}});
         QCOMPARE(s.since(s.ops.size() - 2).dump(), edited.dump());
         QVERIFY(drawn_as_book(s));
         // the same words again: the edit alone
@@ -803,7 +804,7 @@ private slots:
         QTRY_COMPARE(chars.family->currentText(), QStringLiteral("test-mincho"));
         // 既定の設定に戻す: every style key but the group, cleared
         panel.reset->click();
-        QCOMPARE(s.last()["style"].size(), std::size_t{46});
+        QCOMPARE(s.last()["style"].size(), std::size_t{52});  // (fukidashi@1: six more keys a line's style takes)
         QVERIFY(!s.last()["style"].contains("group"));
         QCOMPARE(s.last()["style"].begin().key(), std::string("font"));
         const Json cleared = s.last()["style"];  // (kept: a range-for over a temporary's items() reads freed memory)
@@ -864,11 +865,11 @@ private slots:
         editor->apply_button->click();
         // Python's plan: the new lines placed panel by panel on a copy, each with its own id
         const Json want = Json::parse(R"([{"op": "add_line", "page": 2, "id": "", "text": "おはよう", "speaker": "太郎", "balloon": "speech",
-            "frame_id": "", "x_mm": 185.17, "y_mm": 16.0, "w_mm": 8.83, "h_mm": 29.59, "wrap": "vertical"},
-            {"op": "add_line", "page": 2, "id": "", "text": "翌朝", "speaker": "", "balloon": "narration", "frame_id": "", "x_mm": 176.17,
+            "frame_id": "", "x_mm": 184.86, "y_mm": 16.0, "w_mm": 9.14, "h_mm": 30.62, "wrap": "vertical"},
+            {"op": "add_line", "page": 2, "id": "", "text": "翌朝", "speaker": "", "balloon": "narration", "frame_id": "", "x_mm": 175.86,
             "y_mm": 16.0, "w_mm": 7.5, "h_mm": 12.5, "wrap": "vertical"},
-            {"op": "add_line", "page": 2, "id": "", "text": "心の声", "speaker": "", "balloon": "thought", "frame_id": "", "x_mm": 165.71,
-            "y_mm": 16.0, "w_mm": 8.96, "h_mm": 22.37, "wrap": "vertical"}])");
+            {"op": "add_line", "page": 2, "id": "", "text": "心の声", "speaker": "", "balloon": "thought", "frame_id": "", "x_mm": 165.08,
+            "y_mm": 16.0, "w_mm": 9.28, "h_mm": 23.15, "wrap": "vertical"}])");
         Json got = s.since(0);
         QCOMPARE(got.size(), std::size_t{3});
         const std::string frame2 = s.window->book().page(1).leaf_frames().front()->id;
@@ -1138,9 +1139,10 @@ private slots:
         QCOMPARE(marks.style_runs.dump(), Json::parse(R"([["する", {"scale": 1.4, "rgb": [210, 30, 30]}]])").dump());
         QCOMPARE(app::lettering::parse_marks(QStringLiteral("{謎|そのまま}")).text, std::string("{謎|そのまま}"));
         QCOMPARE(app::lettering::parse_marks(QStringLiteral("{×9|大きすぎ}")).style_runs.size(), std::size_t{0});
-        // the balloons' sizes against Python's (box_size of every kind, down and across)
+        // the balloons' sizes (box_size of every kind, down and across; fukidashi@1, SPEC BALLOON-01: an oval 1.035 times what it
+        // was for the hand-drawn oval — speech and thought —, the others as they were)
         const std::vector<std::tuple<const char*, double, double, double, double>> sizes = {
-            {"speech", 37.38, 43.32, 43.32, 37.38}, {"rounded", 28.5, 32.5, 32.5, 28.5},  {"thought", 37.38, 43.32, 43.32, 37.38},
+            {"speech", 38.68, 44.83, 44.83, 38.68}, {"rounded", 28.5, 32.5, 32.5, 28.5},  {"thought", 38.68, 44.83, 44.83, 38.68},
             {"shout", 50.25, 60.5, 50.25, 53.7},    {"electric", 37.5, 42.76, 42.76, 37.5}, {"sfx", 50.25, 36.0, 50.25, 48.0},
             {"none", 26.0, 30.0, 30.0, 26.0},       {"dotted_box", 33.5, 37.5, 37.5, 33.5}};
         const std::string words = "こんにちは、元気ですか。今日はいい天気ですね";
@@ -1148,10 +1150,10 @@ private slots:
             QCOMPARE(app::lettering::box_size(words, kind, true, 60.5, 50.25), std::make_pair(vw, vh));
             QCOMPARE(app::lettering::box_size(words, kind, false, 60.5, 50.25), std::make_pair(hw, hh));
         }
-        QCOMPARE(app::lettering::box_size("やあ", "speech", true, 120.0, 160.0), std::make_pair(8.93, 15.64));
+        QCOMPARE(app::lettering::box_size("やあ", "speech", true, 120.0, 160.0), std::make_pair(9.24, 16.19));
         const auto measured = app::lettering::measure({U"あいう", U"えお"}, "speech");
-        QCOMPARE(measured.first, 18.401649044222758);
-        QCOMPARE(measured.second, 22.62170074439381);
+        QCOMPARE(measured.first, 18.401649044222758 * 1.035);  // (fukidashi@1: an oval's box holds the letters' oval in a true ellipse)
+        QCOMPARE(measured.second, 22.62170074439381 * 1.035);
         const auto shout = app::lettering::measure({U"あいう", U"えお"}, "shout");
         QCOMPARE(shout.first, 26.43995756636174);
         QCOMPARE(shout.second, 32.50343522601233);

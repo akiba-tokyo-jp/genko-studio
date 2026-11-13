@@ -1440,17 +1440,17 @@ double shape_gauge(std::string_view kind, double x, double y, double a, double b
     const double ax = std::fabs(x);
     const double ay = std::fabs(y);
     if (kind == "capsule") {
-        // (a stadium: the long way `far`, the short way `narrow`; r its ends' radius, s half its straight part)
+        // (a stadium: the long way `along`, the short way `narrow`; r its ends' radius, s half its straight part)
         const bool tall = a <= b;
         const double r = core::py_max(tall ? a : b, 1e-6);
         const double s = (tall ? b : a) - r;
         const double narrow = tall ? ax : ay;
-        const double far = tall ? ay : ax;
+        const double along = tall ? ay : ax;
         const double flat = narrow / r;
-        if (far <= flat * s) return flat;
-        const double sum = narrow * narrow + far * far;
+        if (along <= flat * s) return flat;
+        const double sum = narrow * narrow + along * along;
         const double root = std::sqrt(core::py_max(0.0, r * r * sum - s * s * narrow * narrow));
-        const double below = far * s + root;
+        const double below = along * s + root;
         return below > 0 ? sum / below : 0.0;
     }
     if (outline != nullptr && outline->size() >= 3) {

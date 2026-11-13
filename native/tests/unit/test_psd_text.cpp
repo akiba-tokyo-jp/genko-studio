@@ -423,10 +423,15 @@ private slots:
     void imageWayIsAsBefore() {
         const auto& files = image_way();
         QCOMPARE(files.size(), std::size_t{4});
+        QStringList shas;  // (all four said when one differs)
         for (std::size_t i = 0; i < files.size(); ++i) {
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
-            const QString sha = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex());
-            QVERIFY2(sha == image_way_sha(i), qPrintable(QString::number(i + 1) + ": " + sha));
+            shas << QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex());
+        }
+        for (std::size_t i = 0; i < files.size(); ++i) {
+            const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
+            const QString sha = shas[static_cast<qsizetype>(i)];
+            QVERIFY2(sha == image_way_sha(i), qPrintable(QString::number(i + 1) + ": " + shas.join(QStringLiteral(" "))));
             QVERIFY(bytes.find("TySh") == std::string::npos);
             QVERIFY(bytes.find("lsct") == std::string::npos);
             const Read& r = image_page(i);

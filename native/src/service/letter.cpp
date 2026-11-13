@@ -357,11 +357,11 @@ std::array<double, 2> measure(const std::vector<std::string>& breaks, const std:
         // with the fit's pad round it, 0.3 em more beside it)
         const double fit = em * kFitPad;
         const double narrow = core::py_min(text_w, text_h);
-        const double far = core::py_max(text_w, text_h);
+        const double longer = core::py_max(text_w, text_h);
         const double radius = narrow / 2 + fit + em * 0.3;
         const double corner = narrow / 2 + fit;
         const double into = std::sqrt(radius * radius - corner * corner);  // (how far into a round end the corners reach)
-        const double length = core::py_max(2 * radius, far + 2 * fit + 2 * (radius - into));
+        const double length = core::py_max(2 * radius, longer + 2 * fit + 2 * (radius - into));
         return text_w <= text_h ? std::array<double, 2>{2 * radius, length} : std::array<double, 2>{length, 2 * radius};
     }
     double pad = in(balloon, {"none", "aside"}) ? 0.0 : em / 4;

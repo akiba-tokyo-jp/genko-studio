@@ -501,10 +501,10 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     };
     if (width > 0 && (core::py_truthy(at(st, "double")) || kind == "fancy_box")) {
         // a second line inside the first: two widths in, one width wide
-        const clean::Plane far = within(width * 4);
-        const clean::Plane close = within(width * 3);
+        const clean::Plane outer = within(width * 4);
+        const clean::Plane closer = within(width * 3);
         std::vector<float> second(count);
-        for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, far.values[i] - close.values[i]);
+        for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
         lighter(second);
     }
     std::vector<float> cover = fill.values;

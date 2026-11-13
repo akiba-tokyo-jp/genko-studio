@@ -800,12 +800,12 @@ std::vector<Shape> joins_between(const Contour& a, const Contour& b, double reac
         const double way_a = inside(b, point_at(a, la, c.sa + probe)) ? -1.0 : 1.0;
         const double way_b = inside(a, point_at(b, lb, c.sb + probe)) ? -1.0 : 1.0;
         const double sharp = sharpness(unit(sub(point_at(a, la, c.sa + way_a * limit), c.at)), unit(sub(point_at(b, lb, c.sb + way_b * limit), c.at)));
-        const double far = std::min(limit * sharp, 0.2 * std::min(la.back(), lb.back()));
-        const P on_a = point_at(a, la, c.sa + way_a * far);
-        const P on_b = point_at(b, lb, c.sb + way_b * far);
+        const double span = std::min(limit * sharp, 0.2 * std::min(la.back(), lb.back()));
+        const P on_a = point_at(a, la, c.sa + way_a * span);
+        const P on_b = point_at(b, lb, c.sb + way_b * span);
         if (inside(b, on_a) || inside(a, on_b)) continue;  // (the outlines meet again before the join ends)
-        const P da = direction_at(a, la, c.sa + way_a * far);
-        const P db = direction_at(b, lb, c.sb + way_b * far);
+        const P da = direction_at(a, la, c.sa + way_a * span);
+        const P db = direction_at(b, lb, c.sb + way_b * span);
         const P a_in = a_clockwise ? inward(da) : mul(inward(da), -1.0);
         const P b_in = b_clockwise ? inward(db) : mul(inward(db), -1.0);
         out.push_back(patch(c.at, on_a, a_in, mul(da, -way_a), on_b, b_in, mul(db, -way_b), inset));

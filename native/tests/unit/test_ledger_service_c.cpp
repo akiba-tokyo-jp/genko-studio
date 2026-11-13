@@ -419,19 +419,29 @@ private slots:
     // (under 4 mm from it, never on it); the add_line op carries the speaker.
     // (Python: test_quality_report.py test_a_balloon_sits_by_its_speaker_and_its_tail_reaches_them)
     void test_a_balloon_sits_by_its_speaker_and_its_tail_reaches_them() {
-        const Lettered page = two_person_page(parsed(R"([{"beat_id": "b1", "balloon": "speech", "breaks": ["ちっちゃ!"]}])"));
+        // (fukidashi@1, SPEC BALLOON-01: Python's line 「ちっちゃ!」 — one column of five — is said in a capsule now, which
+        // sits right by its speaker and needs no tail (letter's `obvious`); the tail is looked at on a line of two
+        // columns, an oval as before)
+        const Lettered tall = two_person_page(parsed(R"([{"beat_id": "b1", "balloon": "speech", "breaks": ["ちっちゃ!"]}])"));
+        QVERIFY(!tall.placements.empty());
+        QCOMPARE(tall.placements[0].balloon, std::string("capsule"));
+        const Lettered page = two_person_page(parsed(R"([{"beat_id": "b1", "balloon": "speech", "breaks": ["ちっちゃ", "すぎる!"]}])"));
         const layout::RectMm* rect = page.compiled.rect_of("p1");
         QVERIFY(rect != nullptr);
         const std::vector<genko::service::Figure> figs = genko::service::figures(page.plan["panels"][0], *rect);
         QCOMPARE(figs.size(), std::size_t{2});
         const MmBox hina = genko::service::as_box(figs[0].head);
         const MmBox sota = genko::service::as_box(figs[1].head);
-        QVERIFY(!page.placements.empty());
-        const letter::BalloonPlacement& p = page.placements[0];
-        const double centre = p.x_mm + p.w_mm / 2;
         const double hina_x = hina[0] + hina[2] / 2;
         const double sota_x = sota[0] + sota[2] / 2;
-        QVERIFY2(std::abs(centre - hina_x) < std::abs(centre - sota_x), (std::to_string(centre) + " " + std::to_string(hina_x)).c_str());
+        for (const Lettered* lettered : {&tall, &page}) {
+            const letter::BalloonPlacement& placed = lettered->placements[0];
+            const double centre = placed.x_mm + placed.w_mm / 2;
+            QVERIFY2(std::abs(centre - hina_x) < std::abs(centre - sota_x), (std::to_string(centre) + " " + std::to_string(hina_x)).c_str());
+        }
+        QVERIFY(!page.placements.empty());
+        const letter::BalloonPlacement& p = page.placements[0];
+        QCOMPARE(p.balloon, std::string("speech"));
         QVERIFY(p.tail.has_value());
         const double tx = (*p.tail)[0];
         const double ty = (*p.tail)[1];
