@@ -138,6 +138,17 @@
   - GenkoPackage: Windows だけ windeployqt に `--no-system-dxc-compiler`（dxcompiler.dll・dxil.dll を入れない。SBOM の検査は緩めていない）。
 - **Windows で確かめたのはビルドと上の 4 つの操作だけ。** Windows の試験（windows-debug・windows-release の全試験と --pair）と実機での受入（配布の前に必須）は残る。費用は Actions の込みの枠の中（Windows 約 8 回のビルド）。
 
+### ネームのラフは線で描く（案 1）— 2026-11-13、main に統合
+- 利用者の報告: AI にネームを頼むと、手描きでなく画像を貼ってくる。原因は手引きと道具の側（「ネームでは絵を描かない」「作画＝生成した絵を置く」「ラフは purpose=draft」）で、AI は教えたとおりに画像を貼っていた。利用者の決定: 案 1（教え方と関門）を先に入れ、案 2（設定から描くネーム・ポーズ集 30〜40）は後で設計する。
+- 入れたもの（native/name-lines、凍結 217683d5）:
+  - 手引き（SKILL.md・drawing.md・manga_rules.md と integrations の写し、AGENT.md・OTHER_AGENTS.md・AI_PIPELINE.md）: ネームは「コマ割り・台詞の配置と、線で描くラフ」。ラフは人形（add_figure・add_mannequin）を置いて trace_prims の鉛筆の線にし、物は add_shape、線は add_stroke。構図を変えるときは線を消して人形を動かし、引き直す。SKILL.md の例は試験がそのまま流す。
+  - MCP の説明、断りの文（「ラフは purpose=draft」をやめた）、plan_page の案内。
+  - 関門（core::refuse_unnamed_picture、core::kept_off_print）: AI と進める本で、ネームが未承認のページでは、AI はネーム・下描き・印刷に出さないレイヤーに画像を置けない（place_asset・smart_place・adopt_candidate・画像の stamp_material・画像を含む paste。下描き用の generation_request と take_panel_art は name_not_approved）。断る前に何も書かない。人は今までどおり。承認の後も今までどおり。ファイル形式は変えていない。
+  - アタリの印（kind atari）を付け外しできるのは人だけ。AI は import_name（人から渡された手描きのスキャン）でだけ下描きに置ける。ネームのレイヤーにはアタリも置けない。
+- レビュー 1 回（P1×2: アタリの偽装、paste の画像。P2×5、P3×4）と直し。
+- 残る穴（手引きで禁止と書いた）: AI が自分で作った画像を import_name で取り込めば下描きには置ける（人のスキャンの取り込みを残すため）。
+- 試験（利用者の判断 2026-11-13: Release の全試験だけ。ASan・Debug は流していない）: `validation_policy --base 304d5564 --phase milestone`（tier full）、linux-release 264/264 合格（1 回目は test_gui_ledger_a が、日本語の断りの文に入れた操作の名前を英語と数えて落ちた。人に見せる文から名前を外し、AI には英語の detail で届ける形に直して流し直した）。実 xcb の画面・性能・配布物は流していない。
+
 ## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 
 ### 利用者の決定
