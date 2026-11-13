@@ -481,6 +481,13 @@ std::optional<Image> placed_picture(const core::Layer& layer, const core::Rect& 
         }
         out.putalpha(chops::multiply(out.getchannel(3), shape_mask));
     }
+    // komawari@1: art placed in a panel below one that lies over the others (差し込み・重ね) is hidden under that one
+    if (frame != nullptr && !frame->over && (layer.clip_to == "frame" || layer.clip_to == "bleed")) {
+        const auto leaves = page.leaf_frames();
+        if (std::any_of(leaves.begin(), leaves.end(), [](const core::Frame* f) { return f->over; })) {
+            out.putalpha(chops::multiply(out.getchannel(3), detail::over_panels_cut(page, frame, size, dpi, area)));
+        }
+    }
     return out;
 }
 

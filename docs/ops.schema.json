@@ -35,7 +35,8 @@
       "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)",
       "bow": "{edge, mm}? (one edge)",
       "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)",
-      "corner_mm": "float? (角の丸み: corner radius, 0 sharp)"
+      "corner_mm": "float? (角の丸み: corner radius, 0 sharp)",
+      "over": "bool? (komawari@1: the panel lies over the others; their borders and placed art are hidden under it)"
     },
     {
       "op": "cut_frame",
@@ -682,6 +683,8 @@
       "border_mm": "float?",
       "tolerance_mm": "float? (freehand: how much jitter to drop, 0.4)",
       "id": "str?",
+      "into": "str? (komawari@1: a panel's id: the drawn panel goes in its place and is read with it — 差し込み・重ね)",
+      "over": "bool? (komawari@1: the drawn panel lies over the others; with into, true unless false)",
       "note": "draw a panel (コマを描く): the page's first drawn panel replaces the basic frame; drawn panels keep their own places (no gutters)"
     },
     {
@@ -1384,7 +1387,7 @@
     {
       "op": "set_layout",
       "page": "int",
-      "tree": "{rect_mm, axis?, children?}",
+      "tree": "{rect_mm, axis?, children?, over? (komawari@1: a panel, not a node)}",
       "force": "bool?"
     },
     {

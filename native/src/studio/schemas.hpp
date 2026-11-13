@@ -33,6 +33,11 @@ const core::Json& schema(std::string_view name);
 // schemas.fill_nulls: a copy of `data` with every missing nullable property set to null.
 core::Json fill_nulls(const core::Json& data, const core::Json& schema);
 
+// komawari@1 (K1): a filled name plan without the nulls fill_nulls put for the layout keys K1 added (gap_mm, tilt_mm,
+// border_mm, overflow, insets) where `given` did not have them, so a plan that does not write them is kept, hashed and
+// saved as before them.
+core::Json unfill_extensions(const core::Json& filled, const core::Json& given);
+
 // jsonschema_lite.validate: the findings, in Python's order and words.
 std::vector<Issue> validate(const core::Json& data, const core::Json& schema, const std::string& path = {});
 

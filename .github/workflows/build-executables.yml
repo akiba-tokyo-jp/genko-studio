@@ -1,0 +1,180 @@
+name: build-executables
+
+# Windows 用と Linux 用の実行ファイルを作り、下書きの Release に添付する。手動で流すときだけ動く（push や PR では動かない）。
+# 利用者の判断（2026-11-13）: GitHub Actions で一度だけ流す。試験は「動くかだけ」（版・本を作る・調べる・描き出す）。
+# 自動の CI（.github/disabled-workflows/native.yml）は戻さない。流したあとはこのファイルも disabled-workflows に移す。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "下書き Release のタグ（例: v0.1.0）"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-executables
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: "6.11.2"
+  AQT_VERSION: "3.3.0"
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ninja-build g++ cmake pkg-config \
+            libgl-dev libegl-dev libopengl-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libfreetype-dev \
+            libharfbuzz-dev liblcms2-dev libpng-dev libjpeg-turbo8-dev libtiff-dev libwebp-dev zlib1g-dev libopenexr-dev libavif-dev libaom-dev libzstd-dev \
+            nlohmann-json3-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xkb1 libxcb-randr0 libxcb-shape0
+      - name: LibRaw 0.22.2 (libraw.org's source, a shared library of its own)
+        run: bash tools/ci/build_libraw.sh "${{ runner.temp }}/libraw"
+      - name: Qt (official binaries, LGPL modules only)
+        run: pipx run "aqtinstall==${AQT_VERSION}" install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -m qtimageformats -O "${{ runner.temp }}/qt"
+      - name: Configure and build (Release, without the test suites)
+        env:
+          GENKO_LIBRAW_ROOT: ${{ runner.temp }}/libraw
+        run: |
+          set -euo pipefail
+          cd native
+          cmake --preset linux-release -DCMAKE_PREFIX_PATH="${{ runner.temp }}/qt/${QT_VERSION}/gcc_64" -DGENKO_BUILD_TESTS=OFF
+          cmake --build ../build/linux-release
+          cd ../build/linux-release
+          cpack -B "${{ runner.temp }}/pkg"
+      - name: 動くかだけ確かめる（展開した配布物で 版・本を作る・調べる・描き出す）
+        env:
+          QT_QPA_PLATFORM: offscreen
+          LANG: C.UTF-8
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/smoke" && cd "${{ runner.temp }}/smoke"
+          tar xzf "${{ runner.temp }}"/pkg/genko-studio-*-linux-x86_64.tar.gz
+          G=$(ls -d "$PWD"/genko-studio-*-linux-x86_64)/bin/genko
+          "$G" --version | tee version.json
+          grep -qE '"ok": ?true' version.json
+          "$G" new ./book.genko
+          "$G" inspect ./book.genko > inspect.json
+          "$G" export ./book.genko ./out --format png --dpi 100
+          ls -l out
+          test -n "$(ls out)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: ${{ runner.temp }}/pkg/genko-studio-*-linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Paths
+        shell: pwsh
+        run: |
+          "GENKO_VCPKG=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\vcpkg-bin" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-bin,readwrite" >> $env:GITHUB_ENV
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Qt (official binaries, LGPL modules only)
+        shell: pwsh
+        run: python tools/ci/fetch_qt.py --os windows --out "$env:RUNNER_TEMP\qt"
+      - name: vcpkg at the manifest baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $baseline = (Get-Content native/vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git clone --quiet https://github.com/microsoft/vcpkg "$env:GENKO_VCPKG"
+          git -C "$env:GENKO_VCPKG" checkout --quiet $baseline
+          & "$env:GENKO_VCPKG\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+      - name: Configure and build (Release, without the test suites)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            $vsNinja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja'
+            if (Test-Path (Join-Path $vsNinja 'ninja.exe')) { $env:PATH = "$vsNinja;$env:PATH" } else { choco install ninja --no-progress -y }
+          }
+          $env:VCPKG_ROOT = $env:GENKO_VCPKG
+          $qt = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64"
+          $env:CMAKE_PREFIX_PATH = $qt
+          $env:PATH = "$qt\bin;$env:PATH"
+          cd native
+          # (Windows では初めてのビルド: MSVC の警告でビルドを止めない。GENKO_WERROR は Linux の試験ビルドで生きている)
+          cmake --preset windows-release -DGENKO_BUILD_TESTS=OFF -DGENKO_WERROR=OFF
+          cmake --build ..\build\windows-release
+          # (cpack: chocolatey にも同名のものがあるので、cmake と同じ場所のものを使う)
+          $cpack = Join-Path (Split-Path (Get-Command cmake).Source) 'cpack.exe'
+          Set-Location ..\build\windows-release
+          & $cpack -B "$env:RUNNER_TEMP\pkg"
+      - name: 動くかだけ確かめる（展開した配布物で 版・本を作る・調べる・描き出す）
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $smoke = "$env:RUNNER_TEMP\smoke"
+          $zip = Get-ChildItem "$env:RUNNER_TEMP\pkg\genko-studio-*-windows-x64.zip" | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath $smoke
+          $root = Get-ChildItem $smoke -Directory | Select-Object -First 1
+          $g = Join-Path $root.FullName 'bin\genko.exe'
+          Set-Location $smoke
+          $v = & $g --version
+          $v
+          if ($v -notmatch '"ok":\s*true') { throw "--version: $v" }
+          & $g new .\book.genko
+          & $g inspect .\book.genko | Out-File inspect.json
+          & $g export .\book.genko .\out --format png --dpi 100
+          Get-ChildItem out
+          if (-not (Get-ChildItem out)) { throw "export wrote nothing" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: ${{ runner.temp }}\pkg\genko-studio-*-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 下書きの Release（公開はしない）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum genko-studio-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cat > notes.md <<EOF
+          Genko Studio ${TAG}（下書き）
+
+          - コミット: ${GITHUB_SHA}
+          - Linux（Ubuntu 24.04 x86_64）: genko-studio-*-linux-x86_64.tar.gz。展開して ./install.sh。
+          - Windows 10 / 11（x64）: genko-studio-*-windows-x64.zip。展開して bin\\genko.exe。
+          - この 2 つは GitHub Actions で作り、動くかだけ（版・本を作る・調べる・描き出す）確かめた。
+          - Linux は同じコミットを手元で全試験（ASan・Release）・実際の画面・性能・素の Ubuntu への導入まで確かめている（docs/cpp-migration/HANDOFF.md）。
+          - Windows は実機での受入がまだ（配布の前に必須）。
+          EOF
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "Genko Studio ${TAG}" --notes-file notes.md genko-studio-* SHA256SUMS.txt

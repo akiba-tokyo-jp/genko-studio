@@ -40,6 +40,8 @@ genko_library(genko_service
     blocking.cpp
     fxwords.cpp
     layout.cpp
+    komawari_shape.cpp
+    layout_ideas.cpp
     letter.cpp
     lint.cpp
     preflight.cpp
@@ -64,6 +66,7 @@ genko_library(genko_service
     service_write.cpp
     studio_art.cpp
     studio_atari.cpp
+    studio_komawari.cpp
     studio_output.cpp
     tool_table.cpp
     human_service.cpp

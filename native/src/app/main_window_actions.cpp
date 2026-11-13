@@ -45,6 +45,7 @@
 #include "app/config.hpp"
 #include "app/layer_panel.hpp"
 #include "app/dialogs.hpp"
+#include "app/komawari_dialog.hpp"
 #include "app/frame_tools.hpp"
 #include "app/help.hpp"
 #include "app/icons.hpp"
@@ -589,6 +590,8 @@ void MainWindow::build_actions() {
     });
     make("act_template", QStringLiteral("テンプレートでコマを割る…"), [this] { templates_dialog(); }, {},
          QStringLiteral("今のページのコマと台詞を作り直します"));
+    make("act_komawari", QStringLiteral("コマ割りの案を出す…"), [this] { komawari_dialog(); }, {},
+         QStringLiteral("コマ割りの案を束で出し、選んだ案で今のページを割ります（コマと台詞は作り直します）"));
     make("act_save_template", QStringLiteral("今のコマ割りをテンプレートに残す…"), [this] { save_template(); }, {},
          QStringLiteral("このページのコマ割り（形・枠線・断ち切り・角の丸み）を、自分のテンプレートとして残します"));
     // pages
@@ -788,6 +791,7 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
     frames->addSeparator();
     frames->addAction(action("act_template"));
+    frames->addAction(action("act_komawari"));
     frames->addAction(action("act_save_template"));
     frames->addSeparator();
     for (const char* name : {"act_gutters", "act_border", "act_no_border"}) frames->addAction(action(name));
@@ -1598,6 +1602,26 @@ void MainWindow::templates_dialog() {
     apply_ops(dialog.plan->ops, dialog.plan->ids);
 }
 
+void MainWindow::komawari_dialog() {
+    // (a person's change, as テンプレートでコマを割る…: the same question first, one change, one Undo)
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    KomawariDialog dialog(this, session_->snapshot(), static_cast<std::size_t>(page_index_), session_->actor());
+    if (ask::exec(&dialog) != QDialog::Accepted || !dialog.plan) return;
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    if (dialog.needs_clearing &&
+        !ask::question(this, QStringLiteral("Genko"),
+                       QStringLiteral("%1 ページのコマと台詞を消して、コマ割りの案で割り直します。\n（元に戻す で取り消せます）").arg(QString::fromStdString(page->index.repr())))) {
+        return;
+    }
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    if (!apply_ops(dialog.plan->ops, dialog.plan->ids)) return;
+    flash(QStringLiteral("コマ割りの案で割りました（%1）。何度も使うなら「今のコマ割りをテンプレートに残す…」で残せます").arg(dialog.chosen), 6000);
+}
+
 void MainWindow::save_template() {
     const auto origin = session_;
     const auto snapshot = origin->snapshot();
@@ -1618,7 +1642,7 @@ void MainWindow::save_template() {
     }
     try {
         if (!modal_target_unchanged(origin, snapshot, page_index)) return;
-        templates::save_mine(name, *page);
+        templates::save_mine(name, *page, page->inner_rect_mm(book().start_side ? std::string_view(*book().start_side) : std::string_view()));
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return;

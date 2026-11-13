@@ -84,6 +84,8 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `plugin-filters@1` | PC5 J-f | スマートオブジェクトの `filters` に人のプラグインのスマートフィルター（`kind` が `plugin:<キー>`）と、その残した絵 `kept` を持つこと。SPEC PROD-01「プラグイン（WebAssembly）」・COMP-04、この文書の「制作の補助」 |
 | `image-assets@1` | PC5 I-f | 本の `"generator": {"image_assets": true}`（生成 → 画像アセット: 人の保存のたびに名前の付いたレイヤーを書き出す）。SPEC AUTO-01「プリント・コンタクトシート・画像アセット」、この文書の「画像アセット」 |
 
+| `komawari@1` | コマ割り K1 | コマの `"over": true`（ほかのコマの上に重なる。差し込み・重ね）。SPEC LAYOUT-01、この文書の「コマの重ね」 |
+
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
 ## 4. 履歴（studio/journal.jsonl）
@@ -568,3 +570,10 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - 書き手は、どれかのページの `pixel_aspect` が 1 でなければ `features` に `pixel-aspect@1` を加え、すべて 1 に戻れば外す。持たない原稿は今と同じバイトで書く。範囲の外の比のページを持つ本は書かない（core::Error `value`）。
 - **読み手の検査**: 数でない・範囲の外の `pixel_aspect` を持つ本は、読み取り専用で開く（読めない値はそのまま書き戻す鍵に残す）。pixel-aspect@1 を知らない読み手（PC5 H-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。スマートオブジェクトの中身のページの `pixel_aspect` は読まない（そのまま書き戻す）。
 - op `set_pixel_aspect {"page", "ratio" | "preset"}`（ページの op）。PSD のリソース 1064 と行き来する（psd-keep@1 の印 `copied` の `1064`）。
+
+## コマの重ね（komawari@1。SPEC LAYOUT-01、コマ割り K1。利用者の決定 2026-11-12）
+
+- **コマの `"over": true`**（コマの鍵の `corner_mm` の後）: そのコマはほかのコマの上に重なる（差し込み・重ね）。false のコマは書かない。コマ（葉）だけが持つ（割った節は持たない。割れば子に移る）。真偽値でない `over` は broken_value（読み取り専用）。描くときは、over のコマの下で、ほかのコマの枠線と、ほかのコマに置いた絵（`clip_to` が frame・bleed）が隠れる。over のコマ同士の上下は決めない。
+- 書き手は、どれかのコマが over なら `features` に `komawari@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。komawari@1 を知らない読み手は、未知の拡張として読み取り専用で開く。
+- **形**: 差し込みのコマは、宿主のコマの場所を「描いたコマの節」（`split_axis: "free"`）にして、宿主（id・指示・台詞・絵はそのまま）と並べて持つ。この節は宿主の箱と形を持ち、親の割り目が動けば中のコマも一緒に動く（今の free の決まり）。読み順はその節の中で位置の順（今の free の決まり）。
+- **op**: `add_frame` の `"into"`（コマの id: そこへ差し込む）と `"over"`（into の既定は true）、`set_frame` の `"over"`、`set_layout` の木の `"over"`。ネーム計画の鍵（段・列・行の `gap_mm`・`tilt_mm`、コマの `border_mm`・`overflow`、計画の `insets`）は原稿の形式を変えない（今の op の組み合わせになる）。

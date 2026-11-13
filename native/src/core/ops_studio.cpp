@@ -1718,6 +1718,7 @@ Frame frame_from_tree(const Json& node) {
     }
     if (const Json line = dget(node, "line"); line.is_object()) frame.line = line;
     if (py_truthy(dget(node, "corner_mm"))) frame.corner_mm = to_float(node["corner_mm"]);
+    if (node.contains("over") && frame.children.empty() && !frame.split_axis) frame.over = py_truthy(node["over"]);  // (komawari@1: a panel over the others)
     return frame;
 }
 

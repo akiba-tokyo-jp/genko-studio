@@ -98,7 +98,7 @@ genko export PROJ ./sns --format sns --long-edge 1600 --spreads          # 見�
 
 Hermes 以外で `docs/STUDIO_EVAL.md` の「パイロットページの通し」を 1 回行い、次を確かめる:
 
-- [ ] 道具の一覧が出る（41 個）。`inspect`（`target: "rules"`）が読める。
+- [ ] 道具の一覧が出る（42 個）。`inspect`（`target: "rules"`）が読める。
 - [ ] スキルが読み込まれ、エージェントが `commit: false` → `commit: true` の順で書く。
 - [ ] ネームの承認待ちで止まり、`review_page` の場所を知らせてくる。
 - [ ] 依頼パックの参照画像・ガイドを画像ツールに渡し、inbox に置いて `import_images` できる。

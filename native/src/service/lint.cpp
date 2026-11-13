@@ -9,6 +9,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "service/fxwords.hpp"
+#include "service/komawari_shape.hpp"
 #include "service/pyfmt.hpp"
 #include "service/result.hpp"
 #include "service/text.hpp"
@@ -114,12 +115,13 @@ double share(const std::vector<std::pair<std::string, double>>& shares, const st
     return 1;
 }
 
-std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t page_count, bool tall) {
+std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t page_count, bool tall, std::pair<double, double> frame) {
     const auto shares = shares_of(plan);
     if (shares.empty()) return {};
     std::vector<std::string> order;
     try {
-        order = layout::slots_in_order(layout::resolve_tiers(plan));
+        // (komawari@1: a plan with insets reads them beside their hosts)
+        order = core::truthy_at(plan, "insets") ? komawari::reading_slots(plan, frame.first, frame.second) : layout::slots_in_order(layout::resolve_tiers(plan));
     } catch (const layout::LayoutError&) {
         return {};
     }
@@ -138,7 +140,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
     std::vector<Issue> out;
     if (core::py_get(plan, "turn_role") == Json("reveal") && !order.empty() && share(shares, order[0]) < 0.3) {
         out.push_back(warning("reveal_small", "/tiers", "めくってすぐの見せ場なのに、最初のコマがページの3割より小さい",
-                              "template の reveal_top・reveal_bleed・splash を使うか、最初の段を大きくして bleed（断ち切り）にする"));
+                              "最初の段をページの3割以上にして bleed（断ち切り）にする（layout_ideas の focus 1 で案を出せる。定型なら reveal_top・reveal_bleed・splash が例）"));
     }
     for (const auto& [slot, item] : panels) {
         double weight = 0;
@@ -151,7 +153,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
         }
         if (weight >= 0.8 && share(shares, core::py_str(slot)) < 0.3) {
             out.push_back(warning("emphasis_small", "/panels/" + std::to_string(item.first) + "/emphasis", "強調の高いコマ " + core::py_str(slot) + " がページの3割より小さい",
-                                  "大きい段に置くか、bleed（断ち切り）や slant（斜め）で目立たせる"));
+                                  "大きい段に置くか、bleed（断ち切り）や tilt_mm・slant（斜め）で目立たせる（layout_ideas の focus にそのコマの番号）"));
         }
     }
     if (page == page_count && !order.empty() && !tall) {  // (a tall strip ends by scrolling, not with a page's last panel)
@@ -171,7 +173,7 @@ std::vector<Issue> size_hints(const Json& plan, std::int64_t page, std::int64_t 
         }
         if (share(shares, last) < 0.35 && !(core::truthy_at(panel, "bleed") || template_bleed)) {
             out.push_back(warning("finale_small", "/tiers", "最後のページの最後のコマが小さく、断ち切りでもない（余韻が弱い）",
-                                  "template の finale_bleed を使うか、最後の段を大きくして bleed にする"));
+                                  "最後の段を大きくして bleed（断ち切り）にする（定型なら finale_bleed が例）"));
         }
     }
     return out;
@@ -336,7 +338,7 @@ Json script_index(const Json& script) {
     return out;
 }
 
-std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall) {
+std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Json& bible, std::int64_t page_count, bool tall, std::pair<double, double> frame) {
     std::vector<Issue> issues;
     const Json page_value = core::py_get(plan, "page", Json(0));
     const std::int64_t page = core::to_int(page_value);
@@ -481,7 +483,7 @@ std::vector<Issue> lint_name_plan(const Json& plan, const Json& script, const Js
             issues.push_back(warning("axis_crossed", "/panels", "場面 " + core::py_str(scene_id) + " で人物の左右が入れ替わる（180度ルール）", "意図的なら cross:true を付ける"));
         }
     }
-    for (Issue& issue : size_hints(plan, page, page_count, tall)) issues.push_back(std::move(issue));
+    for (Issue& issue : size_hints(plan, page, page_count, tall, frame)) issues.push_back(std::move(issue));
     if (core::truthy_at(plan, "title")) {
         if (core::py_strip(core::py_str(core::py_or(core::py_get(bible, "title"), Json("")))).empty()) {
             issues.push_back(warning("title_missing", "/title", "扉にするページだが、企画書に題名（title）が無い"));

@@ -283,6 +283,9 @@ struct Frame {
     std::optional<std::vector<double>> curves;  // how far each edge bows out (mm, outward +)
     std::optional<Json> line;               // the border's look
     double corner_mm = 0.0;                 // 角の丸み
+    // komawari@1 (コマ割り K1): the panel lies over the others (差し込み・重ね) — the borders, and the art placed in the
+    // other panels, are hidden under it. Saved only when true (none: as every panel before it).
+    bool over = false;
 };
 
 // One ruby of a line held by its place in the text (ruby-layout@1, core/ruby.hpp): the reading over the text's

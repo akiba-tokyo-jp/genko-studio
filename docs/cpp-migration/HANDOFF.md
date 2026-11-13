@@ -10,12 +10,120 @@
 - R5 計画の違う結果は `--pair` で使えないので、最後の群は V2 を流さず、V3 へ直行する。
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
+- **R3 の置き換え（利用者の決定 2026-11-13）**: 工程の出口は、差分から選んだ範囲（変更分と影響箇所）を ASan と Release の 2 構成で流す。Debug は最終配布の前に 1 回だけ。詳しくは「コマ割り K」の節の「利用者の決定（2026-11-13）」。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
 - 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画（この節が最新）
+## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12（この節が最新）
+
+### 利用者の決定（2026-11-12）
+- 生成 AI がコマ割りをすると無難な格子しか出ない。これを直すため、次の 4 つを全部入れる。
+  - **A 書ける形を広げる**: ネーム計画（submit_name の tiers・template）で、コマの中のコマ（差し込み・重ね）、はみ出し（枠で切らない）、枠なし、コマごとの間の広さ、自由な割り線を書けるようにする。
+  - **B 手引き**: 手引きを、定型の名前でなく緩急で教える形に書き直す（別の群）。
+  - **C 単調さの検査**: 提出したネームに単調さの警告を返す（止めない）。
+  - **コマ割りの案の束**: 利用者が参考に挙げたコマ割りジェネレーター（tools.oyasumi-gamedev.com/komawari。乱数で束を出す）の考え方を Genko に作る。そのコードは読まない・写さない。考え方だけを使い、一から作る。コマ数をちょうど指定できる（1〜8。kMaxPanels=8 は変えない）、段数の範囲・プリセット（会話・標準・アクション・見せゴマ／扉）・つまみ（斜め・断ち切り・コマ内分割・大ゴマ率・重ね・はみ出し・枠なし）、**12 案の束**（数は引数、既定 12）、seed で同じ束、1 案か今のページを元にした変異（変異度）、振るい（無難すぎる格子・読み順の崩れ・小さすぎるコマ・狭すぎる間・束の中で似た案を除く）、当てると本物のコマ（apply_layout の道）。
+- 群: K1 が土台（core・service）、K2 が GUI、K3 が MCP の道具。K2・K3 は K1 の API（SPEC LAYOUT-01「GUI・MCP 向けの API」）を使う。
+
+### 群 K1（土台。ブランチ komawari-core、main 8362d5fc から）
+- 設計: SPEC.md LAYOUT-01（骨組みのキー・生成の手順・プリセットとつまみ・振るい・変異・警告の code と文言・API・互換）、schema-v4.md「コマの重ね（komawari@1）」。
+- A（ネーム計画の拡張。どれも任意のキーで、書かなければ前と同じ）:
+  - 段・列・行の `gap_mm`・`tilt_mm`（その後ろの境目の間と斜め）、panels の `border_mm`（0 で枠なし）・`overflow`（はみ出し）、計画の `insets`（差し込み・重ね）。name_plan@1 の schema にも足した（strict のまま、どれも null 可）。
+  - check_tiers の検査と apply_layout の当て方を両方直した。当て方は今の op の組み合わせ（split_frame の gutter_mm・tilt_mm、add_frame、set_frame）。
+  - core は重ね・差し込みをそのままでは表せなかった（add_frame は根を描いたコマの節にするので、差し込んだコマがページ全体の後に読まれ、下のコマの枠線も重なって見える）。そこで拡張した:
+    - コマの `over`（true だけ保存、`komawari@1` の拡張として features に載る）。
+    - `add_frame` の `into`（宿主のコマの場所を描いたコマの節にして、宿主と並べる。読み順は宿主のそばで位置の順）と `over`。
+    - `set_frame`・`set_layout` の木の `over`。
+    - 描き方: over のコマの下では、ほかのコマの枠線と、ほかのコマに置いた絵が隠れる（render/panels.cpp の draw_frames、render/placed.cpp）。
+  - submit_name は、fill_nulls が足した拡張のキーの null を `studio::unfill_extensions` で外してから計画を持つ。拡張のキーを書かない計画は、計画の保存・input_hash まで前と同じ。
+- 生成（service/layout_ideas.{hpp,cpp}）と、測り方を 1 か所に置いた service/komawari_shape.{hpp,cpp}（形・振るいの基準・違いの点数・今のページの骨組み・単調さの警告）。乱数は xoshiro256**（splitmix64 で種を混ぜる）で、std の分布は使わない。
+- C: submit_name に単調さの警告を足した（止めない）。code は layout_repeats・layout_flat・reveal_beat_small・book_without_accent。review.html にも、本の今のコマについて「コマ割りの緩急」として並べる。
+- 試験: unit/test_layout_ideas 17 本（同じ seed で同じ束の sha・コマ数ちょうど 1〜8×4 プリセット・振るい・見せ場・当てて保存・読み戻し・今のページからの骨組み・変異・速さ・要求の断り・前と同じ op とバイトの sha・新しいキーの形と検査・add_frame into・重ねの下の枠線が消える描画・単調さの警告・submit_name の道）。12 案の束は描かずに約 1 ms（4 束 48 案で 3 ms）。関係する試験（R1）: test_model・test_storage・test_ops・test_studio_ops・test_command_bus・test_placed・test_contract_storage（参照 Python が無い 3 本は前からの SKIP）・test_service・test_ledger_service_a・b・c・test_gui_ledger_a の test_every_error_reads_in_japanese・test_gui_ledger_c、すべて合格。
+- 直したもの（関係する試験で見つけた）: 公開の op の一覧 docs/ops.schema.json に add_frame の into・over、set_frame の over を足した。単調さの警告は、ほかの issue の後に足す（承認済みの断り name_approved が先頭のまま）。
+- 直さなかった物（K2・K3 か後の群へ）:
+  - GUI（K2）: 案の束の窓、変異、当てる操作。app/templates.cpp は描いたコマの節（free）を持つ「自分のテンプレート」をまだ当て直せない（差し込みのあるページを残すとこれに当たる）。
+  - MCP（K3）: 案の束の道具。submit_name の説明文と手引き（B）に新しいキーを書くこと。→ 群 K3 で済んだ（下）。
+  - 重ねの下で隠すのは、枠線と、コマに置いた絵（clip_to frame・bleed）だけ。スマートオブジェクトをコマで切った絵と、ページ全体の層の絵は、重ねのコマの下でも見える。over のコマ同士の上下は決めていない。
+  - 自由な割り線は直線（位置と傾き）まで。曲がった線・折れ線は今の手の操作（set_frame curves・poly）のまま。
+
+### 群 K1 のレビュー（読取専用 1 回）と直し
+- P2（4 件）はすべて直した:
+  - 承認済みのページで、人でない者が set_frame の over を変えることを、strict_gates で止める。over はコマ割りの変化（same_layout）にも数える。
+  - apply_idea の関門を `core::can_approve(agent)` にした（ai: でない名前も止める）。骨組みは check_tiers で先に検査し、写しの上で当ててから入れ替える。断ったとき work は元のまま。
+  - 差し込みの宿主を、変異を通して変わらないコマの番号で持つ。変異の後、差し込みは宿主と一緒に動く。振るいに「差し込みの箱の 4 分の 1 以上が宿主に掛かる」を足した。
+  - 壊れた base は LayoutError("/base…", 日本語) で断る。
+- P3:
+  - over はコマだけが持つ（割れば子へ移る、set_layout の節には付かない、features は葉だけを見る）。読み手は真偽値でない over を broken_value にする。
+  - book_monotony は本の番号のまま返し（Json）、位置で前後を見る。monotony も例外を出さない。
+  - reading_slots と lint の読み順は、本の基本枠の大きさで測る。
+  - 描いたコマ 1 つだけのページ、基本枠でない根は、骨組みにしない。
+  - 要求の検査を足した（panels と範囲の両方、min_tiers>コマ数、focus>コマ数、空の seed、64 bit を超える整数）。大文字の 16 進の seed も受ける。Request を直接作ったときの NaN と範囲の外は、generate が範囲に収める。
+  - 自動の seed は new_txn_id（システムの乱数）から作り、new_id を食わない。
+  - 振るいに flat（layout_flat と同じ基準）を足した。
+  - draft_of は、panels の slant、template の bleed と slant、計画の tier_gap_mm・col_gap_mm を引き継ぐ。
+  - merge_into_plan は、骨組みに無い slot の panels を外して知らせる（dropped）。panels の slant も外す。
+  - apply_layout は、差し込みの後で選択を元に戻す。
+  - 文書（列の間・set_layout の over）。
+- 互換の試験を、8362d5fc のコードで取った値に替えた。8362d5fc を scratchpad の別の build で、試験の対象 1 つだけ組み、demo4 のネーム 4 ページを submit_name した project.json（book_id を 0 にしたもの）の sha と、各ページの input_hash を固定した（submitNameSavesAsBeforeK1）。新しいコードでも同じ値になった。その build は消した。
+- 試験: test_layout_ideas は 22 本になった（足した物: 8362d5fc と同じ保存・関門（strict_gates の set_frame over、ai: でない名前の apply_idea）・over と features の外れ方・割った over・読み手の検査・変異した案（差し込みあり）の当て・K1 より前の計画を元にした変異・壊れた base と骨組みと要求）。すべて合格。関係する試験（test_model・test_storage・test_ops・test_studio_ops・test_command_bus・test_placed・test_contract_storage（前からの SKIP 3 本）・test_service・test_ledger_service_a・b・c・test_gui_ledger_a の test_every_error_reads_in_japanese・test_gui_ledger_c）もすべて合格。
+- 直さなかった物: 台詞の自動配置（letter）は、宿主の台詞が差し込みの上に乗ることを避けない（未確認のまま）。束の sha は Linux でだけ取った（Windows では M7 で確かめる）。`"over": false` を明示した本は、保存でその鍵が消える（false は既定なので、見た目と意味は同じ）。
+
+### 群 K2（GUI。ブランチ komawari-gui、komawari-core 692d212d から。K1 のレビューの直し e9601687 を取り込み済み）
+- 窓「コマ割りの案を出す…」（app/komawari_dialog.{hpp,cpp}、命令 `act_komawari`）: ページ → コマ の「テンプレートでコマを割る…」の次と、コマ割りツールの設定（「案を出す…」）。形と操作は SPEC LAYOUT-01「窓『コマ割りの案を出す…』」。
+- 当てる: `idea_plan` が clear_page と apply_idea の op を 1 つの変更にまとめる（service の apply_ops は batch ごとに job id を 1 つ引くので、op ごとに同じ ids で当て直して job id を外し、最後に 1 batch で同じコマになることを確かめる）。主窓はテンプレートの窓と同じ確かめの後 apply_ops で当てる（人の操作。関門はテンプレートの窓と同じ）。
+- app/templates.cpp: 自分のテンプレートを、当てるページの基本枠に合わせて置く（今までは紙の比だけで伸ばしたので、反対側のページでは描いたコマと斜めのコマの輪郭が基本枠からずれた）。差し込み・重ねの節（宿主 1 つと over 1 つ）は add_frame の into で作り直す（今までは描いたコマとして set_layout で丸ごと置いた）。
+- service の API に `preset_defaults(Preset)` を足した（窓のつまみの初めの値。K3 も使える）。ほかの API は変えていない。
+- 試験: gui/test_gui_komawari（窓と 12 案の絵・同じ seed で同じ束〔コピー・貼り付け・Enter〕・コマ数ちょうど 1〜8・段数・見せ場・変異とガチャに戻る・当てて Undo・Redo・保存と読み戻し・確かめ・今のページを元に変異・承認済みのページ〔strict_gates〕に人は当てられ、同じ op を AI は断られる・テンプレートに残して反対側と同じ側と元のページに当て直す〔差し込み・描いたコマ〕・速さ: 12 案の束は 1 ms、絵 12 枚は約 50 ms、その間のイベントループの待ちは最長約 30 ms）。test_gui_layout の画面の大きさの検査に窓を足した（21 → 22 窓）。test_gui_actions の命令の数を 820 → 821。commands.json を作り直した。ヘルプの「2. コマを割る」に一節。
+- 直さなかった物: 窓の設定（プリセット・つまみ・束の数）は窓を閉じると忘れる（覚えない）。描いたコマを複数持つページは、今までどおり「今のページのコマ割り」を変異の元にできない（skeleton_of_page が無し）。
+- レビュー（rev-K2）の直し（komawari-ai 576dd5d6 を取り込み済み）:
+  - P1 テンプレート: 「今のコマ割りをテンプレートに残す…」が元のページの基本枠を `"frame"` として残す。`"frame"` のあるテンプレートだけ、その枠から当てるページの基本枠へ写す（同じ枠なら 1e-3 mm 以内で写さない。描いたコマの木は根が紙全体なら根だけ紙のまま、割った木は斜めのコマの輪郭だけを写す）。`"frame"` の無い今までのテンプレートは e9601687 と全く同じに置く。試験 templatesLayAsBefore が、e9601687 の templates.cpp で取った ops（ids 込み）と project.json の sha で、描いたコマ（add_frame。根が紙全体）を元のページへ、割った斜めの木を元のページへ、内蔵のテンプレート 2 つを固定する（今残したテンプレートも同じ値）。反対側のページでも根は紙のまま、コマは基本枠の中の同じ位置。
+  - P2 窓: Enter はリストか「このページに当てる」にフォーカスがあるときだけ当てる（窓を show した試験）。描いたコマが 1 つのページ（白紙で根が描いたコマの節）にも当てられる（idea_plan・絵・K1 の apply_idea で clear_page。確かめも出す）。絵はコマだけを描き、紙と基本枠の外形・枠なしの破線・断ち切りの塗り・はみ出しの矢印を重ねる。
+  - P2 案の質（layout_ideas.cpp・komawari_shape.cpp の生成と振るいだけ。merge_into_plan は触っていない）: プリセットの既定を強め、段の境目の斜めを 12〜(12+40×斜め) mm、列を 6〜(8+20×斜め) mm に深くし、振るいに strips（帯の積み重ね）・accents（目立つ所が足りない案は 12 案に 2 案まで）・tiers（段数の範囲）を足し、似ているかを見た目（look_alike）で見る。単調な元からの変異には目立つ所を足す（add_accents。K3 の報告: 格子のページの base_page が 0 案）。束の sha（test_layout_ideas）を作り直した。数字は SPEC LAYOUT-01 と manga_rules.md・layout_ideas の説明文に合わせた。
+  - P3: 見せ場・段数の上限をコマ数（指定なしはプリセットの上限）に、誤りの言葉から API の鍵を外す、誤りの後も seed を保つ、「コピー」は束の seed、設定を変えた 250 ms の間は当てる・変異を止める、足りないときは外した理由を言う、案の言葉を人の言葉に（describe_for_people）、シード・変異の元・ヘルプの言い回し、moved は 1e-3 mm で比べる、反対側でも割った木の間は前の値（写すのは輪郭だけ）、AI の拒否の試験は ids の台本の下で関門の言葉まで、絵を描いている間に閉じる試験、承認済みのページは注記で言う、裏の絵は ScopedIdsApart、act_komawari の言葉・ツールチップ・場所を test_gui_actions で、内容タブで灰色を test_gui_smart_contents で。
+
+### 群 K3（AI 向けの道具と手引き。ブランチ komawari-ai、komawari-core 692d212d から）
+- 設計: SPEC.md LAYOUT-01「AI 向けの道具（群 K3）」。K1 のレビューの直し（e9601687）を取り込んだ上で合わせた（merge_into_plan の dropped、振るいの flat）。K1 の API（request_from_json・generate・batch_to_json・merge_into_plan、komawari::skeleton_of_page・shape_of_page・difference・describe）をそのまま使い、service の API は変えていない。
+- MCP の道具 `layout_ideas`（service/studio_komawari.cpp、道具の表 kAgentTools・tool_table・api/mcp_tools に足した。MCP は 42 道具）:
+  - 引数: project・page（必須）、panels か min_panels・max_panels、min_tiers・max_tiers、preset、knobs、seed、count（既定 12）、base（案の skeleton）か base_page（今のページ）、variation、focus、plan（下書きのネーム計画）。
+  - 返り値: {page, request, seed, ideas[{skeleton, summary, panels, pattern, largest, reading_order, like_pages, plan?}], tried, dropped, around, name_approved}。plan を渡すと各案に merge_into_plan した plan が付き、そのまま submit_name に出せる（案に無い slot のコマは外れて plan_dropped、警告 plan_panels_dropped）。コマ数を書かずに plan を渡すと plan のコマ数ちょうど。
+  - 読むだけ（MCP の read_only に入れた: presence と book_in_use は無く、道具の記録だけが書かれる）。人が承認したページは警告 name_approved（変更は submit_name が断る）。断りは issues の code layout_ideas_invalid・base_twice・base_unusable・no_page、束が足りないときは警告 layout_ideas_few。
+  - MCP の inputSchema: ToolParam に schema（プロパティの説明・範囲を JSON の文で足す）を足し、layout_ideas の各引数と submit_name の plan に使った。ほかの道具の schema は前のまま。submit_name の説明文と MCP の instructions に拡張のキー・単調さの警告・layout_ideas を書いた。
+  - CLI: `genko studio layout-ideas BOOK --page N [--panels N] [--preset …] [--knobs JSON] [--seed S] [--count N] [--base FILE | --base-page] [--variation V] [--focus N] [--plan FILE] …`。`genko studio call BOOK layout_ideas ARGS.json` も通る。HTTP の API（genko serve）には studio の道具の入口が無いので足していない（MCP の Streamable HTTP には同じ道具が出る）。
+- B 手引き: manga_rules.md に「コマ割りの緩急」（beat の重さで大きさ・めくり・視線・前のページと変える・斜め／断ち切り／重ね／差し込み／はみ出し／枠なし／間の使いどころ・定型は例）、「コマ割りの案の束（layout_ideas）」、「単調さの警告」（code ごとの直し方の表）を足し、段組の節に拡張のキーを書いた。SKILL.md の plan_page を緩急と案の束で教える形に書き直した（integrations の Hermes・Claude Code の写しも同じ）。drawing.md（と写し）に add_frame の into・over、set_frame の border_mm・clip・over。lint の reveal_small・emphasis_small・finale_small の hint を、定型を例として示す文にした（code と severity は同じ）。docs/AGENT.md、OTHER_AGENTS.md（42 個）、ARCHITECTURE.md、integrations/hermes/config.example.yaml（ネーム担当に layout_ideas）。
+- 試験: test_mcp_api_e2e に layoutIdeasThroughMcp（tools/list に出る・schema・submit_name の説明文のキー、同じ seed で同じ束、コマ数ちょうど 1〜8、断り、本を変えない、下書きの計画から選んで submit_name、今のページの変異、拡張のキーを全部含む計画、単調な 3 ページで layout_repeats と layout_flat がほかの issue の後に警告で出る、承認済みのページは name_approved の警告で、submit_name は断り本は変わらない）。onlyAnAgentsTools の道具の表に layout_ideas を足した（42）。test_cli_e2e に studioLayoutIdeas（同じ seed で同じ出力・コマ数・knobs・plan のファイル・call・使い方の誤り exit 2・count 49 の断り・本を変えない）。手引きの写しの試験（test_ledger_service_b の skillCopyMatchesThePackagedOne・claudeCodeSkillCopyMatchesThePackagedSkill）と unit/test_layout_ideas 17 本も合格。PERF-F（test_perf_pipeline）は道具の数を固定していない（pipeline_harness も固定していない）ので変えていない。
+- レビューの直し（rev-K3）:
+  - P2-1 core: `Page::merge_frame` で `split` も消し、split_frame のまっすぐの道で `remember_split` の前に葉の古い `split` を消した。試験 aSplitAfterAMergeRemembersItsOwnLine（斜めの split → merge → まっすぐの split、前の版の本の葉に残った線、submit_name の replace の後の割り線・skeleton_of_page・gutters・move_gutter、undo で前の斜めの線に戻る）。layoutIdeasThroughMcp は、案で出したページを格子で作り直す順に戻した（直す前は layout_repeats が出ずに落ちる）。submitNameSavesAsBeforeK1 の sha は変わらない。
+  - P2-2: plan を name_plan@1 で確かめて `plan_invalid`（path 付き）。merge_into_plan はオブジェクトでない要素を外して dropped に入れる。
+  - P2-3: 読み取り専用（別の会話からの呼び出しで book_in_use にならず、presence.json と、logs を除く本のファイルが同じで、tools.jsonl だけ 1 行増える）、like_pages の中身（difference と同じになる、unit/likePagesAreTheNeighboursAlike）、全道具の inputSchema の sha、base_twice・no_page・plan_invalid・plan_too_large・MCP からの count 49 の試験。
+  - P3: plan は 256 KiB まで（plan_too_large）。隣のページと今のページの測りを try で受ける。plan_page_changed・variation_unused の警告、plan から決めたコマ数の断りの文、request.seed は実際の seed。SPEC の「41 のまま」を直し、integrations の drawing.md の写しを本体とそろえて試験 drawingCopiesMatchThePackagedOne を足した。
+- 直さなかった物:
+  - （済み。上の「レビューの直し」）core の既存の不具合（見つけた）: 斜めに切った（cut_frame）コマを merge_frame で戻すと、親のコマの `split`（割り線の記録）が残り、その後のまっすぐの split_frame は remember_split が前の記録を上書きしない。submit_name の replace で斜めの段組から斜めの無い段組に作り直したページは、`split` に前の斜めが残る（コマの形は正しい）。そのため skeleton_of_page・shape_of_page がそのページを「斜めあり」と読み、layout_repeats が出ないことがあり、inspect page の gutters（move_gutter）も前の線を返しうる。K3 のレビューで直した。
+  - 案の束の絵（12 案を並べた縮小画像）は返さない。AI は summary・pattern・largest と、submit_name のプレビューで見る。
+  - GUI（K2）は別の群。
+
+### コマ割りの工程の出口 V3 — 凍結 108ae80 で Linux の ASan・Release が合格（2026-11-13）
+- **凍結SHA**: `108ae80c`（native/komawari。K1・K2・K3 とレビューの直し 2df678c1 に、V3 の 1 回目で見つけた試験の直しを足した版）。計画は `validation_policy.py --base 8362d5f --head 108ae80 --phase milestone`（tier full。理由: 共通モデル・保存〔model.hpp の Frame に over、reader・writer〕、共有の描画経路〔panels.cpp〕、登録〔commands.json・ops_schema.json〕。各構成 264 試験）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 1 回目（凍結 2df678c、2026-11-12）: ASan で test_layout_ideas だけが落ちた（263/264 合格）。どちらも試験の側の誤りで、製品のコードは変えていない。
+  - overAndItsFeature: set_frame がページの枠を置き換えた後も、前の枠の子を指したまま回していた（heap-use-after-free）。子の id を先に取ってから回す。
+  - aBatchIsQuick: 1 束 50 ms の上限を ASan（-O0）で超えた（4 束で 303 ms）。上限は最適化ビルドではそのまま。サニタイザ・Debug のビルドでは、48 案の時間が 12 案の 10 倍以内（案の数に比例して伸びること）を確かめる（support/regex_timing.hpp の kOptimizedBuild と同じ考え方。ASan で 239 ms と 926 ms）。
+  - R4 に従い直した版（108ae80）で凍結し直して全体をやり直した（途中でコンテナが再起動し、ASan を最初から流し直した）。
+- 結果（2 回目、凍結 108ae80）:
+  - WebAssembly のホスト（cargo test と本体）: 合格。
+  - linux-asan: 264/264 合格（2 並列、約 3 時間 16 分）。
+  - linux-release: 264/264 合格。実 xcb の GUI 64 本すべて合格。
+  - 性能（静かな機械で）: test_perf_app 2 回（開くまで 531 ms・544 ms、入力から画面まで p95 1.48 ms・1.51 ms、p99 3.30 ms・3.12 ms）、test_perf_render 合格、test_perf_pipeline 合格（PERF-F 8 ページの校正刷り p95 5264.6 ms）。
+  - 配布物: `genko-studio-0.1.0-linux-x86_64.tar.gz`（sha256 `df7a07794ade39b9ec078eff9d31cecc8e3aaff0d0e93dfbc3e25bc057cf5ce5`、75,199,411 バイト）。素の Ubuntu 24.04（ネットワークなし、管理者でない利用者）で導入・足りないライブラリなし・版・窓で描いて保存・開き直して同じ画素・16 形式の書き出し・MCP（42 道具）・プラグイン・アンインストールまで ALL OK。
+  - **linux-debug: 流していない（利用者の判断 2026-11-13、下）。** `--pair` は「構成artifactの欠落・重複」で不合格（Debug と Windows 2 構成が無い）。**3 構成の --pair 合格ではない。**
+- 残り: 文字の自動配置が差し込みのコマを避けない、束の sha の固定は Linux だけ、窓の設定を覚えない、斜めの深いページで似た 2 つのコマの大きい方を skeleton_of_page が取り違えうる、Windows は deferred。
+
+### 利用者の決定（2026-11-13）: 試験の量と実行ファイル
+- 「変更分と影響箇所だけを見る」でよい。これからの工程の出口は、`validation_policy.py` が差分から選ぶ範囲（変更分と影響箇所）を、ASan と Release（範囲の試験と配布物・性能・実 xcb の画面）の 2 構成で流す。**Debug は最終配布の前に 1 回だけ。** 同じ試験を 3 構成で重ねて流さない（R3 の「Debug を並べる」をこれで置き換える）。範囲・合格値・安全検査は変えない。流さなかった構成は合格に数えない。
+- コマ割りの工程は、ASan・Release の合格で Debug を省いて main に入れる。
+- マージのときに Windows 用と Linux 用の実行ファイルを作る。Windows は GitHub Actions で一度だけ（手動でだけ動く `.github/workflows/build-executables.yml`。自動の CI〔native.yml〕は戻さない）。試験は「動くかだけ」（版・本を作る・調べる・描き出す）。できた物は下書きの Release に添付し、公開はしない。流した後はワークフローを `.github/disabled-workflows/` に戻す。Windows の実機での受入（配布前に必須）は残る。
+
+## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 
 ### 利用者の決定
 - （2026-10-16）PhotoCraft の台帳 `docs/cpp-migration/photocraft/feature-ledger.json` の **全 961 行**を、この移行で取り込む（Windows の作業の前）。2026-10-06 の決定（DECISIONS.json: 漫画原稿へ統合し C++ 版の原稿形式を広げる、原本は変えない、未対応の版では編集を断る。カラー制作 COLOR-01）はそのまま。

@@ -115,6 +115,13 @@ const std::vector<Tool>& tools() {
         t.push_back({"submit_name",
                      {required("project"), required("plan"), optional("commit", false), optional("replace", false), optional("max_px", 1024)},
                      &StudioService::submit_name});
+        // コマ割り K3 (SPEC LAYOUT-01): the batch of layout ideas for a page (reads only)
+        t.push_back({"layout_ideas",
+                     {required("project"), required("page"), optional("panels", none), optional("min_panels", none), optional("max_panels", none),
+                      optional("min_tiers", none), optional("max_tiers", none), optional("preset", none), optional("knobs", none),
+                      optional("seed", none), optional("count", none), optional("base", none), optional("base_page", false),
+                      optional("variation", none), optional("focus", none), optional("plan", none)},
+                     &StudioService::layout_ideas});
         t.push_back({"apply_ops", {required("project"), required("ops"), optional("commit", false)}, &StudioService::apply_ops});
         t.push_back({"record_review", {required("project"), required("page"), required("score"), required("notes")}, &StudioService::record_review});
         t.push_back({"record_chat_approval",

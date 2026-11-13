@@ -155,7 +155,7 @@ private slots:
         QCOMPARE(w->doc_tabs()->tabText(1), QStringLiteral("絵の中身"));
         QVERIFY(w->current_page() != nullptr && book.layer("pic", w->current_page()) != nullptr);
         // (what the tab cannot use: greyed; what it can, not)
-        for (const char* off : {"act_add_page", "act_del_page", "act_split_h", "act_text", "act_line_type", "act_template", "act_ai", "act_package"})
+        for (const char* off : {"act_add_page", "act_del_page", "act_split_h", "act_text", "act_line_type", "act_template", "act_komawari", "act_ai", "act_package"})
             QVERIFY2(!book.act(off)->isEnabled(), off);
         for (const char* on : {"act_undo", "act_smart_convert", "act_layer_paint", "act_import"}) QVERIFY2(book.act(on)->isEnabled(), on);
 

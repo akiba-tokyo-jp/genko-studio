@@ -82,6 +82,8 @@ public:
     ToolResult set_script(const Json& a);
     ToolResult submit_name(const Json& a);
     ToolResult apply_ops(const Json& a);
+    // コマ割り K3: the batch of layout ideas for a page (studio_komawari.cpp; reads only)
+    ToolResult layout_ideas(const Json& a);
     // --- reviews, requests, tickets and proposals ------------------------------------------------------------------------
     ToolResult record_review(const Json& a);
     ToolResult record_chat_approval(const Json& a);

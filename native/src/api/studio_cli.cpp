@@ -131,6 +131,12 @@ std::vector<Command> commands() {
         if (std::string(name) == "submit-name") more.push_back(flag("--replace"));
         out.push_back(project_cmd(name, std::move(more)));
     }
+    // コマ割り K3 (SPEC LAYOUT-01): the batch of layout ideas for a page (the tool layout_ideas; reads only)
+    out.push_back(project_cmd("layout-ideas", {opt("--page", Json(), Type::Int, {}, true), opt("--panels", Json(), Type::Int), opt("--min-panels", Json(), Type::Int),
+                                               opt("--max-panels", Json(), Type::Int), opt("--min-tiers", Json(), Type::Int), opt("--max-tiers", Json(), Type::Int),
+                                               opt("--preset", Json(), Type::Str, {"talk", "standard", "action", "showcase"}), opt("--knobs"), opt("--seed"),
+                                               opt("--count", 12, Type::Int), opt("--base"), flag("--base-page"), opt("--variation", Json(), Type::Float),
+                                               opt("--focus", Json(), Type::Int), opt("--plan")}));
     out.push_back(project_cmd("record-review", {opt("--page", Json(), Type::Int, {}, true), opt("--notes", ""), opt("--score", Json(), Type::Float)}));
     out.push_back(project_cmd("request-approval", {opt("--gate", "name", Type::Str, {"name", "art", "sheet"}), opt("--pages", ""), opt("--character"), opt("--note", "")}));
     out.push_back(project_cmd("tickets", {flag("--all")}));
@@ -595,6 +601,16 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
     } else if (cmd == "submit-name") {
         result = call("submit_name", Json::object({{"project", name}, {"plan", load(ns["file"].get<std::string>())}, {"commit", ns["commit"]},
                                                    {"replace", ns["replace"]}}));
+    } else if (cmd == "layout-ideas") {
+        Json kwargs = Json::object({{"project", name}, {"page", ns["page"]}});
+        for (const char* key : {"panels", "min_panels", "max_panels", "min_tiers", "max_tiers", "preset", "seed", "count", "variation", "focus", "base_page"}) {
+            kwargs[key] = ns[key];
+        }
+        // (--knobs is JSON text, --base and --plan files of JSON or - for stdin)
+        if (core::py_truthy(ns["knobs"])) kwargs["knobs"] = core::parse_python_json(ns["knobs"].get<std::string>());
+        if (core::py_truthy(ns["base"])) kwargs["base"] = load(ns["base"].get<std::string>());
+        if (core::py_truthy(ns["plan"])) kwargs["plan"] = load(ns["plan"].get<std::string>());
+        result = call("layout_ideas", kwargs);
     } else if (cmd == "record-review") {
         result = call("record_review", Json::object({{"project", name}, {"page", ns["page"]}, {"score", ns["score"]}, {"notes", ns["notes"]}}));
     } else if (cmd == "request-approval") {

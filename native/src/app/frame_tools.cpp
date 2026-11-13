@@ -177,6 +177,7 @@ core::Json frame_tree(const core::Frame& frame) {
     if (frame.curves && !frame.curves->empty()) node["curves"] = Json(*frame.curves);
     if (frame.line && !frame.line->is_null() && !frame.line->empty()) node["line"] = *frame.line;
     if (frame.corner_mm != 0.0) node["corner_mm"] = frame.corner_mm;
+    if (frame.over) node["over"] = true;  // (komawari@1)
     return node;
 }
 

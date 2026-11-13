@@ -360,8 +360,13 @@ void split_frame(OpContext& c) {
     } else {
         // (Python's page.split_frame looks the panel up by the id as it was given, not as a str)
         if (!frame_id.is_string()) throw OpKeyError(py_repr(frame_id));
+        target.split.reset();  // (a leaf's stale cut line, left by an older merge: the line remembered is this split's)
         std::tie(a, b) = page.split_frame(target_id, axis, Num(ratio), Num(gutter));
         remember_split(target);
+    }
+    if (target.over) {  // (komawari@1: a panel over the others is two over them; the split itself is none)
+        a->over = b->over = true;
+        target.over = false;
     }
     if (target.panel) {
         // the brief stays with the panel read first: top, or the binding-side column
@@ -420,6 +425,10 @@ void cut_frame_op(OpContext& c) {
         std::tie(a, b) = cut_frame(target, p0, p1, gutter);
     } catch (const PyValueError& error) {
         throw OpError(error.what());
+    }
+    if (target.over) {  // (komawari@1)
+        a->over = b->over = true;
+        target.over = false;
     }
     if (panel) {
         Frame* first = (target.split_axis && *target.split_axis == "horizontal") || doc.binding != Binding::Right ? a : b;
@@ -487,7 +496,34 @@ void add_frame(OpContext& c) {
     if (page.frames.empty()) throw PyUncaught("IndexError", "list index out of range");
     const auto leaves = page.leaf_frames();
     double border = leaves.empty() ? 0.8 : leaves.front()->border_mm;
-    if (!is_free(page.frames[0])) {
+    // komawari@1 (K1): "into" puts the drawn panel in a panel's place (差し込み・重ね) — that panel becomes a node of drawn
+    // panels holding itself (its id, brief, lines and art stay with it) and the new one, so the two are read together,
+    // by where they are; "over" lays the new panel over the others (with into: over unless "over" is false).
+    const Json* into_value = get(c.op, "into");
+    const bool into = into_value != nullptr && !into_value->is_null();
+    const Json* over_value = get(c.op, "over");
+    const bool over = over_value != nullptr && !over_value->is_null() ? py_truthy(*over_value) : into;
+    Frame* holder = nullptr;
+    if (into) {
+        if (!into_value->is_string()) throw OpError("into is the id of a panel");
+        Frame* host = page.find_frame(into_value->get<std::string>());
+        if (host == nullptr) throw OpError("no frame " + into_value->get<std::string>());
+        if (!host->children.empty()) throw OpError("into takes one panel (not a split)");
+        const Rect& hr = host->rect;
+        const bool meets = box.x < hr.x + hr.width && hr.x < box.x + box.width && box.y < hr.y + hr.height && hr.y < box.y + box.height;
+        if (!meets) throw OpError("the drawn panel does not touch the panel it goes into");
+        border = host->border_mm;
+        Frame panel = std::move(*host);
+        Frame node;
+        node.id = new_id();
+        node.rect = panel.rect;
+        node.poly = panel.poly;
+        node.split_axis = std::string(kFreeSplit);
+        node.border_mm = panel.border_mm;
+        node.children.push_back(std::move(panel));
+        *host = std::move(node);
+        holder = host;
+    } else if (!is_free(page.frames[0])) {
         Frame& root = page.frames[0];
         const bool blank = root.children.empty() && !root.panel && placed_on(page, {root.id}).empty() && !root.custom &&
                            !(root.poly && !root.poly->empty());
@@ -518,8 +554,9 @@ void add_frame(OpContext& c) {
         set_shape(frame, points);
         frame.custom = true;
     }
+    frame.over = over;
     const std::string new_frame_id = frame.id;
-    page.frames[0].children.push_back(std::move(frame));
+    (holder != nullptr ? *holder : page.frames[0]).children.push_back(std::move(frame));
     page.selected_frame_id = new_frame_id;
 }
 
@@ -630,6 +667,10 @@ void set_frame(OpContext& c) {
     if (has(op, "bleed")) frame.bleed = py_truthy(op["bleed"]);
     if (has(op, "clip")) frame.clip = py_truthy(op["clip"]);
     if (has(op, "border_mm")) frame.border_mm = to_float(op["border_mm"]);
+    if (has(op, "over")) {  // (komawari@1: a panel over the others)
+        if (!frame.children.empty()) throw OpError("only a panel (not a split) lies over the others");
+        frame.over = py_truthy(op["over"]);
+    }
     if (has(op, "line")) {
         if (py_truthy(op["line"])) {
             frame.line = border_style(op["line"]);
