@@ -10,6 +10,7 @@
 - R5 計画の違う結果は `--pair` で使えないので、最後の群は V2 を流さず、V3 へ直行する。
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
+- **R3 の置き換え（利用者の決定 2026-11-13）**: 工程の出口は、差分から選んだ範囲（変更分と影響箇所）を ASan と Release の 2 構成で流す。Debug は最終配布の前に 1 回だけ。詳しくは「コマ割り K」の節の「利用者の決定（2026-11-13）」。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
 - 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
@@ -100,6 +101,27 @@
   - （済み。上の「レビューの直し」）core の既存の不具合（見つけた）: 斜めに切った（cut_frame）コマを merge_frame で戻すと、親のコマの `split`（割り線の記録）が残り、その後のまっすぐの split_frame は remember_split が前の記録を上書きしない。submit_name の replace で斜めの段組から斜めの無い段組に作り直したページは、`split` に前の斜めが残る（コマの形は正しい）。そのため skeleton_of_page・shape_of_page がそのページを「斜めあり」と読み、layout_repeats が出ないことがあり、inspect page の gutters（move_gutter）も前の線を返しうる。K3 のレビューで直した。
   - 案の束の絵（12 案を並べた縮小画像）は返さない。AI は summary・pattern・largest と、submit_name のプレビューで見る。
   - GUI（K2）は別の群。
+
+### コマ割りの工程の出口 V3 — 凍結 108ae80 で Linux の ASan・Release が合格（2026-11-13）
+- **凍結SHA**: `108ae80c`（native/komawari。K1・K2・K3 とレビューの直し 2df678c1 に、V3 の 1 回目で見つけた試験の直しを足した版）。計画は `validation_policy.py --base 8362d5f --head 108ae80 --phase milestone`（tier full。理由: 共通モデル・保存〔model.hpp の Frame に over、reader・writer〕、共有の描画経路〔panels.cpp〕、登録〔commands.json・ops_schema.json〕。各構成 264 試験）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 1 回目（凍結 2df678c、2026-11-12）: ASan で test_layout_ideas だけが落ちた（263/264 合格）。どちらも試験の側の誤りで、製品のコードは変えていない。
+  - overAndItsFeature: set_frame がページの枠を置き換えた後も、前の枠の子を指したまま回していた（heap-use-after-free）。子の id を先に取ってから回す。
+  - aBatchIsQuick: 1 束 50 ms の上限を ASan（-O0）で超えた（4 束で 303 ms）。上限は最適化ビルドではそのまま。サニタイザ・Debug のビルドでは、48 案の時間が 12 案の 10 倍以内（案の数に比例して伸びること）を確かめる（support/regex_timing.hpp の kOptimizedBuild と同じ考え方。ASan で 239 ms と 926 ms）。
+  - R4 に従い直した版（108ae80）で凍結し直して全体をやり直した（途中でコンテナが再起動し、ASan を最初から流し直した）。
+- 結果（2 回目、凍結 108ae80）:
+  - WebAssembly のホスト（cargo test と本体）: 合格。
+  - linux-asan: 264/264 合格（2 並列、約 3 時間 16 分）。
+  - linux-release: 264/264 合格。実 xcb の GUI 64 本すべて合格。
+  - 性能（静かな機械で）: test_perf_app 2 回（開くまで 531 ms・544 ms、入力から画面まで p95 1.48 ms・1.51 ms、p99 3.30 ms・3.12 ms）、test_perf_render 合格、test_perf_pipeline 合格（PERF-F 8 ページの校正刷り p95 5264.6 ms）。
+  - 配布物: `genko-studio-0.1.0-linux-x86_64.tar.gz`（sha256 `df7a07794ade39b9ec078eff9d31cecc8e3aaff0d0e93dfbc3e25bc057cf5ce5`、75,199,411 バイト）。素の Ubuntu 24.04（ネットワークなし、管理者でない利用者）で導入・足りないライブラリなし・版・窓で描いて保存・開き直して同じ画素・16 形式の書き出し・MCP（42 道具）・プラグイン・アンインストールまで ALL OK。
+  - **linux-debug: 流していない（利用者の判断 2026-11-13、下）。** `--pair` は「構成artifactの欠落・重複」で不合格（Debug と Windows 2 構成が無い）。**3 構成の --pair 合格ではない。**
+- 残り: 文字の自動配置が差し込みのコマを避けない、束の sha の固定は Linux だけ、窓の設定を覚えない、斜めの深いページで似た 2 つのコマの大きい方を skeleton_of_page が取り違えうる、Windows は deferred。
+
+### 利用者の決定（2026-11-13）: 試験の量と実行ファイル
+- 「変更分と影響箇所だけを見る」でよい。これからの工程の出口は、`validation_policy.py` が差分から選ぶ範囲（変更分と影響箇所）を、ASan と Release（範囲の試験と配布物・性能・実 xcb の画面）の 2 構成で流す。**Debug は最終配布の前に 1 回だけ。** 同じ試験を 3 構成で重ねて流さない（R3 の「Debug を並べる」をこれで置き換える）。範囲・合格値・安全検査は変えない。流さなかった構成は合格に数えない。
+- コマ割りの工程は、ASan・Release の合格で Debug を省いて main に入れる。
+- マージのときに Windows 用と Linux 用の実行ファイルを作る。Windows は GitHub Actions で一度だけ（手動でだけ動く `.github/workflows/build-executables.yml`。自動の CI〔native.yml〕は戻さない）。試験は「動くかだけ」（版・本を作る・調べる・描き出す）。できた物は下書きの Release に添付し、公開はしない。流した後はワークフローを `.github/disabled-workflows/` に戻す。Windows の実機での受入（配布前に必須）は残る。
 
 ## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画
 
