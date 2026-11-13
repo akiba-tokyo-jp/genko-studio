@@ -629,6 +629,12 @@ private slots:
         const QImage dense = app::preset_picture(*app::balloon_preset(QStringLiteral("oval")), 2.0);
         QCOMPARE(dense.size(), size * 2);
         QCOMPARE(dense.devicePixelRatio(), 2.0);
+        {  // (shown, not judged: how long every picture takes to draw afresh — at a scale not drawn yet)
+            QElapsedTimer clock;
+            clock.start();
+            for (const app::BalloonPreset& preset : presets) (void)app::preset_picture(preset, 1.5);
+            qInfo("the palette's %d pictures drawn afresh in %lld ms", static_cast<int>(presets.size()), static_cast<long long>(clock.elapsed()));
+        }
         // the keys: the arrows move among the presets, Enter and Space pick the one in hand
         QSignalSpy picked(&s.palette(), &app::BalloonPalette::picked);
         list->setFocus();
@@ -649,6 +655,14 @@ private slots:
         dock->hide();
         s.window->stage_actions().at(QStringLiteral("letter"))->trigger();
         QVERIFY(!dock->isHidden());
+        // its place goes with the window's layout, as every dock's: open or closed as it was kept
+        const QByteArray open_layout = s.window->saveState();
+        dock->hide();
+        const QByteArray closed_layout = s.window->saveState();
+        QVERIFY(s.window->restoreState(open_layout));
+        QVERIFY(!dock->isHidden());
+        QVERIFY(s.window->restoreState(closed_layout));
+        QVERIFY(dock->isHidden());
     }
 
     // A pick with a line chosen: that line takes the look — its kind and its look's keys, the keys of the look it had
