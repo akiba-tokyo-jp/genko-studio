@@ -725,11 +725,16 @@ private slots:
 
     // A plan without the new keys is saved as 8362d5fc (before K1) saved it: the demo4 names submitted through the tool,
     // project.json (its random book id zeroed) and each page's input hash, taken from that build (k1_probe).
+    // (fukidashi@1, SPEC BALLOON-01: the plans' input hashes are 8362d5fc's still. project.json is 8362d5fc's but for the
+    // ovals the tool letters — drawn true now, so each of the five is 1.035 times as wide and tall to hold the same
+    // letters, and is put where a balloon of that size goes (x_mm; one tail's end with it) — and the book's
+    // "balloon_geometry": 2. Seen by submitting the same names through 5cf6551a's program and this one's and
+    // comparing the two books key by key: those 18 values and no other. The sha256 before: 7c1284b4…297a00a9.)
     void submitNameSavesAsBeforeK1() {
         QTemporaryDir root;
         const auto [sha, hashes] = k1_probe(root.path().toStdString());
         QCOMPARE(QString::fromStdString(hashes), QStringLiteral("ok ok ok ok sha256:9238450ccae65d3552a809acb132124bebff257ffd829d70b1d159baf285bcd0 sha256:a5df9f572363c47d1ecf212eebaec7fc2b4f7a7a0f9d557401536e6ec39f63d2 sha256:118132feb18e7ebd98e0c56bb5b1c04ce1d142329ad6f22bebe72d9e6c18cf49 sha256:90ebed411f37d33dea3e1aa3b902140b5a964ed9841ae314263651390af245e4 "));
-        QCOMPARE(QString::fromStdString(sha), QStringLiteral("7c1284b40aac3f696c2b4ab40fb41a84da5db79d1c3e82b1e801dd3b297a00a9"));
+        QCOMPARE(QString::fromStdString(sha), QStringLiteral("bf8114d52015a8b437e610ee8aa6c9a324df51faff4ddda36e157d8372ee678a"));
     }
 
     // The gates: on a page whose name a person approved, an agent changes no panel's over (strict_gates), and only a

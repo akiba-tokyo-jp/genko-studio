@@ -1078,7 +1078,10 @@ private slots:
         QTest::mouseClick(panel->list->viewport(), Qt::LeftButton, {}, panel->list->visualItemRect(panel->list->item(0)).center());
         QCOMPARE(s.window->page_index(), 2);
         QVERIFY(s.canvas()->highlight_box.has_value());
-        QCOMPARE(*s.canvas()->highlight_box, (std::array<double, 4>{-3.0, 40.0, 30.0, 20.0}));
+        // (the place marked is where the line's letters are set: an oval's letters keep the box they had before the ovals
+        // were drawn true — the balloon's box −3, 40, 30 × 20 about its middle, 1 / 1.035 of it, to the report's two
+        // decimals. SPEC BALLOON-01)
+        QCOMPARE(*s.canvas()->highlight_box, (std::array<double, 4>{-2.49, 40.34, 28.99, 19.32}));
         QCOMPARE(s.canvas()->selected_line_id.value(), s.doc().story.front().id);
         QCOMPARE(s.window->last_notice(), QStringLiteral("台詞「はみ出した台詞」が仕上がり線の外にはみ出している（裁ち落とされる）"));
         // a layer's problem: that layer drawn on; the mark gone with another page (the box of a page-wide problem: none)

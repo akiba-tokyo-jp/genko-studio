@@ -26,41 +26,60 @@
 ### 群 B1（土台。ブランチ native/fukidashi-core、main 5cf6551a から）
 - 設計: SPEC.md BALLOON-01（描き方・種類・鍵・しっぽ・文字の収まり・前の本の読み替え・拡張・試験）、schema-v4.md「フキダシ（fukidashi@1 と balloon_geometry）」。
 - 描画: `render/text/balloon_clean.{hpp,cpp}`（輪郭を実数の多角形で作る。＋−×÷と平方根だけ、正多角形の角と波の位相は libm_float の sinf・cosf。4 分の 1 か右半分を作って写す。塗りは形の和集合、線は「和集合の縁から太さ以内」を正確な面積のラスタライザーで出す）。`balloons.cpp` の shape_masks は全部これで描く。手描き風の機械（uneven・swell・角度で切る破線・収縮で出す線・整数の多角形・角のあるしっぽ）は消した。ページへは 1 回の混ぜ方で載せる（透明のあるレイヤーでも縁が暗くならない）。
-- 種類: 今ある種類（speech・rounded・box・narration・cloud・thought・shout・electric・whisper・flash・dotted_box・tone_box・fancy_box・手で描いた輪郭）を今風に。新しい種類 `capsule`・`polygon`。新しい鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`。しっぽの `kind: inward` と `fillet_mm`。付け根は輪郭としっぽの向きに沿う曲線でつなぐ。つないだフキダシは切れ込みを同じ継ぎ目で、離れていれば首でつなぐ。
-- 前の鍵: `hand` は受け取るだけ（描く形は変えない。文字を収める楕円の決め方だけ前と同じに使う）。`wobble` は波の輪郭（`wave_mm` = 0.03 × wobble × 箱の短い辺）として描く。どちらもエラーにしない。
-- 文字: 楕円の種類の文字は、前と同じ「文字の楕円」（2.6 乗の超楕円）に収める。その楕円は箱の 0.955 / 1.035 で、箱に内接する真の楕円に入る。capsule・polygon は形そのものに収める（shape_gauge・fit_in_shape）。
-- 前の本: project.json の一番上の `balloon_geometry`（今は 2）。無い本は、読むときに、手描きの楕円だった台詞（文字レイヤーの記録も）の箱を真ん中を保って 1.035 倍にする（storage/reader の read_line。core/fukidashi.hpp の grow_legacy_oval）。保存で鍵が付き、2 度は大きくならない。楕円の台詞が無い本には鍵を書かない。前の版の Genko は知らない鍵として残す（拡張ではない）。
+- 種類: 今ある種類（speech・rounded・box・narration・cloud・thought・shout・electric・whisper・flash・dotted_box・tone_box・fancy_box・手で描いた輪郭）を今風に。新しい種類 `capsule`・`polygon`。新しい鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`。しっぽの `kind: inward` と `fillet_mm`。しっぽは根元で輪郭の法線に沿って出て先へ曲がり、両側は中心線からのオフセット、根元の幅は短い辺の 0.22（付け根どうしをまっすぐ測った長さ）。付け根は、両側が輪郭と交わる所を小さな曲線（線の 1.5 倍か 0.5 mm、幅の 1/4 まで）でつなぐ。本体の輪郭はその 2 か所のほかは変わらない。つないだフキダシは切れ込みを同じ継ぎ目で、離れていれば首でつなぐ。
+- 前の鍵: `hand` は描く形を変えない。今も決めるのは文字を収める楕円だけ（false は箱そのものの真の楕円、ほかは文字の箱のふくらんだ楕円）。`wobble` は波の輪郭（`wave_mm` = 0.03 × wobble × 箱の短い辺）として描く。どちらもエラーにしない。
+- 文字: 楕円の種類の文字は「文字の箱」（core::letter_box。箱を真ん中を保って 1 / 1.035。小数 9 桁）の中の、前と同じ「文字の楕円」（箱の 0.955 の、2.6 乗の超楕円）に収める。箱に内接する真の楕円に入る。読み替えた前の本では文字の箱が前の箱とビットまで同じなので、文字はどの解像度でも前と同じ画素になる。capsule・polygon は形そのものに収める（shape_gauge・fit_in_shape）。検査（text_outside_trim・text_outside_frame・text_overlap）も文字の箱で測る（formats/checks.cpp）。
+- 前の本: project.json の一番上の `balloon_geometry`（今は 2）。無い本（と 1 の本）は、読むときに 1 回だけ読み替える（storage/reader の read_line → core::migrate_legacy_line。文字レイヤーの記録も）。(1) 手描きの楕円だった台詞の箱を真ん中を保って 1.035 倍（小数 9 桁）。type@1 の箱の文字・ポイント文字、`hand: false`、`wobble`、手で描いた輪郭は大きくしない。(2) その台詞の消しゴムの跡（style.cuts）と文字の道（style.text_path）を、箱の角が動いたぶんずらす（ページの上で同じ場所）。しっぽ（ページの座標）と text_dx/dy（文字の箱から）はそのまま。(3) `border_mm: 0` は 0.01 mm（core::kHairlineMm。1 px の細い線のまま）。保存で鍵が付き、2 度は読み替えない。鍵は楕円の台詞か border_mm 0 の台詞がある本に書く。2.0 も読む。読めない値は broken_value（読み取り専用）で、読み替えない。前の版の Genko は知らない鍵として残す（拡張ではない）。
 - 拡張 `fukidashi@1`: 新しい種類・鍵・しっぽを使っているあいだだけ書く（core::uses_fukidashi）。
-- 自動の文字入れ: 楕円の箱は前の 1.035 倍。1〜2 列で高さが幅の 3 倍以上の speech は `capsule`（service::letter::shape_for。ネームの文字入れと propose_lines の寸法）。
+- 自動の文字入れ: 楕円の箱は前の 1.035 倍。**種類を書いた台詞は変えない。** 種類が無く、1 列で 5 字以上の台詞だけ `capsule`（service::letter::shape_for(breaks, given)。ネームの文字入れの計画の行と propose_lines で balloon が無いとき）。
 - 設計からの変更（利用者の決定で）: `style.draw`・本の `balloon_draw`・`authoring_draw`・op `restyle_balloons`・既定の書き込みは作らない（描き方が 1 つになったので要らない）。「前の本は同じ画素」の試験も置かない（意図して変わる）。
 
 ### B2・B3 が使うもの
 - 種類の名前 `capsule`・`polygon`、鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽの `kind: "inward"`・`fillet_mm`。どれも今の `add_line`・`edit_line`・`move_line` で渡す（新しい op は無い）。範囲と断りの文は SPEC BALLOON-01、`genko schema`（edit_line の「style (fukidashi)」）。
 - 寸法: `render::text::hug_power`・`hug_keep`（app/lettering.cpp の measure はこれを呼んでいるので、楕円はもう 1.035 倍になっている）、`service::letter::measure(breaks, "capsule")`、`service::letter::shape_for`。
 - 見本の絵（パレットのサムネイル）: `render::text::draw_group` をそのまま使う。
-- B2 に残ること: 種類のメニューに「縦長（カプセル）」「多角形（機械の声）」、パレット、台詞パネルの新しい鍵、`hand`（手描き風）と `wobble` をメニューから外す、commands.json。app/lettering.cpp の measure に capsule の寸法（今は箱の種類として測る）。
+- B2 に残ること: 種類のメニューに「縦長（カプセル）」「多角形（機械の声）」、パレット、台詞パネルの新しい鍵、`hand`（手描き風）と `wobble` をメニューから外す、commands.json。**app/lettering.cpp の measure（320〜350 行のあたり）には capsule と polygon の場合が無い**（今は箱の種類として測るので、カプセルに打った文字の自動の箱が合わない）。service::letter::measure(breaks, "capsule") と同じ式（幅は列＋ふち、高さは文字＋幅ぶんの半円 2 つ）を入れること。
 - B3 に残ること: MCP の道具の説明と手引き（SKILL.md・drawing.md と integrations/ の写し）から手描き風の説明を外し、新しい種類・鍵を書く。ネーム計画（studio/schemas.cpp の panels[].lines[].balloon）に capsule・polygon を足すかどうか。
 
 ### 直した既存の試験（どれも意図した変更。緩めていない）
 - test_storage v4RoundTrip: 楕円のある本は `balloon_geometry` を書く（鍵の並びに 1 つ足した）。
 - test_gui_lines: 楕円（speech・thought）の箱の期待値を 1.035 倍に（aLineIsTypedWhereTheTextToolClicks、aLineIsTypedOverDeletedTurnedAndReshaped の 2 か所、theLinesPanelListsReordersAndEdits の 2 か所、theStoryEditorPoursAScriptAndEditsEveryLine、selectedCharactersAreStyledAsTyped の box_size・measure）。「既定の設定に戻す」が消す鍵は 46 → 52（鍵が 6 つ増えた）。
-- test_ledger_service_c test_a_balloon_sits_by_its_speaker_and_its_tail_reaches_them: 1 列 5 字の「ちっちゃ!」は capsule になり、話し手のすぐ横に置かれてしっぽが要らなくなった。話し手の側に置かれることは両方で見て、しっぽは 2 列の台詞（楕円）で見る。
-- tests/support/psd_book_hashes.hpp: PSD の見本（画像の道 4 つ、文字を編集できる道 4 つ）の sha256 を取り直した（フキダシの画素が変わるので）。レイヤーを重ねると台詞になること・2 つの道の統合画像が同じことは、前の試験のまま通る。
+- test_ledger_service_c: main と同じに戻した（最初の版では、種類を書いた 1 列 5 字の台詞がカプセルになるので書き換えていた。種類を書いた台詞を変えなくなったので要らなくなった）。
+- tests/support/psd_book_hashes.hpp: PSD の見本（画像の道 4 つ、文字を編集できる道 4 つ）の sha256 を取り直した（フキダシの画素が変わるので。しっぽを作り直したのでもう一度）。レイヤーを重ねると台詞になること・2 つの道の統合画像が同じことは、前の試験のまま通る。main の版の PSD と比べた結果は下の「PSD の見本を main の版と比べた」。
 - test_save_e2e savedBookReadsBackWhole: v3 の見本の手描きの楕円（30 × 60 mm）は、v4 に変換した写しで 31.05 × 62.1 mm（真ん中は同じ）になり、`balloon_geometry: 2` が付く。
 - test_psd_text imageWayIsAsBefore: 4 ページ分の sha256 をまとめて言うようにした（検査は同じ）。test_render_page: コメントだけ。
 - docs/ops.schema.json: native の一覧と同じ文に（edit_line の balloon・tails・style の説明）。
+- test_contract_opentype linesOfBeforeAsBefore（tests/data/type/plain_lines.json）: フキダシのある 14 ページの sha256 を記録し直した（フキダシの画素が変わるので）。フキダシの無い 3 つ（latin・sfx・text_only）は前のまま。文字は、17 ページを main 5cf6551a の実行ファイルと今の版で PSD（文字を編集できる道）に書いて文字レイヤーを比べた: 字の大きさは 17 個とも同じ。置き場所は 11 個が同じで、op で作った楕円の 6 個（leant・tcy・no_features・down_features・text_gamma・across_ruby_spans）は 150 dpi で 1 px ずれる（楕円の文字は文字の箱の真ん中に置く。文字の箱はフキダシの箱の 1 / 1.035 で、画素への丸めが箱とは別になる）。保存してあった本は読み替えで文字の箱が前の箱と同じになるので、ずれない。**この試験も最初の版（09099074）のときから落ちていた。**
+- test_gui_output checksPanel: 点検の「台詞が仕上がり線の外」をクリックしたときに印が付く箱は、台詞の文字の箱（楕円はフキダシの箱の 1 / 1.035。指摘の小数 2 桁で −2.49, 40.34, 28.99 × 19.32）。前はフキダシの箱（−3, 40, 30 × 20）。指摘の件数・文・選ばれる台詞は同じ。
+- test_layout_ideas submitNameSavesAsBeforeK1: demo4 のネームを道具で提出して保存した project.json の sha256 を取り直した（7c1284b4… → bf8114d5…）。計画の input_hash 4 つは前のまま。main 5cf6551a の実行ファイルと今の版で同じネームを MCP から提出して、2 冊の project.json を鍵ごとに比べた: 違いは 18 個の値だけ — 道具が写植した楕円 5 本の w_mm・h_mm（1.035 倍）と x_mm（その大きさの置き場所。3 本は別の空きへ移る）、しっぽの先 1 つ、`balloon_geometry: 2`。コマ・計画・id・ほかの台詞は同じ。**この試験は最初の版（09099074）のときから落ちていた**（関係する試験の一覧に入れていなかった）。今回、台詞を足す試験を全部流して見つけた。
 
 ### 確かめたこと（Linux Release。関係する試験だけ）
-- 関係する試験 59 本（test_render_page・test_gui_lines・test_psd_text・test_smart_stack・test_ruby_render・test_contract_type 3 本・test_ledger_service_a/b/c・test_service・test_storage・test_model・test_features・test_command_bus・test_ops_e2e・test_cli_e2e・test_mcp_api_e2e・test_gui_ledger_a・test_fukidashi・test_fukidashi_service と、台詞に触れる契約・GUI・e2e の試験）: 試験の関数 1672 件が合格、不合格 0、スキップ 32（前からのスキップと、見本の書き出し 1 件）。test_perf_render は 6 件合格・1 件スキップ（PSD の見本の環境変数が無いとき）。全体の試験と ASan は流していない（群の出口で）。
-- 新しい試験: test_fukidashi（輪郭の鏡像・線の太さ・破線・しっぽの付け根・継ぎ目・タイル＝ページ・白黒の線の太さ・レイヤーを重ねるとページ・ベタに白抜き・トーン枠・前の鍵・拡張の出入り・前の本の読み替えと文字の大きさ・2 度大きくならない・今の形の文字の収まり）、test_fukidashi_service（op の受け取りと日本語の断り・切れ込みのしっぽ・楕円の寸法・capsule の選び方と寸法・ネームの文字入れ）。前の本の見本は tests/data/fukidashi（main 5cf6551a が書いた project.json と、その版での文字の em と大きさ）。76 本の台詞すべてが 150・600 dpi で同じ em・同じ大きさ。
-- 速さ（test_perf_render の ten_balloons_at_600dpi。表示だけ）: B4・600 dpi（6071 × 8598 px）に 10 個。フキダシなし 453 ms、ありを最初から 964 ms、もう一度 467 ms、形だけ 395 ms（1 個 39.5 ms）。前の本の見本を `genko render` で 600 dpi に描く時間は、main の実行ファイル 10.0 s・4.6 s（1・2 ページ）に対して 5.7 s・1.8 s。
-- 見本: 今風の種類としっぽ（150 dpi の全体、600 dpi の原寸の切り出し）、前の本を main と今の版で描いた並び。作業用の場所（リポジトリの外）に置き、報告に道を書いた。
+- 関係する試験 103 本: 最初の版の 59 本（test_render_page・test_gui_lines・test_psd_text・test_smart_stack・test_ruby_render・test_contract_type 3 本・test_ledger_service_a/b/c・test_service・test_storage・test_model・test_features・test_command_bus・test_ops_e2e・test_cli_e2e・test_mcp_api_e2e・test_gui_ledger_a・test_fukidashi・test_fukidashi_service と、台詞に触れる契約・GUI・e2e の試験）に、台詞を足す試験・点検を流す試験・台詞のある本を読む試験を全部足した（test_layout_ideas・test_contract_opentype・test_gui_output・test_gui_effects・test_contract_annotations/layer_comps/measure/pcraft/slices/smart/video・test_gui_ai/align/anim/color/paths/shapes/smart/smart_contents/transform/variables/workspace/prefs・test_contract_align/anim/color_model/image_ops/ink/layers/paths/transform/prefs/retouch・test_brushes_model・test_color_model・test_groups・test_page_geometry・test_page_size・test_pyre・test_spell・test_variables・test_adjust・test_ai_link・test_strokes・test_perf_render）。試験の関数 2411 件が合格、不合格 0、スキップ 33（前からのスキップと、見本の書き出し 1 件）。test_soak_app（3 時間の耐久。台詞の期待値は無い）、全体の試験、ASan は流していない（群の出口で）。
+- 新しい試験: test_fukidashi 72 件（輪郭の鏡像・線の太さ・破線・しっぽが輪郭の法線から出る・先が法線の上なら曲がらない・本体はしっぽのほかは変わらない・継ぎ目・線より小さい泡・同じフキダシは同じ画素・角 0 は四角・タイル＝ページ・白黒の線の太さ・レイヤーを重ねるとページ・ベタに白抜き・トーン枠・前の鍵・拡張の出入り・前の本の読み替え（箱・消しゴムの跡・文字の道・細い線・世代の鍵の読み方）・文字の大きさと画素・検査の指摘・2 度は読み替えない・今の形の文字の収まり）、test_fukidashi_service 18 件（op の受け取りと日本語の断り・切れ込みのしっぽ・capsule と polygon の tail_hidden・楕円の寸法・capsule の選び方（種類を書いた台詞は変えない）・ネームの文字入れ）。前の本の見本は tests/data/fukidashi（old_book・old_book2 は main 5cf6551a が書いた project.json。old_letters.json・old_letter_layers.json・old_issues.json はその版での文字の em と大きさ・文字だけの絵の sha256・検査の指摘）。台詞 92 本（77 ＋ 15）すべてが 150・350・600・1200 dpi で同じ em・同じ大きさ、文字だけの絵は同じ sha256。
+- 速さ（test_perf_render の ten_balloons_at_600dpi。表示だけ。ほかの試験と並べて流したときの数字）: B4・600 dpi（6071 × 8598 px）に 10 個。フキダシなし 354 ms、ありを最初から 1008 ms、もう一度 494 ms、形だけ 449 ms（1 個 44.9 ms）。
+- 見本: 今風の種類としっぽ（150 dpi の全体 3 ページ、600 dpi の原寸の切り出し）、前の本 2 冊を main と今の版で描いた並び。作業用の場所（リポジトリの外）に置き、報告に道を書いた。
+
+### 前の本を開いたとき・取り消し・ジャーナル（確かめたこと。コードは変えていない）
+- GUI で前の本を開いても、**本は変更ありにならず、ファイルも書き換えない**。読み替えは読むときにメモリーの上で起きるだけで、セッション（app/session.hpp）は op を当てるまで「保存済み」のまま。画面のフキダシは今風で、文字は前と同じ。何もせずに閉じれば、ディスクの本は前のまま（次に開くとまた同じように読み替える。結果は毎回同じ）。
+- 利用者が何か 1 つ編集して保存すると、その保存の取引で、読み替えた箱と `balloon_geometry: 2` が一緒に書かれる。保存の差分には、その編集のほかに楕円の箱と鍵の変更が入る。
+- 取り消し・やり直し: メモリーの上の取り消しは、読み替えた後の文書どうしを行き来するので、境目をまたがない。ジャーナル（.genko/journal）から前の状態（鍵が無い状態）を戻したときは、それをまた読むときに同じ読み替えがかかる（毎回同じ結果）。鍵のある状態を戻せば読み替えない。どちらでも箱が 2 度大きくなることは無い。
+- 落ちた後の復旧: 保存していない op は、読み直した（読み替えた）文書の上に当て直される。op が書いている箱の数字はそのまま使う（op は読み替えない）。前の版で書かれて当て直されていない op（楕円を足す add_line で w・h を書いたもの）が残っていた場合だけ、その楕円は 1.035 倍にならず、文字が 1 段小さく収まることがある（下の「op の列を今の版でやり直したとき」と同じ）。
+- 版をまたぐ: 鍵の付いた本を前の版で開いて保存しても、鍵は知らない鍵として残る。
+
+### PSD の見本を main の版と比べた（main 5cf6551a の実行ファイルと今の版で同じ本を書いて、PSD を開いて比べた）
+- 見本: tests/data/psd_text_book.json（4 ページ、フキダシのある台詞 12 本）。150 dpi、画像の道と文字を編集できる道。2 通りで比べた: (A) main の版が保存した本を今の版で開いて書き出す、(B) 同じ op を今の版で当て直して書き出す（試験の sha256 はこちら）。
+- どちらも結果は同じ: 8 ファイルとも、レイヤーの並び（深さ・種類・名前）とキャンバスの大きさが同じ。フキダシ以外のレイヤー（紙・コマ・絵・文字レイヤー）の画素は全部同じ。文字レイヤーの本文・行列（置き場所と向き）・字の大きさ・フォント・ランの長さは全部同じ（違い 0 件）。
+- 違うのはフキダシの画素を持つレイヤーだけ: 画像の道は台詞のレイヤー 12 本（p1 が 5、p2 が 3、p3 が 3、p4 が 1）、編集できる道は「フキダシ」レイヤー 12 本。画像の道の台詞レイヤーで違う画素は 1 本につき 4886〜9517 px で、そのうち文字の上にあるものは 0 px（フキダシの輪郭だけが変わっている）。
+- 箱を数字で書いた台詞で、main より文字が小さく組まれたもの: 0 本（(B) でも）。
+- この見本にはしっぽが無いので、しっぽの作り直しでは sha256 は変わらなかった（最初の版で取り直した 8 つのまま）。
 
 ### 残り・気を付けること
+- 同じ build フォルダーで main の版を作って比べた（2 つ目の build フォルダーは作らない決まり）。main の実行ファイルは作業用の場所に置いただけで、リポジトリには無い。
 - 版をまたぐ動き: `balloon_geometry` の付いた本を前の版で開いて楕円を足して保存すると、その楕円は読み替えられない（文字が少し小さく収まることがある）。前の版は公開前の v0.1.0 の下書きだけ。
-- op の列を今の版でやり直したとき（ジャーナルの再生、試験の見本の op）は、箱は書かれた数字のまま真の楕円になる。文字の楕円は箱の 0.955 / 1.035 なので、前の版で同じ op を当てたときより文字が 1 段小さく収まることがある（保存した本を開く道は読み替えるので変わらない）。
-- 回したフキダシの紙の大きさ（turned_sheet の py_hypot）と、しっぽの先の回し方以外の回転の計算は前のまま（環境の libm）。今風の形の計算には入っていない。
-- 鋭い切れ込み（本体に沿って寝たしっぽ）は、継ぎ目を大きく取っても小さなくびれとして残る。`fillet_mm` で変えられる。
+- op の列を今の版でやり直したとき（ジャーナルの再生、試験の見本の op）は、箱は書かれた数字のまま真の楕円になる。文字の箱はその 1 / 1.035 なので、前の版で同じ op を当てたときより文字が 1 段小さく収まることがある（保存した本を開く道は読み替えるので変わらない）。
+- 回したフキダシの紙の大きさ（turned_sheet の py_hypot）は前のまま（環境の libm）。しっぽの先の回し方は libm_float。今風の形の計算には環境の libm は入っていない。
+- 鋭い切れ込み（本体に沿って寝たしっぽ）は、継ぎ目が小さいので小さなくびれとして残る。`fillet_mm` で大きくできる。
+- ギザギザのしっぽの先は、線の太さより細くなる所で両側の線が重なり、小さな目が残ることがある（前からの見え方）。
 - Windows の実機のビルドは未確認（near・far の名前、GCC の拡張、__int128 は使っていない）。
 
 ## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12
