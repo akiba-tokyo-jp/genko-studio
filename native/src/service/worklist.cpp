@@ -434,7 +434,10 @@ Json next_actions(const core::Document& doc, const std::optional<std::filesystem
         }
         if (!draft) {
             const bool blank = page.leaf_frames().size() == 1 && doc.story_for_page(page.index).empty();
-            if (blank && !no_script) out.push_back(item("plan_page", "ネームがまだない", tools({"inspect", "submit_name", "render"}), n, Json::array(), page_side(n)));
+            if (blank && !no_script) out.push_back(item("plan_page",
+                                                  "ネームがまだない（submit_name でコマ割りと台詞を出し、ラフはネームのレイヤーに apply_ops で線で描く: "
+                                                  "add_mannequin・add_figure → trace_prims（kind pencil）、add_shape、add_stroke。画像は使わない）",
+                                                  tools({"inspect", "submit_name", "apply_ops", "render"}), n, Json::array(), page_side(n)));
             continue;
         }
         const Json review = core::py_get(core::py_or(core::py_get(*draft, "reviews"), Json::object()), "name");

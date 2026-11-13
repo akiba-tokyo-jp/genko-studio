@@ -1,12 +1,13 @@
 ---
 name: genko-manga
-description: Genko Studio を MCP で操作して、企画から漫画のネーム（コマ割り・台詞の配置）、作画（生成した絵をコマに置く）、仕上げ、書き出しの依頼までを進める手順。漫画のネーム、コマ割り、作画、Genko の話が出たら使う。
+description: Genko Studio を MCP で操作して、企画から漫画のネーム（コマ割り・台詞の配置と、線で描くラフ）、作画（ネームの承認の後に、生成した絵をコマに置く）、仕上げ、書き出しの依頼までを進める手順。漫画のネーム、コマ割り、作画、Genko の話が出たら使う。
 ---
 
 # Genko で漫画を作る
 
 Genko は漫画原稿のシステムで、MCP サーバー `genko` として接続されている（道具は `mcp__genko__<名前>`。古い Hermes（v0.21 より前）では区切りの `__` が `_` 1 つになる）。
-Genko は文章も絵も作らない。企画書・脚本・ネーム計画と絵は、あなたが作る。Genko はそれを検査し、コマ割りと縦書きの写植を計算し、
+Genko は文章も絵も作らない。企画書・脚本・ネーム計画、ネームのラフ、作画の絵は、あなたが作る。ネームのラフは Genko の道具で線として描き、
+作画の絵は画像ツールで作ってネームの承認の後に取り込む。Genko はそれを検査し、コマ割りと縦書きの写植を計算し、
 絵の依頼パック（サイズ・プロンプトの下書き・ガイド画像・参照画像）を用意し、取り込んだ絵をコマに置いて仕上げる。
 承認と本番の書き出しは人間が行う。この文書の最新版は resource `genko://guide/skill` で読める。
 
@@ -75,11 +76,47 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
       `dotted_box`（点線の囲み）。しっぽは付かない。
     - 要点だけ大きく・太く: `{太|心地よさのこと}`・`{大|…}`（台詞の中の一部）。1 つのフキダシで 1 か所まで。
     - 短い返事（「はい」「え？」）は短いまま。長い台詞は 2 つのフキダシに分ける（同じ人なら並べて置かれる）。
+- ネームのラフを描く: `submit_name` でコマと台詞ができたら、コマの中の人物・物・背景をラフ（アタリ）として、そのページのネームのレイヤーに鉛筆の線で描く。
+  ネームのレイヤーは印刷されず、ネームの承認の前でも描ける。
+  ネームの段階では画像を作らない・置かない。使わない道具: `import_image`、`generation_request`（`purpose: draft` も）、`import_images`（draft の依頼への取り込みも）、
+  `take_panel_art`、`adopt`（`to: draft`）、`place_asset`（`to: draft`・`name`）、画像の素材の `stamp_material`、画像を含む `paste`、
+  `import_name`（人が描いて渡したアタリのスキャン・写真を取り込むときだけ使う。自分で作った絵には使わない）。
+  ネームの承認の前に、ネーム・下描き・印刷に出さないレイヤーへ画像を置こうとすると、エージェントは断られる（`place_asset`・`adopt`・`take_panel_art`・
+  `generation_request` の draft・`stamp_material`・`paste`。人が描いたアタリを `import_name` で取り込むときだけは下描きに入る）。画像はネームの承認の後、作画で使う。
+  1. ネームのレイヤー: `inspect`（`target: "snapshot"`、`page`）の `layers` で `role` が `name` のレイヤーの `id`。下の op の `layer_id` にはこれを入れる。
+     はじめに `set_layer`（`layer: "name"`、`panel_each: true`）にしておくと、線はそれぞれ描き始めたコマの中だけに出る（コマからはみ出す人物の線が隣のコマに入らない）。
+  2. 人物: コマごとに `add_figure`（`preset`: stand・walk・run・sit・point・arms_up・think・kneel・peace、`hands`）か `add_mannequin`（`preset` に look_back もある）を、
+     ネーム計画の人物の位置（プレビューの赤い枠）に合わせて置く。`pos` は腰の位置（ページの mm で `[x, y, 0]`）で、頭の上端はおよそ y から `height_mm` の半分だけ上。
+     `height_mm`（全身の高さ。`add_figure` は 10〜400）はショットで決める: ロング（引き）はコマの高さの 1/3〜1/2、フル（全身）はコマに収まる高さ、
+     バストはコマの高さの 2 倍ほど、アップは 3〜4 倍（頭と肩だけがコマに入り、腰はコマの下の外になる）。
+     向きは `rot`（`[tip, turn, lean]`、ラジアン。turn 1.57 で横向き、3.14 で後ろ向き）、手足は `pose_figure`・`pose_mannequin`。
+  3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（隠れた線は省かれる）。
+  4. 物と背景: `add_shape`（`layer_id`、`shape` は rect・ellipse・line・polyline・curve・polygon、`kind: "pencil"`）で机・窓・建物の箱や地面の線を描く。
+     3D の小物（`add_prim3d` の `kind: "prop"`）や背景（`add_scene`）を置いて `trace_prims` してもよい。
+  5. ほかの線: `add_stroke`（`layer_id`、`points` はページの mm、`kind: "pencil"`）で、視線や動きの向き、効果の目印などを少し足す。
+  6. 見て直す: 線だけを見るときは `render` の `layer_id` にネームのレイヤーを渡す。構図を変えるときは、そのコマの線を `delete_area`
+     （`layer_id`、`area: {"rect": コマの [x, y, 幅, 高さ]}`）で消し、人形を `edit_prim`（`pos`・`rot`・`size`）・`pose_figure`・`pose_mannequin` で動かして `trace_prims` し直す。
+  7. 構図が決まったら、人形を `delete_prim` で消して線だけを残す（人形は印刷されないが、残すとネームの画面で線に重なって見える）。
+  例（`apply_ops`。B4 の 1 ページ目に、ネームのレイヤーの id を入れて送る）:
+  ```json
+  {"project": "summer.genko", "commit": true, "ops": [
+    {"op": "set_layer", "page": 1, "layer": "name", "panel_each": true},
+    {"op": "add_figure", "page": 1, "id": "hina", "pos": [170, 250, 0], "height_mm": 110, "preset": "point", "rot": [0, 0.6, 0]},
+    {"op": "add_mannequin", "page": 1, "id": "sora", "pos": [80, 255, 0], "height_mm": 100, "preset": "look_back"},
+    {"op": "trace_prims", "page": 1, "layer_id": "<ネームのレイヤーの id>", "ids": ["hina", "sora"], "kind": "pencil"},
+    {"op": "add_shape", "page": 1, "layer_id": "<ネームのレイヤーの id>", "shape": "rect", "box": [45, 285, 60, 25], "kind": "pencil"},
+    {"op": "add_stroke", "page": 1, "layer_id": "<ネームのレイヤーの id>", "kind": "pencil", "points": [[45, 110], [212, 110]]},
+    {"op": "delete_prim", "page": 1, "id": "hina"},
+    {"op": "delete_prim", "page": 1, "id": "sora"}]}
+  ```
 - `review_name`: `submit_name` の返事に付いた画像で、読み順の迷い・窮屈なコマ・弱いめくり・大きさの差の無い割りを確かめる（見返すときだけ `mcp__genko__render`）。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`（`input_hash` は作業項目の値）。
 - 承認の依頼はまとめて出す: ネームと作画は `pages` に複数のページ、設定画は `character_ids` に複数の人物を入れて 1 回で。
 - `revise_page`: 人間の指示（`comments`）に従って `submit_name` を `replace: true` で送り直す。
 
-## アタリ（人間が手で描いたネーム）から始めるとき
+## 人間が描いたアタリの画像から始めるとき
+
+人間が紙や別のアプリで描いたネーム（アタリ）のスキャン・写真を取り込むときの手順。`import_name` は、人が描いて渡したアタリのためだけに使う（自分で作った絵は取り込まない）。
+あなたが描くラフは、上の「ネームのラフを描く」のとおり線で描く。
 
 - 人間が `import_name` か CLI でアタリを取り込むと、Genko がコマ割りを検出して提案にする（確定は人間）。
 - `read_atari`: `mcp__genko__render`（`kind: "atari"`）でアタリを見て、手書きの台詞を読み、`mcp__genko__propose_lines` で提案する。

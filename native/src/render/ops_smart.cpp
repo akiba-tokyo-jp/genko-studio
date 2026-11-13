@@ -388,7 +388,8 @@ void smart_convert(OpContext& c) {
 
 // --- smart_place -----------------------------------------------------------------------------------------------------
 
-// smart_place's `to` (art, bg, draft, name) as the layer's role, the strict gates asked of art and bg.
+// smart_place's `to` (art, bg, draft, name) as the layer's role, the strict gates asked of art and bg (and of an agent's
+// picture on the name or the draft before the name is approved: core::refuse_unnamed_picture).
 LayerRole place_role(const OpContext& c, const Document& doc, std::size_t at, const std::string& to) {
     LayerRole role = LayerRole::User;
     if (to == "bg") role = LayerRole::Bg;
@@ -399,7 +400,10 @@ LayerRole place_role(const OpContext& c, const Document& doc, std::size_t at, co
     if ((to == "art" || to == "bg") && doc.strict_gates && !seen.name_ok) {
         throw OpError("page " + seen.index.repr() + ": approve the name first (strict_gates)");
     }
-    (void)c;
+    Layer laid;  // (the layer smart_place makes: its role, printed for art and bg alone)
+    laid.role = role;
+    laid.exportable = to == "art" || to == "bg";
+    core::refuse_unnamed_picture(c, seen, laid);  // (an agent's rough is lines, not a picture)
     return role;
 }
 

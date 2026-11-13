@@ -152,6 +152,28 @@ LayerRole stroke_role(const std::string& layer_name) {
 
 bool gated(const Document& doc) { return doc.strict_gates || py_truthy(doc.studio); }
 
+bool kept_off_print(const Layer& layer) { return layer.role == LayerRole::Name || layer.role == LayerRole::Draft || !layer.exportable; }
+
+void refuse_unnamed_picture(const OpContext& c, const Page& page, const Layer& target, const Json& asset) {
+    if (!kept_off_print(target)) return;  // (a printed layer: strict_gates' own rule)
+    if (c.actor.can_approve() || page.name_ok || !gated(c.doc)) return;
+    if (target.role == LayerRole::Draft && asset.is_string() && c.doc.studio.is_object()) {
+        const Json assets = py_get(c.doc.studio, "assets", Json::object());
+        const Json meta = assets.is_object() ? py_get(assets, asset.get<std::string>(), Json::object()) : Json::object();
+        if (meta.is_object() && py_equals(py_get(meta, "kind", Json()), Json("atari"))) return;  // (a person's hand-drawn atari)
+    }
+    throw OpError("page " + page.index.repr() + ": before the name is approved an agent puts no picture on the name, a draft or a " +
+                  "layer kept off the print; it draws the rough as lines on the name layer (trace_prims, add_shape, add_stroke)");
+}
+
+namespace {
+thread_local int atari_import_depth = 0;
+}  // namespace
+
+AtariImport::AtariImport() { ++atari_import_depth; }
+AtariImport::~AtariImport() { --atari_import_depth; }
+bool importing_atari() { return atari_import_depth > 0; }
+
 std::vector<std::int64_t> rgb3(const Json& value, std::string_view what) {
     std::vector<std::int64_t> rgb;
     try {

@@ -3,7 +3,9 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "render/ops_registry.hpp"
@@ -120,6 +122,84 @@ private slots:
         if(unsafe){QVERIFY(!accepted);QVERIFY(doc.page(1).note.empty());}
         else{QVERIFY2(accepted,"user image must be placed from the existing read-only library");const auto& layers=result.page(0).layers;const auto& target=*std::find_if(layers.begin(),layers.end(),[](const auto&l){return l.role==core::LayerRole::Ink;});QCOMPARE(target.patches.size(),std::size_t(1));QCOMPARE(*target.patches[0].png,original.toStdString());QCOMPARE(target.patches[0].attrs["box"],Json::array({4.0,7.0,12.0,6.0}));const auto image=render::render_page(result.page(0),72,render::proof_options()).image;QCOMPARE(image.getpixel(image.width()/2,image.height()/2),(std::vector<double>{12,123,234}));}
         QVERIFY(manifest.open(QIODevice::ReadOnly));QCOMPARE(manifest.readAll(),QByteArray::fromStdString(library));QVERIFY(picture.open(QIODevice::ReadOnly));QCOMPARE(picture.readAll(),original);QVERIFY(external.open(QIODevice::ReadOnly));QCOMPARE(external.readAll(),original);
+    }
+    // name-lines: in an agents' book (strict gates), before a page's name is approved an agent stamps no picture
+    // material on the name or the draft layer (the rough is lines: refused, the book as it was); a drawn part (lines)
+    // goes on the name layer; a person stamps the picture there, and so does the agent once the name is approved.
+    void anAgentStampsNoPictureOnANameNotApproved(){
+        QTemporaryDir cfg;QVERIFY(cfg.isValid());const auto previous=qgetenv("GENKO_CONFIG_DIR");
+        struct Restore{QByteArray value;~Restore(){if(value.isNull())qunsetenv("GENKO_CONFIG_DIR");else qputenv("GENKO_CONFIG_DIR",value);}}restore{previous};qputenv("GENKO_CONFIG_DIR",cfg.path().toUtf8());
+        const auto root=cfg.path()+"/materials";QVERIFY(QDir().mkpath(root));render::save_png(render::Image::create("RGBA",{2,1},render::Ink{12,123,234,255}),core::path_from_utf8((root+"/u-blue.png").toStdString()));
+        const auto library=Json::array({Json{{"id","u-blue"},{"kind","image"},{"name","青い画像"},{"file","u-blue.png"},{"width_mm",12},{"aspect",.5}}}).dump();
+        QFile manifest(root+"/library.json");QVERIFY(manifest.open(QIODevice::WriteOnly));QCOMPARE(manifest.write(QByteArray::fromStdString(library)),qint64(library.size()));manifest.close();
+        auto doc=core::new_episode("ネームの線",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"mono"));doc.strict_gates=true;
+        const core::CommandBus bus(render::ops_registry());
+        const auto stamp=[](const char* material,const char* layer){return Json::array({Json{{"op","stamp_material"},{"page",1},{"material_id",material},{"layer",layer},{"x_mm",10},{"y_mm",10}}});};
+        for(const char* layer:{"name","draft"}){
+            std::string error;
+            try{(void)bus.apply(doc,stamp("u-blue",layer),core::Actor("ai:test"));}catch(const core::ApplyError& e){error=e.what();}
+            QVERIFY2(error.find("draws the rough as lines on the name layer")!=std::string::npos,(std::string(layer)+": "+error).c_str());
+            const auto person=bus.apply(doc,stamp("u-blue",layer),core::Actor("human:test")).doc;const auto& made=person.page(0).layers;
+            QVERIFY(std::any_of(made.begin(),made.end(),[&](const auto& l){return core::to_string(l.role)==layer && l.patches.size()==1;}));
+        }
+        const auto lines=bus.apply(doc,stamp("mark-汗","name"),core::Actor("ai:test")).doc;
+        const auto& name=*std::find_if(lines.page(0).layers.begin(),lines.page(0).layers.end(),[](const auto& l){return l.role==core::LayerRole::Name;});
+        QVERIFY(name.stroke_count()>0);
+        doc.edit_page(0).name_ok=true;
+        const auto approved=bus.apply(doc,stamp("u-blue","draft"),core::Actor("ai:test")).doc;
+        QVERIFY(std::any_of(approved.page(0).layers.begin(),approved.page(0).layers.end(),[](const auto& l){return l.role==core::LayerRole::Draft && l.patches.size()==1;}));
+    }
+    // name-lines: in an agents' book, before a page's name is approved an agent pastes no picture (items with patches) on
+    // the name, a draft or a layer it set exportable: false — named by its id or by its role — and the book is as it was;
+    // lines alone are pasted there; a person pastes the picture, and so does the agent once the name is approved; a
+    // picture stamped on the layer kept off the print is refused as well. A name taken back (name_ok false again) is
+    // gated again.
+    void anAgentPastesNoPictureOnANameNotApproved(){
+        auto doc=core::new_episode("ネームの線",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"mono"));doc.strict_gates=true;
+        const core::CommandBus bus(render::ops_registry());
+        const core::Actor agent("ai:test"),person("human:test");
+        // (the agent's own layer kept off the print: made and set exportable false before the name, as strict_gates lets it)
+        doc=bus.apply(doc,Json::array({Json{{"op","add_layer"},{"page",1},{"id","trial"},{"kind","pen"}},Json{{"op","set_layer"},{"page",1},{"id","trial"},{"exportable",false}}}),agent).doc;
+        std::string name_id;for(const auto& l:doc.page(0).layers)if(l.role==core::LayerRole::Name)name_id=l.id;QVERIFY(!name_id.empty());
+        const std::string png=core::b64encode(render::write_png(render::Image::create("RGBA",{2,1},render::Ink{12,123,234,255})));
+        const Json picture={{"patches",Json::array({Json{{"box",Json::array({2,2,6,3})},{"mode","image"},{"opacity",1},{"png",png}}})}};
+        const Json lines={{"strokes",Json::array({Json{{"points",Json::array({Json::array({3,3}),Json::array({12,12})})}}})}};
+        const auto paste=[](Json where,const Json& items){where["op"]="paste";where["page"]=1;where["items"]=items;return Json::array({where});};
+        const std::vector<Json> targets={Json{{"layer_id",name_id}},Json{{"layer","name"}},Json{{"layer","draft"}},Json{{"layer_id","trial"}}};
+        for(const Json& where:targets){
+            std::string error;
+            try{(void)bus.apply(doc,paste(where,picture),agent);}catch(const core::ApplyError& e){error=e.what();}
+            QVERIFY2(error.find("draws the rough as lines on the name layer")!=std::string::npos,(where.dump()+": "+error).c_str());
+            (void)bus.apply(doc,paste(where,lines),agent);  // (lines alone go through)
+            (void)bus.apply(doc,paste(where,picture),person);
+        }
+        std::string stamped;
+        try{(void)bus.apply(doc,Json::array({Json{{"op","stamp_material"},{"page",1},{"material_id","mark-汗"},{"layer_id","trial"}}}),agent);}catch(const core::ApplyError& e){stamped=e.what();}
+        QVERIFY2(stamped.empty(),stamped.c_str());  // (a drawn part is lines: it goes on)
+        doc.edit_page(0).name_ok=true;
+        for(const Json& where:targets)(void)bus.apply(doc,paste(where,picture),agent);
+        doc.edit_page(0).name_ok=false;  // (the name taken back: gated again)
+        std::string again;
+        try{(void)bus.apply(doc,paste(targets[0],picture),agent);}catch(const core::ApplyError& e){again=e.what();}
+        QVERIFY2(again.find("draws the rough as lines on the name layer")!=std::string::npos,again.c_str());
+    }
+    // A picture material stamped by an agent on its layer kept off the print (exportable: false) before the name is
+    // approved: refused, as on the name and the draft.
+    void anAgentStampsNoPictureOnALayerKeptOffThePrint(){
+        QTemporaryDir cfg;QVERIFY(cfg.isValid());const auto previous=qgetenv("GENKO_CONFIG_DIR");
+        struct Restore{QByteArray value;~Restore(){if(value.isNull())qunsetenv("GENKO_CONFIG_DIR");else qputenv("GENKO_CONFIG_DIR",value);}}restore{previous};qputenv("GENKO_CONFIG_DIR",cfg.path().toUtf8());
+        const auto root=cfg.path()+"/materials";QVERIFY(QDir().mkpath(root));render::save_png(render::Image::create("RGBA",{2,1},render::Ink{12,123,234,255}),core::path_from_utf8((root+"/u-blue.png").toStdString()));
+        const auto library=Json::array({Json{{"id","u-blue"},{"kind","image"},{"name","青い画像"},{"file","u-blue.png"},{"width_mm",12},{"aspect",.5}}}).dump();
+        QFile manifest(root+"/library.json");QVERIFY(manifest.open(QIODevice::WriteOnly));QCOMPARE(manifest.write(QByteArray::fromStdString(library)),qint64(library.size()));manifest.close();
+        auto doc=core::new_episode("ネームの線",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"mono"));doc.strict_gates=true;
+        const core::CommandBus bus(render::ops_registry());
+        doc=bus.apply(doc,Json::array({Json{{"op","add_layer"},{"page",1},{"id","trial"},{"kind","pen"}},Json{{"op","set_layer"},{"page",1},{"id","trial"},{"exportable",false}}}),core::Actor("ai:test")).doc;
+        const Json stamp=Json::array({Json{{"op","stamp_material"},{"page",1},{"material_id","u-blue"},{"layer_id","trial"},{"x_mm",10},{"y_mm",10}}});
+        std::string error;
+        try{(void)bus.apply(doc,stamp,core::Actor("ai:test"));}catch(const core::ApplyError& e){error=e.what();}
+        QVERIFY2(error.find("draws the rough as lines on the name layer")!=std::string::npos,error.c_str());
+        const auto placed=bus.apply(doc,stamp,core::Actor("human:test")).doc;
+        QCOMPARE(placed.page(0).layers[core::layer_by_id(placed.page(0),"trial")].patches.size(),std::size_t(1));
     }
     void drawnBuiltinKinds_data(){QTest::addColumn<QString>("material");QTest::newRow("lines")<<QString("mark-汗");QTest::newRow("lettering")<<QString("sfx-ドーン");}
     void letteringPutsALineAsTheMaterialHasIt() {

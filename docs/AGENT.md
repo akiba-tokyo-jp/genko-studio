@@ -13,7 +13,7 @@ Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No display needed
 ## Contract
 
 - Project = folder with `project.json`
-- `name_ok` before ink strokes / flood_fill / lt_convert to ink
+- `name_ok` before ink strokes / flood_fill / lt_convert to ink (lines on the name and draft layers, which never print, can be drawn before it: an agent draws the name's rough there as lines)
 - mm coordinates, page index 1-based
 - Failed apply is transactional (nothing from that request is kept)
 - `project.lock` while `apply` runs (stale after 15 minutes)
@@ -192,7 +192,7 @@ Genko makes no images. It writes a generation request, the agent generates with 
 Rules:
 
 - The image is kept as its asset and resampled from the source at print time into its placement, then clipped to its panel (`bleed` panels extend to the paper edge on their outer sides). A generated image covers the panel plus the request's 3 mm pad. Gutters stay white.
-- Art (`to: art|bg`) needs the page's name approved; `to: draft` works any time and never prints. Candidates never print.
+- Art (`to: art|bg`) needs the page's name approved; `to: draft` never prints, and for an agent it also waits for the name: before the name is approved an agent puts no picture on the name or draft layer, nor on a layer set `exportable: false` (`place_asset`, `adopt`, `take_panel_art`, `stamp_material` of a picture, `paste` with pictures, `generation_request` with `purpose: draft` are refused) and draws the rough as lines on the name layer instead (`trace_prims`, `add_shape`, `add_stroke`). A person may place pictures there any time. `import_name` is for a hand-drawn name a person gave the agent (a scan or a photo): the agent uses it only for that, never for its own generated pictures; that scan still comes in as the draft (on the draft layer, never the name layer). Only a person (or `import_name`) marks an asset `kind: atari` with `register_assets`. Candidates never print.
 - With `strict_gates` (studio projects) an approved name freezes the layout for agents; `advance to=finish` needs `art_ok`.
 - `split_frame` gives the brief to the panel read first; `merge_frame` keeps the first panel's brief. Placed art needs `force: true` and moves to `studio.orphans`. `duplicate_page` keeps art on the new panel ids.
 - A person's pins, prompt/size overrides (`gen.prompt_override` replaces the prompt draft), regions and `skip` cannot be changed by an agent. Approvals are person-only; an approved sheet locks the character and its face is cut out as a `face` reference.
@@ -272,7 +272,7 @@ Rulers and 3D (M14):
 
 - `add_ruler {page, kind, points, …, frame_id?}` puts a ruler on the page: `line` [a, b], `curve` (points of a smooth curve), `parallel {angle}`, `concentric` [centre] `{ratio, angle}`, `radial` [centre] (focus lines), `perspective` (1 to 3 vanishing points), `symmetry` [a, b] `{copies, mirror}`. `edit_ruler {id, active, visible, …}`, `delete_ruler {id?}` (none: all).
 - `add_stroke {snap_ruler: true}` (or `ruler_id`) makes the line follow the ruler that suits it (line and curve rulers only take lines that start within 10 mm of them); active symmetry rulers draw the line again. Rulers are guides: never printed.
-- `add_mannequin`, `pose_mannequin {drag: {handle, to: [x, y]}}` points a part (chest, head, elbows, hands, fingers, knees, ankles, toes; `pelvis` moves the figure) at a place on the page. `add_prim3d {kind: box, pos, size: [w, h, d], rot: [tip, turn, lean], focal_mm}`, `edit_prim`, `delete_prim`. Figures and boxes show in name and proof renders, never in print. `trace_prims {layer_id, ids?}` draws them as pencil lines on a layer (for the draft).
+- `add_mannequin`, `pose_mannequin {drag: {handle, to: [x, y]}}` points a part (chest, head, elbows, hands, fingers, knees, ankles, toes; `pelvis` moves the figure) at a place on the page. `add_prim3d {kind: box, pos, size: [w, h, d], rot: [tip, turn, lean], focal_mm}`, `edit_prim`, `delete_prim`. Figures and boxes show in name and proof renders, never in print. `trace_prims {layer_id, ids?, kind}` draws them as pencil lines on a layer: on the name layer (its id from `inspect target=snapshot`, role `name`) this is how an agent draws the name's rough, before the name is approved too.
 
 Tones, effect lines and materials (M15):
 

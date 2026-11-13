@@ -1142,6 +1142,16 @@ void register_assets(OpContext& c) {
         require_asset(c.doc, Json(ref));
         Json& index = c.doc.studio["assets"];
         const Json before = py_get(index, ref, Json::object());
+        // (name-lines: an asset marked kind atari goes onto a draft before the name is approved — a person's hand-drawn
+        // name. Only a person marks it so, or takes it away; an agent's import_name of the scan a person gave it does too)
+        if (!person(c) && !importing_atari()) {
+            const Json was = before.is_object() ? py_get(before, "kind", Json()) : Json();
+            const Json now = meta.is_object() && meta.contains("kind") ? meta["kind"] : was;
+            if ((py_equals(now, Json("atari")) || py_equals(was, Json("atari"))) && !py_equals(now, was)) {
+                throw OpError("only a person can mark an asset as an atari (kind atari) or change that: an agent brings in a scan a person "
+                              "gave it with import_name");
+            }
+        }
         setitem(index, ref, merged(before, py_or(meta, Json::object())));
     }
 }
@@ -1472,6 +1482,7 @@ void adopt_candidate(OpContext& c, const StudioHooks& hooks) {
         layer.frame_id = frame.id;
         layer.source = Json::object({{"to", to}});
     }
+    refuse_unnamed_picture(c, page, layer);  // (an agent's rough is lines, not a picture)
     layer.asset = subscript(cand, "asset").is_string() ? std::optional<std::string>(cand["asset"].get<std::string>())
                                                        : std::optional<std::string>(py_str(cand["asset"]));
     layer.source = Json::object({{"candidate", subscript(cand, "id")}, {"request", dget(cand, "request")}, {"to", to}});
@@ -1646,6 +1657,7 @@ void place_asset(OpContext& c, const StudioHooks& hooks) {
     layer.role = role;
     layer.kind = LayerKind::Placed;
     layer.exportable = to == "art" || to == "bg";
+    refuse_unnamed_picture(c, page, layer, Json(asset));  // (an agent's rough is lines, not a picture)
     layer.title = "placed " + to;
     if (frame != nullptr) layer.frame_id = frame->id;
     layer.asset = asset;
