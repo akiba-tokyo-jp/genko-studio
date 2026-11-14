@@ -265,7 +265,15 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
     form->setRowVisible(preset_row, false);
     form->addRow(QString(), vertical);
     form->addRow(QString(), draw_balloon);
-    form->addRow(QStringLiteral("書体"), font);
+    more_fonts = new QPushButton(QStringLiteral("ほかの書体…"));
+    more_fonts->setObjectName(QStringLiteral("text_more_fonts"));
+    more_fonts->setToolTip(QStringLiteral("書体のパレットを開きます。見本を見て、まんが用の書体を選べます"));
+    connect(more_fonts, &QPushButton::clicked, this, [this] { emit moreFonts(); });
+    auto* font_line = new QHBoxLayout;
+    font_line->setContentsMargins(0, 0, 0, 0);
+    font_line->addWidget(font, 1);
+    font_line->addWidget(more_fonts);
+    form->addRow(QStringLiteral("書体"), font_line);
     form->addRow(QStringLiteral("文字の大きさ"), size);
     auto* note = new QLabel(QStringLiteral("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}（特大・小・太・赤・青・白も）と打ちます。"
                                            "入れた後の台詞は、台詞パネルで直せます。"));
@@ -277,6 +285,24 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
 void TextToolSettings::show_preset(const QString& name) {
     preset_name->setText(name.isEmpty() ? QString() : QStringLiteral("パレットの形: %1").arg(name));
     static_cast<QFormLayout*>(layout())->setRowVisible(preset_row, !name.isEmpty());
+}
+
+void TextToolSettings::show_usual(const QString& label) { font->setItemText(0, QStringLiteral("いつもの書体（%1）").arg(label)); }
+
+void TextToolSettings::show_face(const QString& key, const QString& label) {
+    // (one choice for the palette's face, after the seven: the one before it taken away)
+    const int listed = static_cast<int>(lettering::bundled_fonts().size());
+    while (font->count() > listed) font->removeItem(font->count() - 1);
+    if (key.isEmpty()) {
+        font->setCurrentIndex(0);
+        return;
+    }
+    int at = font->findData(key);
+    if (at < 0) {
+        font->addItem(label, key);
+        at = font->count() - 1;
+    }
+    font->setCurrentIndex(at);
 }
 
 TextToolSettings::LineFields TextToolSettings::line_fields(const QString& tool) const {

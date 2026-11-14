@@ -515,6 +515,7 @@ void MainWindow::build_actions() {
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
     build_balloon_actions();    // (フキダシのパレットを開く: main_window_fukidashi.cpp)
+    build_font_actions();       // (書体のパレットを開く: main_window_fonts.cpp)
     build_type_actions();       // (PC5 G-a: 横書き文字ツール, 書式's commands, the text tools' type layers: main_window_type.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
@@ -972,6 +973,7 @@ void MainWindow::build_docks() {
     build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     build_balloon_dock();  // (フキダシ, the palette of balloons, a tab beside 台詞 when opened: main_window_fukidashi.cpp)
+    build_font_dock();  // (書体, the palette of lettering faces, a tab beside 台詞 when opened: main_window_fonts.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
     build_paint_docks();  // (PC4 E-0: ブラシ設定, ブラシ, パターン, スタイル, ツールプリセット, スウォッチ: paint_panels.cpp)

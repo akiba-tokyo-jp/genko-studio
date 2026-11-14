@@ -29,6 +29,24 @@ const std::vector<std::pair<QString, QString>>& kinds();
 QString kind_label(const std::string& key);
 // fonts.BUNDLED: each bundled face's key and its name.
 const std::vector<std::pair<QString, QString>>& bundled_fonts();
+// fonts@1 (書体の追加 F2): every face Genko comes with as the 書体 palette lists it — the seven of before (アンチック first,
+// the others in the category the catalogue gives their fonts) and the forty added (core/font_catalog.hpp), by the
+// catalogue's categories in their order —, and a category's name. `mark`: what a person must know before choosing it
+// (「かなだけ（漢字は◯◯）」, 「漢字は一部（残りは◯◯）」; empty: nothing).
+struct FaceRow {
+    QString key;       // what a line's style.font takes
+    QString label;     // its name
+    QString category;  // the category's id
+    QString use;       // what it is for
+    QString mark;
+    QString search;    // (its name, key, family, use and category, lower case: what the palette's search looks through)
+    bool added = false;
+};
+const std::vector<FaceRow>& catalog_faces();
+const std::vector<std::pair<QString, QString>>& face_categories();  // {id, name}
+// A face's name for a person: a bundled face's (bundled_fonts), an added face's (the catalogue's), a font file's name
+// without its folder and extension.
+QString face_label(const QString& font);
 // tategaki.STYLE_TAGS: the marks typed in {…|words} and the style each gives, in Python's order.
 const std::vector<std::pair<QString, core::Json>>& style_tags();
 

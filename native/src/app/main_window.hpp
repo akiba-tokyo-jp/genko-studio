@@ -83,6 +83,7 @@ class ToolPresetsPanel;
 class StylesPanel;
 class ShapesPanel;
 class BalloonPalette;
+class FontPalette;
 struct BalloonPreset;
 class HistogramPanel;
 class InfoPanel;
@@ -464,6 +465,18 @@ public:
     // next line placed does), "line" the chosen line, "next" the next line; the chosen line given a preset's look (one
     // edit_line: false when no line is chosen or it has no balloon); the preset the next line placed takes (none:
     // nullptr), set by its key (empty: none — the text tool's own フキダシ again).
+    // 書体 (fonts@1, 書体の追加 F2; main_window_fonts.cpp): the palette of lettering faces and its dock; a face picked there
+    // (`how`: "" as the window decides — the chosen line, else the next line placed —, "line", "next", "ruby" the chosen
+    // ruby, "book" the book's usual face); the face the next line placed takes (empty: the text tool's own); the faces
+    // the book names whose files are not on this computer, by name; what is said of the book's faces when it is opened.
+    FontPalette* font_palette() const { return font_palette_; }
+    QDockWidget* font_dock() const { return font_dock_; }
+    void use_font_face(const QString& key, const QString& how = {});
+    void arm_font_face(const QString& key);
+    QString armed_face() const { return armed_face_; }
+    QStringList faces_not_installed() const;
+    void note_fonts_on_open(const std::shared_ptr<Session>& session);
+    void show_usual_face();
     BalloonPalette* balloon_palette() const { return balloon_palette_; }
     QDockWidget* balloon_dock() const { return balloon_dock_; }
     void use_balloon_preset(const QString& key, const QString& how = {});
@@ -1189,6 +1202,8 @@ private:
     void build_line_dock();
     void build_balloon_actions();  // (フキダシ: main_window_fukidashi.cpp)
     void build_balloon_dock();
+    void build_font_actions();  // (書体: main_window_fonts.cpp)
+    void build_font_dock();
     QWidget* line_select_page();
     void panel_for_tool(const QString& tool);
     void refresh_lines();
@@ -1583,6 +1598,10 @@ private:
     BalloonPalette* balloon_palette_ = nullptr;
     QDockWidget* balloon_dock_ = nullptr;
     QString armed_balloon_;  // (the palette's preset the next line placed takes; empty: none)
+    FontPalette* font_palette_ = nullptr;
+    QDockWidget* font_dock_ = nullptr;
+    QString armed_face_;  // (the 書体 palette's face the next line placed takes; empty: the text tool's own choice)
+    std::vector<std::weak_ptr<Session>> fonts_told_;  // (the books whose faces were spoken of when they were opened)
     QPointer<StoryEditor> story_editor_;
     QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
     bool lines_later_ = false;

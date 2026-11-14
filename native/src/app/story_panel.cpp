@@ -725,8 +725,8 @@ void StoryPanel::show_ruby_settings() {
     const core::RubySpan& span = chosen ? spans[static_cast<std::size_t>(row)] : none;
     const QString face = span.font ? qs(*span.font) : QString();
     int at = ruby_font->findData(face);
-    if (at < 0) {  // (a font file: shown by its name)
-        ruby_font->addItem(QFileInfo(face).completeBaseName(), face);
+    if (at < 0) {  // (a font file: shown by its name; fonts@1: one of the added faces by the catalogue's)
+        ruby_font->addItem(lettering::face_label(face), face);
         at = ruby_font->findData(face);
     }
     ruby_font->setCurrentIndex(at);
@@ -756,6 +756,15 @@ void StoryPanel::set_ruby(const char* key, const Json& value) {
     }
     if (span == was) return;  // (nothing changed: no edit)
     window_->apply_ops(Json::array({lettering::rubies_op(*l, spans)}));
+}
+
+bool StoryPanel::set_chosen_ruby_font(const QString& key) {
+    const core::StoryLine* l = line();
+    if (l == nullptr) return false;
+    const int row = rubies->currentRow();
+    if (row < 0 || row >= static_cast<int>(lettering::rubies_of(*l).size())) return false;
+    set_ruby("font", key.isEmpty() ? Json() : Json(key.toStdString()));
+    return true;
 }
 
 void StoryPanel::show_rubies(const core::StoryLine* l) {

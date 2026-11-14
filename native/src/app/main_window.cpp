@@ -710,6 +710,10 @@ void MainWindow::connect_session() {
     session_links_.push_back(connect(s, &Session::notice, this, [this](const QString& message, bool error) {
         flash(wording::error(message), 6000, error);
     }));
+    // (fonts@1: what is said of the book's faces when it is opened — once a book, after the window has shown it)
+    QTimer::singleShot(0, this, [this, weak = std::weak_ptr<Session>(session_)] {
+        if (const auto opened = weak.lock(); opened && !closed_) note_fonts_on_open(opened);
+    });
 }
 
 void MainWindow::disconnect_session() {

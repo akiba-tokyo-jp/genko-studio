@@ -124,6 +124,10 @@ public:
     QComboBox* layer_order = nullptr;
     QPushButton* reset = nullptr;
 
+    // 書体 (fonts@1): the chosen ruby's face set from the 書体 palette (an edit_line of the line's rubies); false when no
+    // ruby of the chosen line is chosen in the list.
+    bool set_chosen_ruby_font(const QString& key);
+
 private:
     std::vector<const core::StoryLine*> lines() const;
     // The chosen line's words and lettering shown (never throws: what cannot be shown is logged, the rest is shown).

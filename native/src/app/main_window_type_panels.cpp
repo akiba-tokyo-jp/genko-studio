@@ -268,7 +268,8 @@ void MainWindow::note_missing_glyphs(const core::StoryLine& record) {
         for (const char32_t c : core::ruby::code_points(record.text)) {
             if (c == U'\n' || c == U' ' || c == U'　') continue;
             const std::u32string one(1, c);
-            if (fonts.path_for(face, one) != face.other && !lacking.contains(QString::fromUcs4(&c, 1))) lacking += QString::fromUcs4(&c, 1);
+            // (fonts@1: a letter drawn in the face's partner — the kanji of a face without them — is the face's own)
+            if (!face.own(fonts.path_for(face, one)) && !lacking.contains(QString::fromUcs4(&c, 1))) lacking += QString::fromUcs4(&c, 1);
             if (lacking.size() >= 8) break;
         }
         if (!lacking.isEmpty()) flash(QStringLiteral("「%1」は選んだ書体に無いので、ほかの書体で描きます（欠落グリフの保護）").arg(lacking), 5000);
@@ -289,11 +290,17 @@ void MainWindow::resolve_missing_fonts() {
     for (const Json& result : last_results_) {
         if (result.is_object() && result.value("op", Json()) == Json("replace_fonts")) missing = result.value("missing", Json::array());
     }
+    // (fonts@1: the faces Genko comes with whose files are not on this computer are not missing fonts to replace — they
+    // come back when the application is put in whole again —: told, never offered for replacing)
+    const QStringList absent = faces_not_installed();
+    const QString told = absent.isEmpty() ? QString()
+                                          : QStringLiteral("付属の書体「%1」のファイルが、このパソコンにありません。置き換えずに、アプリを入れ直すと元の書体で描けます")
+                                                .arg(absent.join(QStringLiteral("」「")));
     if (missing.empty()) {
-        flash(QStringLiteral("見つからないフォントはありません"), 3000);
+        flash(absent.isEmpty() ? QStringLiteral("見つからないフォントはありません") : told, absent.isEmpty() ? 3000 : 8000);
         return;
     }
-    MissingFontsDialog dialog(this, missing);
+    MissingFontsDialog dialog(this, missing, told);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     if (apply_ops(Json::array({Json{{"op", "replace_fonts"}, {"map", dialog.map()}}}))) {
         update_all_type();
@@ -308,7 +315,14 @@ void MainWindow::replace_all_missing_fonts() {
         if (result.is_object() && result.value("op", Json()) == Json("replace_fonts")) replaced = result.value("replaced", Json(0)).get<std::int64_t>();
     }
     if (replaced > 0) update_all_type();
-    flash(replaced > 0 ? QStringLiteral("見つからないフォントを、いつもの書体にしました（%1 か所）").arg(replaced) : QStringLiteral("見つからないフォントはありません"), 4000);
+    // (fonts@1: Genko's own faces whose files are not here are left in the book as they are, and said)
+    const QStringList absent = faces_not_installed();
+    QString said = replaced > 0 ? QStringLiteral("見つからないフォントを、いつもの書体にしました（%1 か所）").arg(replaced) : QStringLiteral("見つからないフォントはありません");
+    if (!absent.isEmpty()) {
+        said += QStringLiteral("\n付属の書体「%1」は、ファイルがこのパソコンに無いだけなので、そのままにしました（アプリを入れ直すと元の書体で描けます）")
+                    .arg(absent.join(QStringLiteral("」「")));
+    }
+    flash(said, absent.isEmpty() ? 4000 : 8000);
 }
 
 }  // namespace genko::app

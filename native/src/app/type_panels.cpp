@@ -41,11 +41,13 @@
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "app/view_units.hpp"
+#include "core/font_catalog.hpp"
 #include "core/prefs_table.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
 #include "core/type_styles.hpp"
 #include "core/type_text.hpp"
+#include "render/font_files.hpp"
 #include "render/draw.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/opentype.hpp"
@@ -221,7 +223,9 @@ QString qt_family(const QString& font) {
     static QString file;
     static int file_id = -1;
     static QString file_family;
-    const bool own = font.indexOf(QLatin1Char('/')) < 0 && font.indexOf(QLatin1Char('\\')) < 0;
+    // (fonts@1: one of the forty added faces is a file of Genko's — added while it is the one shown and let go for the
+    // next, as a file of the computer's: never forty fonts kept in Qt for the life of the application)
+    const bool own = font.indexOf(QLatin1Char('/')) < 0 && font.indexOf(QLatin1Char('\\')) < 0 && !core::fonts::added(font.toStdString());
     if (own) {
         if (const auto it = bundled.find(font); it != bundled.end()) return it->second;
     } else if (font == file) {
@@ -584,6 +588,27 @@ void CharacterPanel::fill_fonts() {
     }
     if (!listed.empty()) family->insertSeparator(family->count());
     for (const auto& [key, label] : lettering::bundled_fonts()) add(label, key, key == QLatin1String("antique") ? QStringLiteral("mincho") : key);
+    // fonts@1: the forty added faces under their categories, by name (no file of theirs is read to fill the list, and
+    // none is added to Qt: their samples are the 書体 palette's); one whose file is not on this computer cannot be chosen
+    {
+        auto* model = qobject_cast<QStandardItemModel*>(family->model());
+        QString category;
+        for (const lettering::FaceRow& face : lettering::catalog_faces()) {
+            if (!face.added) continue;
+            if (face.category != category) {
+                category = face.category;
+                QString name = category;
+                for (const auto& [id, label] : lettering::face_categories()) {
+                    if (id == category) name = label;
+                }
+                family->addItem(QStringLiteral("— %1 —").arg(name));
+                if (model != nullptr) model->item(family->count() - 1)->setEnabled(false);
+            }
+            const bool there = render::font_files::file_there(face.key.toStdString());
+            add(there ? face.label : face.label + QStringLiteral("（ファイルなし）"), face.key, QString());
+            if (!there && model != nullptr) model->item(family->count() - 1)->setEnabled(false);
+        }
+    }
     family->insertSeparator(family->count());
     std::set<QString> seen;
     for (const FontFace& f : faces) {
@@ -641,8 +666,8 @@ void CharacterPanel::refresh() {
         style->addItem(at(c, "font_style").is_string() ? qs(at(c, "font_style").get<std::string>()) : QStringLiteral("Regular"), data);
     }
     int index = family->findData(data);
-    if (index < 0) {
-        family->addItem(QFileInfo(data).completeBaseName(), data);
+    if (index < 0) {  // (a font file by its name; fonts@1: one of the added faces — the list not opened yet — by the catalogue's)
+        family->addItem(lettering::face_label(data), data);
         index = family->count() - 1;
     }
     {
