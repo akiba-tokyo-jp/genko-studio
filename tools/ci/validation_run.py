@@ -313,6 +313,11 @@ def run_tests(build, regex, jobs, root, log, keep=()):
     return subprocess.run(['ctest', '--test-dir', str(build), '--parallel', str(jobs), '-R', regex, '-V', '--no-tests=error', '--output-on-failure'], cwd=root, stdout=log, stderr=subprocess.STDOUT, pass_fds=keep).returncode
 
 
+def cli23_required(plan, preset, row):
+    """CLI23 を要る構成: 工程出口（milestone）と最終配布候補（final）の Linux の全構成、統合候補の全試験の構成。"""
+    return preset.startswith('linux') and (plan['phase'] in ('milestone', 'final') or plan['phase'] == 'integration' and row['suite'] == 'full')
+
+
 def earlier_record(out, old_raw, state, build):
     """--resume: 前回の記録から続けてよいかを調べる。返すのは (前回の記録, None) か (None, 続けない理由)。"""
     if old_raw is None:
@@ -495,7 +500,7 @@ def run_held(args, root, out, keep):
         failures += state['audit']['failures']
         if state['ctest_exit']:
             failures.append('CTest失敗・中断')
-        if args.preset.startswith('linux') and (plan['phase'] == 'milestone' or plan['phase'] == 'integration' and row['suite'] == 'full'):
+        if cli23_required(plan, args.preset, row):
             executable = next(p for p in commands if p.name == 'genko')
             pyref = os.environ.get('GENKO_PYREF')
             if not pyref:
@@ -588,8 +593,7 @@ def pair_results(folder, plan):
             if json.dumps(audit, sort_keys=True) != json.dumps(row.get('audit'), sort_keys=True):
                 failures.append(preset + ': raw証跡の欠落・改変')
             failures += [preset + ': ' + f for f in audit['failures']]
-            cli_required = preset.startswith('linux') and (plan['phase'] == 'milestone' or plan['phase'] == 'integration' and wanted['suite'] == 'full')
-            if cli_required:
+            if cli23_required(plan, preset, wanted):
                 if row.get('cli23') != 'pass' or not (path.parent / 'cli23.log').is_file():
                     failures.append(preset + ': CLI23証跡の欠落')
         except (OSError, ValueError, KeyError) as error:
@@ -605,7 +609,12 @@ def pair_results(folder, plan):
         if pins and any(p != pins[0] for p in pins):
             failures.append(platform_name + ': 構成間のsource不一致')
     # resumed: 続きから走らせた構成（回の数、落ちてから合格した試験、前の回の不合格の理由）。原因はHANDOFFに書く。
-    return {'passed': not failures, 'failures': failures, 'presets': sorted(rows), 'performance': 'not_run', 'resumed': resumed}
+    # plan・configurations: どの段階の、どの範囲の合格か（2026-11-14 から milestone は「全構成の全試験」ではない。
+    # ASan と Windows は差分に関係する試験で、写真加工の試験を ASan から外すことがある）。
+    return {'passed': not failures, 'failures': failures, 'presets': sorted(rows), 'performance': 'not_run', 'resumed': resumed,
+            'plan': {'phase': plan.get('phase'), 'tier': plan.get('tier'), 'schema': plan.get('schema'),
+                     'asan_without_photo': len(plan.get('asan_without_photo') or [])},
+            'configurations': {preset: {'suite': wanted.get('suite'), 'tests': len(wanted.get('tests', []))} for preset, wanted in sorted(expected.items())}}
 
 
 def main():
