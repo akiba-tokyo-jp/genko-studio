@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -83,7 +84,10 @@ Image page_part(const Document& doc, int dpi, double x, double y, double w, doub
 struct Grey {
     int w = 0, h = 0;
     std::string v;
-    int at(int x, int y) const { return static_cast<unsigned char>(v[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)]); }
+    int at(int x, int y) const {  // (a place off the picture is the test's own mistake: a failure, never a read past it)
+        if (x < 0 || y < 0 || x >= w || y >= h) throw std::out_of_range("a pixel off the picture");
+        return static_cast<unsigned char>(v[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)]);
+    }
 };
 Grey grey_of(const Image& image) { return Grey{image.width(), image.height(), image.convert("L").tobytes()}; }
 
@@ -2658,20 +2662,21 @@ private slots:
         const auto px_of = [](int dpi, double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
         const Json path = Json::array({Json::array({42, 44}), Json::array({70, 40}), Json::array({90, 54}), Json::array({84, 78}), Json::array({58, 80}), Json::array({40, 65})});
         for (const int dpi : {150, 600, 1200}) {
-            const double page = dpi == 1200 ? 115 : 140;  // (the picture: page × page − 20 mm — the balloon and its tail reach 100 × 92)
+            // (the picture: page × 100 mm — the balloon and its tail reach 100 × 96, the fading tail's tip at 99.5 × 95.5)
+            const double page = dpi == 1200 ? 115 : 140;
             {  // (a notch: its sides are part of the one line, closed)
                 const Document doc = one_line("speech", Json{{"tails", Json::array({Json{{"to", Json::array({70, 62})}, {"kind", "inward"}}})}, {"style", pen}});
-                const Image drawn = balloon_alone(doc, dpi, page, page - 20);
+                const Image drawn = balloon_alone(doc, dpi, page, 100);
                 QVERIFY(closed_round(grey_of(drawn), px_of(dpi, 50), px_of(dpi, 52), 200));
                 genko::render::text::clear_balloon_cache();
-                QVERIFY(balloon_alone(doc, dpi, page, page - 20).tobytes() == drawn.tobytes());
+                QVERIFY(balloon_alone(doc, dpi, page, 100).tobytes() == drawn.tobytes());
                 if (dpi == 600) QCOMPARE(genko::render::text::balloon::pen_trace({&doc.story.front()}, dpi).size(), std::size_t{1});
             }
             for (const bool curved : {false, true}) {  // (drawn by hand)
                 Json style = pen;
                 if (curved) style["path_curve"] = true;
                 const Document doc = one_line("speech", Json{{"path", path}, {"tail", Json::array({70, 92})}, {"style", style}});  // (a tail from its foot, clear of its corners)
-                const Image drawn = balloon_alone(doc, dpi, page, page - 20);
+                const Image drawn = balloon_alone(doc, dpi, page, 100);
                 QVERIFY2(closed_round(grey_of(drawn), px_of(dpi, 65), px_of(dpi, 60), 200), qPrintable(QStringLiteral("%1 at %2 dpi").arg(curved ? "smoothed" : "as given").arg(dpi)));
                 const auto traces = genko::render::text::balloon::pen_trace({&doc.story.front()}, dpi);
                 QCOMPARE(traces.size(), std::size_t{1});
@@ -2687,7 +2692,7 @@ private slots:
                 Document even = cut;
                 even.story.front().style.erase("pen_swell");
                 even.story.front().style.erase("pen_taper");
-                const Grey a = grey_of(balloon_alone(cut, dpi, page, page - 20)), b = grey_of(balloon_alone(even, dpi, page, page - 20));
+                const Grey a = grey_of(balloon_alone(cut, dpi, page, 100)), b = grey_of(balloon_alone(even, dpi, page, 100));
                 int gone = 0, ink = 0;
                 for (int y = 0; y < a.h; ++y) {
                     for (int x = 0; x < a.w; ++x) {
@@ -2699,7 +2704,7 @@ private slots:
                 QVERIFY(ink > 100);
                 QVERIFY2(gone < ink / 3, qPrintable(QStringLiteral("%1 of %2").arg(gone).arg(ink)));
                 const Document fade = one_line("speech", Json{{"tails", Json::array({Json{{"to", Json::array({100, 96})}, {"kind", "fade"}}})}, {"style", pen}});
-                const Grey f = grey_of(balloon_alone(fade, dpi, page, page - 20));
+                const Grey f = grey_of(balloon_alone(fade, dpi, page, 100));
                 QVERIFY(f.at(px_of(dpi, 99.5), px_of(dpi, 95.5)) > 200);  // (nothing left at the tip)
                 QVERIFY(!closed_round(f, px_of(dpi, 65), px_of(dpi, 60), 200));  // (open at the tip, as a fading tail is)
             }
