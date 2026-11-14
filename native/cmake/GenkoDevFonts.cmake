@@ -5,8 +5,10 @@
 #
 # Where a link can be made (not Windows, and the place is free or already a link) the folder is a link to the source's.
 # Otherwise — Windows, a file system without links, a real folder already there — the forty files and FONTS.json are
-# copied, each only when it is missing, of another size or older than the source's (the six fonts compiled into the
-# program, the licences and the screen's fonts are not: the program reads none of them from here).
+# copied: a font file only when it is missing or of another size (never by the files' times: a copy that keeps its
+# source's time would be made again on every build, 157 MB of them), the catalogue only when its content differs (the
+# six fonts compiled into the program, the licences and the screen's fonts are not copied: the program reads none of
+# them from here). A font file the catalogue lists that is not in the source stops the step (GenkoFontList.cmake).
 if(NOT GENKO_FONTS_SOURCE OR NOT GENKO_FONTS_DEST)
   message(FATAL_ERROR "GenkoDevFonts.cmake: GENKO_FONTS_SOURCE and GENKO_FONTS_DEST are needed")
 endif()
@@ -33,25 +35,16 @@ endif()
 
 if(_copy)
   file(MAKE_DIRECTORY "${GENKO_FONTS_DEST}")
-  file(READ "${GENKO_FONTS_SOURCE}/FONTS.json" _catalogue)
-  string(JSON _count LENGTH "${_catalogue}" fonts)
-  math(EXPR _last "${_count} - 1")
-  set(_files FONTS.json)
-  foreach(_i RANGE ${_last})
-    string(JSON _storage GET "${_catalogue}" fonts ${_i} storage)
-    if(_storage STREQUAL "file")
-      string(JSON _file GET "${_catalogue}" fonts ${_i} file)
-      list(APPEND _files "${_file}")
-    endif()
-  endforeach()
-  foreach(_file IN LISTS _files)
-    set(_from "${GENKO_FONTS_SOURCE}/${_file}")
-    set(_to "${GENKO_FONTS_DEST}/${_file}")
+  include("${CMAKE_CURRENT_LIST_DIR}/GenkoFontList.cmake")
+  genko_font_files(_fonts "${GENKO_FONTS_SOURCE}")
+  foreach(_from IN LISTS _fonts)
+    get_filename_component(_name "${_from}" NAME)
+    set(_to "${GENKO_FONTS_DEST}/${_name}")
     set(_stale TRUE)
-    if(EXISTS "${_to}")
+    if(EXISTS "${_to}" AND NOT IS_DIRECTORY "${_to}")
       file(SIZE "${_from}" _a)
       file(SIZE "${_to}" _b)
-      if(_a EQUAL _b AND NOT "${_from}" IS_NEWER_THAN "${_to}")
+      if(_a EQUAL _b)
         set(_stale FALSE)
       endif()
     endif()
@@ -59,4 +52,5 @@ if(_copy)
       file(COPY_FILE "${_from}" "${_to}")
     endif()
   endforeach()
+  file(COPY_FILE "${GENKO_FONTS_SOURCE}/FONTS.json" "${GENKO_FONTS_DEST}/FONTS.json" ONLY_IF_DIFFERENT)
 endif()

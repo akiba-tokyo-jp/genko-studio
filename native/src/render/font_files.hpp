@@ -16,15 +16,18 @@ class QByteArray;
 // links it to native/resources/fonts). Tests name the folder themselves (set_dir_for_testing).
 //
 // A face is installed (present) when its file is the file the catalogue lists: a regular file of that size whose
-// SHA-256 is the catalogue's. That is found out once a process, the first time the face is asked for — its file is read
-// whole then (at most 10 MB) and its bytes kept for the drawing that asked —, and the answer stays for the rest of the run:
-// what is drawn (and remembered) of a face does not change while Genko runs. A face that is not installed is drawn in
-// its kind's default face (render::text::face_of) and said (formats/checks: font_not_installed).
+// SHA-256 is the catalogue's. That is found out the first time the face is asked for — its file is read whole then (at
+// most 10 MB) and its bytes kept for the drawing that asked. A good answer stays until the file is read again; a file of
+// the right size whose content is another's makes the face not installed for the rest of the run. A file that is not
+// there, or that could not be opened or read to its end (tried twice: a file being written, a busy disk), is "not
+// installed" for that one asking only — the next asks the file again. A face that is not installed is drawn in its
+// kind's default face (render::text::face_of) and said (formats/checks: font_not_installed).
 //
-// Should a file that was good be gone or another file when its bytes are read again (they are let go when many faces
-// are in use; the program upgraded while it runs), the face is not installed from then on: generation() moves, so what was
-// drawn with it is drawn again in the default face, and the one piece of lettering being set at that moment takes the
-// bundled Gothic for it (render::text::Fonts) — never another font.
+// Whenever a look at a face's file says something else than the look before did — a good file gone or changed when its
+// bytes are read again (they are let go when many faces are in use; the program upgraded while it runs), a file that
+// could not be read and now can — generation() moves, so what was drawn before is drawn again as the files now are; the
+// one piece of lettering being set at the moment a face is lost takes the bundled Gothic for it (render::text::Fonts) —
+// never another font, and never without the check's warning.
 //
 // What may be called when:
 //   - file_there(key), files_not_there(): one stat a face, nothing read — for a list on the screen (a picker's
@@ -55,19 +58,22 @@ void set_dir_for_testing(const std::optional<std::string>& dir);
 std::string path(std::string_view key);
 // Whether a file of the catalogue's size is where an added face's file should be (one stat; and not found wrong before).
 bool file_there(std::string_view key);
+// Whether something is where an added face's file should be that is not its file: a file read and found to be
+// another's, or one of another size (one stat; what present() learnt is used — ask it first for a sure answer).
+bool damaged(std::string_view key);
 // The added faces with no such file, in the catalogue's order (forty stats).
 std::vector<std::string> files_not_there();
 // Whether an added face is installed: its file is the catalogue's (size and SHA-256). The first call for a face reads its file.
 bool present(std::string_view key);
 // An added face's file, read whole: shared, and kept among the last used. NotYetPorted("default_font") — what a font
 // file that cannot be read is (render::TrueTypeFonts::truetype) — for a key that is not an added face or a face that is
-// not installed; a file found gone or changed here makes the face not installed for the rest of the run.
+// not installed. Bytes that were let go here but are still held by a user are given again, not read again.
 std::shared_ptr<const QByteArray> bytes(std::string_view key);
 
 // The added faces that are not installed, in the catalogue's order (reads every file not read yet).
 std::vector<std::string> missing();
-// How many times a face that was installed has been found gone or changed (and set_dir_for_testing called): what is
-// remembered of drawings made before is not used after it moves.
+// How many times a look at a face's file has said something else than the look before (and set_dir_for_testing
+// called): what is remembered of drawings made before is not used after it moves.
 std::uint64_t generation();
 
 // Every added face's file looked at now (not the answers kept): whether it is a regular file, of the catalogue's size

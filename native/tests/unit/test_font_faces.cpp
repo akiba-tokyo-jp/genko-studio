@@ -1497,19 +1497,76 @@ private slots:
             if (e.added) QCOMPARE(QFileInfo(copied + "/" + QString::fromStdString(e.file)).size(), static_cast<qint64>(e.bytes));
         }
         QVERIFY(installed(copied));
-        // (again: nothing is written over; one taken away or cut short is put back)
+        // (again: nothing is written over — whatever the files' times: a copy as old as its source, as a copy that keeps
+        // its source's time is, or older than it, is not made again —; one taken away or cut short is put back, and the
+        // catalogue when its words are not the source's)
         const QString klee = copied + QStringLiteral("/KleeOne-SemiBold.ttf"), stick = copied + QStringLiteral("/Stick-Regular.ttf");
-        const QDateTime before = QFileInfo(klee).lastModified();
+        const QString dot = copied + QStringLiteral("/DotGothic16-Regular.ttf");
+        const auto set_time = [](const QString& path, const QDateTime& when) {
+            QFile file(path);
+            return file.open(QIODevice::ReadWrite) && file.setFileTime(when, QFileDevice::FileModificationTime);
+        };
+        const QDateTime source_time = QFileInfo(QString::fromStdString(source_fonts()) + QStringLiteral("/KleeOne-SemiBold.ttf")).lastModified();
+        QVERIFY(set_time(klee, source_time));
+        const QDateTime long_ago = QDateTime::fromSecsSinceEpoch(946684800);  // (2000-01-01: older than any source)
+        QVERIFY(set_time(dot, long_ago));
         QVERIFY(QFile::remove(stick));
         {
             QFile cut(copied + QStringLiteral("/YujiBoku-Regular.ttf"));
             QVERIFY(cut.resize(1000));
         }
+        const std::string catalogue = genko::test::read_bytes(copied + QStringLiteral("/FONTS.json"));
+        {
+            std::string other = catalogue;
+            other[other.size() / 2] = other[other.size() / 2] == 'x' ? 'y' : 'x';  // (the same size, other words)
+            genko::test::write_bytes(copied + QStringLiteral("/FONTS.json"), other);
+        }
         QVERIFY(step(copied));
-        QCOMPARE(QFileInfo(klee).lastModified(), before);
+        QCOMPARE(QFileInfo(klee).lastModified().toSecsSinceEpoch(), source_time.toSecsSinceEpoch());
+        QCOMPARE(QFileInfo(dot).lastModified().toSecsSinceEpoch(), long_ago.toSecsSinceEpoch());
         QCOMPARE(QFileInfo(stick).size(), static_cast<qint64>(fonts::find("stick")->bytes));
         QCOMPARE(QFileInfo(copied + QStringLiteral("/YujiBoku-Regular.ttf")).size(), static_cast<qint64>(fonts::find("brush_boku")->bytes));
+        QCOMPARE(genko::test::read_bytes(copied + QStringLiteral("/FONTS.json")), catalogue);
         QVERIFY(installed(copied));
+    }
+
+    // A font file the catalogue lists that is not in the source stops the configure of a package and the build tree's
+    // step, by its name (cmake/GenkoFontList.cmake: what GenkoPackage.cmake and GenkoDevFonts.cmake both read the list
+    // with) — not the install, later, or only a test. The source as it is passes.
+    void aMissingFontFileStopsTheConfigure() {
+        const QString script = genko::test::repo_root() + QStringLiteral("/native/cmake/GenkoFontList.cmake");
+        const auto check = [&](const QString& folder) {
+            return genko::test::run(QStringLiteral(GENKO_CMAKE_COMMAND), {QStringLiteral("-DGENKO_CHECK_FONTS=") + folder, QStringLiteral("-P"), script},
+                                    QProcessEnvironment::systemEnvironment());
+        };
+        const genko::test::Run whole = check(QString::fromStdString(source_fonts()));
+        QVERIFY2(whole.finished && whole.exit_code == 0, qPrintable(whole.described()));
+        // (a folder with the catalogue and every file but one — the files' names are enough: nothing is read of them)
+        QTemporaryDir part;
+        QVERIFY(QFile::copy(QString::fromStdString(source_fonts()) + QStringLiteral("/FONTS.json"), part.path() + QStringLiteral("/FONTS.json")));
+        for (const fonts::Entry& e : fonts::entries()) {
+            if (!e.added || e.key == "klee") continue;
+            QFile empty(part.path() + QLatin1Char('/') + QString::fromStdString(e.file));
+            QVERIFY(empty.open(QIODevice::WriteOnly));
+        }
+        const genko::test::Run stopped = check(part.path());
+        QVERIFY2(stopped.finished && stopped.exit_code != 0, qPrintable(stopped.described()));
+        QVERIFY2(stopped.err.contains("a font file the catalogue lists is not there") && stopped.err.contains("KleeOne-SemiBold.ttf"),
+                 qPrintable(stopped.described()));
+        // (the build tree's step with that source, where it copies — a real folder is in the place —: stopped the same
+        // way, nothing copied half)
+        QVERIFY(QDir().mkpath(part.path() + QStringLiteral("/out/fonts")));
+        const genko::test::Run step = genko::test::run(QStringLiteral(GENKO_CMAKE_COMMAND),
+                                                       {QStringLiteral("-DGENKO_FONTS_SOURCE=") + part.path(),
+                                                        QStringLiteral("-DGENKO_FONTS_DEST=") + part.path() + QStringLiteral("/out/fonts"), QStringLiteral("-P"),
+                                                        genko::test::repo_root() + QStringLiteral("/native/cmake/GenkoDevFonts.cmake")},
+                                                       QProcessEnvironment::systemEnvironment());
+        QVERIFY2(step.finished && step.exit_code != 0, qPrintable(step.described()));
+        QVERIFY(QDir(part.path() + QStringLiteral("/out/fonts")).entryList(QDir::Files).isEmpty());
+        // (and a catalogue that is not there)
+        QTemporaryDir none;
+        const genko::test::Run bare = check(none.path());
+        QVERIFY2(bare.finished && bare.exit_code != 0 && bare.err.contains("the font catalogue is not there"), qPrintable(bare.described()));
     }
 
     // --- the sample sheets and the pins (written when asked) ---------------------------------------------------------------

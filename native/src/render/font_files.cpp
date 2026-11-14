@@ -30,8 +30,12 @@ struct State {
     std::mutex mutex;
     std::optional<std::string> testing_dir;
     std::optional<std::string> program_dir;  // (found out once: QCoreApplication is asked no more than that)
-    std::map<std::string, bool, std::less<>> installed;  // (a face's verdict, once reached)
+    // (a face's verdict: true — its file was read and is the catalogue's; false — a file of its size was read and is
+    // another's, for the rest of the run. A file that is not there, or could not be read, leaves none: asked again)
+    std::map<std::string, bool, std::less<>> installed;
+    std::map<std::string, bool, std::less<>> answered;  // (what the last look at a face's file said: generation() moves when it changes)
     std::map<std::string, Kept, std::less<>> kept;
+    std::map<std::string, std::weak_ptr<const QByteArray>, std::less<>> alive;  // (bytes let go here that a user still holds)
     std::uint64_t kept_bytes = 0;
     std::uint64_t tick = 0;
     std::uint64_t epoch = 0;  // (moves with the folder: a file read for another folder is not kept or judged)
@@ -66,14 +70,23 @@ bool regular_of_size(const QString& file, std::int64_t bytes) {
     return info.isFile() && info.size() == bytes;
 }
 
-// The file read whole when it is the catalogue's: of its size (no more than that is read) and of its SHA-256.
-std::shared_ptr<const QByteArray> read_checked(const QString& file, const core::fonts::Entry& entry) {
+enum class Read { Good, Unreadable, Differs };
+
+// The file read whole when it is the catalogue's: of its size (no more than that is read) and of its SHA-256. `how`:
+// Unreadable — no regular file of that size there, or it could not be opened or read to its end —, Differs — a file of
+// that size whose content is not the catalogue's.
+std::shared_ptr<const QByteArray> read_checked(const QString& file, const core::fonts::Entry& entry, Read& how) {
+    how = Read::Unreadable;
     if (!regular_of_size(file, entry.bytes)) return nullptr;
     QFile source(file);
     if (!source.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) return nullptr;
     auto read = std::make_shared<QByteArray>(source.read(static_cast<qint64>(entry.bytes) + 1));
     if (static_cast<std::int64_t>(read->size()) != entry.bytes) return nullptr;
-    if (QCryptographicHash::hash(*read, QCryptographicHash::Sha256).toHex().toStdString() != entry.sha256) return nullptr;
+    if (QCryptographicHash::hash(*read, QCryptographicHash::Sha256).toHex().toStdString() != entry.sha256) {
+        how = Read::Differs;
+        return nullptr;
+    }
+    how = Read::Good;
     return read;
 }
 
@@ -94,8 +107,10 @@ void keep_locked(State& s, std::string_view key, const std::shared_ptr<const QBy
     }
 }
 
-// The face's bytes from its file, judged: kept and returned when they are the catalogue's; nothing, and the face not
-// installed from now on, when they are not (generation() moves if it was installed before).
+// The face's bytes from its file, judged: kept and returned when they are the catalogue's. A file whose content is
+// another's makes the face not installed from now on; one that is not there or could not be read (tried twice) is
+// nothing this time and asked for again the next. generation() moves whenever a look at the file says something else
+// than the look before did.
 std::shared_ptr<const QByteArray> load(const core::fonts::Entry& entry) {
     State& s = state();
     std::string folder;
@@ -107,29 +122,45 @@ std::shared_ptr<const QByteArray> load(const core::fonts::Entry& entry) {
             it->second.used = ++s.tick;
             return it->second.bytes;
         }
+        // (let go here, still held by lettering or a sample being made: those bytes, not the file read again)
+        if (const auto it = s.alive.find(entry.key); it != s.alive.end()) {
+            if (std::shared_ptr<const QByteArray> held = it->second.lock()) {
+                keep_locked(s, entry.key, held);
+                return held;
+            }
+        }
         folder = dir_locked(s);
         epoch = s.epoch;
     }
     // (before there is a program to be beside, nothing is learnt: asked again once there is)
     if (folder.empty()) return nullptr;
     // (read outside the lock: two readers of one face at once both read it, and the first kept is shared from then on)
-    std::shared_ptr<const QByteArray> read = read_checked(file_in(folder, entry), entry);
+    Read how = Read::Unreadable;
+    const QString file = file_in(folder, entry);
+    std::shared_ptr<const QByteArray> read = read_checked(file, entry, how);
+    if (how == Read::Unreadable) read = read_checked(file, entry, how);  // (once more: a file being written, a busy disk)
     const std::lock_guard<std::mutex> lock(s.mutex);
     if (s.epoch != epoch) return read;  // (tests changed the folder meanwhile: this answer is the caller's alone)
-    if (!read) {
-        const auto was = s.installed.find(entry.key);
-        const bool lost = was != s.installed.end() && was->second;
-        s.installed[entry.key] = false;
-        if (lost) ++generation_counter();
+    if (const auto verdict = s.installed.find(entry.key); verdict != s.installed.end() && !verdict->second) return nullptr;
+    const bool good = read != nullptr;
+    if (const auto was = s.answered.find(entry.key); was != s.answered.end() && was->second != good) ++generation_counter();
+    s.answered[entry.key] = good;
+    if (!good) {
+        s.alive.erase(entry.key);  // (those who hold its bytes keep them; nobody is given them anew)
+        if (how == Read::Differs) {
+            s.installed[entry.key] = false;
+        } else {
+            s.installed.erase(entry.key);
+        }
         return nullptr;
     }
-    if (const auto verdict = s.installed.find(entry.key); verdict != s.installed.end() && !verdict->second) return nullptr;
     s.installed[entry.key] = true;
     if (const auto it = s.kept.find(entry.key); it != s.kept.end()) {
         it->second.used = ++s.tick;
         return it->second.bytes;
     }
     keep_locked(s, entry.key, read);
+    s.alive[entry.key] = read;
     return read;
 }
 
@@ -153,7 +184,9 @@ void set_dir_for_testing(const std::optional<std::string>& dir) {
     const std::lock_guard<std::mutex> lock(s.mutex);
     s.testing_dir = dir;
     s.installed.clear();
+    s.answered.clear();
     s.kept.clear();
+    s.alive.clear();
     s.kept_bytes = 0;
     ++s.epoch;
     ++generation_counter();
@@ -178,6 +211,21 @@ bool file_there(std::string_view key) {
         folder = dir_locked(s);
     }
     return !folder.empty() && regular_of_size(file_in(folder, *entry), entry->bytes);
+}
+
+bool damaged(std::string_view key) {
+    const core::fonts::Entry* entry = added_entry(key);
+    if (entry == nullptr) return false;
+    State& s = state();
+    std::string folder;
+    {
+        const std::lock_guard<std::mutex> lock(s.mutex);
+        if (const auto verdict = s.installed.find(key); verdict != s.installed.end()) return !verdict->second;
+        folder = dir_locked(s);
+    }
+    if (folder.empty()) return false;
+    const QFileInfo info(file_in(folder, *entry));
+    return info.exists() && !(info.isFile() && info.size() == entry->bytes);
 }
 
 std::vector<std::string> files_not_there() {
@@ -253,6 +301,7 @@ void clear_cache() {
     State& s = state();
     const std::lock_guard<std::mutex> lock(s.mutex);
     s.kept.clear();
+    s.alive.clear();
     s.kept_bytes = 0;
 }
 

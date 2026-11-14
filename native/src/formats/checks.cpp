@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -27,6 +28,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
+#include "core/type_text.hpp"
 #include "render/font_files.hpp"
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
@@ -34,6 +36,7 @@
 #include "render/png.hpp"
 #include "render/psd_image.hpp"
 #include "render/selection.hpp"
+#include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/tones.hpp"
 #include "storage/asset_store.hpp"
@@ -443,6 +446,12 @@ void ruby_review_issues(const core::StoryLine& line, const core::Page& page, con
     }
 }
 
+// fonts@1: why an added face is not drawn in — 「…のファイルがこのパソコンに無いため」, or, when something is where its file
+// should be that is not its file (another's content, another size), 「…のファイルが無いか、壊れているため」.
+std::string no_file(const core::fonts::Entry& face) {
+    return render::font_files::damaged(face.key) ? "のファイルが無いか、壊れているため" : "のファイルがこのパソコンに無いため";
+}
+
 // What its lettering could not do as asked (render::text::ruby_notes at the check's 150 dpi): a warning. A lettering
 // that cannot be set (what _text_size_mm passes over) says nothing here and stops nothing; what this build does not
 // letter yet is said, as text_size_mm says it.
@@ -467,7 +476,7 @@ void ruby_note_issues(const core::StoryLine& line, const core::Page& page, const
             // (fonts@1: one of the faces Genko comes with, its file not on this computer, is said by its name, not its key)
             const core::fonts::Entry* face = core::fonts::find(note.detail.substr(5));
             message = face != nullptr && face->added
-                          ? reading + "の書体「" + face->label + "」のファイルがこのパソコンに無いため、台詞の書体で描いた（アプリを入れ直すと元の書体で描ける）"
+                          ? reading + "の書体「" + face->label + "」" + no_file(*face) + "、台詞の書体で描いた（アプリを入れ直すと元の書体で描ける）"
                           : reading + "の書体「" + note.detail.substr(5) + "」が見つからないため、台詞の書体で描いた";
         } else if (note.kind == "font_fallback") {
             message = reading + "の字「" + note.detail + "」がルビの書体に無く、別の書体で描いた";
@@ -482,12 +491,13 @@ void ruby_note_issues(const core::StoryLine& line, const core::Page& page, const
 }
 
 // fonts@1 (書体の追加 F2): the faces Genko comes with whose files are not on this computer (render/font_files: not
-// installed), wherever this page's letters name them — a line's style, a record's character attributes and its ranges',
-// a type layer's record (its rubies' too: a line's rubies are said by ruby_font_fallback), and the book's usual face —,
-// each said once a page by its name, with what the letters were drawn in instead; and a face whose own file is there
-// but whose partner's — the face that draws its kanji — is not. Only the forty added keys are looked at: a font file
-// that is not there, or a name nobody knows, says what it always said (nothing here), so a book of before is told what
-// it was told.
+// installed), wherever this page's letters name them — a line's style, a record's character attributes and its ranges'
+// (the book's type styles they follow too), a type layer's record (its rubies' too: a line's rubies are said by
+// ruby_font_fallback), the type layers of the smart objects' contents the page shows, and the book's usual face —, each
+// said once a page by its name, with what the letters were drawn in instead; and a face whose own file is there but
+// whose partner's — the face that draws its kanji — is not, when a letter of those words is one the face itself does
+// not have. Only the forty added keys are looked at: a font file that is not there, or a name nobody knows, says what
+// it always said (nothing here), so a book of before is told what it was told.
 struct LostFace {
     const core::fonts::Entry* face = nullptr;
     bool usual = false;    // (letters that would be the default dialogue face's: drawn in アンチック)
@@ -499,13 +509,33 @@ struct LostFace {
     Json id = nullptr;
 };
 
-void note_face(std::vector<LostFace>& lost, const std::string& font, int how, const Json& box, const char* kind, const Json& id) {
+// Whether a letter of `words` is one an installed added face does not draw itself (its partner's, were it there).
+bool needs_partner(const core::fonts::Entry& entry, std::string_view words) {
+    try {
+        render::text::Fonts fonts;
+        const render::text::Face face = render::text::face_of(Json(entry.key));
+        if (face.key != entry.key) return false;
+        for (const char32_t c : fonts.normalize(face, render::text::u32(words))) {
+            if (render::text::py_isspace(c) || c < 0x20 || (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0100 && c <= 0xE01EF) || c == 0x200D) continue;
+            const std::string drawn = fonts.path_for(face, std::u32string_view(&c, 1));
+            if (drawn != face.kana && drawn != face.other) return true;
+        }
+    } catch (const std::exception&) {  // (the face lost this moment: said as not installed at the next look)
+    }
+    return false;
+}
+
+// (how: 0 the default dialogue face's letters, 1 a sound effect's, 2 a ruby's; `words`: the letters the face is asked for)
+void note_face(std::vector<LostFace>& lost, const std::string& font, int how, std::string_view words, const Json& box, const char* kind,
+               const Json& id) {
     const core::fonts::Entry* face = core::fonts::find(font);
     if (face == nullptr || !face->added) return;
     bool partner = false;
     if (render::font_files::present(face->key)) {
         const core::fonts::Entry* with = face->fallback.empty() ? nullptr : core::fonts::find(face->fallback);
         if (with == nullptr || !with->added || render::font_files::present(with->key)) return;
+        const bool said = std::any_of(lost.begin(), lost.end(), [&](const LostFace& l) { return l.face == face && l.partner; });
+        if (!said && !needs_partner(*face, words)) return;  // (no letter here is the partner's: nothing was drawn otherwise)
         partner = true;
     }
     auto found = std::find_if(lost.begin(), lost.end(), [&](const LostFace& l) { return l.face == face && l.partner == partner; });
@@ -528,20 +558,45 @@ void fonts_under(const Json& value, std::vector<std::string>& out) {
     }
 }
 
-void note_record(std::vector<LostFace>& lost, const core::StoryLine& record, bool rubies, const Json& box, const char* kind, const Json& id) {
+void note_record(std::vector<LostFace>& lost, const core::StoryLine& record, bool rubies, const Json* styles, const Json& box, const char* kind,
+                 const Json& id) {
     if (record.style.is_object()) {
         const auto font = record.style.find("font");
-        if (font != record.style.end() && font->is_string()) note_face(lost, font->get<std::string>(), record.balloon == "sfx" ? 1 : 0, box, kind, id);
+        if (font != record.style.end() && font->is_string()) {
+            note_face(lost, font->get<std::string>(), record.balloon == "sfx" ? 1 : 0, record.text, box, kind, id);
+        }
     }
     if (record.native_type) {
         std::vector<std::string> named;
         fonts_under(*record.native_type, named);
-        for (const std::string& font : named) note_face(lost, font, 0, box, kind, id);
+        // (and the faces its letters take from the book's type styles: what the lettering resolves them to)
+        try {
+            for (const core::type_text::CharRun& run : core::type_text::resolve_chars(record, styles)) {
+                if (!run.attrs.is_object()) continue;
+                const auto font = run.attrs.find("font");
+                if (font != run.attrs.end() && font->is_string()) named.push_back(font->get<std::string>());
+            }
+        } catch (const core::Error&) {  // (a record that cannot be resolved is another check's)
+        }
+        for (const std::string& font : named) note_face(lost, font, 0, record.text, box, kind, id);
     }
     if (rubies && record.ruby_spans) {
         for (const core::RubySpan& span : *record.ruby_spans) {
-            if (span.font && span.review.empty()) note_face(lost, *span.font, 2, box, kind, id);
+            if (span.font && span.review.empty()) note_face(lost, *span.font, 2, span.ruby, box, kind, id);
         }
+    }
+}
+
+// The type layers of the contents a page shows, directly or inside other contents (each contents once).
+void note_contents(std::vector<LostFace>& lost, const core::Document& doc, const core::Page& page, const Json* styles, std::set<std::string>& seen) {
+    for (const std::string& id : core::smart::shown_on(page)) {
+        if (!seen.insert(id).second) continue;
+        const auto it = doc.smart_contents.find(id);
+        if (it == doc.smart_contents.end() || !it->second || !it->second->page) continue;
+        for (const core::Layer& layer : it->second->page->layers) {
+            if (layer.type) note_record(lost, *layer.type, true, styles, nullptr, "page", nullptr);
+        }
+        note_contents(lost, doc, *it->second->page, styles, seen);
     }
 }
 
@@ -550,8 +605,9 @@ void lost_face_issues(const std::vector<LostFace>& lost, const core::Page& page,
         if (l.partner) {
             const core::fonts::Entry* with = core::fonts::find(l.face->fallback);
             out.push_back(issue("warning", "font_partner_not_installed", page,
-                                "書体「" + l.face->label + "」に無い字（漢字など）を描く書体「" + (with != nullptr ? with->label : l.face->fallback) +
-                                    "」のファイルがこのパソコンに無いため、その字をゴシックで描いた（アプリを入れ直すと元の書体で描ける）",
+                                "書体「" + l.face->label + "」の漢字などを受け持つ書体「" + (with != nullptr ? with->label : l.face->fallback) + "」" +
+                                    (with != nullptr ? no_file(*with) : std::string("のファイルがこのパソコンに無いため")) +
+                                    "、その字はゴシックで描いた（アプリを入れ直すと元の書体で描ける）",
                                 l.box, l.kind, l.id));
             continue;
         }
@@ -561,9 +617,31 @@ void lost_face_issues(const std::vector<LostFace>& lost, const core::Page& page,
             if (used) drawn += (drawn.empty() ? "" : "と") + std::string(name);
         }
         out.push_back(issue("warning", "font_not_installed", page,
-                            "書体「" + l.face->label + "」のファイルがこのパソコンに無いため、代わりに" + drawn +
-                                "で描いた（アプリを入れ直すと元の書体で描ける）",
-                            l.box, l.kind, l.id));
+                            "書体「" + l.face->label + "」" + no_file(*l.face) + "、代わりに" + drawn + "で描いた（アプリを入れ直すと元の書体で描ける）", l.box,
+                            l.kind, l.id));
+    }
+}
+
+// The book's usual face (font_path), said on the book's first page: its file not on this computer, or — the face
+// there — its partner's, when a line that names no face of its own has a letter the partner draws.
+void usual_face_issues(const core::Document& episode, const core::Page& page, Json& out) {
+    const core::fonts::Entry* usual = core::fonts::find(episode.font_path);
+    if (usual == nullptr || !usual->added) return;
+    if (!render::font_files::present(usual->key)) {
+        out.push_back(issue("warning", "font_not_installed", page,
+                            "この本のいつもの書体「" + usual->label + "」" + no_file(*usual) +
+                                "、書体を決めていない台詞をアンチックで描いた（アプリを入れ直すと元の書体で描ける）"));
+        return;
+    }
+    const core::fonts::Entry* with = usual->fallback.empty() ? nullptr : core::fonts::find(usual->fallback);
+    if (with == nullptr || !with->added || render::font_files::present(with->key)) return;
+    for (const core::StoryLine& line : episode.story) {
+        const bool own = line.style.is_object() && line.style.contains("font") && line.style["font"].is_string();
+        if (own || !needs_partner(*usual, line.text)) continue;
+        out.push_back(issue("warning", "font_partner_not_installed", page,
+                            "この本のいつもの書体「" + usual->label + "」の漢字などを受け持つ書体「" + with->label + "」" + no_file(*with) +
+                                "、その字はゴシックで描いた（アプリを入れ直すと元の書体で描ける）"));
+        return;
     }
 }
 
@@ -578,6 +656,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
     const std::vector<const core::StoryLine*> lines = episode.story_for_page(page.index);
     std::vector<std::pair<const core::StoryLine*, std::array<double, 4>>> placed;
     std::vector<LostFace> lost;  // (fonts@1: the faces this page names that are not installed, in the order met)
+    const Json* styles = episode.type_styles ? &*episode.type_styles : nullptr;
     for (const core::StoryLine* line : lines) {
         std::string text = line->text;
         std::erase(text, '\n');
@@ -625,21 +704,19 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
             ruby_review_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
             ruby_note_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
         }
-        note_record(lost, *line, false, box_json(std::vector<double>(box.begin(), box.end())), "line", line->id);  // (fonts@1)
+        note_record(lost, *line, false, styles, box_json(std::vector<double>(box.begin(), box.end())), "line", line->id);  // (fonts@1)
     }
-    // fonts@1: the type layers' records, and — said on the book's first page, once a book — the book's usual face
+    // fonts@1: the type layers' records (the page's, and those of the contents its smart objects show), and — said on the
+    // book's first page, once a book — the book's usual face
     for (const core::Layer& layer : page.layers) {
-        if (layer.type) note_record(lost, *layer.type, true, nullptr, "layer", layer.id);
+        if (layer.type) note_record(lost, *layer.type, true, styles, nullptr, "layer", layer.id);
+    }
+    if (!episode.smart_contents.empty()) {
+        std::set<std::string> seen;
+        note_contents(lost, episode, page, styles, seen);
     }
     lost_face_issues(lost, page, out);
-    if (!episode.pages.empty() && episode.pages.front()->index.json() == page.index.json()) {
-        const core::fonts::Entry* usual = core::fonts::find(episode.font_path);
-        if (usual != nullptr && usual->added && !render::font_files::present(usual->key)) {
-            out.push_back(issue("warning", "font_not_installed", page,
-                                "この本のいつもの書体「" + usual->label +
-                                    "」のファイルがこのパソコンに無いため、書体を決めていない台詞をアンチックで描いた（アプリを入れ直すと元の書体で描ける）"));
-        }
-    }
+    if (!episode.pages.empty() && episode.pages.front()->index.json() == page.index.json()) usual_face_issues(episode, page, out);
     cut_faces(page, out);
     for (std::size_t i = 0; i < placed.size(); ++i) {
         const auto& [a, box_a] = placed[i];

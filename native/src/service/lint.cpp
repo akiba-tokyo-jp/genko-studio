@@ -249,7 +249,8 @@ std::vector<Issue> lint_bible(const Json& bible) {
         if (const core::fonts::Entry* added = face.is_string() ? core::fonts::find(name) : nullptr; added != nullptr && added->added) {
             if (!render::font_files::file_there(added->key)) {
                 issues.push_back(warning("font_not_installed", "/lettering/" + kind + "/font",
-                                         "書体「" + added->label + "」のファイルがこのパソコンに無い（アンチックで描かれる）",
+                                         "書体「" + added->label + "」のファイルがこのパソコンに無い（" +
+                                             (kind == "sfx" ? "極太の書体" : "アンチック") + "で描かれる）",
                                          "アプリを入れ直すと元の書体で描ける"));
             }
             continue;

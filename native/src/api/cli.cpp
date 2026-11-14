@@ -29,6 +29,7 @@
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
 #include "api/prefs_cli.hpp"
+#include "core/font_catalog.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
@@ -1912,13 +1913,29 @@ int doctor(const QStringList& args, bool ascii) {
         report["problems"].push_back("bundled font missing: :/genko/text/sfx (DelaGothicOne-Regular.ttf)");
         report["ok"] = false;
     }
-    // (fonts@1: the forty added lettering faces, installed as files beside the program — each there, of the catalogue's
-    // size and SHA-256; a problem names the face's key and its file, and where it was looked for)
-    for (const render::font_files::Checked& font : render::font_files::verify(true)) {
-        if (font.exists && font.size_ok && font.hash_ok.value_or(false)) continue;
-        const char* what = !font.exists ? "lettering font missing" : !font.size_ok ? "lettering font of another size" : "lettering font changed";
-        report["problems"].push_back(std::string(what) + ": " + font.key + " (" + font.file + ") in " + render::font_files::dir());
-        report["ok"] = false;
+    // (fonts@1: the forty added lettering faces, installed as files beside the program. Each is looked for — one stat a
+    // face, nothing read —; the faces this book names are read too, and checked against the catalogue's SHA-256. A face
+    // the book names that is not there or not its file is the book's problem here (it is drawn otherwise on this
+    // computer); the others' are said under "installation" and leave the book as well as it is — a book that uses none
+    // of them is told what it was told before. A problem names the face's key and its file, and where it was looked for)
+    std::set<std::string> named;
+    try {
+        for (const std::string& key : core::fonts::named(storage::load_document(path_arg(a.positional[0])).document)) named.insert(key);
+    } catch (const std::exception&) {  // (a book that cannot be read: said above; none of its faces is known)
+    }
+    for (const render::font_files::Checked& font : render::font_files::verify(false)) {
+        const bool mine = named.count(font.key) != 0;
+        const char* what = !font.exists ? "lettering font missing"
+                           : !font.size_ok ? "lettering font of another size"
+                           : mine && !render::font_files::present(font.key) ? "lettering font changed" : nullptr;
+        if (what == nullptr) continue;
+        const std::string said = std::string(what) + ": " + font.key + " (" + font.file + ") in " + render::font_files::dir();
+        if (mine) {
+            report["problems"].push_back(said);
+            report["ok"] = false;
+        } else {
+            report["installation"].push_back(said);
+        }
     }
     print_json(report, ascii);
     return report["ok"].get<bool>() ? 0 : 1;
