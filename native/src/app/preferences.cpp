@@ -199,6 +199,10 @@ void name_commands(MainWindow* window) {
 
 const std::multimap<QString, QString>& renamed() {
     static const std::multimap<QString, QString> all{{QStringLiteral("レイヤーを消す"), QStringLiteral("レイヤーを削除")},
+                                                     // (fukidashi@1: フキダシの形's two kinds said as they are drawn — dashes,
+                                                     // lines spreading out; keys chosen under the names of before stay theirs)
+                                                     {QStringLiteral("ささやき（破線）"), QStringLiteral("ささやき（点線）")},
+                                                     {QStringLiteral("フラッシュ（放射状の線）"), QStringLiteral("フラッシュ（放射線）")},
                                                      {QStringLiteral("このページを消す…"), QStringLiteral("このページを削除…")},
                                                      {QStringLiteral("色の校正"), QStringLiteral("CMYK で見る（色校正）")},  // (PC1b)
                                                      // (PC3, the user's decision 5: the selection's, 編集's, 変形's and the moving's

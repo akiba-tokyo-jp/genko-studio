@@ -1,0 +1,664 @@
+{
+  "version": 4,
+  "min_reader": 4,
+  "writer": {
+    "app": "genko-native",
+    "version": "0.1.0"
+  },
+  "book_id": "fedcba9876543210fedcba9876543210",
+  "features": [],
+  "revision": 0,
+  "title": "前の本 2",
+  "episode": 1,
+  "binding": "right",
+  "start_side": null,
+  "strict_gates": false,
+  "autosave": false,
+  "font_path": "",
+  "page_locks": {},
+  "brush": {
+    "rgb": [
+      20,
+      20,
+      20
+    ],
+    "width_mm": 0.35,
+    "stabilize": 0,
+    "taper": false,
+    "curve": "linear"
+  },
+  "spec": {
+    "width_mm": 210,
+    "height_mm": 297,
+    "dpi": 600,
+    "bleed_mm": 3,
+    "inner_margin_mm": 10,
+    "expression": "mono",
+    "preset": "a4-mono"
+  },
+  "bible": {
+    "plot": "",
+    "characters": [],
+    "constraints": []
+  },
+  "tickets": [],
+  "studio": {},
+  "pages": [
+    {
+      "id": "pq1",
+      "index": 1,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "fq1_0",
+          "rect": {
+            "x": 13.0,
+            "y": 13.0,
+            "width": 184.0,
+            "height": 271.0
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [],
+          "panel": null
+        }
+      ],
+      "layers": [
+        {
+          "id": "lq1_0",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "lq1_1",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "lq1_2",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true
+        },
+        {
+          "id": "lq1_3",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {}
+    },
+    {
+      "id": "pq2",
+      "index": 2,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "fq2_0",
+          "rect": {
+            "x": 13.0,
+            "y": 13.0,
+            "width": 184.0,
+            "height": 271.0
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [],
+          "panel": null
+        }
+      ],
+      "layers": [
+        {
+          "id": "lq2_0",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "lq2_1",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "lq2_2",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true
+        },
+        {
+          "id": "lq2_3",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {}
+    }
+  ],
+  "story": [
+    {
+      "id": "P1",
+      "page_index": 1,
+      "text": "みちにそうもじ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 30.0,
+      "w_mm": 50.0,
+      "h_mm": 40.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "text_path": [
+          [
+            6.0,
+            14.0
+          ],
+          [
+            25.0,
+            8.0
+          ],
+          [
+            44.0,
+            16.0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "P2",
+      "page_index": 1,
+      "text": "こちらもみち",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 100.0,
+      "y_mm": 30.0,
+      "w_mm": 46.37,
+      "h_mm": 38.5,
+      "balloon": "thought",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "text_path": [
+          [
+            8.5,
+            20.25
+          ],
+          [
+            38.125,
+            18.0
+          ]
+        ],
+        "size_mm": 4.0
+      }
+    },
+    {
+      "id": "P3",
+      "page_index": 1,
+      "text": "消しゴムで\n削った",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 90.0,
+      "w_mm": 44.0,
+      "h_mm": 34.0,
+      "balloon": "speech",
+      "tail": [
+        80.0,
+        130.0
+      ],
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "cuts": [
+          {
+            "points": [
+              [
+                -2.0,
+                10.0
+              ],
+              [
+                10.0,
+                18.0
+              ],
+              [
+                22.0,
+                36.0
+              ]
+            ],
+            "width_mm": 3.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "P4",
+      "page_index": 1,
+      "text": "こちらも\n削る",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 100.0,
+      "y_mm": 90.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "whisper",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "cuts": [
+          {
+            "points": [
+              [
+                18.5,
+                -2.0
+              ],
+              [
+                21.0,
+                33.0
+              ]
+            ],
+            "width_mm": 2.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "P5",
+      "page_index": 1,
+      "text": "細い線の\n楕円",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 150.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "border_mm": 0.0
+      }
+    },
+    {
+      "id": "P6",
+      "page_index": 1,
+      "text": "細い線の\n四角",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 80.0,
+      "y_mm": 150.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "box",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "border_mm": 0.0
+      }
+    },
+    {
+      "id": "P7",
+      "page_index": 1,
+      "text": "細い線の\n角丸",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 130.0,
+      "y_mm": 150.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "rounded",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "border_mm": 0.0,
+        "double": true
+      }
+    },
+    {
+      "id": "P8",
+      "page_index": 1,
+      "text": "手描きでない\n細い線",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 200.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "border_mm": 0.0,
+        "hand": false
+      }
+    },
+    {
+      "id": "P9",
+      "page_index": 1,
+      "text": "文字を\nずらす",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 80.0,
+      "y_mm": 200.0,
+      "w_mm": 43.21,
+      "h_mm": 31.7,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "text_dx_mm": 2.5,
+        "text_dy_mm": -1.25
+      }
+    },
+    {
+      "id": "P10",
+      "page_index": 1,
+      "text": "回して\nずらす",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 130.0,
+      "y_mm": 200.0,
+      "w_mm": 40.0,
+      "h_mm": 34.0,
+      "balloon": "speech",
+      "tail": [
+        176.0,
+        240.0
+      ],
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "rotate_deg": 12.0
+      }
+    },
+    {
+      "id": "Q1",
+      "page_index": 2,
+      "text": "仕上がりの\nきわ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 166.7,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "Q2",
+      "page_index": 2,
+      "text": "枠の\nきわ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 161.4,
+      "y_mm": 80.0,
+      "w_mm": 36.0,
+      "h_mm": 28.0,
+      "balloon": "thought",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "Q3",
+      "page_index": 2,
+      "text": "下の\nきわ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 40.0,
+      "y_mm": 254.45,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "Q4",
+      "page_index": 2,
+      "text": "となりと\n重なる",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 120.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "Q5",
+      "page_index": 2,
+      "text": "すこし\n重なる",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 64.3,
+      "y_mm": 120.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "whisper",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "Q6",
+      "page_index": 2,
+      "text": "手描きで\nない",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 166.7,
+      "y_mm": 170.0,
+      "w_mm": 40.0,
+      "h_mm": 30.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "hand": false
+      }
+    },
+    {
+      "id": "Q7",
+      "page_index": 2,
+      "text": "角丸の\nきわ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 161.4,
+      "y_mm": 210.0,
+      "w_mm": 36.0,
+      "h_mm": 28.0,
+      "balloon": "rounded",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    }
+  ]
+}

@@ -43,11 +43,12 @@ namespace genko::core {
 
 namespace {
 
-// balloons.SHAPES and balloons.TAIL_KINDS
-constexpr std::array<std::string_view, 16> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
+// balloons.SHAPES and balloons.TAIL_KINDS; fukidashi@1 (SPEC BALLOON-01): the kinds capsule and polygon, the tail
+// kind inward (a notch cut into the balloon)
+constexpr std::array<std::string_view, 18> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
                                                    "electric", "flash", "whisper", "narration", "sfx",      "none",
-                                                   "picture", "dotted_box", "tone_box", "fancy_box"};
-constexpr std::array<std::string_view, 5> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles"};
+                                                   "picture", "dotted_box", "tone_box", "fancy_box", "capsule", "polygon"};
+constexpr std::array<std::string_view, 6> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles", "inward"};
 
 // ops.FEATURES: the OpenType forms a line's style may ask for
 constexpr std::array<std::string_view, 25> kFeatures{"jp78", "jp83", "jp90", "jp04", "trad", "expt", "nlck", "hojo", "hwid",
@@ -75,6 +76,9 @@ constexpr StyleKey kStyleKeys[] = {
     {"fill_rgb", Kind::List},     {"fill_opacity", Kind::Float}, {"text_dx_mm", Kind::Float},   {"text_dy_mm", Kind::Float},
     {"path_curve", Kind::Bool},   {"cuts", Kind::Cuts},          {"ruby_scale", Kind::Float},   {"mono_ruby", Kind::Bool},
     {"below_layer", Kind::Str},   {"hand", Kind::Bool},          {"periods", Kind::Bool},
+    // fukidashi@1 (SPEC BALLOON-01; `hand` above is kept for the books and calls of before, and changes nothing drawn)
+    {"corner_mm", Kind::Float},   {"squircle", Kind::Bool},      {"sides", Kind::Int},          {"wave_mm", Kind::Float},
+    {"spike_alt", Kind::Float},   {"dash_mm", Kind::Float},
 };
 
 template <std::size_t N>
@@ -166,7 +170,7 @@ std::optional<Point> parse_tail(const Json& value) {
     return Point{Num(x), Num(y)};
 }
 
-// ops._parse_tails: [{"to": [x, y], "via"?, "vias"?, "width_mm"?, "kind"?}] (an item may be the [x, y] alone)
+// ops._parse_tails: [{"to": [x, y], "via"?, "vias"?, "width_mm"?, "kind"?, "fillet_mm"?}] (an item may be the [x, y] alone)
 std::vector<Json> parse_tails(const Json& raw) {
     std::vector<Json> tails;
     for (Json item : iterate(py_or(raw, Json::array()))) {
@@ -183,6 +187,12 @@ std::vector<Json> parse_tails(const Json& raw) {
             tail.erase("via");
         }
         if (truthy_at(item, "width_mm")) tail["width_mm"] = to_float(item["width_mm"]);
+        if (const Json* fillet = get(item, "fillet_mm"); fillet != nullptr && !fillet->is_null()) {
+            // (fukidashi@1: how far the tail's join with the balloon is rounded; 0: a corner)
+            const double reach = to_float(*fillet);
+            if (!(0 <= reach && reach <= 20)) throw OpError("a tail's fillet_mm must be between 0 and 20");
+            tail["fillet_mm"] = reach;
+        }
         if (truthy_at(item, "kind") && item["kind"] != Json("wedge")) {
             if (!item["kind"].is_string() || !listed(kTailKinds, item["kind"].get_ref<const std::string&>())) {
                 throw OpError("tail kind must be one of " + joined(kTailKinds));
@@ -448,6 +458,12 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
         if (key == "scale_x") must(0.3 <= number() && number() <= 3, "scale_x must be between 0.3 and 3");
         if (key == "spike_jitter") must(0 <= number() && number() <= 1, "spike_jitter must be between 0 and 1");
         if (key == "bumps") must(5 <= number() && number() <= 60, "bumps must be between 5 and 60");
+        // (fukidashi@1)
+        if (key == "corner_mm") must(0 <= number() && number() <= 50, "corner_mm must be between 0 and 50");
+        if (key == "sides") must(5 <= number() && number() <= 12, "sides must be between 5 and 12");
+        if (key == "wave_mm") must(0 <= number() && number() <= 3, "wave_mm must be between 0 and 3");
+        if (key == "spike_alt") must(0 <= number() && number() <= 0.8, "spike_alt must be between 0 and 0.8");
+        if (key == "dash_mm") must(0.2 <= number() && number() <= 10, "dash_mm must be between 0.2 and 10");
         out[key] = std::move(kept);
     }
     return out;
@@ -491,7 +507,52 @@ Json lettering_style(const Json& value, const PictureCheck& check) {
 
 }  // namespace
 
-// ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others)
+namespace {
+
+// fukidashi@1: whether a point (dx, dy from the balloon's middle) lies inside a capsule or a polygon of w × h — the
+// shapes as they are drawn (a polygon's corners not rounded).
+bool inside_capsule(double dx, double dy, double w, double h) {
+    const double r = py_min(w, h) / 2;
+    const double narrow = std::abs(w <= h ? dx : dy);
+    const double lengthwise = std::abs(w <= h ? dy : dx);
+    const double straight = py_max(w, h) / 2 - r;
+    if (lengthwise <= straight) return narrow < r;
+    return narrow * narrow + (lengthwise - straight) * (lengthwise - straight) < r * r;
+}
+
+bool inside_polygon(double dx, double dy, double w, double h, std::int64_t sides) {
+    const auto n = static_cast<int>(std::clamp<std::int64_t>(sides, 5, 12));
+    // (a regular polygon, a flat side up, stretched to the box: render/text/balloon_clean's)
+    std::vector<std::pair<double, double>> corners;
+    double reach = 0.0, top = 0.0, foot = 0.0;
+    for (int k = 0; k < n; ++k) {
+        const double angle = -kPi / 2 + kPi / n + 2 * kPi * k / n;
+        corners.emplace_back(py_cos(angle), py_sin(angle));
+        reach = py_max(reach, corners.back().first);
+        top = py_min(top, corners.back().second);
+        foot = py_max(foot, corners.back().second);
+    }
+    for (auto& [x, y] : corners) {
+        x = x / reach * (w / 2);
+        y = -h / 2 + (y - top) / (foot - top) * h;
+    }
+    for (int k = 0; k < n; ++k) {  // (inside: on the inner side of every edge)
+        const auto [ax, ay] = corners[static_cast<std::size_t>(k)];
+        const auto [bx, by] = corners[static_cast<std::size_t>((k + 1) % n)];
+        if ((bx - ax) * (dy - ay) - (by - ay) * (dx - ax) <= 0) return false;
+    }
+    return true;
+}
+
+std::int64_t polygon_sides(const StoryLine& line) {
+    const Json* sides = line.style.is_object() ? get(line.style, "sides") : nullptr;
+    return sides != nullptr && sides->is_number() ? to_int(*sides) : 8;
+}
+
+}  // namespace
+
+// ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others;
+// fukidashi@1: a capsule and a polygon by their own shape)
 bool tail_hidden(const StoryLine& line, const Json& tip) {
     const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
     const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
@@ -502,6 +563,8 @@ bool tail_hidden(const StoryLine& line, const Json& tip) {
     if (kind == "box" || kind == "narration" || kind == "rounded" || kind == "none" || kind == "sfx") {
         return std::abs(dx) < w / 2 && std::abs(dy) < h / 2;
     }
+    if (kind == "capsule") return inside_capsule(dx, dy, w, h);
+    if (kind == "polygon") return inside_polygon(dx, dy, w, h, polygon_sides(line));
     return squared(divided(dx, w / 2)) + squared(divided(dy, h / 2)) < 1.0;
 }
 
@@ -519,6 +582,7 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
     for (Json& tail : tails) {
         const Json* tip = get(tail, "to");
         if (tip == nullptr || !py_truthy(*tip) || !tail_hidden(line, *tip)) continue;
+        if (const Json* kind = get(tail, "kind"); kind != nullptr && *kind == Json("inward")) continue;  // (a notch: its tip is inside)
         double dx = to_float(subscript(*tip, 0)) - cx;
         double dy = to_float(subscript(*tip, 1)) - cy;
         if (std::abs(dx) + std::abs(dy) < 1e-6) {
@@ -527,7 +591,17 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
         }
         const double length = py_hypot(dx, dy);
         const double ux = divided(dx, length), uy = divided(dy, length);
-        const double edge = divided(1.0, std::sqrt(squared(divided(ux, w / 2)) + squared(divided(uy, h / 2))));  // (the outline that way)
+        double edge = divided(1.0, std::sqrt(squared(divided(ux, w / 2)) + squared(divided(uy, h / 2))));  // (the outline that way)
+        if (line.balloon == "capsule" || line.balloon == "polygon") {  // (fukidashi@1: their own outline that way)
+            double inside = 0.0, outside = py_hypot(w, h);
+            const std::int64_t sides = polygon_sides(line);
+            for (int step = 0; step < 48; ++step) {
+                const double mid = (inside + outside) / 2;
+                const bool in = line.balloon == "capsule" ? inside_capsule(ux * mid, uy * mid, w, h) : inside_polygon(ux * mid, uy * mid, w, h, sides);
+                (in ? inside : outside) = mid;
+            }
+            edge = outside;
+        }
         tail["to"] = Json::array({py_round(cx + ux * (edge + beyond), 2), py_round(cy + uy * (edge + beyond), 2)});
         changed = true;
     }
@@ -535,6 +609,42 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
         line.tails = tails;
         line.tail = tail_point(subscript(tails[0], "to"));
     }
+}
+
+// fukidashi@1: an inward tail is a notch cut into its balloon — its tip (and the point it bends through) is a place in
+// the balloon, not a speaker on the page. When the balloon is moved or resized without saying its tails, each inward
+// tail goes with the box: the same share of the way across it (to two decimals of a mm). The other tails stay where
+// they point on the page, as before.
+void inward_tails_with_box(StoryLine& line, const std::array<double, 4>& was) {
+    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
+    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
+    const double x = line.x_mm.value(), y = line.y_mm.value();
+    if (x == was[0] && y == was[1] && w == was[2] && h == was[3]) return;
+    const auto moved = [&](const Json& point) {
+        const double px = to_float(subscript(point, 0));
+        const double py = to_float(subscript(point, 1));
+        const double fx = was[2] != 0.0 ? (px - was[0]) / was[2] : 0.5;
+        const double fy = was[3] != 0.0 ? (py - was[1]) / was[3] : 0.5;
+        // (a box moved and not resized: the point moved by as much, not through its share of the box)
+        const double nx = w == was[2] ? px + (x - was[0]) : x + fx * w;
+        const double ny = h == was[3] ? py + (y - was[1]) : y + fy * h;
+        return Json(Json::array({py_round(nx, 2), py_round(ny, 2)}));
+    };
+    bool changed = false;
+    for (Json& tail : line.tails) {
+        const Json* kind = tail.is_object() ? get(tail, "kind") : nullptr;
+        if (kind == nullptr || *kind != Json("inward")) continue;
+        for (const char* key : {"to", "via"}) {
+            if (const Json* point = get(tail, key); point != nullptr && py_truthy(*point)) tail[key] = moved(*point);
+        }
+        if (const Json* vias = get(tail, "vias"); vias != nullptr && py_truthy(*vias)) {
+            Json bends = Json::array();
+            for (const Json& v : iterate(*vias)) bends.push_back(moved(v));
+            tail["vias"] = std::move(bends);
+        }
+        changed = true;
+    }
+    if (changed && !line.tails.empty()) line.tail = tail_point(subscript(line.tails.front(), "to"));
 }
 
 // What Python keeps that this build's book cannot hold, refused once the op has done everything Python does (so every
@@ -786,6 +896,7 @@ void move_line(OpContext& c) {
     if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
     StoryLine& line = find_line(c.doc, py_str(*line_id));
     const double was_x = line.x_mm.value(), was_y = line.y_mm.value();
+    const std::array<double, 4> was_box{was_x, was_y, line.w_mm.truthy() ? line.w_mm.value() : 40.0, line.h_mm.truthy() ? line.h_mm.value() : 20.0};
     if (has(op, "x_mm")) line.x_mm = Num(to_float(op["x_mm"]));
     if (has(op, "y_mm")) line.y_mm = Num(to_float(op["y_mm"]));
     type_text::move_anchor(line, line.x_mm.value() - was_x, line.y_mm.value() - was_y);  // (type@1, PC5 G-a: a point text's anchor with it)
@@ -802,7 +913,10 @@ void move_line(OpContext& c) {
     }
     if (has(op, "balloon")) line.balloon = balloon_kind(op["balloon"]);
     const bool moved = has(op, "x_mm") || has(op, "y_mm") || has(op, "w_mm") || has(op, "h_mm");
-    if (!(has(op, "tail") || has(op, "tails")) && moved) tails_outside(line);
+    if (!(has(op, "tail") || has(op, "tails")) && moved) {
+        inward_tails_with_box(line, was_box);  // (fukidashi@1: a notch goes with its balloon)
+        tails_outside(line);
+    }
     require_kept(line);
 }
 

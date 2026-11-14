@@ -6,6 +6,7 @@
 // And (PC5 I-b review P2-4) a B4 RGB PSD of groups at 350 dpi (GENKO_PERF_GROUPS_PSD, made by perf/make_groups_psd.py)
 // read by import_psd onto a B4 colour page: the whole page and a 512 x 512 part, from nothing. Where this build draws
 // groups (groups@1), also the same page with its groups made plain folders again, as builds before groups read them.
+// And (fukidashi@1, SPEC BALLOON-01) ten balloons of now on a B4 page at 600 dpi.
 
 #include <QtTest>
 
@@ -29,6 +30,8 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/smart.hpp"
+#include "render/text/balloons.hpp"
+#include "render/text/lettering.hpp"
 
 #if __has_include("core/groups.hpp")
 #include "core/groups.hpp"
@@ -259,6 +262,56 @@ private slots:
               "(%ld MB before)",
               tiles.size(), static_cast<long long>(one_by_one), static_cast<unsigned long long>(first), static_cast<long long>(together),
               static_cast<unsigned long long>(second), proc_kb("VmHWM:") / 1024, before / 1024);
+    }
+
+    // fukidashi@1 (SPEC BALLOON-01; shown, not judged): ten balloons of now — an oval with a double line, a rounded one, a
+    // capsule, a polygon, a cloud, a burst, an electric one, a whisper, a thought and an oval, each with its words and most
+    // with a tail — on a B4 page at 600 dpi: the page without them, with them from nothing, and again (their shapes and
+    // letters remembered); and the balloons' shapes alone, from nothing.
+    void ten_balloons_at_600dpi() {
+        Document doc = genko::core::new_episode("フキダシ", genko::core::Num(1), 1, genko::core::PageSpec::b4_comic());
+        doc.edit_page(0).numero = false;
+        render::clear_render_caches();
+        render::text::clear_balloon_cache();
+        QElapsedTimer timer;
+        timer.start();
+        const render::RenderResult bare = render::render_page(*doc.pages[0], 600, {}, &doc);
+        const qint64 without = timer.elapsed();
+        const char* kinds[10] = {"speech", "rounded", "capsule", "polygon", "cloud", "shout", "electric", "whisper", "thought", "speech"};
+        for (int i = 0; i < 10; ++i) {
+            const double x = 30.0 + (i % 3) * 68.0;
+            const double y = 30.0 + (i / 3) * 80.0;
+            const bool capsule = std::strcmp(kinds[i], "capsule") == 0;
+            genko::core::StoryLine& line =
+                doc.add_line(genko::core::Num(1), capsule ? "そうなんだ" : "今日は\nいい天気", "", std::nullopt, "", genko::core::Num(x), genko::core::Num(y),
+                             genko::core::Num(capsule ? 16.0 : 46.0), genko::core::Num(38.0), kinds[i],
+                             genko::core::Point{genko::core::Num(x + 56.0), genko::core::Num(y + 52.0)});
+            line.wrap = "vertical";
+            if (i == 0) line.style["double"] = true;
+        }
+        render::clear_render_caches();
+        render::text::clear_balloon_cache();
+        timer.restart();
+        const render::RenderResult cold = render::render_page(*doc.pages[0], 600, {}, &doc);
+        const qint64 with = timer.elapsed();
+        timer.restart();
+        (void)render::render_page(*doc.pages[0], 600, {}, &doc);
+        const qint64 warm = timer.elapsed();
+        // (the shapes alone: no letters, on a blank picture of the page's size)
+        render::text::clear_balloon_cache();
+        render::Image blank = render::Image::create("RGB", cold.image.size(), render::Ink{255, 255, 255});
+        std::vector<const genko::core::StoryLine*> lines;
+        for (const genko::core::StoryLine& line : doc.story) lines.push_back(&line);
+        const render::text::LetterParts shapes_only{true, false, false, false};
+        timer.restart();
+        render::text::draw_lines(render::text::whole_page(blank), lines, 600, std::nullopt, false, nullptr, {}, nullptr, &shapes_only);
+        const qint64 shapes = timer.elapsed();
+        qInfo("ten balloons on a B4 page at 600 dpi (%d x %d px): the page without them %lld ms; with them from nothing %lld ms; again "
+              "%lld ms; their shapes alone from nothing %lld ms (%.1f ms a balloon)",
+              cold.image.width(), cold.image.height(), static_cast<long long>(without), static_cast<long long>(with), static_cast<long long>(warm),
+              static_cast<long long>(shapes), static_cast<double>(shapes) / 10.0);
+        QVERIFY(bare.image.size() == cold.image.size());
+        QVERIFY(bare.image.tobytes() != cold.image.tobytes());
     }
 
     void small_picture_of_200_lines() {

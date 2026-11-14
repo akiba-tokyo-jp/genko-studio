@@ -14,6 +14,7 @@
 #include "app/canvas.hpp"
 #include "app/ime.hpp"
 #include "app/theme.hpp"
+#include "core/balloon_tails.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/type_text.hpp"
@@ -304,8 +305,23 @@ bool PageCanvas::line_move(const QPointF& mm, Qt::KeyboardModifiers modifiers) {
                 drag.angle = Num(core::py_round(angle, 1));
             }
         } else {
-            const Json at = Json::array({r2(x_mm), r2(y_mm)});
+            Json at = Json::array({r2(x_mm), r2(y_mm)});
             Json& tail = drag.tails[static_cast<std::size_t>(drag.handle.tail)];
+            // (fukidashi@1: an inward tail is a notch — its tip stays inside its balloon; dragged out, it stops a
+            // little short of the outline, on the line from the balloon's middle)
+            if (const core::StoryLine* line = selected_line();
+                line != nullptr && drag.handle.part == QLatin1String("to") && core::get_or(tail, "kind", Json()) == Json("inward") &&
+                !core::tail_hidden(*line, at)) {
+                const double cx = (line->x_mm + line->w_mm / Num(2)).value();
+                const double cy = (line->y_mm + line->h_mm / Num(2)).value();
+                double inside = 0.0, outside = 1.0;  // (shares of the way from the middle to the pointer)
+                for (int step = 0; step < 24; ++step) {
+                    const double mid = (inside + outside) / 2;
+                    const Json there = Json::array({cx + (x_mm - cx) * mid, cy + (y_mm - cy) * mid});
+                    (core::tail_hidden(*line, there) ? inside : outside) = mid;
+                }
+                at = Json::array({r2(cx + (x_mm - cx) * inside * 0.9), r2(cy + (y_mm - cy) * inside * 0.9)});
+            }
             if (drag.handle.part == QLatin1String("vias")) {
                 tail["vias"][static_cast<std::size_t>(drag.handle.via)] = at;
             } else {

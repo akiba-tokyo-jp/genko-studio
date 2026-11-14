@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -29,11 +30,26 @@ int line_weight(const core::Json& st);
 // px(mm, dpi): max(1, round(mm / 25.4 * dpi))
 std::int64_t px(double mm, int dpi);
 
-// _inner(kind, w, h, pad, depth): the room for the words inside the shape.
-std::pair<double, double> inner(std::string_view kind, double w, double h, double pad, const core::Json& depth);
-// hug_power(kind, st) and _hug_keep(kind, st): the hand-drawn oval's fullness, the share of the box the letters use.
+// _inner(kind, w, h, pad, depth): the room for the words inside the shape (`corner`: a rounded balloon's corner in px,
+// style.corner_mm; negative: its usual one).
+std::pair<double, double> inner(std::string_view kind, double w, double h, double pad, const core::Json& depth, double corner = -1.0);
+// hug_power(kind, st) and _hug_keep(kind, st), for a balloon sized for its words (app/lettering, service/letter): the
+// smallest oval of that power round the words, over the share, is the balloon's box. The power: 2.6 for speech,
+// thought and whisper (the letters' oval, fuller than an ellipse), 2 for the others and for a line with hand: false
+// or a wobble. The share: a burst's valleys; for the fuller oval core::kOvalRoom — 0.955 of the letters' box, which is
+// 1 / 1.035 of the balloon's (fukidashi@1, SPEC BALLOON-01: the balloon's true ellipse holds the letters' oval); 1
+// otherwise.
 double hug_power(std::string_view kind, const core::Json& st);
 double hug_keep(std::string_view kind, const core::Json& st);
+// The box a line's letters are set in (mm): the line's own (its w or 40, its h or 20), but an oval's letters in their
+// own box inside it (core::letter_box — for an oval grown from a book of before, the box it had there).
+struct LettersBox {
+    double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+};
+LettersBox letters_box(const core::StoryLine& line);
+// fukidashi@1: how far out of a shape a point lies — 1 on its edge, less inside — the shape about its middle, half
+// sizes a × b: a capsule, or a convex outline given about its middle (a polygon's); an ellipse otherwise.
+double shape_gauge(std::string_view kind, double x, double y, double a, double b, const std::vector<std::array<double, 2>>* outline = nullptr);
 
 // ink_rects(image, em): the letters' outline as upright strips (x0, y0, x1, y1) with ink above 40.
 std::vector<std::array<std::int64_t, 4>> ink_rects(const Image& image, std::int64_t em);
@@ -46,6 +62,9 @@ struct Fit {
     double dy = 0.0;
 };
 Fit fit_in(const std::vector<std::array<double, 2>>& points, double a, double b, double power);
+// The same in a shape that is not an oval (fukidashi@1: a capsule, a polygon): `gauge(x, y)` says how far out a point
+// lies (shape_gauge); worst is its square, so 1.03 means what it means for an oval.
+Fit fit_in_shape(const std::vector<std::array<double, 2>>& points, double a, double b, const std::function<double(double, double)>& gauge);
 
 // text_layout(line, dpi, font_path): the lettering (RGBA), its em in px, and where its top left sits from the box's
 // middle (px).

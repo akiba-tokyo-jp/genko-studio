@@ -69,6 +69,7 @@ genko_library(genko_core
     exposure.cpp
     ops_color.cpp
     frames.cpp
+    fukidashi.cpp
     strokes.cpp
     covers.cpp
     pyrandom.cpp

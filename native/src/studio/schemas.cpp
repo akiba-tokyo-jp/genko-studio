@@ -57,8 +57,9 @@ Json angles() { return enumeration({"eye", "high", "low", "bird", "worm", "dutch
 Json positions() { return enumeration({"left", "left_third", "center", "right_third", "right"}); }
 Json facings() { return enumeration({"left", "right", "front", "back"}); }
 Json balloons() {
+    // (fukidashi@1, SPEC BALLOON-01: capsule — one tall column — and polygon — a machine's voice — with Python's kinds)
     return enumeration({"speech", "rounded", "thought", "shout", "whisper", "electric", "narration", "sfx", "aside", "dotted_box",
-                        "tone_box", "fancy_box"});
+                        "tone_box", "fancy_box", "capsule", "polygon"});
 }
 Json beat_kinds() { return enumeration({"action", "dialogue", "monologue", "narration", "sfx"}); }
 

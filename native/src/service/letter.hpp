@@ -56,8 +56,19 @@ struct BalloonPlacement {
 Json looks(const Json& bible);
 // letter.look_style(look, balloon): the line style that carries a look (size_mm only when the size changes).
 Json look_style(const Json& look, const std::string& balloon);
-// letter.measure(breaks, balloon, em): the balloon's box (w, h) as the renderer draws it.
-std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em = kEmMm);
+// fukidashi@1 (SPEC BALLOON-01): the shape a line is lettered in. A kind the line says (`given` not null) is kept as
+// it is — a line that says speech stays an oval. A line that says none is a speech line, in a capsule when it is one
+// column at least five times as tall as wide (five characters or more), an oval otherwise.
+std::string shape_for(const std::vector<std::string>& breaks, const Json& given, double em = kEmMm);
+// letter.measure(breaks, balloon, em): the balloon's box (w, h) as the renderer draws it (an oval: the box whose true
+// ellipse holds the letters' oval round the words — 1.035 times what it was for the hand-drawn oval; a capsule: round
+// ends on the words' narrow side).
+// A polygon (fukidashi@1): the words' block made polygon_room(sides) times as big, its corners on the polygon's sides
+// (`sides`: style.sides, 0 for the eight it has when none is said).
+std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em = kEmMm, int sides = 0);
+// How much bigger than a block of words the box of a polygon of `sides` (5..12; 0: eight) is that holds it: the block's
+// corners lie on the polygon's sides (√2 for eight sides, 1.5 for six).
+double polygon_room(int sides);
 // letter.fits(rect, balloon, others, em): how much text the panel takes in one balloon of this kind, in words.
 std::string fits(const Box& rect, const std::string& balloon, std::size_t others = 0, double em = kEmMm);
 // letter.place_page(plan, layout, bible, speakers): the balloons of every panel (and the title, the 名札) and the

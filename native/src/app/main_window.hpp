@@ -82,6 +82,8 @@ class BrushSettingsPanel;
 class ToolPresetsPanel;
 class StylesPanel;
 class ShapesPanel;
+class BalloonPalette;
+struct BalloonPreset;
 class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
@@ -457,6 +459,17 @@ public:
     std::unique_ptr<QMenu> line_menu(const std::string& line_id);
     // A line of the book by its id (none: not there).
     const core::StoryLine* line_by_id(const std::string& line_id) const;
+    // フキダシ (fukidashi@1, main_window_fukidashi.cpp): the palette of balloons and its dock; a preset picked — `how` ""
+    // as the window decides (the line chosen on this page takes its look, unless the text tool is in hand; else the
+    // next line placed does), "line" the chosen line, "next" the next line; the chosen line given a preset's look (one
+    // edit_line: false when no line is chosen or it has no balloon); the preset the next line placed takes (none:
+    // nullptr), set by its key (empty: none — the text tool's own フキダシ again).
+    BalloonPalette* balloon_palette() const { return balloon_palette_; }
+    QDockWidget* balloon_dock() const { return balloon_dock_; }
+    void use_balloon_preset(const QString& key, const QString& how = {});
+    bool restyle_with_balloon_preset(const QString& key);
+    void arm_balloon_preset(const QString& key);
+    const BalloonPreset* armed_balloon_preset() const;
     // 履歴 and 点検 (main_window_output.cpp): the panels; a problem the checks found shown on its page (its page in
     // front, its place marked, its line chosen or its layer drawn on, its words in the status line).
     HistoryPanel* history() const { return history_; }
@@ -1174,6 +1187,8 @@ private:
     void build_line_actions();
     void build_line_menus(QMenu* pages);
     void build_line_dock();
+    void build_balloon_actions();  // (フキダシ: main_window_fukidashi.cpp)
+    void build_balloon_dock();
     QWidget* line_select_page();
     void panel_for_tool(const QString& tool);
     void refresh_lines();
@@ -1186,6 +1201,9 @@ private:
     void delete_selected_line();
     void toggle_selected_wrap();
     void set_selected_balloon(const QString& kind);
+    // The ops that give a line a balloon's kind as the kinds' menus do: edit_line, and — to or from a capsule or a
+    // polygon — the move_line that fits its box to its words about its middle (one step).
+    core::Json balloon_kind_ops(const core::StoryLine& line, const std::string& kind) const;
     std::optional<QString> panel_reference(const std::string& frame_id) const;
     void picture_balloon(const std::string& line_id);
     void draw_text_path(const std::string& line_id);
@@ -1562,6 +1580,9 @@ private:
     QDockWidget* checks_dock_ = nullptr;
     TextToolSettings* text_settings_ = nullptr;
     QDockWidget* lines_dock_ = nullptr;
+    BalloonPalette* balloon_palette_ = nullptr;
+    QDockWidget* balloon_dock_ = nullptr;
+    QString armed_balloon_;  // (the palette's preset the next line placed takes; empty: none)
     QPointer<StoryEditor> story_editor_;
     QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
     bool lines_later_ = false;

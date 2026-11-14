@@ -34,19 +34,30 @@ const std::vector<std::pair<QString, core::Json>>& style_tags();
 
 // columns(text, per_column): explicit line breaks first, then between phrases, a spoken line without its closing 。.
 std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_column);
-// studio.letter.measure(breaks, balloon, em): the balloon's box as the renderer draws it.
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm);
+// studio.letter.measure(breaks, balloon, em): the balloon's box as the renderer draws it. A capsule and a polygon
+// (fukidashi@1) are sized by service::letter::measure itself (`sides`: a polygon's style.sides, 0 when none is said).
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0);
 // box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm.
-std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm);
+std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm,
+                                   int sides = 0);
+// A style's sides as the renderer reads them (5..12; 0: none said).
+int sides_of(const core::Json& style);
 // place_new(episode, page, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm, wrap}.
 core::Json place_new(const core::Document& doc, const core::Page& page, const core::Frame& frame, const std::string& text,
                      const std::string& balloon, bool vertical);
 // refit(line, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm}, the balloon's top-right corner kept.
 core::Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon,
                  bool vertical);
-// place_at(x_mm, y_mm, text, balloon, vertical, frame): {x_mm, y_mm, w_mm, h_mm, wrap}, centred where clicked.
+// fukidashi@1: the box a line is given when a person changes its balloon to or from a kind that holds its letters in
+// its own shape (a capsule, a polygon): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
+// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. Null when the kind does not change
+// that way (speech to shout, the same kind), the balloon is drawn by hand or the line is not set in a balloon, or the
+// box would not change. `style_after`: the style the line has then (a polygon's sides).
+core::Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const core::Json& style_after);
+// place_at(x_mm, y_mm, text, balloon, vertical, frame): {x_mm, y_mm, w_mm, h_mm, wrap}, centred where clicked (`style`:
+// the style the line is given — a polygon's sides size its box).
 core::Json place_at(double x_mm, double y_mm, const std::string& text, const std::string& balloon, bool vertical,
-                    const core::Frame* frame);
+                    const core::Frame* frame, const core::Json& style = core::Json());
 
 // parse_marks(typed): the text without its marks, and its ruby runs [[base, ruby]], 傍点 [words] and styled parts
 // [[words, {scale, bold, rgb, tcy}]] (JSON lists, as Python's lists); and (TEXT-01) each ruby where it was typed: the

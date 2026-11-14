@@ -7,6 +7,7 @@
 - R2 一つの工程の群は「実装（関係する試験）→レビュー1回→直し」までを群ごとに。統合は工程の候補 1 本にまとめ、群ごとの V2 は流さない（V3 が V2 を含む）。V2 を流すのは、次の群がその群の合格を前提にしていて、失敗の切り分けが要るときだけ。
 - R3 V3 は一つの計画（`validation_policy.py --phase milestone`）で 1 回。ASan と Release を同時に始め、Debug はビルドが済み次第並べる。実 xcb の GUI は Release・Debug の後、性能は ASan の後の静かな機械で、最後に `--pair`。
 - R4 失敗したら残りの構成を止める。コードを直したら（全構成のソースが変わるので `--pair` のため）3 構成をやり直す。環境だけが原因なら、その構成だけやり直す。
+- **R4 の補い（利用者の決定 2026-11-14）**: 機械の再起動や環境が原因で止まった・落ちた構成は、`validation_run.py --resume` で続きから走らせる（合格済みの試験を引き継ぐ。条件と記録は VALIDATION.md §3、経緯は「試験の「続きから」」）。コードを直したら全部やり直すのは変わらない。
 - R5 計画の違う結果は `--pair` で使えないので、最後の群は V2 を流さず、V3 へ直行する。
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
@@ -16,7 +17,181 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12（この節が最新）
+## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13（この節が最新）
+
+### 利用者の決定（2026-11-13）
+- 「吹き出しが少しいびつに見える」「いびつにせずに今風の漫画の吹き出しを各種作って置けるように」。続けて「手描き風は消して良いです」、すでにある本のフキダシは「全部を今風に描く」。
+- だから: 手描き風の描き方（卵形の楕円・線の強弱・揺れ・ばらついた破線・角のあるしっぽ）を無くし、すべてのフキダシを 1 つの描き方（今風）で描く。**すでにある本のフキダシも開けば今風になる（見た目が変わる）。文字の大きさは変えない。**「すでにある本は同じ画素で描く」という決まりは、フキダシの画素についてだけ、この決定で外れた。フキダシ以外は今までどおり。
+- 群: B1 が土台（core・render・service）、B2 が GUI、B3 が AI 向けの道具と手引き。B2・B3 は下の「B2・B3 が使うもの」を使う。
+
+### 群 B1（土台。ブランチ native/fukidashi-core、main 5cf6551a から）
+- 設計: SPEC.md BALLOON-01（描き方・種類・鍵・しっぽ・文字の収まり・前の本の読み替え・拡張・試験）、schema-v4.md「フキダシ（fukidashi@1 と balloon_geometry）」。
+- 描画: `render/text/balloon_clean.{hpp,cpp}`（輪郭を実数の多角形で作る。＋−×÷と平方根だけ、正多角形の角と波の位相は libm_float の sinf・cosf。4 分の 1 か右半分を作って写す。塗りは形の和集合、線は「和集合の縁から太さ以内」を正確な面積のラスタライザーで出す）。`balloons.cpp` の shape_masks は全部これで描く。手描き風の機械（uneven・swell・角度で切る破線・収縮で出す線・整数の多角形・角のあるしっぽ）は消した。ページへは 1 回の混ぜ方で載せる（透明のあるレイヤーでも縁が暗くならない）。
+- 種類: 今ある種類（speech・rounded・box・narration・cloud・thought・shout・electric・whisper・flash・dotted_box・tone_box・fancy_box・手で描いた輪郭）を今風に。新しい種類 `capsule`・`polygon`。新しい鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`。しっぽの `kind: inward` と `fillet_mm`。しっぽは根元で輪郭の法線に沿って出て先へ曲がり、両側は中心線からのオフセット、根元の幅は短い辺の 0.22（付け根どうしをまっすぐ測った長さ）。付け根は、両側が輪郭と交わる所を小さな曲線（線の 1.5 倍か 0.5 mm、幅の 1/4 まで）でつなぐ。本体の輪郭はその 2 か所のほかは変わらない。つないだフキダシは切れ込みを同じ継ぎ目で、離れていれば首でつなぐ。
+- 前の鍵: `hand` は描く形を変えない。今も決めるのは文字を収める楕円だけ（false は箱そのものの真の楕円、ほかは文字の箱のふくらんだ楕円）。`wobble` は波の輪郭（`wave_mm` = 0.03 × wobble × 箱の短い辺）として描く。どちらもエラーにしない。
+- 文字: 楕円の種類の文字は「文字の箱」（core::letter_box。箱を真ん中を保って 1 / 1.035。小数 9 桁）の中の、前と同じ「文字の楕円」（箱の 0.955 の、2.6 乗の超楕円）に収める。箱に内接する真の楕円に入る。読み替えた前の本では文字の箱が前の箱とビットまで同じなので、文字はどの解像度でも前と同じ画素になる。capsule・polygon は形そのものに収める（shape_gauge・fit_in_shape）。検査（text_outside_trim・text_outside_frame・text_overlap）も文字の箱で測る（formats/checks.cpp）。
+- 前の本: project.json の一番上の `balloon_geometry`（今は 2）。無い本（と 1 の本）は、読むときに 1 回だけ読み替える（storage/reader の read_line → core::migrate_legacy_line。文字レイヤーの記録も）。(1) 手描きの楕円だった台詞の箱を真ん中を保って 1.035 倍（小数 9 桁）。type@1 の箱の文字・ポイント文字、`hand: false`、`wobble`、手で描いた輪郭は大きくしない。(2) その台詞の消しゴムの跡（style.cuts）と文字の道（style.text_path）を、箱の角が動いたぶんずらす（ページの上で同じ場所）。しっぽ（ページの座標）と text_dx/dy（文字の箱から）はそのまま。(3) `border_mm: 0` は 0.01 mm（core::kHairlineMm。1 px の細い線のまま）。保存で鍵が付き、2 度は読み替えない。鍵は楕円の台詞か border_mm 0 の台詞がある本に書く。2.0 も読む。読めない値は broken_value（読み取り専用）で、読み替えない。前の版の Genko は知らない鍵として残す（拡張ではない）。
+- 拡張 `fukidashi@1`: 新しい種類・鍵・しっぽを使っているあいだだけ書く（core::uses_fukidashi）。
+- 自動の文字入れ: 楕円の箱は前の 1.035 倍。**種類を書いた台詞は変えない。** 種類が無く、1 列で 5 字以上の台詞だけ `capsule`（service::letter::shape_for(breaks, given)。ネームの文字入れの計画の行と propose_lines で balloon が無いとき）。
+- 設計からの変更（利用者の決定で）: `style.draw`・本の `balloon_draw`・`authoring_draw`・op `restyle_balloons`・既定の書き込みは作らない（描き方が 1 つになったので要らない）。「前の本は同じ画素」の試験も置かない（意図して変わる）。
+
+### B2・B3 が使うもの
+- 種類の名前 `capsule`・`polygon`、鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽの `kind: "inward"`・`fillet_mm`。どれも今の `add_line`・`edit_line`・`move_line` で渡す（新しい op は無い）。範囲と断りの文は SPEC BALLOON-01、`genko schema`（edit_line の「style (fukidashi)」）。
+- 寸法: `render::text::hug_power`・`hug_keep`（app/lettering.cpp の measure はこれを呼んでいるので、楕円はもう 1.035 倍になっている）、`service::letter::measure(breaks, "capsule")`、`service::letter::shape_for`。
+- 見本の絵（パレットのサムネイル）: `render::text::draw_group` をそのまま使う。
+- B2 に残ること: 種類のメニューに「縦長（カプセル）」「多角形（機械の声）」、パレット、台詞パネルの新しい鍵、`hand`（手描き風）と `wobble` をメニューから外す、commands.json。**app/lettering.cpp の measure（320〜350 行のあたり）には capsule と polygon の場合が無い**（今は箱の種類として測るので、カプセルに打った文字の自動の箱が合わない）。service::letter::measure(breaks, "capsule") と同じ式（幅は列＋ふち、高さは文字＋幅ぶんの半円 2 つ）を入れること。
+- B3 に残ること: MCP の道具の説明と手引き（SKILL.md・drawing.md と integrations/ の写し）から手描き風の説明を外し、新しい種類・鍵を書く。ネーム計画（studio/schemas.cpp の panels[].lines[].balloon）に capsule・polygon を足すかどうか。
+
+### 直した既存の試験（どれも意図した変更。緩めていない）
+- test_storage v4RoundTrip: 楕円のある本は `balloon_geometry` を書く（鍵の並びに 1 つ足した）。
+- test_gui_lines: 楕円（speech・thought）の箱の期待値を 1.035 倍に（aLineIsTypedWhereTheTextToolClicks、aLineIsTypedOverDeletedTurnedAndReshaped の 2 か所、theLinesPanelListsReordersAndEdits の 2 か所、theStoryEditorPoursAScriptAndEditsEveryLine、selectedCharactersAreStyledAsTyped の box_size・measure）。「既定の設定に戻す」が消す鍵は 46 → 52（鍵が 6 つ増えた）。
+- test_ledger_service_c: main と同じに戻した（最初の版では、種類を書いた 1 列 5 字の台詞がカプセルになるので書き換えていた。種類を書いた台詞を変えなくなったので要らなくなった）。
+- tests/support/psd_book_hashes.hpp: PSD の見本（画像の道 4 つ、文字を編集できる道 4 つ）の sha256 を取り直した（フキダシの画素が変わるので。しっぽを作り直したのでもう一度）。レイヤーを重ねると台詞になること・2 つの道の統合画像が同じことは、前の試験のまま通る。main の版の PSD と比べた結果は下の「PSD の見本を main の版と比べた」。
+- test_save_e2e savedBookReadsBackWhole: v3 の見本の手描きの楕円（30 × 60 mm）は、v4 に変換した写しで 31.05 × 62.1 mm（真ん中は同じ）になり、`balloon_geometry: 2` が付く。
+- test_psd_text imageWayIsAsBefore: 4 ページ分の sha256 をまとめて言うようにした（検査は同じ）。test_render_page: コメントだけ。
+- docs/ops.schema.json: native の一覧と同じ文に（edit_line の balloon・tails・style の説明）。
+- test_contract_opentype linesOfBeforeAsBefore（tests/data/type/plain_lines.json）: フキダシのある 14 ページの sha256 を記録し直した（フキダシの画素が変わるので）。フキダシの無い 3 つ（latin・sfx・text_only）は前のまま。文字は、17 ページを main 5cf6551a の実行ファイルと今の版で PSD（文字を編集できる道）に書いて文字レイヤーを比べた: 字の大きさは 17 個とも同じ。置き場所は 11 個が同じで、op で作った楕円の 6 個（leant・tcy・no_features・down_features・text_gamma・across_ruby_spans）は 150 dpi で 1 px ずれる（楕円の文字は文字の箱の真ん中に置く。文字の箱はフキダシの箱の 1 / 1.035 で、画素への丸めが箱とは別になる）。保存してあった本は読み替えで文字の箱が前の箱と同じになるので、ずれない。**この試験も最初の版（09099074）のときから落ちていた。**
+- test_gui_output checksPanel: 点検の「台詞が仕上がり線の外」をクリックしたときに印が付く箱は、台詞の文字の箱（楕円はフキダシの箱の 1 / 1.035。指摘の小数 2 桁で −2.49, 40.34, 28.99 × 19.32）。前はフキダシの箱（−3, 40, 30 × 20）。指摘の件数・文・選ばれる台詞は同じ。
+- test_layout_ideas submitNameSavesAsBeforeK1: demo4 のネームを道具で提出して保存した project.json の sha256 を取り直した（7c1284b4… → bf8114d5…）。計画の input_hash 4 つは前のまま。main 5cf6551a の実行ファイルと今の版で同じネームを MCP から提出して、2 冊の project.json を鍵ごとに比べた: 違いは 18 個の値だけ — 道具が写植した楕円 5 本の w_mm・h_mm（1.035 倍）と x_mm（その大きさの置き場所。3 本は別の空きへ移る）、しっぽの先 1 つ、`balloon_geometry: 2`。コマ・計画・id・ほかの台詞は同じ。**この試験は最初の版（09099074）のときから落ちていた**（関係する試験の一覧に入れていなかった）。今回、台詞を足す試験を全部流して見つけた。
+
+### 確かめたこと（Linux Release。関係する試験だけ）
+- 関係する試験 103 本: 最初の版の 59 本（test_render_page・test_gui_lines・test_psd_text・test_smart_stack・test_ruby_render・test_contract_type 3 本・test_ledger_service_a/b/c・test_service・test_storage・test_model・test_features・test_command_bus・test_ops_e2e・test_cli_e2e・test_mcp_api_e2e・test_gui_ledger_a・test_fukidashi・test_fukidashi_service と、台詞に触れる契約・GUI・e2e の試験）に、台詞を足す試験・点検を流す試験・台詞のある本を読む試験を全部足した（test_layout_ideas・test_contract_opentype・test_gui_output・test_gui_effects・test_contract_annotations/layer_comps/measure/pcraft/slices/smart/video・test_gui_ai/align/anim/color/paths/shapes/smart/smart_contents/transform/variables/workspace/prefs・test_contract_align/anim/color_model/image_ops/ink/layers/paths/transform/prefs/retouch・test_brushes_model・test_color_model・test_groups・test_page_geometry・test_page_size・test_pyre・test_spell・test_variables・test_adjust・test_ai_link・test_strokes・test_perf_render）。試験の関数 2411 件が合格、不合格 0、スキップ 33（前からのスキップと、見本の書き出し 1 件）。test_soak_app（3 時間の耐久。台詞の期待値は無い）、全体の試験、ASan は流していない（群の出口で）。
+- 新しい試験: test_fukidashi 72 件（輪郭の鏡像・線の太さ・破線・しっぽが輪郭の法線から出る・先が法線の上なら曲がらない・本体はしっぽのほかは変わらない・継ぎ目・線より小さい泡・同じフキダシは同じ画素・角 0 は四角・タイル＝ページ・白黒の線の太さ・レイヤーを重ねるとページ・ベタに白抜き・トーン枠・前の鍵・拡張の出入り・前の本の読み替え（箱・消しゴムの跡・文字の道・細い線・世代の鍵の読み方）・文字の大きさと画素・検査の指摘・2 度は読み替えない・今の形の文字の収まり）、test_fukidashi_service 18 件（op の受け取りと日本語の断り・切れ込みのしっぽ・capsule と polygon の tail_hidden・楕円の寸法・capsule の選び方（種類を書いた台詞は変えない）・ネームの文字入れ）。前の本の見本は tests/data/fukidashi（old_book・old_book2 は main 5cf6551a が書いた project.json。old_letters.json・old_letter_layers.json・old_issues.json はその版での文字の em と大きさ・文字だけの絵の sha256・検査の指摘）。台詞 92 本（77 ＋ 15）すべてが 150・350・600・1200 dpi で同じ em・同じ大きさ、文字だけの絵は同じ sha256。
+- 速さ（test_perf_render の ten_balloons_at_600dpi。表示だけ。ほかの試験と並べて流したときの数字）: B4・600 dpi（6071 × 8598 px）に 10 個。フキダシなし 354 ms、ありを最初から 1008 ms、もう一度 494 ms、形だけ 449 ms（1 個 44.9 ms）。
+- 見本: 今風の種類としっぽ（150 dpi の全体 3 ページ、600 dpi の原寸の切り出し）、前の本 2 冊を main と今の版で描いた並び。作業用の場所（リポジトリの外）に置き、報告に道を書いた。
+
+### 前の本を開いたとき・取り消し・ジャーナル（確かめたこと。コードは変えていない）
+- GUI で前の本を開いても、**本は変更ありにならず、ファイルも書き換えない**。読み替えは読むときにメモリーの上で起きるだけで、セッション（app/session.hpp）は op を当てるまで「保存済み」のまま。画面のフキダシは今風で、文字は前と同じ。何もせずに閉じれば、ディスクの本は前のまま（次に開くとまた同じように読み替える。結果は毎回同じ）。
+- 利用者が何か 1 つ編集して保存すると、その保存の取引で、読み替えた箱と `balloon_geometry: 2` が一緒に書かれる。保存の差分には、その編集のほかに楕円の箱と鍵の変更が入る。
+- 取り消し・やり直し: メモリーの上の取り消しは、読み替えた後の文書どうしを行き来するので、境目をまたがない。ジャーナル（.genko/journal）から前の状態（鍵が無い状態）を戻したときは、それをまた読むときに同じ読み替えがかかる（毎回同じ結果）。鍵のある状態を戻せば読み替えない。どちらでも箱が 2 度大きくなることは無い。
+- 落ちた後の復旧: 保存していない op は、読み直した（読み替えた）文書の上に当て直される。op が書いている箱の数字はそのまま使う（op は読み替えない）。前の版で書かれて当て直されていない op（楕円を足す add_line で w・h を書いたもの）が残っていた場合だけ、その楕円は 1.035 倍にならず、文字が 1 段小さく収まることがある（下の「op の列を今の版でやり直したとき」と同じ）。
+- 版をまたぐ: 鍵の付いた本を前の版で開いて保存しても、鍵は知らない鍵として残る。
+
+### PSD の見本を main の版と比べた（main 5cf6551a の実行ファイルと今の版で同じ本を書いて、PSD を開いて比べた）
+- 見本: tests/data/psd_text_book.json（4 ページ、フキダシのある台詞 12 本）。150 dpi、画像の道と文字を編集できる道。2 通りで比べた: (A) main の版が保存した本を今の版で開いて書き出す、(B) 同じ op を今の版で当て直して書き出す（試験の sha256 はこちら）。
+- どちらも結果は同じ: 8 ファイルとも、レイヤーの並び（深さ・種類・名前）とキャンバスの大きさが同じ。フキダシ以外のレイヤー（紙・コマ・絵・文字レイヤー）の画素は全部同じ。文字レイヤーの本文・行列（置き場所と向き）・字の大きさ・フォント・ランの長さは全部同じ（違い 0 件）。
+- 違うのはフキダシの画素を持つレイヤーだけ: 画像の道は台詞のレイヤー 12 本（p1 が 5、p2 が 3、p3 が 3、p4 が 1）、編集できる道は「フキダシ」レイヤー 12 本。画像の道の台詞レイヤーで違う画素は 1 本につき 4886〜9517 px で、そのうち文字の上にあるものは 0 px（フキダシの輪郭だけが変わっている）。
+- 箱を数字で書いた台詞で、main より文字が小さく組まれたもの: 0 本（(B) でも）。
+- この見本にはしっぽが無いので、しっぽの作り直しでは sha256 は変わらなかった（最初の版で取り直した 8 つのまま）。
+
+### 残り・気を付けること
+- 同じ build フォルダーで main の版を作って比べた（2 つ目の build フォルダーは作らない決まり）。main の実行ファイルは作業用の場所に置いただけで、リポジトリには無い。
+- 版をまたぐ動き: `balloon_geometry` の付いた本を前の版で開いて楕円を足して保存すると、その楕円は読み替えられない（文字が少し小さく収まることがある）。前の版は公開前の v0.1.0 の下書きだけ。
+- op の列を今の版でやり直したとき（ジャーナルの再生、試験の見本の op）は、箱は書かれた数字のまま真の楕円になる。文字の箱はその 1 / 1.035 なので、前の版で同じ op を当てたときより文字が 1 段小さく収まることがある（保存した本を開く道は読み替えるので変わらない）。
+- 回したフキダシの紙の大きさ（turned_sheet の py_hypot）は前のまま（環境の libm）。しっぽの先の回し方は libm_float。今風の形の計算には環境の libm は入っていない。
+- 鋭い切れ込み（本体に沿って寝たしっぽ）は、継ぎ目が小さいので小さなくびれとして残る。`fillet_mm` で大きくできる。
+- ギザギザのしっぽの先の小さな目は、群 B3 で直した（下の「群 B2・B3」）。ごく短いギザギザのしっぽ（1 段が線 2 本より短い）は、歯がつぶれて黒い塊に見える（16 段のまま。前から）。
+- Windows の実機のビルドは未確認（near・far の名前、GCC の拡張、__int128 は使っていない）。
+
+### 群 B2・B3（GUI と、AI 向けの道具・手引き。同じブランチ native/fukidashi-core、d48c3f60 の上）— 2026-11-13
+#### 作ったもの（B2。GUI）
+- 種類: `lettering::kinds()` に「縦長（カプセル）」`capsule`（楕円の次）と「多角形（機械の声）」`polygon`（四角の次）。ページ → 台詞 → フキダシの形、フキダシの右クリック、台詞パネル、文字ツールの設定、ストーリーエディターの 5 つに出る。15 → 17 種類。
+- 手描き風の設定を外した: 台詞パネルの「線の揺れ」（`wobble`）。`hand` の設定は画面には元から無い。残したもの（フキダシの手描き風ではないので）: 「フキダシを手で描く」（自分で輪郭を描く）、「手で描いたフキダシを曲線にする」、書体の「手書き風」、コマの枠線の「手描き風」、ブラシ。`hand`・`wobble` を持つ本はそのまま開き、ほかの設定を変えても鍵は残る（パネルはもう `wobble` を書かない）。前の `wobble` の波は「線のふるえ」に mm で出て、そこを変えると `wave_mm` に書いて `wobble` を外す（楕円の台詞は `hand: false` を足し、文字を収める楕円を変えない）。「既定の設定に戻す」は前の鍵も消す（前から）。
+- 台詞パネルの新しい設定（app/story_panel。選択ツールのオプションに出る）: 角の丸み、角をふっくら丸くする、角の数、線のふるえ、トゲの長短、破線の長さ、しっぽの形（くさび・まっすぐ・ギザギザ・消える・泡・内向き）、しっぽの付け根の丸み。効く種類のときだけ行を出す（描画の body_of・no_tail と同じ分け方）。どれも `edit_line` 1 つ。フキダシの右クリックの「しっぽの形」にも「まっすぐ」「内向き（切れ込み）」を足した。内向きにすると先をフキダシの中へ（真ん中から先への線の上、縁までの 0.55）、外向きに戻すと外へ（1.6）移す。
+- ドック「フキダシ」（app/balloon_palette、main_window_fukidashi）: プリセット 32 個（下）。絵は draw_group が描く（40 × 34 mm の紙を 56 dpi × 画面の倍率で。線なしだけ灰色の紙）。初めて見せたときに 4 枚ずつ描き、プロセスの中で使い回す。キー（矢印・Enter・Space）、ツールチップ、右クリック（選んだ台詞に当てる／次に置く台詞に使う）。ウィンドウ → フキダシ、ページ → 台詞 → フキダシのパレットを開く（`act_balloon_palette`）。台詞のタブの隣、初めは閉じている。写植の並び（作業の段階）に入れた。配置は saveState に入る（objectName「フキダシ」）。
+- 選んだときの動き: このページの台詞を選んでいて文字ツールを持っていなければ、その台詞に当てる（`edit_line` 1 つ）。そうでなければ次に置く台詞の形（文字ツールに持ち替え、type_new_line・balloon_drawn が読む。別のプリセットか文字ツールの「フキダシ」を選ぶまで続く）。台詞パネルの「コマに追加」とストーリーエディターは、自分の種類の欄があるので、パレットの形は使わない。
+- 寸法: app/lettering の measure は capsule・polygon を service::letter::measure で測る（式は 1 つ）。polygon の寸法は service に足した（polygon_room）。polygon の角の数は place_at・refit がスタイルから読む。
+- プリセット（鍵 / 名前）: oval 普通、oval_tail しっぽつき、capsule 縦長、capsule_wide 横長、rounded 角丸、squircle ふっくら角丸、box 四角、narration ナレーション、cloud もくもく、thought_cloud 心の声（雲）、thought 心の声（泡）、shout 叫び、shout_alt 叫び（長短）、shout_sharp 叫び（鋭い）、electric 電子音、flash フラッシュ、whisper ささやき、long_dash 長い破線、wave ふるえ声、double 二重線、thick 太い線、no_line 線なし、polygon8 八角形、polygon6 六角形、black_oval ベタ白抜き、black_shout ベタの叫び、black_flash ベタフラ、dotted_box 点線の囲み、tone_box トーンの囲み、fancy_box 飾り枠、inward_tail 内向きしっぽ、two_tails しっぽ 2 本。
+- 作らなかったもの: つないだ 2 つ（`group`）のプリセット。つなぎは台詞 2 本の鍵なので、1 本を置く・1 本に当てるプリセットでは作れない（右クリック「次の台詞のフキダシとつなげる」は前のまま）。
+- commands.json: 4 つ足した（ウィンドウ → フキダシ、フキダシのパレットを開く、フキダシの形の 2 つ）。消した命令は無い。保存してあるショートカットは、ウィンドウの命令ごとに `shortcuts/<名前>` を引くだけなので、知らない名前の設定が残っていても読まれず、何も起きない（preferences.cpp）。
+
+#### 作ったもの（B3。AI 向け）
+- MCP の道具の説明（api/mcp_tools.cpp）: `apply_ops` に、フキダシの種類（capsule・polygon を含む）・形の鍵と範囲・しっぽの kind と fillet_mm を書いた。`propose_lines` に、balloon を省いたときの決まり。手描き風は「無い」とだけ書いた。`inspect` の説明は変えていない（2026-10-15 の決定）。道具の inputSchema は変えていない（test_mcp_api_e2e の sha256 は前のまま）。
+- op の一覧（core/data/ops_schema.json と docs/ops.schema.json）: `corner_mm` の 0 は四角、`add_line` の balloon・tails・style は edit_line と同じ、`wobble` を style の並びから外し、`hand`・`wobble` は「前の鍵。受け取るが新しい台詞には使わない」と書いた。
+- 手引き: SKILL.md に「フキダシの形を選ぶ」の表（会話・1 列の台詞・説明・心の声・叫び・ささやき・機械の声・ナレーション・ふるえ・コマの外の声・ベタ）、drawing.md に種類・形の鍵・しっぽの説明（`wobble`（手描き風の揺れ）を外した）、manga_rules.md の balloon の並び。integrations/hermes と integrations/claude-code の写しは同じ内容。
+- ネーム計画: `panels[].lines[].balloon` の種類に `capsule`・`polygon` を足した（studio/schemas.cpp）。計画の input_hash は計画の中身のハッシュなので、今ある見本のハッシュは変わらない。
+- docs/AGENT.md の種類・しっぽ・鍵の説明。OTHER_AGENTS.md・AI_PIPELINE.md には直す所が無かった。CLI のヘルプに種類の並びは無い（`genko schema` は ops_schema.json）。
+- ギザギザのしっぽの先の「目」（B1 の残り）: balloon_clean.cpp の zigzag で、くびれの白が線の太さより細くなる所から先は外へ振らずに細らせる（TailSpec.line）。16 段のままなので、ごく短いしっぽ（1 段が線 2 本より短い）は前と同じく歯がつぶれる。
+
+#### 直した既存の試験（どれも意図した変更。緩めていない）
+- test_gui_lines commandsAsPythonsWindowHasThem: ページ → 台詞 の並びに「フキダシのパレットを開く」が入る（11 → 12 項目）。フキダシの形のメニューと文字ツールの設定の種類は 15 → 17。
+- test_gui_lines theLinesPanelListsReordersAndEdits: 台詞パネルの設定を変えたときの edit_line の style から `"wobble": null` が無くなった（線の揺れの欄を外したので、パネルは `wobble` を書かない）。
+- test_gui_actions theMenusHoldPythonsCommands: 名前つきの命令 821 → 822（`act_balloon_palette` の 1 つ）。
+- core/data/commands.json: 4 つ足した（test_gui_prefs commandsJsonIsTheMenus が作り直したもの）。
+- docs/ops.schema.json: native の一覧と同じ文に（add_line・edit_line の説明）。
+- 期待値を変えていないもの: test_mcp_api_e2e の道具の inputSchema の sha256、PSD・opentype の画素の sha256（見本にギザギザのしっぽが無い）、ネームの見本の input_hash と test_layout_ideas の project.json の sha256。
+
+#### 確かめたこと（Linux Release。関係する試験だけ）
+- 152 本の実行ファイル（test_gui_* 全部・*_e2e 全部・service・ledger_service_a/b/c・fukidashi・fukidashi_service・layout_ideas・studio_files・studio_ops・mcp_connection・storage・model・strokes・command_bus・ops・features・render_page・psd_text・smart_stack・smart_render・ruby・ruby_render・type_text・contract の type 3 本・opentype・psd_text・psd・storage・render_cli・pipeline・export・export_cli・annotations・layer_comps・measure・pcraft・slices・smart・video・align・anim・color_model・image_ops・ink・layers・paths・transform・prefs・retouch・guides・copy・open・variables・artboards・page_size・brushes_model・color_model・groups・page_geometry・page_size・pyre・spell・variables・adjust・ai_link・perf_render・package・control_channel・session・migration・tiles・web_export・pcraft・prefs_table・json・buildinfo）: 試験の関数 2986 件が合格、不合格 0、スキップ 25（Release では動かない障害注入 22 件、見本と画面の絵の書き出し 2 件、PSD の速さの見本 1 件）。3 本を並べて流した。全体の試験・ASan・test_soak_app は流していない。
+- 新しい試験: test_gui_fukidashi 9 件（メニュー 5 つ、手描き風の設定が無い・前の鍵の台詞の編集、形の設定の鍵と取り消し、パレットと絵、選んだ台詞に当てる、次に置く台詞、capsule・polygon の寸法、画面の絵の書き出し）、test_fukidashi aZigzagTailClosesWithAPoint（直す前は落ちることを確かめた）。
+- パレットの絵 32 枚を描き直す時間（表示だけ。書体を読んだ後、1.5 倍の画面で）: 49 ms。配置（saveState・restoreState）で開閉が戻ることも試験で見る。
+- 画面の絵（作業用の場所。GENKO_FUKIDASHI_OUT にフォルダを指定して test_gui_fukidashi を走らせると、最後に書く）: パレット（明・暗）、台詞パネルの設定（明・暗）。日本語は字で出ていて、切れている所は無い。
+
+#### 残り・気を付けること（B2・B3）
+- Windows の実機のビルドは未確認。
+- 「次に置く台詞の形」は、文字ツールの「フキダシ」を選び直すか別のプリセットを選ぶまで続く。画面の印は、パレットの選ばれた項目（太字）と文字ツールの設定の種類だけ。
+- 選んだ台詞に capsule のプリセットを当てても箱は変えない（言葉・場所・大きさを保つ決まり）。横に広い箱では、両端の丸い横長になる。
+- 手で描いた輪郭（path）の台詞に当てると、形は変わらず線と塗りだけ変わる（そう知らせる）。type@1 のポイント文字・段落文字には当てない（知らせる）。
+- パレットの絵は 56 dpi（× 画面の倍率）なので、飾り枠の角飾りやトーンの点は実際より粗く見える。
+- polygon の寸法は角を丸める前の多角形で測る。奇数の角（5・7・9・11）は 2% の余裕を足している（試験は 5〜12 角で文字が 5 mm のまま収まることを見る）。
+- 内向きのしっぽにしたときの先の置き場所（縁までの 0.55）は、箱の楕円で測る（四角や多角形でも中に入る）。
+
+#### レビュー（d48c3f60..14a425c5 の読むだけのレビュー。P1 なし・P2 4 件・P3 10 件）と直したこと
+- P2-1 切れ込み（inward）がフキダシに置いていかれる: core の `move_line` が、しっぽを言わずに箱を動かす・大きさを変えるとき、inward のしっぽだけ箱と一緒に動かす（動かしただけなら同じだけ、大きさを変えたら箱の中の同じ割合へ。`to`・`via`・`vias`）。ほかのしっぽは前のまま（ページの上で指す所。隠れた先は外へ）。同じ op をもう一度当てても同じ結果（op は文書だけから決まる）。画面: 内向きの先（●）はドラッグしても中に留まる（縁までの 0.9）。「しっぽをまっすぐにする」はしっぽの種類を保つ（内向きが見えないくさびにならない。ギザギザ・消えるも保つ）。
+- P2-2 つないだフキダシ（`group`）にパレットの形: つないだ台詞の全部に種類と見た目の鍵を当てる（1 回の apply_ops＝取り消し 1 回）。しっぽは選んだ台詞だけ。文字の色の決まりは 1 本ずつ。
+- P2-3 前の `wobble` を外すと文字が小さくなる: パレット（preset_style_change）と線のふるえ（set_wave）の両方で、`wobble` が効いていて、結果が楕円で、`hand` が false でなければ `hand: false` を書く（`hand: true` のときも）。
+- P2-4 カプセルは箱で形が決まる: AI 向けの文（apply_ops・propose_lines の説明、SKILL.md の表とネームの項、drawing.md、integrations の写し、docs/AGENT.md）を直した（箱の長い辺が長い辺、大きさを省いた add_line は 40×20 mm、edit_line で変えたら move_line で箱を合わせる、目安の寸法）。画面: 種類のメニュー（ページ → 台詞 → フキダシの形、右クリック）とパレットで capsule・polygon へ／から変えると、同じ取り消しの中で箱を言葉に合わせて作り直す（真ん中を保つ。lettering::refit_for_kind）。ほかの種類どうしは箱を変えない。台詞パネルの「台詞を直す」とストーリーエディターは前から作り直している（右上を保つ）。core の edit_line はそのまま。
+- P3-1 白い文字: ベタの白い文字は、文字の色が無いか黒い台詞にだけ。白い文字を戻すのは前の塗りが黒かったときだけ（白抜き文字は触らない）。
+- P3-2 効かない行: 点線の囲みに角の丸み・線のふるえを出さない、飾り枠に角の丸みを出さない、心の声にしっぽの形を出さない。
+- P3-3 触っていない欄が書く: 新しい欄は、出している値と同じ（表示の刻みの半分以内）なら op を出さない（story_panel の left_as_shown）。しっぽの付け根の丸みは、1 本目の値が同じなら出さない（しっぽごとの違いをそろえない）。前からの「しっぽの幅」は、同じなら move_line（しっぽ）を出さない。ただし前からの欄がどれもそうであるように、欄を離れるとスタイルの edit_line は出る（test_gui_lines が見ている前からの動き。変えていない）。
+- P3-4 何も変わらない選択: op も取り消しの 1 回も作らず、「もう「◯◯」です」と知らせる。
+- P3-5 内向きと外向きが混じったしっぽ: しっぽのプリセットでは、向きの違うしっぽが 1 本でもあればプリセットのしっぽに置き換える。
+- P3-6 文の正しさ: propose_lines（balloon を省いて形が言葉で決まるのは、x_mm・y_mm だけを出したとき。box01 は speech のまま）、docs/AGENT.md（add_line の既定は speech）、入らないときの目安（service::letter::fits）を capsule・polygon の寸法で数える。
+- P3-7 試験: 下の「試験」。
+- P3-8 画面の倍率: QEvent::DevicePixelRatioChange で絵を描き直す。
+- P3-9 次に置く形が見えない: 文字ツールのオプションに「パレットの形: ◯◯」と「外す」。文字ツールの「フキダシ」を選び直しても外れる（前から）。
+- P3-10 文言: パレットの「普通」、種類の「ささやき（破線）」「フラッシュ（放射状の線）」（前の名前で付けたショートカットは preferences::renamed で引き継ぐ。commands.json の old_names）、「元に戻す で取り消せます」、ドックの説明。
+
+#### レビューの直しで変えた既存の試験の期待値（どれも意図した変更。緩めていない）
+- test_fukidashi_service aNotchStaysInsideItsBalloon → aNotchGoesWithItsBalloon: 箱を 40×30 → 60×50 にしたとき、切れ込みは「元の場所のまま」ではなく箱と一緒に動く（[58, 50] → [67, 56.67]）。P2-1 の決まり。ほかのしっぽ・検査の指摘は前のまま。
+- test_gui_lines aBalloonsOwnMenu（しっぽをまっすぐにする）: ギザギザのしっぽをまっすぐにしても種類が残る（`{"to": …}` → `{"to": …, "kind": "zigzag"}`）。P2-1。
+- core/data/commands.json: 種類 2 つの名前（id も名前）が変わり、old_names に前の名前が入る。
+- docs/ops.schema.json: native の一覧と同じ文（move_line の tails）。
+- test_gui_fukidashi（群 B2 の試験）: 種類を capsule・polygon へ変える op が 2 つ（edit_line と move_line）になる、ベタは利用者の赤い文字を白にしない、など上の決まりに合わせた。
+- 変えていないもの: 画素・PSD・opentype・project.json の sha256、道具の inputSchema の sha256、ネームの見本の input_hash。
+
+#### レビューの直しの後に確かめたこと（Linux Release。関係する試験だけ）
+- 前と同じ 152 本の実行ファイル（上の一覧）を、全部を作り直してから 3 本並べて流した: 試験の関数 2989 件が合格、不合格 0、スキップ 25（内訳は前と同じ）。sha256 を取り直した試験は無い。全体の試験・ASan・Debug・test_soak_app は流していない。
+- 試験: test_gui_fukidashi は 12 件（つないだフキダシに当てる aPickOnAJoinedBalloonTakesEveryMember、切れ込みとフキダシ aNotchGoesWithItsBalloon を足した。手描き風の試験は、wobble を外すと文字の組み方が変わる箱を探して使い、`hand: false` が入ること・組み方が変わらないことを線のふるえとパレットの両方で見る。寸法の試験は手で計算した数と比べる。パレットの項目の名前とツールチップも「無くなった言葉」の検査に入れた。右クリックのメニューは item_menu から試す）。test_fukidashi_service は 19 件（aNotchGoesWithItsBalloon: 動かす・大きさを変える・同じ op をもう一度・しっぽを言った move_line。aPlanSaysCapsuleAndPolygon: ネーム計画の capsule・polygon が写植まで届く・目安の字数）。
+- 画面の絵（作業用の場所）: gui-palette.png・gui-panel.png・gui-window.png（パレットを台詞の隣に開き、次に置く形を選んだ所。文字ツールのオプションに「パレットの形: 二重線」と「外す」）・gui-armed.png と、それぞれの -dark。日本語は字で出ていて、切れている所は無い（右のタブの見出しは、タブが多いと「フキ…」と省略される。前からのタブの動き）。
+
+#### 残り・気を付けること（レビューの後）
+- フキダシをドラッグしている途中の絵では、切れ込みは離すまで元の場所に見える（離したときに動く）。確かめたのは離した後の op と結果だけ。
+- `move_line` 以外で台詞を動かす op（整列・変形・用紙の変更など）で切れ込みがどう動くかは見ていない。
+- つないだフキダシで capsule・polygon へ／から変えると、1 本ずつ真ん中を保って箱を作り直す。箱が小さくなって離れることがある（短い半径の 1.2 倍までは首でつながる）。
+- 「しっぽをまっすぐにする」が種類を保つのは、全部の種類（前はくさびに戻していた）。
+- 種類 2 つの名前を変えたので、`genko commands` の id も変わる（前の名前は old_names）。
+
+### 今風のフキダシの出口 — 凍結 a72bd1e8 で Linux の ASan・Release が合格（2026-11-14）
+- **凍結SHA**: `a72bd1e8`（native/fukidashi-core。B1〜B3 とレビューの直し b6cb225d に、出口で見つけた試験の直し 6b2f5411 と、試験の「続きから」a72bd1e8 を足した版）。計画は `validation_policy.py --base 5cf6551a --head a72bd1e8 --phase milestone`（tier full。理由: CI 自身の変更〔tools/ci〕、ビルド・登録の共通境界、共有の描画経路、共通モデル・保存、工程出口、性能試験の変更〔test_perf_render に表示だけの測定〕、未分類の native 変更）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB（プロセスは 14 GB の memory cgroup の中）/ Ubuntu 24.04.5 / kernel 6.18.44 / cgroup v1。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 結果:
+  - linux-asan: 267/267 合格（2 並列、3 時間 1 分。QtTest の項目 5,502、SKIP 0、CLI23 合格）。1 回で走り切った（`--resume` を付けて呼んだが、引き継ぎは起きていない）。
+  - linux-release: 267/267 合格（2 並列、18 分。項目 5,428、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 65 本すべて合格（項目 1,198。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で）: test_perf_app 2 回（開くまで 501 ms・432 ms、入力から画面まで p95 1.68 ms・1.31 ms、p99 3.20 ms・2.55 ms）、test_perf_render 合格（フキダシ 10 個の B4 600 dpi: フキダシ無しのページ 316 ms、一から 680 ms、描き直し 401 ms。表示だけで合否は付けていない）、test_perf_pipeline 合格（PERF-F 8 ページの校正刷り p95 5120.8 ms）。
+  - `--pair`: 「構成artifactの欠落・重複」で不合格（Debug と Windows 2 構成が無い）。**3 構成の --pair 合格ではない。**
+  - **流していないもの**: linux-debug（最終配布の前に 1 回。利用者の決定 2026-11-13）、配布物（この工程は配布物の中身と作り方を変えていない。次の書体の工程で配布物が変わるので、そこで作って確かめる）、WebAssembly のホスト（変えていない）、Windows（deferred）。
+- 合格までの回（どれも合格に数えていない）:
+  - 凍結 b6cb225d で 3 回、コンテナの再起動で止まった（ASan のビルド中、試験の 166 本目、192 本目）。背景の見張りが 2 時間の上限で切れた後に 1 回、基盤の入れ替え（kernel の版が変わった）で 1 回。
+  - ASan の試験を 4 並列にした回: test_cli_e2e が落ちた。原因は memory cgroup の上限（14 GB）で、試験が起こした genko の子プロセスを OOM killer が止めた（dmesg の記録あり。プロセスを起こす e2e の試験が同時に走り、ASan の genko が 14 個、各 1 GB で並んだ）。製品の不具合ではない。**ASan の試験は 2 並列まで**（4 並列は使わない）。
+  - 2 並列に戻した回は lead が止めた: test_fukidashi の sampleSheets と test_gui_fukidashi の screenshots（見本の絵の書き出し）が、GENKO_FUKIDASHI_OUT が無いと QSKIP していた。監査は ASan の SKIP を一つも認めないので、走り切っても不合格になる。4 並列の回のログを「続きから」の読み方（試験ごとの結末）で読んで分かった。絵の書き出しを試験の項目から外し、フォルダを指定した回の cleanupTestCase で書く（6b2f5411。test_gui_color の画面の絵と同じやり方。監査は変えていない）。ASan で 2 本を、指定なし（72・11 項目、SKIP 0）と指定あり（絵 40 枚が書かれる）で確かめた。
+- 次から気を付けること: 開発中の関係する試験（V1）は ctest の合否しか見ていなかったので、足した QSKIP に気付かなかった。試験に QSKIP を足したら、出口の前に関係する試験のログで `SKIP` を見る。
+- test_fx_lens は ASan で 1 本 51〜75 分かかり（今回 3,054 秒）、ASan の所要時間の 3 割前後を占める。分ければ並列が効き、止まったときのやり直しも短くなる（未着手。利用者に相談する）。
+
+### 試験の「続きから」（validation_run.py --resume）— 利用者の決定 2026-11-14
+- 利用者の決定: 「「続きから」を入れてください」「他の試験でも同様のようなテストがあれば変更してください」。機械の再起動と環境が原因の失敗で、ASan の全体の試験を最初からやり直すことが 1 日に 3 回続いた（合わせて約 5 時間）。
+- 何をするか（正本は VALIDATION.md §3・§4）: 同じ `--output` のまま `--resume` を付けると、前回の `result.json` と計画・ソース・実行物・構成が全部同じときだけ、合格済みの試験を引き継いで残りと落ちた試験だけを走らせる。違えば最初から走らせ、理由を `resume.reason` に残す。各回のログは残し（`ctest-output.log`、`ctest-output.attempt-N.log`）、`--pair` は全部を読み直す。前の回で落ちて後で合格した試験は `audit.rerun_after_failure` と `--pair` の `resumed` に出る。**その原因（機械のメモリ不足など、コードの外のもの）をこの引継ぎに書けないときは、合格に数えない。** コードを直せばソースが変わるので全部走らせ直しになる（R4 のまま）。
+- `--resume` を付けない実行の監査、合否の基準、SKIP の扱い、試験の中身は変えていない。足したのは、走らせた機械（OS・CPU 数・メモリ）と回のログ名の記録、記録を横に書いてから置き換えること、出力先を一つの実行だけが使う印（`.running`。ctest と試験にも渡すので、道具だけが落ちて ctest が残っているあいだは次の回が始まらない）、実行物の指紋にビルドの中の共有ライブラリを入れること（sanitizer の構成では製品のコードが libgenko_*.so にある）。
+- レビュー（読取専用 1 回）と直し:
+  - P1: 最初から走らせ直す回が、記録を書いてからログを開くまでの間に落ちると、前のソースのログが残り、次の回が今の合格として引き継ぐ。→ 引き継がないログは、記録を書く前に消す。
+  - P1: `\r` の後ろの診断と、試験の番号の付かない診断の行を、試験ごとの読み方が見落とす（一度に走り切る監査は見つける）。→ 行は `\n` だけで切り、どの試験のものか分からない診断がある回は不合格にする（落ちた試験の出力の写しだけは認める）。最後の回には、始めた試験を全部合格で走り切ったという CTest の行を求める。
+  - P2・P3: 落ちる前に自分の失敗を出していた試験を「落ちた」として残す、合格の記録を書き換えない、判定の前に落ちた回が合格の記録を残さない、ログの指紋とビルドの場所を確かめる、記録の型を確かめる、CLI23 のログを回ごとに残す、`--pair` が記録にないログを不合格にする、ほか。中身のない試験 3 本を直し、届いていなかった分岐の試験を足した。
+- 確かめたこと: tools/ci/tests 137 本（test_validation_run 57 → 93 本。ctest と cmake の呼び出しだけを差し替え、途中で止まった回を通しで再現する）。過去の出口（k-v3・pc6-v3）の実ログで、新旧の読み方の結果が同じ。本物の ctest（ASan のビルド、小さな 4 本）: 3 本合格の後に道具だけを止める → ctest が残っているあいだは断る → 消えた後は 3 本を引き継いで 1 本だけ走り合格 → `--pair` 合格 → 合格の記録に付けても何も走らない。
+- 似た流れ（出口の手順。作業用のスクリプトで、リポジトリには無い）: 性能の関門は段（描画・アプリ 2 回・書き出しの流れ）ごとに印を残し、済んだ段は測り直さない（再起動の後は暖機だけやり直す）。実 xcb の GUI は試験ごとに印を残す。ビルドと構成ごとの合否は前から続きから進む。**出口の手順で、出力先を `rm -rf` してから validation_run.py を呼ぶ行（これまでの run.sh にあった）は写さない。**
+- 残り: Windows 構成は続きから走らせない（QtTest のファイル記録を回ごとに残していない）。CI（native.yml）は機械ごと作り直すので付けない。ビルドの置き場は 1 つしか入らない（Release 約 14.6 GB、ASan 約 11.7 GB）ので、ASan の後に Release を作り直す時間（約 40 分）は残る。分類の粗さ（未分類の変更を全体へ広げる）と重い試験の分割は、別に利用者に相談する。
+
+## コマ割り K（komawari@1。SPEC LAYOUT-01）— 2026-11-12
 
 ### 利用者の決定（2026-11-12）
 - 生成 AI がコマ割りをすると無難な格子しか出ない。これを直すため、次の 4 つを全部入れる。

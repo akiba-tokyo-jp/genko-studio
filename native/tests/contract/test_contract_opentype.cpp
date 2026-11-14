@@ -217,6 +217,12 @@ class TestContractOpenType : public QObject {
 
 private slots:
     // the lines of before: their pages drawn as the build before G-b drew them, and none of them shaped by HarfBuzz
+    // (fukidashi@1, SPEC BALLOON-01: every balloon is drawn clean now, so the 14 pages with a balloon were recorded again;
+    // the three without one — latin, sfx, text_only — are the build before G-b's still. Their letters, seen by writing
+    // each page as a PSD with 5cf6551a's program and this one's and comparing the text layers: the same sizes on all 17;
+    // the same places on 11, and on the six set in an oval made by an op here — leant, tcy, no_features, down_features,
+    // text_gamma, across_ruby_spans — 1 px aside at 150 dpi: an oval's letters are centred in their own box, 1 / 1.035
+    // of the balloon's, which rounds to pixels by itself. A book saved before is read with that box where it was.)
     void linesOfBeforeAsBefore() {
         const QString path = test::test_data(QStringLiteral("type/plain_lines.json"));
         const QByteArray record = qgetenv("GENKO_RECORD_PLAIN_LINES");

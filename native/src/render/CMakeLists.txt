@@ -85,6 +85,7 @@ genko_library(genko_render
     text/fonts.cpp
     text/tategaki.cpp
     text/lettering.cpp
+    text/balloon_clean.cpp
     text/balloons.cpp
     # PC3 (選択・マスク・パス・変形・判型の土台: B-0, C-0)
     selection_ext.cpp

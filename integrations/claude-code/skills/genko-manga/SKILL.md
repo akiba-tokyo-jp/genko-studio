@@ -67,8 +67,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
   - 台詞の書き方（写植）:
     - `breaks` は意味の切れ目（文節）で折る。「まんが作りの／モヤモヤを／ズバッと解決する／このコーナー！」。1 列 5〜8 字、列の長さは揃えない。
     - 台詞の終わりの「。」は書かない（Genko も描かない）。文の途中の「。」は列を変える。「！」「？」「……」はそのまま。
-    - 形は気持ちで選ぶ（ネーム計画の `balloon`）: 普通の会話 `speech`、説明・解説 `rounded`、心の声 `thought`、叫び・驚き `shout`、
-      ささやき `whisper`、電話やテレビ `electric`、場面の説明 `narration`。1 ページに 1 種類だけにしない。
+    - 形は気持ちで選ぶ（ネーム計画の `balloon`）: 普通の会話 `speech`、1 列の短い台詞 `capsule`（両端の丸い形。ネーム計画では Genko が言葉に合う箱を作るので、縦 1 列なら縦長になる）、説明・解説 `rounded`、
+      心の声 `thought`、叫び・驚き `shout`、ささやき `whisper`、電話やテレビ `electric`、機械の声・アナウンス `polygon`、
+      場面の説明 `narration`。1 ページに 1 種類だけにしない。細かい形（長短のトゲ・ふるえる線・切れ込むしっぽ）は、
+      ネームができたあと `edit_line` で足す（下の「フキダシの形を選ぶ」）。
     - 呟き `aside`: フキダシ無しの小さな手書き文字（少し傾く）。独り言・ツッコミ・「やってもた…」のような漏れた声、絵の説明書き
       （「男女入れ替えもの」）に。1 ページに 1〜3 か所。
     - 名札: コマの人物に `tag`（「スクール担当 つら姉」）。その人物のそばに小さな角丸の囲みで横書きに入る。人物紹介・解説漫画の初登場で。
@@ -204,7 +206,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 - `add_stroke` の `snap_lines_mm`: 線の端が、その距離までの近い線にくっつく（形を閉じる・線をつなぐ）。
   `erase` の `texture`（soft / rough）と `snap_ruler`（定規に沿って消す）。
 - フキダシ: style の `line_rgb`・`fill_rgb`・`fill_opacity`（線と中の色）、`text_dx_mm`・`text_dy_mm`（文字だけずらす）。
-  しっぽの `vias`（折れ線の角）、`width_mm`。`cut_balloon`（`points`、`width_mm`）でフキダシの一部を削る。
+  しっぽの `vias`（折れ線の角）、`width_mm`、`kind`（`wedge`・`straight`・`zigzag`・`fade`・`bubbles`・`inward`）、`fillet_mm`（付け根の丸み）。
+  `cut_balloon`（`points`、`width_mm`）でフキダシの一部を削る。形の選び方は下の「フキダシの形を選ぶ」。
 - 写植: 台詞の書き方 `{#3060c0|…}`（色）・`{×1.3|…}`（大きさ）・`{縦中横|12}`。style の `align: "justify"`（均等）、
   `ruby_scale`・`mono_ruby`、`below_layer`（そのレイヤーの下に描く）。
 - 描いた線の直し: `trace_edit`（`action` widen / narrow / redraw / redraw_width / join / simplify、`points` はなぞった線）。
@@ -216,7 +219,31 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
-- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・rounded・box・cloud・thought・shout・flash・whisper・narration・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
+- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・capsule・rounded・box・polygon・cloud・thought・shout・electric・flash・whisper・narration・dotted_box・tone_box・fancy_box・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
+
+## フキダシの形を選ぶ
+
+フキダシはどれも同じ今風の線（真の楕円・同じ太さの線・輪郭から伸びるしっぽ）で描かれる。声に合う形を `add_line`・`edit_line` の `balloon`・`style`・`tails` で選ぶ。
+
+形は箱（`x_mm`・`y_mm`・`w_mm`・`h_mm`）に合わせて描かれ、文字の向きでは決まらない。大きさを省いた `add_line` の箱は 40×20 mm。`edit_line` は箱を変えないので、形を変えたら `move_line` の `w_mm`・`h_mm` で言葉に合う箱にする（`propose_lines` に `x_mm`・`y_mm` だけを出せば、箱は言葉に合わせて決まる）。
+
+| 声 | `balloon` | `style`・`tails` |
+|---|---|---|
+| ふつうの会話 | `speech` | そのまま |
+| 1 列の短い台詞（「そうなんだ」） | `capsule` | 箱の長い辺が長い辺になる（縦長の箱なら縦長）。縦書き 1 列の目安: `w_mm` 9.5、`h_mm` 字数×5＋4。横書きの 1 行なら幅と高さを入れ替える |
+| 説明・落ち着いた声 | `rounded` | `corner_mm`（角の丸み 0〜50。0 で四角）、`squircle: true`（ふっくら） |
+| 心の声 | `thought`（楕円に泡が続く） | 雲の形にするなら `cloud` に `tails: [{to, kind: "bubbles"}]` |
+| 叫び・驚き | `shout` | `spike_alt: 0.5`（0〜0.8。トゲを 1 本おきに短く）、`spikes` 6〜80、`spike_depth` 0.05〜0.6 |
+| ささやき・小声 | `whisper`（破線） | `dash_mm`（破線の 1 本の長さ 0.2〜10。長いほど弱い声） |
+| 機械の声・放送・通信 | `polygon` | `sides` 5〜12（既定 8、六角形は 6）。箱の目安: 言葉の縦横に 1.5 mm を足して 1.4 倍（六角形は 1.5 倍）。電話・テレビは `electric` |
+| ナレーション・場面の説明 | `narration` | しっぽは付けない。人物の説明や独白は `box` |
+| ふるえる声・おびえた声 | `speech`（`rounded`・`box`・`capsule` でも） | `wave_mm: 0.4`（0〜3。線が細かく波打つ） |
+| コマの外にいる人の声 | 元の形のまま | `tails: [{to, kind: "inward"}]`（フキダシに切れ込むしっぽ。`to` はフキダシの中、話し手のいる側の縁の近く） |
+| 重い声・不気味な声（ベタに白抜き） | `speech`・`shout`・`flash` | `fill_rgb: [0, 0, 0]`、`line_rgb: [0, 0, 0]`、`rgb: [255, 255, 255]` |
+
+- 強調は `double: true`（二重線）か `border_mm`（線の太さ。0 で線なし）。しっぽの付け根の丸みは `fillet_mm`（0〜20。0 で角）。
+- しっぽは話し手の口へ向ける（`to`）。曲げるときは `via`。2 人が同時に言う台詞は `tails` に 2 本。
+- 人が画面で選ぶ「フキダシ」パレットの形も、同じ `balloon`・`style`・`tails` の組み合わせでできている。
 
 ## 人と同じ道具で描く・直す
 

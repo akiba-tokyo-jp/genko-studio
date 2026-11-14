@@ -498,7 +498,11 @@ private slots:
         QCOMPARE(line.ruby_runs.at(0), genko::core::parse_python_json(R"(["東京", "とうきょう"])"));
         QCOMPARE(line.emphasis_runs, std::vector<std::string>({"へ"}));
         QCOMPARE(line.wrap, std::string("vertical"));
-        QVERIFY(line.x_mm.same(genko::core::Num(120.0)) && line.h_mm.same(genko::core::Num(60.0)));
+        // (fukidashi@1, SPEC BALLOON-01: a book of before — its hand-drawn oval, 30 × 60 mm at 120, 40 — is read with the
+        // oval's box 1.035 times as big about its middle, once: the copy made says its balloons' generation)
+        QVERIFY(line.x_mm.same(genko::core::Num(119.475)) && line.h_mm.same(genko::core::Num(62.1)));
+        QVERIFY(line.w_mm.same(genko::core::Num(31.05)) && line.y_mm.same(genko::core::Num(38.95)));
+        QCOMPARE(project(book).value("balloon_geometry", 0), 2);
         const auto* ink = loaded.document.page(0).first_layer(genko::core::LayerRole::Ink);
         QVERIFY(ink != nullptr && ink->stroke_count() == 2);
         QCOMPARE(ink->strokes->items[0]->pressure, std::vector<double>({0.2, 0.9, 0.5}));

@@ -352,6 +352,13 @@ set_tests_properties(test_ruby_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 genko_test(test_psd_text SOURCES unit/test_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 900)
 set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# fukidashi@1 (SPEC.md BALLOON-01, AC-BALLOON): the balloons drawn clean — the geometry (an outline its own mirror image, the
+# line's width at any angle, dashes of one length, a tail leaving from the outline), drawn (a tile is the page cut there, the
+# printed line's width, a balloon's own layer laid over the page, a solid black balloon with white letters, a tone box, the
+# keys of before), the book (the feature while used, a book of before growing its hand-drawn ovals once, its letters the size
+# they had — data/fukidashi, written by the last build of the hand-drawn look); the sample sheets when asked.
+genko_test(test_fukidashi SOURCES unit/test_fukidashi.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS unit TIMEOUT 1800)
 # PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
@@ -423,6 +430,9 @@ set_tests_properties(test_contract_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
 # M7 (the ledger counted against the C++ tree): the checks the ledger asked for that no other C++ test made
 genko_test(test_ledger_service_a SOURCES unit/test_ledger_service_a.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
+# fukidashi@1 (SPEC.md BALLOON-01): the ops (the new kinds, style keys and tails; the refusals in Japanese; the keys of before
+# taken) and the auto-lettering (an oval sized for a true ellipse, a tall line in a capsule).
+genko_test(test_fukidashi_service SOURCES unit/test_fukidashi_service.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 # komawari@1 (コマ割り K1): the name plan's layout keys, add_frame into/over, the batch of layout ideas, the monotony warnings.
 genko_test(test_layout_ideas SOURCES unit/test_layout_ideas.cpp DEPS genko_test_support genko_service LABELS unit)
@@ -864,6 +874,10 @@ if(GENKO_BUILD_APP)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them
   genko_test(test_gui_lines SOURCES gui/test_gui_lines.cpp DEPS genko_app GUI TIMEOUT 900)
+  # フキダシ (fukidashi@1, SPEC BALLOON-01) in the window: the kinds of now in every menu, no control of the hand-drawn
+  # look, the 台詞 panel's settings of a balloon's shape, the palette of balloons (its pictures, a pick restyling the
+  # chosen line or shaping the next one placed), the window's measure of a capsule against the auto-lettering's
+  genko_test(test_gui_fukidashi SOURCES gui/test_gui_fukidashi.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # TEXT-01 in the window: the ruby typed with the input method (the table's "gui" cases), the ruby settings beside the
   # select tool, 要確認 marked, reassigned and cleared, Undo, 台詞の検索・置換, 縦書き・横書き, saved and read back
   genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)

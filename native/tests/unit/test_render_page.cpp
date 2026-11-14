@@ -634,7 +634,7 @@ private slots:
             doc.add_line(page.index, "見える台詞", "", std::nullopt, "", Num(34), Num(45), Num(20), Num(14), "box").style["below_layer"] =
                 "cover";
             doc.add_line(page.index, "上の台詞", "", std::nullopt, "", Num(8), Num(60), Num(22), Num(12), "rounded");
-            // (the same ids on both pages: a balloon's hand-drawn outline follows its line's id)
+            // (the same ids on both pages: what a balloon draws by its line's id — a burst's jitter — is the same on both)
             for (std::size_t i = 0; i < doc.story.size(); ++i) doc.story[i].id = "line-" + std::to_string(i);
             return doc;
         };

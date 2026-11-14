@@ -1,7 +1,10 @@
-// genko/balloons.py, the balloon side: tails_of, _ellipse_point, _wobbly, _uneven, _outline, _shape, _electric,
-// _edge_point, _smooth_closed, _polyline_tail, _tail_polygon, _fade_mask, _erode, _turned, _draw_turned,
-// _thought_trail, draw_group, _paint_shapes, _dotted_edge, _corner_marks, _tone_dots, _swell, _cuts_mask, _dashes,
-// _flash_lines and draw_lines. (The letters, _paint_text and what it calls: lettering.cpp.)
+// The balloons (fukidashi@1, SPEC BALLOON-01): tails_of, the shapes of a group (each line's balloon, its tails, the
+// joins) as outlines of real pixels (render/text/balloon_clean), their fill and line laid on the page in one mix, a
+// fading tail, the balloon eraser's cuts, a turned balloon drawn upright and laid turned, a picture balloon, the
+// thought's trail, draw_group and draw_lines. (The letters, _paint_text and what it calls: lettering.cpp.)
+//
+// Every balloon is drawn clean: a true ellipse, an even line, tails that run out of the outline. The hand-drawn look
+// (the egg-shaped oval, the pen's swelling line, the wobble) is gone since 2026-11-13, in books of before too.
 
 #include "render/text/balloons.hpp"
 
@@ -20,8 +23,9 @@
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
 #include "render/draw.hpp"
-#include "render/npcompat.hpp"
+#include "render/libm_float.hpp"
 #include "render/page.hpp"
+#include "render/text/balloon_clean.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/memo.hpp"
@@ -29,14 +33,10 @@
 namespace genko::render::text {
 
 using core::Json;
-using balloon::Box4;
 using balloon::Pt;
 
 namespace {
 
-constexpr double kTau = 6.283185307179586;  // math.tau
-constexpr double kHandPower = 2.6;          // HAND_POWER
-constexpr double kUnevenMost = 0.04;        // UNEVEN_MOST
 const std::vector<std::int64_t> kOutline{20, 20, 20};   // OUTLINE
 const std::vector<std::int64_t> kPaper{255, 255, 255};  // PAPER
 
@@ -45,11 +45,9 @@ bool one_of(std::string_view kind, std::initializer_list<std::string_view> kinds
 }
 // SQUARE, (*SQUARE, "rounded"), NO_TAIL, UNEVEN
 bool square(std::string_view kind) { return one_of(kind, {"box", "narration", "dotted_box", "tone_box", "fancy_box"}); }
-bool square_or_rounded(std::string_view kind) { return square(kind) || kind == "rounded"; }
 bool no_tail(std::string_view kind) {
     return one_of(kind, {"narration", "sfx", "none", "flash", "picture", "dotted_box", "tone_box", "fancy_box"});
 }
-bool uneven_kind(std::string_view kind) { return one_of(kind, {"speech", "thought", "whisper"}); }
 
 // st[key] / st.get(key): the value, or null when it is not there
 const Json& at(const Json& st, std::string_view key) {
@@ -57,11 +55,6 @@ const Json& at(const Json& st, std::string_view key) {
     if (!st.is_object()) return none;
     const auto it = st.find(key);
     return it == st.end() ? none : *it;
-}
-// st.get(key, True)
-bool get_true(const Json& st, std::string_view key) {
-    if (!st.is_object() || !st.contains(key)) return true;
-    return core::py_truthy(at(st, key));
 }
 // float(value or fallback)
 double float_or(const Json& value, double fallback) { return core::py_truthy(value) ? core::to_float(value) : fallback; }
@@ -79,15 +72,6 @@ double dist_to(Pt a, const Json& b) {
     return core::py_dist(a[0], a[1], number(core::subscript(b, 0)), number(core::subscript(b, 1)));
 }
 
-std::vector<PointD> drawn(const std::vector<Pt>& points) {
-    std::vector<PointD> out;
-    out.reserve(points.size());
-    for (const Pt& p : points) out.push_back(PointD{p[0], p[1]});
-    return out;
-}
-
-BoxF box_f(const Box4& b) { return BoxF{b[0], b[1], b[2], b[3]}; }
-
 Box page_box(const PagePart& part) {
     return Box{part.origin.x, part.origin.y, part.origin.x + part.image->width(), part.origin.y + part.image->height()};
 }
@@ -102,138 +86,181 @@ std::array<std::int64_t, 4> box_px(const core::StoryLine& ln, int dpi) {
 
 // --- the shapes -----------------------------------------------------------------------------------------------------
 
-// _shape(draw, kind, box, st, seed)
-void shape(Draw& draw, std::string_view kind, const Box4& box, const Json& st, std::string_view seed) {
-    const auto [x0, y0, x1, y1] = box;
-    const double cx = (x0 + x1) / 2;
-    const double cy = (y0 + y1) / 2;
-    const double rx = (x1 - x0) / 2;
-    const double ry = (y1 - y0) / 2;
-    const double wobble = float_or(at(st, "wobble"), 0);
-    if (wobble > 0) {
-        if (const auto points = balloon::outline(kind, box)) {
-            draw.polygon(drawn(balloon::wobbly(*points, wobble, core::py_min(rx, ry) * 2, seed)), Ink(255));
-            return;
-        }
+using clean::P;
+
+double clamp01(double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); }
+
+// A plane of coverage as an "L" picture (0..255, rounded to the nearest).
+Image as_image(const clean::Plane& plane) {
+    std::string bytes(plane.values.size(), '\0');
+    for (std::size_t i = 0; i < plane.values.size(); ++i) {
+        bytes[i] = static_cast<char>(static_cast<std::uint8_t>(clamp01(static_cast<double>(plane.values[i])) * 255.0 + 0.5));
     }
-    if (square(kind)) {
-        draw.rectangle(box_f(box), Ink(255));
-    } else if (kind == "rounded") {
-        draw.rounded_rectangle(box_f(box), core::py_min(rx, ry) * 0.6, Ink(255));
-    } else if (kind == "cloud") {
-        double bump = core::py_max(2.0, core::py_min(rx, ry) * 0.3);
-        const double k = 1 - bump / core::py_max(1.0, core::py_min(rx, ry));
-        const double perimeter = core::kPi * (rx + ry) * k;
-        std::int64_t n = int_or_zero(at(st, "bumps"));
-        if (n == 0) n = std::max<std::int64_t>(8, core::py_trunc_int(perimeter / (bump * 1.4)));
-        // (a set number of bumps: each as big as its share of the edge)
-        if (core::py_truthy(at(st, "bumps"))) bump = core::py_max(2.0, perimeter / static_cast<double>(n) / 1.4);
-        draw.ellipse(BoxF{cx - rx * k, cy - ry * k, cx + rx * k, cy + ry * k}, Ink(255));
-        for (std::int64_t i = 0; i < n; ++i) {
-            const Pt b = balloon::ellipse_point(cx, cy, rx * k, ry * k, 2 * core::kPi * static_cast<double>(i) / static_cast<double>(n));
-            draw.ellipse(BoxF{b[0] - bump, b[1] - bump, b[0] + bump, b[1] + bump}, Ink(255));
-        }
-    } else if (kind == "shout") {
-        std::int64_t spikes = int_or_zero(at(st, "spikes"));
-        if (spikes == 0) spikes = std::max<std::int64_t>(12, core::py_trunc_int((rx + ry) / core::py_max(4.0, core::py_min(rx, ry) / 3)));
-        const double depth = core::py_max(0.05, core::py_min(0.6, float_or(at(st, "spike_depth"), 0.2)));
-        const double jitter = core::py_max(0.0, core::py_min(1.0, float_or(at(st, "spike_jitter"), 0)));
-        core::PyRandom rng = core::PyRandom::from_str(seed.empty() ? std::string_view("shout") : seed);
-        std::vector<Pt> points;
-        for (std::int64_t i = 0; i < spikes * 2; ++i) {
-            const double t = core::kPi * static_cast<double>(i) / static_cast<double>(spikes);
-            const double k = i % 2 == 0 ? 1.0 + (rng.uniform(-0.5, 0.5) * depth * 2 * jitter) : 1.0 - depth;
-            points.push_back(balloon::ellipse_point(cx, cy, rx * k, ry * k, t));
-        }
-        draw.polygon(drawn(points), Ink(255));
-    } else if (kind == "electric") {
-        draw.polygon(drawn(balloon::electric(box, st)), Ink(255));
-    } else if (uneven_kind(kind) && get_true(st, "hand")) {
-        draw.polygon(drawn(balloon::uneven(box, seed)), Ink(255));
-    } else {  // speech, thought, whisper, flash
-        draw.ellipse(box_f(box), Ink(255));
-    }
+    return Image::frombytes("L", Size{plane.width, plane.height}, bytes);
 }
 
-// _fade_mask(size, fades): 255 everywhere but near each fading tail's tip, falling to 0 at the tip (numpy float64:
-// np.hypot is libm's hypot, the minimum over the tails, then (keep * 255).astype("uint8")).
-Image fade_mask(Size size, const std::vector<std::pair<Box4, Pt>>& fades) {
+// A style's length in mm as pixels (not rounded), or `fallback` when it is not set.
+double mm_px(const Json& value, int dpi, double fallback) {
+    return core::py_truthy(value) ? core::to_float(value) / 25.4 * dpi : fallback;
+}
+
+// How far a balloon's outline trembles (px): style.wave_mm, or — a book of before — its wobble as a wave of
+// kWobbleWave × wobble × the box's narrow side (the hand-drawn wobble is gone: SPEC BALLOON-01).
+double wave_px(const Json& st, const core::StoryLine& line, int dpi) {
+    double mm = 0.0;
+    if (core::py_truthy(at(st, "wave_mm"))) {
+        mm = core::to_float(at(st, "wave_mm"));
+    } else if (const double wobble = float_or(at(st, "wobble"), 0); wobble > 0) {
+        mm = balloon::kWobbleWave * core::py_min(1.0, wobble) * core::py_min(mm_or(line.w_mm, 40), mm_or(line.h_mm, 20));
+    }
+    return mm > 0 ? mm / 25.4 * dpi : 0.0;
+}
+
+// A line's balloon: its outline, the outline its tails leave it from (a burst's valleys, a cloud's), and whether a
+// tail's join with it is rounded.
+struct Body {
+    clean::Contour outline;
+    clean::Contour guide;
+    P centre;
+    double least = 0.0;  // (its narrow half size)
+    bool smooth = false;
+    std::string kind;
+};
+
+Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box, const Box& region, int dpi) {
+    Body body;
+    body.kind = kind_of(line);
+    body.centre = {box.cx(), box.cy()};
+    body.least = core::py_min(box.rx(), box.ry());
+    const std::string& kind = body.kind;
+    if (line.path && !line.path->empty()) {  // drawn by hand
+        clean::Contour outline;
+        for (const core::Point& p : *line.path) {
+            outline.push_back({static_cast<double>(px(p.x.value(), dpi) - region.x0), static_cast<double>(px(p.y.value(), dpi) - region.y0)});
+        }
+        if (core::py_truthy(at(lst, "path_curve"))) outline = clean::smooth_closed(outline);
+        body.outline = outline;
+        body.guide = std::move(outline);
+        body.smooth = true;
+        return body;
+    }
+    if (box.x1 - box.x0 < 1 || box.y1 - box.y0 < 1) return body;  // (a box of no pixel: nothing is drawn of it)
+    // (style.corner_mm: 0 is square corners; not set, the kind's own)
+    const double corner = at(lst, "corner_mm").is_number() ? core::to_float(at(lst, "corner_mm")) / 25.4 * dpi : -1.0;
+    if (kind == "rounded") {
+        body.outline = core::py_truthy(at(lst, "squircle")) ? clean::squircle(box) : clean::rounded(box, corner >= 0 ? corner : body.least * 0.6);
+        body.smooth = true;
+    } else if (square(kind)) {
+        body.outline = clean::rounded(box, corner >= 0 ? corner : 0.0);
+        body.smooth = true;
+    } else if (kind == "capsule") {
+        body.outline = clean::rounded(box, body.least);
+        body.smooth = true;
+    } else if (kind == "polygon") {
+        const std::int64_t sides = int_or_zero(at(lst, "sides"));
+        body.outline = clean::polygon(box, sides == 0 ? 8 : static_cast<int>(sides), corner >= 0 ? corner : body.least * 0.14);
+        body.smooth = true;
+    } else if (kind == "cloud") {
+        const double rx = box.rx(), ry = box.ry();
+        const double bump = core::py_max(2.0, body.least * 0.3);
+        const double keep = 1 - bump / core::py_max(1.0, body.least);
+        std::int64_t n = int_or_zero(at(lst, "bumps"));
+        if (n == 0) n = std::max<std::int64_t>(8, core::py_trunc_int(core::kPi * (rx + ry) * keep / (bump * 1.4)));
+        body.outline = clean::cloud(box, static_cast<int>(n));
+        body.guide = clean::scaled_about(clean::ellipse(box), body.centre, 0.8);
+    } else if (kind == "shout") {
+        const double rx = box.rx(), ry = box.ry();
+        std::int64_t spikes = int_or_zero(at(lst, "spikes"));
+        if (spikes == 0) spikes = std::max<std::int64_t>(12, core::py_trunc_int((rx + ry) / core::py_max(4.0, body.least / 3)));
+        const double depth = core::py_max(0.05, core::py_min(0.6, float_or(at(lst, "spike_depth"), 0.2)));
+        const double amount = core::py_max(0.0, core::py_min(1.0, float_or(at(lst, "spike_jitter"), 0)));
+        const double alt = core::py_max(0.0, core::py_min(0.8, float_or(at(lst, "spike_alt"), 0)));
+        std::vector<double> jitter;
+        if (amount > 0) {  // (each point's own reach, the same for the same line)
+            core::PyRandom rng = core::PyRandom::from_str(line.id.empty() ? std::string_view("shout") : std::string_view(line.id));
+            const std::int64_t count = alt > 0 && spikes % 2 != 0 ? spikes + 1 : spikes;
+            for (std::int64_t i = 0; i < count; ++i) jitter.push_back(rng.uniform(-0.5, 0.5) * depth * 2 * amount);
+        }
+        body.outline = clean::burst(box, static_cast<int>(spikes), depth, alt, jitter);
+        body.guide = clean::scaled_about(clean::ellipse(box), body.centre, (1 - depth) * 0.97);
+    } else if (kind == "electric") {
+        const double rx = box.rx(), ry = box.ry();
+        std::int64_t teeth = int_or_zero(at(lst, "spikes"));
+        if (teeth == 0) teeth = std::max<std::int64_t>(14, core::py_trunc_int((rx + ry) / core::py_max(3.0, body.least / 4)));
+        const double depth = core::py_max(0.04, core::py_min(0.4, float_or(at(lst, "spike_depth"), 0.12)));
+        body.outline = clean::sawtooth(box, static_cast<int>(teeth), depth);
+        body.guide = clean::scaled_about(clean::squircle(box), body.centre, (1 - depth) * 0.97);
+    } else {  // speech, thought, whisper, flash
+        body.outline = clean::ellipse(box);
+        body.smooth = true;
+    }
+    if (body.guide.empty()) body.guide = body.outline;
+    if (body.smooth && kind != "flash") {
+        const double wave = wave_px(lst, line, dpi);
+        if (wave > 0) {  // (a trembling outline: its tails leave the outline it trembles about, with a corner)
+            body.outline = clean::waved(body.outline, wave, core::py_max(wave * 7, 2.4 / 25.4 * dpi));
+            body.smooth = false;
+        }
+    }
+    return body;
+}
+
+// _fade_mask(size, fades): 1 everywhere but near each fading tail's tip, falling to 0 at the tip.
+std::vector<float> fade_keep(Size size, const std::vector<std::pair<clean::Box, P>>& fades) {
     const auto w = static_cast<std::size_t>(size.width);
     const auto h = static_cast<std::size_t>(size.height);
-    std::vector<double> keep(w * h, 1.0);
+    std::vector<float> keep(w * h, 1.0f);
     for (const auto& [box, tip] : fades) {
-        const double cx = (box[0] + box[2]) / 2;
-        const double cy = (box[1] + box[3]) / 2;
         const double reach =
-            core::py_max(1.0, core::py_dist(cx, cy, tip[0], tip[1]) - core::py_min(box[2] - box[0], box[3] - box[1]) / 2) * 0.7;
+            core::py_max(1.0, clean::distance({box.cx(), box.cy()}, tip) - core::py_min(box.x1 - box.x0, box.y1 - box.y0) / 2) * 0.7;
         for (std::size_t y = 0; y < h; ++y) {
             for (std::size_t x = 0; x < w; ++x) {
-                const double d = np::hypot(static_cast<double>(x) - tip[0], static_cast<double>(y) - tip[1]);
-                double v = d / reach;
-                v = v < 0 ? 0.0 : (v > 1 ? 1.0 : v);  // np.clip(…, 0, 1)
-                double& k = keep[y * w + x];
-                if (v < k) k = v;  // np.minimum
+                const double dx = static_cast<double>(x) + 0.5 - tip.x;
+                const double dy = static_cast<double>(y) + 0.5 - tip.y;
+                const auto v = static_cast<float>(clamp01(std::sqrt(dx * dx + dy * dy) / reach));
+                float& k = keep[y * w + x];
+                if (v < k) k = v;
             }
         }
     }
-    std::string bytes(w * h, '\0');
-    for (std::size_t i = 0; i < keep.size(); ++i) bytes[i] = static_cast<char>(static_cast<std::uint8_t>(keep[i] * 255));
-    return Image::frombytes("L", size, bytes);
+    return keep;
 }
 
-// _erode(mask, amount)
-Image erode(Image mask, std::int64_t amount) {
-    if (amount <= 0) return mask;
-    if (amount <= 3) {
-        for (std::int64_t i = 0; i < amount; ++i) mask = mask.filter(Filter::min_filter(3));
-        return mask;
-    }
-    // an isotropic erosion: blur and keep what stays nearly solid (Φ(2) ≈ 0.977)
-    return mask.filter(Filter::gaussian_blur(static_cast<double>(amount) / 2)).point([](int v) { return v >= 249 ? 255 : 0; });
-}
-
-// _dotted_edge(size, boxes, width): round dots along each box's edge, about three line-widths apart.
-Image dotted_edge(Size size, const std::vector<Box4>& boxes, std::int64_t width) {
-    Image out = Image::create("L", size, 0);
-    Draw draw(out);
-    const double r = core::py_max(1.0, static_cast<double>(width) * 0.9);
-    const double step = core::py_max(3.0, static_cast<double>(width) * 3.2);
-    for (const Box4& b : boxes) {
-        const double x0 = b[0] + r, y0 = b[1] + r, x1 = b[2] - r, y1 = b[3] - r;
-        const Pt edges[4][2] = {{{x0, y0}, {x1, y0}}, {{x1, y0}, {x1, y1}}, {{x1, y1}, {x0, y1}}, {{x0, y1}, {x0, y0}}};
+// _dotted_edge(boxes, width): round dots along each box's edge, about three line-widths apart.
+std::vector<clean::Contour> dotted_edge(const std::vector<clean::Box>& boxes, double width) {
+    std::vector<clean::Contour> dots;
+    const double r = core::py_max(1.0, width * 0.9);
+    const double step = core::py_max(3.0, width * 3.2);
+    for (const clean::Box& b : boxes) {
+        const double x0 = b.x0 + r, y0 = b.y0 + r, x1 = b.x1 - r, y1 = b.y1 - r;
+        const P edges[4][2] = {{{x0, y0}, {x1, y0}}, {{x1, y0}, {x1, y1}}, {{x1, y1}, {x0, y1}}, {{x0, y1}, {x0, y0}}};
         for (const auto& edge : edges) {
-            const Pt a = edge[0];
-            const Pt e = edge[1];
-            const double length = core::py_dist(a[0], a[1], e[0], e[1]);
+            const double length = clean::distance(edge[0], edge[1]);
             const std::int64_t n = std::max<std::int64_t>(1, core::py_round_int(length / step));
             for (std::int64_t i = 0; i < n; ++i) {
                 const double t = static_cast<double>(i) / static_cast<double>(n);
-                const double cx = a[0] + (e[0] - a[0]) * t;
-                const double cy = a[1] + (e[1] - a[1]) * t;
-                draw.ellipse(BoxF{cx - r, cy - r, cx + r, cy + r}, Ink(255));
+                dots.push_back(clean::circle({edge[0].x + (edge[1].x - edge[0].x) * t, edge[0].y + (edge[1].y - edge[0].y) * t}, r));
             }
         }
     }
-    return out;
+    return dots;
 }
 
-// _corner_marks(size, boxes, width): a small filled diamond on each corner of each box (a 飾り枠's corners).
-Image corner_marks(Size size, const std::vector<Box4>& boxes, std::int64_t width) {
-    Image out = Image::create("L", size, 0);
-    Draw draw(out);
-    const double d = static_cast<double>(width) * 3.5;
-    for (const Box4& b : boxes) {
-        for (const Pt c : {Pt{b[0], b[1]}, Pt{b[2], b[1]}, Pt{b[2], b[3]}, Pt{b[0], b[3]}}) {
-            draw.polygon(drawn({{c[0], c[1] - d}, {c[0] + d, c[1]}, {c[0], c[1] + d}, {c[0] - d, c[1]}}), Ink(255));
+// _corner_marks(boxes, width): a small filled diamond on each corner of each box (a 飾り枠's corners).
+std::vector<clean::Contour> corner_marks(const std::vector<clean::Box>& boxes, double width) {
+    std::vector<clean::Contour> marks;
+    const double d = width * 3.5;
+    for (const clean::Box& b : boxes) {
+        for (const P c : {P{b.x0, b.y0}, P{b.x1, b.y0}, P{b.x1, b.y1}, P{b.x0, b.y1}}) {
+            marks.push_back({{c.x, c.y - d}, {c.x + d, c.y}, {c.x, c.y + d}, {c.x - d, c.y}});
         }
     }
-    return out;
+    return marks;
 }
 
 // _tone_dots(size, dpi, origin): a light dot tone (about 10 %), dots a millimetre apart, lined up with the page.
-Image tone_dots(Size size, int dpi, std::int64_t ox, std::int64_t oy) {
-    Image out = Image::create("L", size, 0);
-    Draw draw(out);
+std::vector<clean::Contour> tone_dots(Size size, int dpi, std::int64_t ox, std::int64_t oy) {
+    std::vector<clean::Contour> dots;
     const double pitch = core::py_max(3.0, dpi / 25.4 * 1.0);
     const double r = core::py_max(0.5, pitch * 0.17);
     double y = -core::py_fmod(static_cast<double>(oy), pitch);
@@ -241,25 +268,13 @@ Image tone_dots(Size size, int dpi, std::int64_t ox, std::int64_t oy) {
     while (y < size.height + pitch) {
         double x = -core::py_fmod(static_cast<double>(ox), pitch) + (row % 2 != 0 ? pitch / 2 : 0);
         while (x < size.width + pitch) {
-            draw.ellipse(BoxF{x - r, y - r, x + r, y + r}, Ink(255));
+            dots.push_back(clean::circle({x, y}, r));
             x += pitch;
         }
         y += pitch;
         ++row;
     }
-    return out;
-}
-
-// _swell(size, seed, wave): where a pen's line swells (white) and where it stays thin (black), soft blobs `wave` apart.
-Image swell(Size size, std::string_view seed, double wave) {
-    core::PyRandom rng = core::PyRandom::from_str("swell:" + std::string(seed.empty() ? std::string_view("genko") : seed));
-    const std::int64_t cw = std::max<std::int64_t>(2, core::py_round_int(size.width / core::py_max(1.0, wave))) + 1;
-    const std::int64_t ch = std::max<std::int64_t>(2, core::py_round_int(size.height / core::py_max(1.0, wave))) + 1;
-    static const std::vector<int> choices{0, 0, 90, 255, 255};
-    std::string cells(static_cast<std::size_t>(cw * ch), '\0');
-    for (char& c : cells) c = static_cast<char>(rng.choice(choices));
-    const Image small = Image::frombytes("L", Size{static_cast<int>(cw), static_cast<int>(ch)}, cells);
-    return small.resize(size, Resample::Bicubic);
+    return dots;
 }
 
 // _cuts_mask(lines, size, origin, dpi, scale): where the balloon eraser went (each line's style.cuts, mm from its
@@ -300,58 +315,45 @@ std::optional<Image> cuts_mask(const std::vector<const core::StoryLine*>& lines,
     return mask;
 }
 
-// _dashes(size, boxes, scale): angular stripes around each balloon's centre (a whisper's dashed outline).
-Image dashes(Size size, const std::vector<Box4>& boxes, std::int64_t scale) {
-    Image out = Image::create("L", size, 0);
-    Draw draw(out);
-    for (const auto& [x0, y0, x1, y1] : boxes) {
-        const double cx = (x0 + x1) / 2;
-        const double cy = (y0 + y1) / 2;
-        const double r = core::py_max(x1 - x0, y1 - y0) * 2;
-        const std::int64_t n = std::max<std::int64_t>(16, core::py_trunc_int((x1 - x0 + y1 - y0) / static_cast<double>(6 * scale)));
-        for (std::int64_t i = 0; i < n * 2; i += 2) {
-            const double a0 = core::kPi * static_cast<double>(i) / static_cast<double>(n);
-            const double a1 = core::kPi * static_cast<double>(i + 1) / static_cast<double>(n);
-            draw.polygon(drawn({{cx, cy},
-                                {cx + r * core::py_cos(a0), cy + r * core::py_sin(a0)},
-                                {cx + r * core::py_cos(a1), cy + r * core::py_sin(a1)}}),
-                         Ink(255));
-        }
-    }
-    return out;
-}
-
-// _flash_lines(size, boxes, width): radiating lines from just inside the balloon to outside it.
-Image flash_lines(Size size, const std::vector<Box4>& boxes, std::int64_t width) {
-    Image out = Image::create("L", size, 0);
-    Draw draw(out);
-    for (const auto& [x0, y0, x1, y1] : boxes) {
-        const double cx = (x0 + x1) / 2;
-        const double cy = (y0 + y1) / 2;
-        const double rx = (x1 - x0) / 2;
-        const double ry = (y1 - y0) / 2;
-        const std::int64_t n = std::max<std::int64_t>(40, core::py_trunc_int((rx + ry) / 2));
+// _flash_lines(boxes, width): spokes round each balloon, from just inside its edge to outside it, each tapering to a
+// point at its inner end; long and short by turns, at equal distances round the edge.
+std::vector<clean::Contour> flash_spokes(const std::vector<clean::Box>& boxes, double width, int dpi) {
+    std::vector<clean::Contour> spokes;
+    for (const clean::Box& box : boxes) {
+        const clean::Contour edge = clean::ellipse(box);
+        const std::vector<double> lengths = clean::lengths_of(edge);
+        const double total = lengths.back();
+        const double pitch = core::py_max(width * 2.2, 0.7 / 25.4 * dpi);
+        std::int64_t n = std::max<std::int64_t>(24, core::py_round_int(total / pitch));
+        if (n % 2 != 0) ++n;
+        const P centre{box.cx(), box.cy()};
+        const double half = core::py_max(0.5, width * 0.55);
         for (std::int64_t i = 0; i < n; ++i) {
-            const double t = 2 * core::kPi * static_cast<double>(i) / static_cast<double>(n) + static_cast<double>(i % 3) * 0.013;
-            const double inner = 0.93 + 0.04 * static_cast<double>((i * 7) % 5) / 5;
-            const Pt a = balloon::ellipse_point(cx, cy, rx * inner, ry * inner, t);
-            const Pt b = balloon::ellipse_point(cx, cy, rx * 1.18, ry * 1.18, t);
-            draw.line(drawn({a, b}), Ink(255), static_cast<int>(std::max<std::int64_t>(1, width / 2)));
+            const double s = total * static_cast<double>(i) / static_cast<double>(n);
+            const P on = clean::point_at(edge, lengths, s);
+            const P along = clean::direction_at(edge, lengths, s);
+            const double inner = i % 2 == 0 ? 0.90 : 0.96;
+            const double outer = i % 2 == 0 ? 1.18 : 1.12;
+            const P tip{centre.x + (on.x - centre.x) * inner, centre.y + (on.y - centre.y) * inner};
+            const P end{centre.x + (on.x - centre.x) * outer, centre.y + (on.y - centre.y) * outer};
+            spokes.push_back({tip, {end.x + along.x * half, end.y + along.y * half}, {end.x - along.x * half, end.y - along.y * half}});
         }
     }
-    return out;
+    return spokes;
 }
 
 // --- one group's shapes (_paint_shapes) ------------------------------------------------------------------------------
 
 using Tails = std::vector<std::pair<const core::StoryLine*, Json>>;
 
-// What _paint_shapes lays on the page over its region: the fill's mask (fill_opacity applied) and colour, a
-// tone_box's dots, the outline's mask and colour. Each mask is the region's size.
+// What _paint_shapes lays on the page over its region: where the group lies (its shapes' union, the cuts and a fading
+// tail taken off), its line, a tone_box's dots; the fill's colour and how much of it covers, the line's colour. Each
+// mask is the region's size.
 struct Masks {
     bool fill = false;
+    double opacity = 1.0;
     std::vector<std::int64_t> paper;
-    Image shapes;
+    Image cover;
     Image tone;  // (empty unless tone_box)
     std::vector<std::int64_t> line_rgb;
     Image band;
@@ -364,146 +366,195 @@ std::vector<std::int64_t> colour_of(const Json& value, const std::vector<std::in
     return out;
 }
 
+// The line's width in pixels: style.border_mm (0.35 mm when not set; 0: no line), a whole number of pixels from 1.5 up
+// (a box's edge stays sharp), never thinner than one.
+double line_width(const Json& st, int dpi) {
+    const Json& border = at(st, "border_mm");
+    const double mm = border.is_null() ? 0.35 : core::to_float(border);
+    if (!(mm > 0)) return 0.0;
+    const double width = mm / 25.4 * dpi;
+    return width >= 1.5 ? std::floor(width + 0.5) : 1.0;
+}
+
 Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::vector<std::array<std::int64_t, 4>>& boxes,
                   const Tails& tails, const Box& region, int dpi, const Json& st) {
-    const std::int64_t rx0 = region.x0, ry0 = region.y0, rx1 = region.x1, ry1 = region.y1;
-    const std::int64_t scale = dpi < 300 ? 2 : 1;  // draw small renders at twice the size for smooth edges
-    const Size size{static_cast<int>((rx1 - rx0) * scale), static_cast<int>((ry1 - ry0) * scale)};
-    Image mask = Image::create("L", size, 0);
-    Image bubbles = Image::create("L", size, 0);
-    std::vector<std::pair<Box4, Pt>> fades;
+    const std::int64_t rx0 = region.x0, ry0 = region.y0;
+    const Size size{region.width(), region.height()};
+    const double width = line_width(st, dpi);
+    const std::string kind = kind_of(*lines.front());
     const auto local = [&](const std::array<std::int64_t, 4>& b) {
-        return Box4{static_cast<double>((b[0] - rx0) * scale), static_cast<double>((b[1] - ry0) * scale),
-                    static_cast<double>((b[2] - rx0) * scale), static_cast<double>((b[3] - ry0) * scale)};
+        return clean::Box{static_cast<double>(b[0] - rx0), static_cast<double>(b[1] - ry0), static_cast<double>(b[2] - rx0),
+                          static_cast<double>(b[3] - ry0)};
     };
     const auto at_px = [&](const Json& point) {
-        return Pt{static_cast<double>((px(number(core::subscript(point, 0)), dpi) - rx0) * scale),
-                  static_cast<double>((px(number(core::subscript(point, 1)), dpi) - ry0) * scale)};
+        return P{static_cast<double>(px(number(core::subscript(point, 0)), dpi) - rx0),
+                 static_cast<double>(px(number(core::subscript(point, 1)), dpi) - ry0)};
     };
-    {
-        Draw draw(mask);
-        Draw bdraw(bubbles);
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            const core::StoryLine& line = *lines[i];
-            const Json lst = style_of(line);
-            if (line.path && !line.path->empty()) {  // drawn by hand
-                std::vector<Pt> outline;
-                for (const core::Point& p : *line.path) {
-                    outline.push_back(Pt{static_cast<double>((px(p.x.value(), dpi) - rx0) * scale),
-                                         static_cast<double>((px(p.y.value(), dpi) - ry0) * scale)});
+    // the group's shapes: each line's balloon, then their tails, the joins and the bubbles
+    std::vector<clean::Shape> shapes;
+    std::vector<Body> bodies;
+    std::vector<clean::Box> locals;
+    std::vector<std::pair<clean::Box, P>> fades;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        locals.push_back(local(boxes[i]));
+        bodies.push_back(body_of(*lines[i], style_of(*lines[i]), locals.back(), region, dpi));
+        shapes.push_back(clean::whole(bodies.back().outline));
+    }
+    for (std::size_t i = 0; i + 1 < bodies.size(); ++i) {  // (joined balloons: their notches rounded, or a neck between them)
+        const Body& a = bodies[i];
+        const Body& b = bodies[i + 1];
+        if (!a.smooth || !b.smooth) continue;
+        const double least = core::py_min(a.least, b.least);
+        const double reach = core::py_max(width * 2, least * 0.3);
+        std::vector<clean::Shape> joins = clean::joins_between(a.outline, b.outline, reach);
+        if (joins.empty() && !clean::inside(a.outline, b.centre) && !clean::inside(b.outline, a.centre)) {
+            const std::vector<double> la = clean::lengths_of(a.outline);
+            const std::vector<double> lb = clean::lengths_of(b.outline);
+            const P from = clean::point_at(a.outline, la, clean::facing(a.outline, la, a.centre, b.centre));
+            const P to = clean::point_at(b.outline, lb, clean::facing(b.outline, lb, b.centre, a.centre));
+            if (clean::distance(from, to) <= least * 1.2) {
+                const clean::Shape between = clean::neck(a.centre, b.centre, least * 0.7);
+                for (const Body* body : {&a, &b}) {
+                    for (clean::Shape& join : clean::joins_between(between.points, body->outline, reach)) joins.push_back(std::move(join));
                 }
-                if (core::py_truthy(at(lst, "path_curve"))) outline = balloon::smooth_closed(outline);
-                draw.polygon(drawn(outline), Ink(255));
-            } else {
-                shape(draw, kind_of(line), local(boxes[i]), lst, line.id);
+                shapes.push_back(between);
             }
         }
-        for (const auto& [line, tail] : tails) {
-            const std::size_t index = static_cast<std::size_t>(std::find(lines.begin(), lines.end(), line) - lines.begin());
-            const Box4 box = local(boxes[index]);
-            const Pt tip = at_px(core::subscript(tail, "to"));
+        for (clean::Shape& join : joins) shapes.push_back(std::move(join));
+    }
+    for (const auto& [line, tail] : tails) {
+        const std::size_t index = static_cast<std::size_t>(std::find(lines.begin(), lines.end(), line) - lines.begin());
+        const clean::Box& box = locals[index];
+        const Body& body = bodies[index];
+        if (body.outline.size() < 3) continue;  // (a balloon of no size has no tail)
+        const P tip = at_px(core::subscript(tail, "to"));
+        const double shortest = core::py_min(box.x1 - box.x0, box.y1 - box.y0);
+        const Json* kind_value = core::dict_get(tail, "kind");
+        const std::string tail_style = core::py_str(kind_value != nullptr && core::py_truthy(*kind_value) ? *kind_value : Json("wedge"));
+        // (a slim tail: where it leaves the balloon, a little over a fifth of the balloon's narrow side)
+        const Json* width_value = core::dict_get(tail, "width_mm");
+        const double base = width_value != nullptr && core::py_truthy(*width_value)
+                                ? static_cast<double>(px(core::to_float(core::subscript(tail, "width_mm")), dpi))
+                                : core::py_max(4.0, shortest * (tail_style == "wedge" ? 0.22 : 0.2));
+        const Json* vias = core::dict_get(tail, "vias");
+        const bool bent = vias != nullptr && core::py_truthy(*vias);
+        if (!bent && (body.kind == "thought" || tail_style == "bubbles")) {
+            // bubbles toward the speaker instead of a tail
+            for (clean::Contour& bubble : clean::bubble_trail(body.guide, body.centre, tip, core::py_max(2.0, body.least * 0.2))) {
+                shapes.push_back(clean::whole(std::move(bubble)));
+            }
+            continue;
+        }
+        clean::TailSpec spec;
+        spec.tip = tip;
+        spec.base = base;
+        spec.kind = tail_style == "inward" ? std::string_view("inward")
+                    : tail_style == "straight" ? std::string_view("straight")
+                    : tail_style == "zigzag" ? std::string_view("zigzag")
+                    : tail_style == "fade" ? std::string_view("fade")
+                                           : std::string_view("wedge");
+        spec.depth = core::py_max(base * 0.5, width * 3 + 2);
+        spec.line = width;
+        if (bent) {  // 折れ線のしっぽ
+            for (const Json& v : core::iterate(*vias)) spec.bends.push_back(at_px(v));
+        } else {
             const Json* via_value = core::dict_get(tail, "via");
-            const std::optional<Pt> via = via_value != nullptr && core::py_truthy(*via_value) ? std::optional<Pt>(at_px(*via_value)) : std::nullopt;
-            const double shortest = core::py_min(box[2] - box[0], box[3] - box[1]);
-            const Json* kind_value = core::dict_get(tail, "kind");
-            const std::string tail_style = core::py_str(kind_value != nullptr && core::py_truthy(*kind_value) ? *kind_value : Json("wedge"));
-            // (a letterer's tail is broad where it leaves the balloon: about a third of its narrow side)
-            const Json* width_value = core::dict_get(tail, "width_mm");
-            const double base = width_value != nullptr && core::py_truthy(*width_value)
-                                    ? static_cast<double>(px(core::to_float(core::subscript(tail, "width_mm")), dpi) * scale)
-                                    : core::py_max(4.0, shortest / (tail_style == "wedge" ? 3.0 : 4.0));
-            const std::string kind = kind_of(*line);
-            const Json* vias = core::dict_get(tail, "vias");
-            if (vias != nullptr && core::py_truthy(*vias)) {  // 折れ線のしっぽ
-                std::vector<Pt> bends;
-                for (const Json& v : core::iterate(*vias)) bends.push_back(at_px(v));
-                draw.polygon(drawn(balloon::polyline_tail(kind, box, tip, bends, base)), Ink(255));
-                continue;
+            if (via_value != nullptr && core::py_truthy(*via_value)) {
+                spec.has_via = true;
+                spec.via = at_px(*via_value);
             }
-            if (kind == "thought" || tail_style == "bubbles") {
-                // bubbles toward the speaker instead of a tail
-                const double cx = (box[0] + box[2]) / 2;
-                const double cy = (box[1] + box[3]) / 2;
-                const double rx = (box[2] - box[0]) / 2;
-                const double ry = (box[3] - box[1]) / 2;
-                const double ang = core::py_atan2((tip[1] - cy) / core::py_max(ry, 1.0), (tip[0] - cx) / core::py_max(rx, 1.0));
-                const Pt e = balloon::ellipse_point(cx, cy, rx, ry, ang);
-                const double fracs[3] = {0.3, 0.6, 0.88};
-                for (int k = 0; k < 3; ++k) {
-                    const double r = core::py_max(2.0, core::py_min(rx, ry) * (0.2 - k * 0.05));
-                    const double bx = e[0] + (tip[0] - e[0]) * fracs[k];
-                    const double by = e[1] + (tip[1] - e[1]) * fracs[k];
-                    bdraw.ellipse(BoxF{bx - r, by - r, bx + r, by + r}, Ink(255));
-                }
-                continue;
-            }
-            draw.polygon(drawn(balloon::tail_polygon(kind, box, tip, via, base, tail_style)), Ink(255));
-            if (tail_style == "fade") fades.emplace_back(box, tip);
+            // (an electric balloon's tail: a lightning bolt)
+            spec.bolt = body.kind == "electric" && !spec.has_via && spec.kind != "inward";
+        }
+        {  // (the join with the balloon rounded a little — half a millimetre, a line and a half at least, a quarter of
+           // the tail's width at most; style fillet_mm says otherwise, 0 a corner)
+            const Json* fillet = core::dict_get(tail, "fillet_mm");
+            spec.fillet = fillet != nullptr && !fillet->is_null()
+                              ? core::py_max(0.0, core::to_float(*fillet)) / 25.4 * dpi
+                              : core::py_min(core::py_max(width * 1.5, 0.5 / 25.4 * dpi), base * 0.25);
+        }
+        clean::Tail made = clean::tail(body.outline, body.guide, body.centre, spec);
+        if (spec.kind == "inward") made.shape.owner = static_cast<int>(index);
+        shapes.push_back(std::move(made.shape));
+        for (clean::Shape& join : made.joins) shapes.push_back(std::move(join));
+        if (tail_style == "fade") fades.emplace_back(box, tip);
+    }
+
+    // their coverage: the fill is their union; the line, what lies within its width of the union's edge
+    const clean::Plane fill = clean::fill_plane(shapes, size.width, size.height);
+    const std::size_t count = fill.values.size();
+    const bool dashes = kind == "whisper" || core::py_truthy(at(st, "dash_mm"));
+    std::vector<clean::Run> runs;
+    if (dashes) {  // (dashes of one length all the way round, none cut short where the outline closes)
+        const double on = core::py_max(width, mm_px(at(st, "dash_mm"), dpi, 1.1 / 25.4 * dpi));
+        runs = clean::edge_runs(clean::dashed(shapes, on, core::py_max(width * 1.2, on * 0.6)));
+    } else {
+        runs = clean::edge_runs(shapes);
+    }
+    const auto within = [&](double reach) {
+        clean::Plane plane = clean::ribbon_plane(runs, reach, size.width, size.height, !dashes);
+        for (std::size_t i = 0; i < count; ++i) plane.values[i] *= fill.values[i];
+        return plane;
+    };
+    std::vector<float> band(count, 0.0f);
+    std::vector<float> inner = fill.values;  // (the fill inside the line: kept solid under a fading tail)
+    if (width > 0) {
+        band = within(width).values;
+        for (std::size_t i = 0; i < count; ++i) inner[i] = fill.values[i] - band[i];
+    }
+    const auto lighter = [&](const std::vector<float>& more) {
+        for (std::size_t i = 0; i < count; ++i) band[i] = std::max(band[i], more[i]);
+    };
+    if (width > 0 && (core::py_truthy(at(st, "double")) || kind == "fancy_box")) {
+        // a second line inside the first: two widths in, one width wide
+        const clean::Plane outer = within(width * 4);
+        const clean::Plane closer = within(width * 3);
+        std::vector<float> second(count);
+        for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
+        lighter(second);
+    }
+    std::vector<float> cover = fill.values;
+    if (!fades.empty()) {  // 消えるしっぽ: its outline and fill thin away toward the tip
+        const std::vector<float> keep = fade_keep(size, fades);
+        for (std::size_t i = 0; i < count; ++i) {
+            band[i] *= keep[i];
+            cover[i] = std::max(cover[i] * keep[i], inner[i]);
         }
     }
-    const Json& border = at(st, "border_mm");
-    const std::int64_t width = px(core::to_float(border.is_null() ? Json(0.35) : border), dpi) * scale;
-    const std::string kind = kind_of(*lines.front());
-    Image shapes = chops::lighter(mask, bubbles);
-    const Image inside = chops::lighter(erode(mask, width), erode(bubbles, std::max<std::int64_t>(1, width * 2 / 3)));
-    Image band = chops::subtract(shapes, inside);
-    if (get_true(st, "hand") && kind != "whisper" && kind != "flash" && width >= 2) {
-        // a pen's line: thinner here, fuller there, as the letterer's hand went round (from 0.6 to 1.5 of the width)
-        const Image thin = chops::subtract(
-            shapes, chops::lighter(erode(mask, std::max<std::int64_t>(1, core::py_round_int(static_cast<double>(width) * 0.6))),
-                                   erode(bubbles, std::max<std::int64_t>(1, width * 2 / 5))));
-        const Image full = chops::subtract(
-            shapes, chops::lighter(erode(mask, std::max<std::int64_t>(2, core::py_round_int(static_cast<double>(width) * 1.5))), inside));
-        const Image swelling = swell(size, lines.front()->id, static_cast<double>(std::max(size.width, size.height)) / 3);
-        band = chops::lighter(thin, chops::multiply(full, swelling));
-    }
-    if (core::py_truthy(at(st, "double"))) {  // a second line inside the first
-        const Image inner = erode(inside, std::max<std::int64_t>(2, width * 2));
-        band = chops::lighter(band, chops::subtract(inner, erode(inner, std::max<std::int64_t>(1, width))));
-    }
-    if (!fades.empty()) {  // 消えるしっぽ: its outline and fill thin away toward the tip
-        const Image keep = fade_mask(size, fades);
-        band = chops::multiply(band, keep);
-        shapes = chops::lighter(chops::multiply(shapes, keep), inside);
-    }
-    std::vector<Box4> locals;
-    for (const auto& b : boxes) locals.push_back(local(b));
-    if (kind == "whisper") band = chops::multiply(band, dashes(size, locals, scale));
-    if (kind == "dotted_box") band = dotted_edge(size, locals, std::max<std::int64_t>(2, width));  // (round dots, not a line)
-    if (kind == "fancy_box") {  // (a double line, and a small diamond on each corner)
-        const Image inner = erode(inside, std::max<std::int64_t>(2, width * 2));
-        band = chops::lighter(band, chops::subtract(inner, erode(inner, std::max<std::int64_t>(1, width))));
-        band = chops::lighter(band, corner_marks(size, locals, std::max<std::int64_t>(2, width)));
-    }
-    if (kind == "flash") band = flash_lines(size, locals, width);
-    if (const auto cut = cuts_mask(lines, size, rx0, ry0, dpi, scale)) {
+    if (width > 0 && kind == "dotted_box") band = clean::union_plane(dotted_edge(locals, core::py_max(2.0, width)), size.width, size.height).values;
+    if (width > 0 && kind == "fancy_box") lighter(clean::union_plane(corner_marks(locals, core::py_max(2.0, width)), size.width, size.height).values);
+    if (width > 0 && kind == "flash") band = clean::union_plane(flash_spokes(locals, width, dpi), size.width, size.height).values;
+    if (const std::int64_t scale = dpi < 300 ? 2 : 1;
+        const auto cut = cuts_mask(lines, Size{size.width * static_cast<int>(scale), size.height * static_cast<int>(scale)}, rx0, ry0, dpi, scale)) {
         // フキダシ消しゴム: those parts of the balloon (its fill and its line) are gone
-        const Image keep = chops::invert(*cut);
-        shapes = chops::multiply(shapes, keep);
-        band = chops::multiply(band, keep);
-    }
-    if (scale > 1) {
-        const Size full{static_cast<int>(rx1 - rx0), static_cast<int>(ry1 - ry0)};
-        shapes = shapes.resize(full, Resample::Lanczos);
-        band = band.resize(full, Resample::Lanczos);
+        const std::string gone = (scale > 1 ? cut->reduce(static_cast<int>(scale), static_cast<int>(scale)) : *cut).tobytes();
+        for (std::size_t i = 0; i < count; ++i) {
+            const float keep = 1.0f - static_cast<float>(static_cast<unsigned char>(gone[i])) / 255.0f;
+            cover[i] *= keep;
+            band[i] *= keep;
+        }
     }
     Masks out;
     out.fill = at(st, "fill") != Json("none");
     if (out.fill) {
         out.paper = colour_of(at(st, "fill_rgb"), kPaper);
-        const Json& cover = at(st, "fill_opacity");
-        if (!cover.is_null() && core::to_float(cover) < 1) {
-            const double k = core::py_max(0.0, core::to_float(cover));
-            shapes = shapes.point([k](int v) { return static_cast<int>(core::py_trunc_int(v * k)); });
-        }
+        const Json& covering = at(st, "fill_opacity");
+        if (!covering.is_null() && core::to_float(covering) < 1) out.opacity = core::py_max(0.0, core::to_float(covering));
     }
     if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
-        const Image inner = erode(shapes, std::max<std::int64_t>(2, px(1.0, dpi)));
-        out.tone = chops::multiply(inner, tone_dots(inner.size(), dpi, rx0, ry0));
+        const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), core::py_max(2.0, static_cast<double>(px(1.0, dpi))), size.width, size.height);
+        clean::Plane dots = clean::union_plane(tone_dots(size, dpi, rx0, ry0), size.width, size.height);
+        for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
+        out.tone = as_image(dots);
     }
     out.line_rgb = colour_of(at(st, "line_rgb"), kOutline);
-    out.shapes = std::move(shapes);
-    out.band = std::move(band);
+    clean::Plane plane;
+    plane.width = size.width;
+    plane.height = size.height;
+    plane.values = std::move(cover);
+    out.cover = as_image(plane);
+    plane.values = std::move(band);
+    out.band = as_image(plane);
     return out;
 }
 
@@ -531,6 +582,87 @@ detail::Memo<Masks>& remembered_masks() {
     return memo;
 }
 
+// The group laid over a part of the page: each pixel the page's own (through what the group does not cover), the
+// fill's colour (inside the line) and the line's, by their shares of the pixel — one mix, so an edge takes no colour
+// from a second pass. On a picture with transparency the colours are laid over what is there (its own colour kept
+// where nothing was: no dark edge on a balloon's own layer).
+void composite(Image& image, const Box& to, const Masks& masks, const Box& from) {
+    const std::string mode(image.mode());
+    const int w = to.width();
+    const int h = to.height();
+    if (w <= 0 || h <= 0) return;
+    const bool all = from == Box{0, 0, masks.cover.width(), masks.cover.height()};
+    const Image cover_part = all ? masks.cover : masks.cover.crop(from);
+    const Image band_part = all ? masks.band : masks.band.crop(from);
+    if (mode != "RGB" && mode != "RGBA") {
+        // (any other kind of picture: the fill through what it covers inside the line, then the line)
+        if (masks.fill) {
+            const double k = masks.opacity;
+            const Image inside = chops::subtract(cover_part, band_part).point([k](int v) { return static_cast<int>(static_cast<double>(v) * k + 0.5); });
+            image.paste(Ink::tuple(masks.paper), to, &inside);
+        }
+        if (!masks.tone.empty()) {
+            const Image tone = all ? masks.tone : masks.tone.crop(from);
+            image.paste(Ink::tuple(masks.line_rgb), to, &tone);
+        }
+        image.paste(Ink::tuple(masks.line_rgb), to, &band_part);
+        return;
+    }
+    const std::string cover = cover_part.tobytes();
+    const std::string band = band_part.tobytes();
+    const std::string tone = masks.tone.empty() ? std::string() : (all ? masks.tone : masks.tone.crop(from)).tobytes();
+    const std::size_t bands = mode == "RGBA" ? 4 : 3;
+    std::string pixels = image.crop(to).tobytes();
+    double paper[3] = {255.0, 255.0, 255.0};
+    double line[3] = {0.0, 0.0, 0.0};
+    for (std::size_t c = 0; c < 3; ++c) {
+        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
+        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
+    }
+    const auto count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto band8 = static_cast<unsigned char>(band[i]);
+        const auto cover8 = static_cast<unsigned char>(cover[i]);
+        if (band8 == 0 && cover8 == 0) continue;
+        if (tone.empty() || tone[i] == '\0') {  // (most of a balloon: all line, or all fill — the colour itself)
+            const bool all_line = band8 == 255;
+            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0;
+            if (all_line || all_fill) {
+                char* whole = &pixels[i * bands];
+                const double* colour = all_line ? line : paper;
+                for (std::size_t k = 0; k < 3; ++k) whole[k] = static_cast<char>(static_cast<std::uint8_t>(colour[k]));
+                if (bands == 4) whole[3] = static_cast<char>(static_cast<std::uint8_t>(255));
+                continue;
+            }
+            if (band8 == 0 && !masks.fill) continue;  // (inside a balloon without a fill: the page as it is)
+        }
+        const double b = static_cast<double>(band8) / 255.0;
+        const double c = static_cast<double>(cover8) / 255.0;
+        const double inside = c > b ? c - b : 0.0;
+        const double t = tone.empty() ? 0.0 : std::min(inside, static_cast<double>(static_cast<unsigned char>(tone[i])) / 255.0);
+        const double w_line = b + t;
+        const double w_paper = masks.fill ? (inside - t) * masks.opacity : 0.0;
+        const double w_under = 1.0 - w_line - w_paper;
+        char* p = &pixels[i * bands];
+        if (bands == 3) {
+            for (std::size_t k = 0; k < 3; ++k) {
+                const double v = static_cast<double>(static_cast<unsigned char>(p[k])) * w_under + paper[k] * w_paper + line[k] * w_line;
+                p[k] = static_cast<char>(static_cast<std::uint8_t>(clamp01(v / 255.0) * 255.0 + 0.5));
+            }
+        } else {
+            const double under = static_cast<double>(static_cast<unsigned char>(p[3])) / 255.0 * w_under;
+            const double alpha = under + w_line + w_paper;
+            if (alpha <= 0) continue;
+            for (std::size_t k = 0; k < 3; ++k) {
+                const double v = (static_cast<double>(static_cast<unsigned char>(p[k])) * under + paper[k] * w_paper + line[k] * w_line) / alpha;
+                p[k] = static_cast<char>(static_cast<std::uint8_t>(clamp01(v / 255.0) * 255.0 + 0.5));
+            }
+            p[3] = static_cast<char>(static_cast<std::uint8_t>(clamp01(alpha) * 255.0 + 0.5));
+        }
+    }
+    image.paste(Image::frombytes(mode, Size{w, h}, pixels), Point{to.x0, to.y0});
+}
+
 // _paint_shapes(image, lines, boxes, tails, region, dpi, st): the shapes worked out over the region, painted where it
 // meets the part of the page.
 void paint_shapes(const PagePart& part, const std::vector<const core::StoryLine*>& lines,
@@ -544,26 +676,17 @@ void paint_shapes(const PagePart& part, const std::vector<const core::StoryLine*
     if (!masks) {
         masks = std::make_shared<const Masks>(shape_masks(lines, boxes, tails, region, dpi, st));
         if (key) {
-            const std::int64_t pixels = static_cast<std::int64_t>(region.width()) * region.height();
-            remembered_masks().put(*key, masks, pixels * (masks->tone.empty() ? 2 : 3));
+            // (what is held: a byte a pixel for where the group lies, for its line and — a tone box — for its tone; the
+            // planes of coverage they were worked out from are gone by now)
+            const auto bytes = [](const Image& mask) { return mask.empty() ? std::int64_t{0} : static_cast<std::int64_t>(mask.width()) * mask.height(); };
+            remembered_masks().put(*key, masks, bytes(masks->cover) + bytes(masks->band) + bytes(masks->tone) + 256);
         }
     }
-    // (Python: area = image.crop(region); colours pasted through the masks; image.paste(area, region's corner). Each
-    // pixel is its own: the part where the region and the image meet is painted the same.)
+    // (each pixel is its own: the part where the region and the image meet is painted the same)
     const Box meet{std::max(region.x0, here.x0), std::max(region.y0, here.y0), std::min(region.x1, here.x1), std::min(region.y1, here.y1)};
     const Box from{meet.x0 - region.x0, meet.y0 - region.y0, meet.x1 - region.x0, meet.y1 - region.y0};
     const Box to{meet.x0 - part.origin.x, meet.y0 - part.origin.y, meet.x1 - part.origin.x, meet.y1 - part.origin.y};
-    const bool all = from == Box{0, 0, region.width(), region.height()};
-    if (masks->fill) {
-        const Image shapes = all ? masks->shapes : masks->shapes.crop(from);
-        part.image->paste(Ink::tuple(masks->paper), to, &shapes);
-    }
-    if (!masks->tone.empty()) {
-        const Image tone = all ? masks->tone : masks->tone.crop(from);
-        part.image->paste(Ink::tuple(masks->line_rgb), to, &tone);
-    }
-    const Image band = all ? masks->band : masks->band.crop(from);
-    part.image->paste(Ink::tuple(masks->line_rgb), to, &band);
+    composite(*part.image, to, *masks, from);
 }
 
 // --- a group ---------------------------------------------------------------------------------------------------------
@@ -788,261 +911,14 @@ std::vector<Json> tails_of(const core::StoryLine& line) {
     return tails;
 }
 
-Pt ellipse_point(double cx, double cy, double rx, double ry, double t) { return {cx + rx * core::py_cos(t), cy + ry * core::py_sin(t)}; }
-
-std::vector<Pt> wobbly(const std::vector<Pt>& points, double amount, double size, std::string_view seed) {
-    core::PyRandom rng = core::PyRandom::from_str(seed.empty() ? std::string_view("genko") : seed);
-    struct Wave {
-        double f, ph, a;
-    };
-    std::array<Wave, 3> waves{};
-    for (Wave& w : waves) {
-        w.f = rng.uniform(2, 5);
-        w.ph = rng.uniform(0, kTau);
-        w.a = rng.uniform(0.5, 1.0);
-    }
-    std::vector<double> xs;
-    std::vector<double> ys;
-    for (const Pt& p : points) {
-        xs.push_back(p[0]);
-        ys.push_back(p[1]);
-    }
-    const auto n = static_cast<double>(points.size());
-    const double cx = core::py_float_sum(xs) / n;
-    const double cy = core::py_float_sum(ys) / n;
-    std::vector<Pt> out;
-    for (std::size_t k = 0; k < points.size(); ++k) {
-        const double t = kTau * static_cast<double>(k) / n;
-        std::vector<double> terms;
-        for (const Wave& w : waves) terms.push_back(w.a * core::py_sin(w.f * t + w.ph));
-        const double push = core::py_float_sum(terms) / 3;
-        const auto [x, y] = points[k];
-        double d = core::py_hypot(x - cx, y - cy);
-        if (d == 0) d = 1.0;
-        const double shift = push * amount * size * 0.05;
-        out.push_back({x + (x - cx) / d * shift, y + (y - cy) / d * shift});
-    }
-    return out;
-}
-
-std::vector<Pt> uneven(const Box4& box, std::string_view seed, int n) {
-    const auto [x0, y0, x1, y1] = box;
-    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
-    core::PyRandom rng = core::PyRandom::from_str("uneven:" + std::string(seed.empty() ? std::string_view("genko") : seed));
-    const double a1 = rng.uniform(0.012, 0.03);
-    const double p1 = rng.uniform(0, kTau);
-    const double a2 = rng.uniform(0.015, 0.035);
-    const double p2 = rng.uniform(0, kTau);
-    const double a3 = rng.uniform(0.0, 0.01);
-    const double p3 = rng.uniform(0, kTau);
-    const auto count = static_cast<double>(n);
-    std::vector<double> drops;
-    for (int k = 0; k < n; ++k) {
-        const auto kk = static_cast<double>(k);
-        drops.push_back(a1 * (1 + core::py_cos(kTau * kk / count - p1)) + a2 * (1 + core::py_cos(2 * kTau * kk / count - p2)) +
-                        a3 * (1 + core::py_cos(3 * kTau * kk / count - p3)));
-    }
-    double most = drops.empty() ? 0.0 : drops.front();
-    for (const double d : drops) most = core::py_max(most, d);
-    if (most == 0) most = 1.0;
-    const double squeeze = core::py_min(1.0, kUnevenMost / most);  // (never more than UNEVEN_MOST in from the box)
-    std::vector<Pt> points;
-    for (int k = 0; k < n; ++k) {
-        const double t = kTau * static_cast<double>(k) / count;
-        const double r = 1 - drops[static_cast<std::size_t>(k)] * squeeze;
-        const double c = core::py_cos(t);
-        const double s = core::py_sin(t);  // (a fuller oval than an ellipse: HAND_POWER)
-        const double ex = std::copysign(core::py_pow(std::fabs(c), 2 / kHandPower), c);
-        const double ey = std::copysign(core::py_pow(std::fabs(s), 2 / kHandPower), s);
-        points.push_back({cx + rx * r * ex, cy + ry * r * ey});
-    }
-    return points;
-}
-
-std::optional<std::vector<Pt>> outline(std::string_view kind, const Box4& box, int n) {
-    const auto [x0, y0, x1, y1] = box;
-    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
-    if (one_of(kind, {"speech", "thought", "whisper", "flash"})) {
-        std::vector<Pt> out;
-        for (int k = 0; k < n; ++k) out.push_back(ellipse_point(cx, cy, rx, ry, kTau * k / n));
-        return out;
-    }
-    if (square_or_rounded(kind)) {
-        const int per = n / 4;
-        std::vector<Pt> pts;
-        const Pt edges[4][2] = {{{x0, y0}, {x1, y0}}, {{x1, y0}, {x1, y1}}, {{x1, y1}, {x0, y1}}, {{x0, y1}, {x0, y0}}};
-        for (const auto& edge : edges) {
-            const auto [ax, ay] = edge[0];
-            const auto [bx, by] = edge[1];
-            for (int i = 0; i < per; ++i) pts.push_back({ax + (bx - ax) * i / per, ay + (by - ay) * i / per});
-        }
-        return pts;
-    }
-    return std::nullopt;
-}
-
-std::vector<Pt> electric(const Box4& box, const Json& st) {
-    const auto [x0, y0, x1, y1] = box;
-    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
-    std::int64_t teeth = int_or_zero(at(st, "spikes"));
-    if (teeth == 0) teeth = std::max<std::int64_t>(14, core::py_trunc_int((rx + ry) / core::py_max(3.0, core::py_min(rx, ry) / 4)));
-    const double depth = core::py_max(0.04, core::py_min(0.4, float_or(at(st, "spike_depth"), 0.12)));
-    std::vector<Pt> points;
-    for (std::int64_t i = 0; i < teeth * 2; ++i) {
-        // (the inner corners lag: a sawtooth, not a star)
-        const double t = core::kPi * (static_cast<double>(i) + (i % 2 != 0 ? 0.35 : 0)) / static_cast<double>(teeth);
-        const double c = core::py_cos(t);
-        const double s = core::py_sin(t);
-        // a superellipse of power 4: flat sides, round corners
-        const double k = i % 2 == 0 ? 1.0 : 1.0 - depth;
-        points.push_back({cx + rx * k * std::copysign(core::py_pow(std::fabs(c), 0.5), c),
-                          cy + ry * k * std::copysign(core::py_pow(std::fabs(s), 0.5), s)});
-    }
-    return points;
-}
-
-std::pair<Pt, Pt> edge_point(std::string_view kind, const Box4& box, Pt toward, double spread) {
-    const auto [x0, y0, x1, y1] = box;
-    const double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    double rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
-    const auto [tx, ty] = toward;
-    if (square_or_rounded(kind)) {
-        if (std::fabs(tx - cx) / core::py_max(rx, 1.0) > std::fabs(ty - cy) / core::py_max(ry, 1.0)) {
-            const double ex = cx + (tx > cx ? rx : -rx) * 0.9;
-            const double my = core::py_max(y0 + spread, core::py_min(y1 - spread, ty));
-            return {Pt{ex, my - spread / 2}, Pt{ex, my + spread / 2}};
-        }
-        const double ey = cy + (ty > cy ? ry : -ry) * 0.9;
-        const double mx = core::py_max(x0 + spread, core::py_min(x1 - spread, tx));
-        return {Pt{mx - spread / 2, ey}, Pt{mx + spread / 2, ey}};
-    }
-    const double t = core::py_atan2((ty - cy) / core::py_max(ry, 1.0), (tx - cx) / core::py_max(rx, 1.0));
-    const double k = kind == "shout" ? 0.72 : kind == "electric" ? 0.8 : 0.9;  // start inside (below the spikes' valleys)
-    rx = rx * k / 0.9;
-    ry = ry * k / 0.9;
-    double lo = 0.0;
-    double hi = core::kPi / 2;
-    for (int i = 0; i < 24; ++i) {  // the half-angle whose chord is `spread`
-        const double mid = (lo + hi) / 2;
-        const Pt a = ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - mid);
-        const Pt b = ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + mid);
-        if (core::py_dist(a[0], a[1], b[0], b[1]) < spread) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    return {ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - lo), ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + lo)};
-}
-
-std::vector<Pt> smooth_closed(const std::vector<Pt>& points, int per) {
-    const std::size_t n = points.size();
-    if (n < 3) return points;
-    std::vector<Pt> out;
-    for (std::size_t i = 0; i < n; ++i) {
-        const Pt& p0 = points[(i + n - 1) % n];
-        const Pt& p1 = points[i];
-        const Pt& p2 = points[(i + 1) % n];
-        const Pt& p3 = points[(i + 2) % n];
-        for (int s = 0; s < per; ++s) {
-            const double t = static_cast<double>(s) / per;
-            const double t2 = t * t;
-            const double t3 = t * t * t;
-            Pt p{};
-            for (int k = 0; k < 2; ++k) {
-                p[k] = 0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 +
-                              (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3);
-            }
-            out.push_back(p);
-        }
-    }
-    return out;
-}
-
-std::vector<Pt> polyline_tail(std::string_view kind, const Box4& box, Pt tip, const std::vector<Pt>& vias, double base) {
-    const auto [p1, p2] = edge_point(kind, box, vias.front(), base);
-    std::vector<Pt> path{Pt{(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2}};
-    path.insert(path.end(), vias.begin(), vias.end());
-    path.push_back(tip);
-    std::vector<double> lengths{0.0};
-    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-        lengths.push_back(lengths.back() + core::py_dist(path[i][0], path[i][1], path[i + 1][0], path[i + 1][1]));
-    }
-    double total = lengths.back();
-    if (total == 0) total = 1.0;
-    const double half0 = core::py_dist(p1[0], p1[1], p2[0], p2[1]) / 2;
-    std::vector<Pt> left;
-    std::vector<Pt> right;
-    for (std::size_t i = 0; i < path.size(); ++i) {
-        const Pt& p = path[i];
-        const Pt& a = path[i == 0 ? 0 : i - 1];
-        const Pt& b = path[std::min(path.size() - 1, i + 1)];
-        const double dx = b[0] - a[0];
-        const double dy = b[1] - a[1];
-        double n = core::py_hypot(dx, dy);
-        if (n == 0) n = 1.0;
-        const double half = half0 * (1 - lengths[i] / total);
-        left.push_back({p[0] - dy / n * half, p[1] + dx / n * half});
-        right.push_back({p[0] + dy / n * half, p[1] - dx / n * half});
-    }
-    left.insert(left.end(), right.rbegin(), right.rend());
-    return left;
-}
-
-std::vector<Pt> tail_polygon(std::string_view kind, const Box4& box, Pt tip, const std::optional<Pt>& via, double base,
-                             std::string_view style) {
-    const auto [p1, p2] = edge_point(kind, box, via ? *via : tip, base);
-    const double mx = (p1[0] + p2[0]) / 2;
-    const double my = (p1[1] + p2[1]) / 2;
-    double cx = via ? (*via)[0] : (mx + tip[0]) / 2;
-    double cy = via ? (*via)[1] : (my + tip[1]) / 2;
-    const bool bow = style == "wedge" && !via && kind != "electric";
-    if (bow) {  // (a drawn tail bows a little, away from the balloon's middle: a comma, not a needle)
-        const double bx = (box[0] + box[2]) / 2;
-        const double by = (box[1] + box[3]) / 2;
-        const double dx = tip[0] - mx;
-        const double dy = tip[1] - my;
-        const double side = (dx * (my - by) - dy * (mx - bx)) >= 0 ? 1.0 : -1.0;
-        const double nx = cx - dy * 0.16 * side;
-        const double ny = cy + dx * 0.16 * side;
-        cx = nx;
-        cy = ny;
-    }
-    const double chord = core::py_dist(p1[0], p1[1], p2[0], p2[1]);
-    std::vector<Pt> left;
-    std::vector<Pt> right;
-    const int steps = 16;
-    for (int i = 0; i <= steps; ++i) {
-        const double t = static_cast<double>(i) / steps;
-        double x = core::py_pow(1 - t, 2) * mx + 2 * (1 - t) * t * cx + core::py_pow(t, 2) * tip[0];
-        double y = core::py_pow(1 - t, 2) * my + 2 * (1 - t) * t * cy + core::py_pow(t, 2) * tip[1];
-        const double dx = 2 * (1 - t) * (cx - mx) + 2 * t * (tip[0] - cx);
-        const double dy = 2 * (1 - t) * (cy - my) + 2 * t * (tip[1] - cy);
-        double n = core::py_hypot(dx, dy);
-        if (n == 0) n = 1.0;
-        // (full at the base, then quickly to a point)
-        double half = core::py_dist(p1[0], p1[1], p2[0], p2[1]) / 2 * (bow ? core::py_pow(1 - t, 1.3) : (1 - t));
-        if (style == "zigzag" && 0 < i && i < steps) half *= i % 2 != 0 ? 1.6 : 0.55;
-        if (kind == "electric" && 0 < i && i < steps) {
-            // a lightning tail: the centre line jumps sideways at a few steps
-            const double jump = i % 4 == 0 ? ((i / 4) % 2 != 0 ? 1 : -1) * chord * 0.9 * (1 - t) : 0.0;
-            const double nx = x - dy / n * jump;
-            const double ny = y + dx / n * jump;
-            x = nx;
-            y = ny;
-        }
-        left.push_back({x - dy / n * half, y + dx / n * half});
-        right.push_back({x + dy / n * half, y - dx / n * half});
-    }
-    left.insert(left.end(), right.rbegin(), right.rend());
-    return left;
-}
-
 Pt turned(Pt point, Pt centre, double degrees) {
-    const double a = degrees * (core::kPi / 180.0);  // math.radians
+    // (the float sine and cosine, the same bits everywhere: a turned balloon's tail ends on the same pixel on every platform)
+    const auto a = static_cast<float>(degrees * (core::kPi / 180.0));
+    const double c = static_cast<double>(libm::cosf(a));
+    const double s = static_cast<double>(libm::sinf(a));
     const double dx = point[0] - centre[0];
     const double dy = point[1] - centre[1];
-    return {centre[0] + dx * core::py_cos(a) - dy * core::py_sin(a), centre[1] + dx * core::py_sin(a) + dy * core::py_cos(a)};
+    return {centre[0] + dx * c - dy * s, centre[1] + dx * s + dy * c};
 }
 
 Pt thought_trail(const core::StoryLine& line, const Panels* panels) {

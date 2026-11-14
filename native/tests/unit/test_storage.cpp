@@ -487,7 +487,9 @@ private slots:
         const Json payload = genko::core::parse_python_json(text);
         QCOMPARE(keys_of(payload),
                  std::vector<std::string>({"future_top", "version", "min_reader", "writer", "book_id", "features", "revision",
-                                           "title", "episode", "binding", "start_side", "strict_gates", "autosave",
+                                           // (fukidashi@1: the book has ovals, so it says its balloons' generation once it is
+                                           // written by this build — SPEC BALLOON-01)
+                                           "title", "episode", "binding", "start_side", "balloon_geometry", "strict_gates", "autosave",
                                            "font_path", "page_locks", "brush", "spec", "bible", "tickets", "studio", "pages",
                                            "story"}));
         QCOMPARE(payload["version"].get<int>(), 4);

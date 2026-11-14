@@ -16,12 +16,13 @@
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 
-// Balloons (Python's genko/balloons.py, the balloon side): each line's shape (speech, rounded, box, cloud, thought,
-// shout, electric, flash, whisper, narration and the 飾り枠 frames; drawn by hand: uneven or wobbled; a hand-drawn
-// outline, smoothed or not) drawn as a mask with its tails (wedge, straight, zigzag, fade, bubbles, bent through
-// points), joined balloons as one mask, the outline its inner edge (a pen's swelling line, a double line, dashes,
-// dots, corner marks, radiating lines), cut where the balloon eraser went, filled; a turned balloon drawn upright and
-// laid turned; a picture balloon; then the letters (render/text/lettering.hpp). The same pixels as Python's.
+// Balloons (fukidashi@1, SPEC BALLOON-01): each line's shape (speech, rounded, box, cloud, thought, shout, electric,
+// flash, whisper, narration, capsule, polygon and the 飾り枠 frames; a hand-drawn outline, smoothed or not) as an outline
+// of real pixels with its tails (wedge, straight, zigzag, fade, bubbles, bent through points, inward), joined balloons
+// as one union, the line what lies within its width of the union's edge (a double line, even dashes, dots, corner marks,
+// spokes, a trembling outline), cut where the balloon eraser went, filled; a turned balloon drawn upright and laid
+// turned; a picture balloon; then the letters (render/text/lettering.hpp). Every balloon is drawn clean (the geometry:
+// render/text/balloon_clean.hpp): the hand-drawn look is gone, in books of before too.
 //
 // What is drawn on is a part of a page (a render region): the shapes are worked out for the whole balloon and only
 // the part is painted, so the pixels are those of the whole page cut there.
@@ -81,33 +82,17 @@ void clear_balloon_cache();
 // (PC5 H-f, メモリをクリア) The bytes they hold now (the letters' too: layout_cache_bytes).
 std::int64_t balloon_cache_bytes();
 
-// The geometry of balloons.py, for the contract tests (points as Python's (x, y) floats).
+// What the drawing of a balloon reads of a line, for the tests.
 namespace balloon {
 
 using Pt = std::array<double, 2>;
-using Box4 = std::array<double, 4>;
 
-// tails_of(line): its tails ({"to", "via", "vias", "width_mm", "kind"}) with a target, or its old single tail.
+// How far a line's old style.wobble (0..1) makes its outline tremble, as a share of its box's narrow side: the wave
+// that stands for the hand-drawn wobble of before (style.wave_mm says it in mm).
+inline constexpr double kWobbleWave = 0.03;
+
+// tails_of(line): its tails ({"to", "via", "vias", "width_mm", "kind", "fillet_mm"}) with a target, or its old single tail.
 std::vector<core::Json> tails_of(const core::StoryLine& line);
-// _ellipse_point(cx, cy, rx, ry, t)
-Pt ellipse_point(double cx, double cy, double rx, double ry, double t);
-// _wobbly(points, amount, size, seed): pushed in and out smoothly (a balloon drawn by hand).
-std::vector<Pt> wobbly(const std::vector<Pt>& points, double amount, double size, std::string_view seed);
-// _uneven(box, seed, n): a letterer's ellipse, a little egg-shaped, inside its box.
-std::vector<Pt> uneven(const Box4& box, std::string_view seed, int n = 120);
-// _outline(kind, box, n): an ellipse's or a box's outline as points, or nothing for the other shapes.
-std::optional<std::vector<Pt>> outline(std::string_view kind, const Box4& box, int n = 96);
-// _electric(box, st): the 電子音 edge.
-std::vector<Pt> electric(const Box4& box, const core::Json& st);
-// _edge_point(kind, box, toward, spread): two points on the edge, `spread` apart, facing `toward`.
-std::pair<Pt, Pt> edge_point(std::string_view kind, const Box4& box, Pt toward, double spread);
-// _smooth_closed(points, per): a closed Catmull–Rom curve through the points.
-std::vector<Pt> smooth_closed(const std::vector<Pt>& points, int per = 6);
-// _polyline_tail(kind, box, tip, vias, base): a tail bent at each of `vias`.
-std::vector<Pt> polyline_tail(std::string_view kind, const Box4& box, Pt tip, const std::vector<Pt>& vias, double base);
-// _tail_polygon(kind, box, tip, via, base, style)
-std::vector<Pt> tail_polygon(std::string_view kind, const Box4& box, Pt tip, const std::optional<Pt>& via, double base,
-                             std::string_view style = "wedge");
 // _turned(point, centre, degrees): turned about `centre` (clockwise on the page).
 Pt turned(Pt point, Pt centre, double degrees);
 // _thought_trail(line, panels): where a thought's bubbles trail to when nobody is named.

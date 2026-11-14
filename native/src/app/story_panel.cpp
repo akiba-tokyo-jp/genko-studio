@@ -35,11 +35,13 @@
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/command_bus.hpp"
+#include "core/fukidashi.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "render/text/balloons.hpp"
 #include "render/text/lettering.hpp"
 
 namespace genko::app {
@@ -209,8 +211,6 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     outline_colour = new QPushButton(QStringLiteral("フチの色…"));
     outline_colour->setToolTip(QStringLiteral("白フチの色（黒フチなど）"));
     connect(outline_colour, &QPushButton::clicked, this, [this] { carry_on("pick_outline_colour", [this] { pick_outline_colour(); }); });
-    wobble = spin(0, 1, 0.1, QString());
-    wobble->setToolTip(QStringLiteral("フキダシの線を手描きのように揺らす（0 でまっすぐ）"));
     double_line = check(QStringLiteral("二重線"));
     spikes = new QSpinBox;
     spikes->setRange(0, 80);
@@ -238,6 +238,75 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     tail_width = spin(0, 30, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"));
     tail_width->setToolTip(QStringLiteral("しっぽの付け根の幅"));
     connect(tail_width, &QDoubleSpinBox::editingFinished, this, [this] { carry_on("set_tail_width", [this] { set_tail_width(); }); });  // (after its style: as Python's)
+    // fukidashi@1: the balloon's shape (each its own edit_line; shown for the kinds it changes — show_shape_rows)
+    const auto own_spin = [this](double lo, double hi, double step, const QString& suffix, const QString& special, const char* slot_name,
+                                 void (StoryPanel::*slot)()) {
+        auto* box = new QDoubleSpinBox;
+        box->setRange(lo, hi);
+        box->setSingleStep(step);
+        box->setDecimals(2);
+        box->setSuffix(suffix);
+        if (!special.isEmpty()) box->setSpecialValueText(special);
+        connect(box, &QDoubleSpinBox::editingFinished, this, [this, slot_name, slot] { carry_on(slot_name, [this, slot] { (this->*slot)(); }); });
+        return box;
+    };
+    corner = new QDoubleSpinBox;
+    corner->setRange(-0.5, 50);  // (its least: 自動 — the kind's own corners; 0: square)
+    corner->setSingleStep(0.5);
+    corner->setDecimals(2);
+    corner->setSuffix(QStringLiteral(" mm"));
+    corner->setSpecialValueText(QStringLiteral("自動"));
+    corner->setToolTip(QStringLiteral("角の丸みの半径（0 で四角い角。「自動」は形に合った丸み）"));
+    connect(corner, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("set_shape_key", [this] {
+            if (corner->value() < 0) corner->setValue(corner->minimum());  // (below 0: 自動)
+            set_shape_key(corner, corner->value(), 0.005, "corner_mm", corner->value() < 0 ? Json() : Json(corner->value()));
+        });
+    });
+    squircle = new QCheckBox(QStringLiteral("角をふっくら丸くする"));
+    squircle->setToolTip(QStringLiteral("辺はまっすぐに近く、角を大きく丸くした形にします（角丸のフキダシ）"));
+    connect(squircle, &QCheckBox::clicked, this, [this](bool on) {
+        carry_on("set_shape_key", [this, on] { set_shape_key(squircle, on ? 1.0 : 0.0, 0.5, "squircle", on ? Json(true) : Json()); });
+    });
+    sides = new QSpinBox;
+    sides->setRange(5, 12);
+    sides->setValue(8);
+    sides->setToolTip(QStringLiteral("多角形のフキダシの角の数（5〜12。初めは 8）"));
+    connect(sides, &QSpinBox::editingFinished, this, [this] {
+        carry_on("set_shape_key", [this] { set_shape_key(sides, sides->value(), 0.5, "sides", sides->value() != 8 ? Json(sides->value()) : Json()); });
+    });
+    wave = own_spin(0, 3, 0.1, QStringLiteral(" mm"), QStringLiteral("なし"), "set_wave", &StoryPanel::set_wave);
+    wave->setToolTip(QStringLiteral("フキダシの線を細かく波打たせます（ふるえる声・おびえた声に。0 でなめらか）"));
+    spike_alt = new QDoubleSpinBox;
+    spike_alt->setRange(0, 0.8);
+    spike_alt->setSingleStep(0.1);
+    spike_alt->setDecimals(2);
+    spike_alt->setSpecialValueText(QStringLiteral("そろえる"));
+    spike_alt->setToolTip(QStringLiteral("叫びのトゲを 1 本おきに短くします（大きいほど長短の差がつく）"));
+    connect(spike_alt, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("set_shape_key", [this] {
+            set_shape_key(spike_alt, spike_alt->value(), 0.005, "spike_alt", spike_alt->value() > 0 ? Json(spike_alt->value()) : Json());
+        });
+    });
+    dash = new QDoubleSpinBox;
+    dash->setRange(0, 10);
+    dash->setSingleStep(0.5);
+    dash->setDecimals(2);
+    dash->setSuffix(QStringLiteral(" mm"));
+    dash->setSpecialValueText(QStringLiteral("実線"));
+    dash->setToolTip(QStringLiteral("フキダシの線を破線にして、1 本の長さを決めます（0.2〜10 mm）"));
+    connect(dash, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("set_shape_key", [this] {
+            if (dash->value() > 0 && dash->value() < 0.2) dash->setValue(0.2);  // (the shortest dash)
+            set_shape_key(dash, dash->value(), 0.005, "dash_mm", dash->value() > 0 ? Json(dash->value()) : Json());
+        });
+    });
+    tail_kind = new QComboBox;
+    for (const auto& [key, label] : tail_kinds()) tail_kind->addItem(label, key);
+    tail_kind->setToolTip(QStringLiteral("しっぽの形。「内向き」は、フキダシに切れ込むしっぽ（コマの外の人の声に）"));
+    connect(tail_kind, &QComboBox::activated, this, [this](int) { carry_on("set_tail_kind", [this] { set_tail_kind(); }); });
+    tail_fillet = own_spin(-0.5, 20, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"), "set_tail_fillet", &StoryPanel::set_tail_fillet);
+    tail_fillet->setToolTip(QStringLiteral("しっぽとフキダシのつなぎ目の丸み（0 で角のまま。「自動」はほどよい丸み）"));
     path_curve = check(QStringLiteral("手で描いたフキダシを曲線にする"));
     ruby_scale = spin(0.25, 0.8, 0.05, QStringLiteral(" 字"));
     ruby_scale->setToolTip(QStringLiteral("ルビの大きさ（本文の何字ぶんか。既定 0.5）"));
@@ -324,7 +393,9 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     for (const auto& [widget, name] : std::initializer_list<std::pair<QWidget*, const char*>>{
              {outline, "outline"}, {border, "border"}, {fill, "fill"}, {rotate, "rotate"}, {skew, "skew"},
              {gradient, "gradient"}, {arc, "arc"}, {latin, "latin"}, {mark, "mark"},
-             {outline_colour, "outline_colour"}, {wobble, "wobble"}, {double_line, "double"}, {spikes, "spikes"},
+             {outline_colour, "outline_colour"}, {double_line, "double"}, {spikes, "spikes"},
+             {corner, "corner"}, {squircle, "squircle"}, {sides, "sides"}, {wave, "wave"}, {spike_alt, "spike_alt"}, {dash, "dash"},
+             {tail_kind, "tail_kind"}, {tail_fillet, "tail_fillet"},
              {spike_depth, "spike_depth"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
              {fill_cover, "fill_cover"}, {text_dx, "text_dx"}, {text_dy, "text_dy"}, {tail_width, "tail_width"},
              {path_curve, "path_curve"}, {ruby_scale, "ruby_scale"}, {mono_ruby, "mono_ruby"}, {layer_order, "layer_order"},
@@ -356,10 +427,15 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     form->addRow(QStringLiteral("欧文"), latin);
     form->addRow(QStringLiteral("傍点"), mark);
     form->addRow(QString(), outline_colour);
-    form->addRow(QStringLiteral("線の揺れ"), wobble);
     form->addRow(QString(), double_line);
+    form->addRow(QStringLiteral("破線の長さ"), dash);
+    form->addRow(QStringLiteral("線のふるえ"), wave);
+    form->addRow(QStringLiteral("角の丸み"), corner);
+    form->addRow(QString(), squircle);
+    form->addRow(QStringLiteral("角の数"), sides);
     form->addRow(QStringLiteral("トゲの数"), spikes);
     form->addRow(QStringLiteral("トゲの長さ"), spike_depth);
+    form->addRow(QStringLiteral("トゲの長短"), spike_alt);
     form->addRow(QStringLiteral("回転"), rotate);
     form->addRow(QStringLiteral("傾き"), skew);
     form->addRow(QStringLiteral("弓なり"), arc);
@@ -369,7 +445,10 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     shift->addWidget(text_dx);
     shift->addWidget(text_dy);
     form->addRow(QStringLiteral("文字のずれ（横・縦）"), shift);
+    form->addRow(QStringLiteral("しっぽの形"), tail_kind);
     form->addRow(QStringLiteral("しっぽの幅"), tail_width);
+    form->addRow(QStringLiteral("しっぽの付け根の丸み"), tail_fillet);
+    style_form = form;
     form->addRow(QString(), path_curve);
     form->addRow(QStringLiteral("ルビの大きさ"), ruby_scale);
     form->addRow(QString(), mono_ruby);
@@ -549,7 +628,6 @@ void StoryPanel::show_picked() {
     gradient->setText(core::py_truthy(st["gradient"]) ? QStringLiteral("文字のグラデーションを外す") : QStringLiteral("文字のグラデーション…"));
     latin->setCurrentIndex(std::max(0, latin->findData(qs(core::py_str(st["latin"])))));
     mark->setCurrentIndex(std::max(0, mark->findData(qs(core::py_str(st["emphasis_mark"])))));
-    wobble->setValue(f("wobble", 0));
     double_line->setChecked(core::py_truthy(st["double"]));
     spikes->setValue(read([&] { return core::py_truthy(st["spikes"]) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(st["spikes"]), 0, 80)) : 0; }, 0));
     spike_depth->setValue(f("spike_depth", 0.2));
@@ -564,6 +642,33 @@ void StoryPanel::show_picked() {
     const Json first_width = !l->tails.empty() && l->tails.front().is_object() ? core::get_or(l->tails.front(), "width_mm", Json()) : Json();
     tail_width->setValue(read([&] { return core::py_truthy(first_width) ? core::to_float(first_width) : 0.0; }, 0.0));
     tail_width->setEnabled(!l->tails.empty());
+    // fukidashi@1: the balloon's shape (the line's own keys: none of them has a default in the style)
+    const auto own = [&](const char* key) { return core::get_or(l->style, key, Json()); };
+    const auto g = [&own, &read](const char* key, double fallback) {
+        return read([&] { return core::py_truthy(own(key)) ? core::to_float(own(key)) : fallback; }, fallback);
+    };
+    corner->setValue(read([&] { return own("corner_mm").is_number() ? std::clamp(core::to_float(own("corner_mm")), 0.0, 50.0) : corner->minimum(); },
+                          corner->minimum()));
+    squircle->setChecked(core::py_truthy(own("squircle")));
+    sides->setValue(read([&] { return core::py_truthy(own("sides")) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(own("sides")), 5, 12)) : 8; }, 8));
+    wave->setValue(read([&] { return shown_wave(*l); }, 0.0));
+    spike_alt->setValue(g("spike_alt", 0));
+    dash->setValue(g("dash_mm", 0));
+    dash->setSpecialValueText(l->balloon == "whisper" ? QStringLiteral("自動") : QStringLiteral("実線"));  // (a whisper is dashed by itself)
+    const Json tails_now = PageCanvas::tails_of(*l);
+    const Json first_tail = !tails_now.empty() && tails_now.front().is_object() ? tails_now.front() : Json::object();
+    const Json first_kind = core::get_or(first_tail, "kind", Json());
+    tail_kind->setCurrentIndex(std::max(0, tail_kind->findData(qs(core::py_truthy(first_kind) ? core::py_str(first_kind) : std::string("wedge")))));
+    tail_kind->setEnabled(!tails_now.empty());
+    const Json first_fillet = core::get_or(first_tail, "fillet_mm", Json());
+    tail_fillet->setValue(read([&] { return first_fillet.is_number() ? std::clamp(core::to_float(first_fillet), 0.0, 20.0) : tail_fillet->minimum(); },
+                               tail_fillet->minimum()));
+    tail_fillet->setEnabled(!tails_now.empty());
+    show_shape_rows(*l);
+    shown_.clear();  // (what each of these fields shows now: one left so makes no edit — left_as_shown)
+    for (const QDoubleSpinBox* box : {corner, wave, spike_alt, dash, tail_fillet, tail_width}) shown_[box] = box->value();
+    shown_[sides] = sides->value();
+    shown_[squircle] = squircle->isChecked() ? 1.0 : 0.0;
     path_curve->setVisible(l->path.has_value() && !l->path->empty());
     path_curve->setChecked(core::py_truthy(st["path_curve"]));
     ruby_scale->setValue(f("ruby_scale", 0.5));
@@ -598,7 +703,6 @@ void StoryPanel::style_changed() {
     change["arc"] = or_none(arc->value());
     change["latin"] = data(latin);
     change["emphasis_mark"] = data(mark);
-    change["wobble"] = or_none(wobble->value());
     change["double"] = on_or_none(double_line->isChecked());
     change["spikes"] = spikes->value() != 0 ? Json(spikes->value()) : Json();
     change["spike_depth"] = std::abs(spike_depth->value() - 0.2) > 1e-6 ? Json(spike_depth->value()) : Json();
@@ -762,6 +866,8 @@ void StoryPanel::pick_style_colour(const char* key, const QString& title, const 
 void StoryPanel::set_tail_width() {
     const core::StoryLine* l = line();
     if (l == nullptr || loading_ || l->tails.empty()) return;
+    // (left as the first tail's was shown: no edit, and tails of different widths are not made one width)
+    if (left_as_shown(tail_width, tail_width->value(), 0.005)) return;
     const double width = tail_width->value();
     Json tails = Json::array();
     for (const Json& t : l->tails) {
@@ -774,6 +880,157 @@ void StoryPanel::set_tail_width() {
         tails.push_back(out);
     }
     window_->apply_ops(Json::array({Json{{"op", "move_line"}, {"id", l->id}, {"tails", tails}}}));
+}
+
+// --- fukidashi@1: the balloon's shape --------------------------------------------------------------------------------
+
+namespace {
+
+bool kind_in(const std::string& kind, std::initializer_list<const char*> names) {
+    return std::any_of(names.begin(), names.end(), [&kind](const char* name) { return kind == name; });
+}
+
+}  // namespace
+
+const std::vector<std::pair<QString, QString>>& StoryPanel::tail_kinds() {
+    static const std::vector<std::pair<QString, QString>> list = {
+        {QStringLiteral("wedge"), QStringLiteral("くさび")}, {QStringLiteral("straight"), QStringLiteral("まっすぐ")},
+        {QStringLiteral("zigzag"), QStringLiteral("ギザギザ")},        {QStringLiteral("fade"), QStringLiteral("消える")},
+        {QStringLiteral("bubbles"), QStringLiteral("泡（心の声）")},   {QStringLiteral("inward"), QStringLiteral("内向き（切れ込み）")},
+    };
+    return list;
+}
+
+double StoryPanel::shown_wave(const core::StoryLine& l) {
+    // (what the renderer trembles the outline by: style.wave_mm, or — a line of before — its wobble as that wave)
+    const Json wave_mm = core::get_or(l.style, "wave_mm", Json());
+    if (core::py_truthy(wave_mm)) return std::clamp(core::to_float(wave_mm), 0.0, 3.0);
+    const Json held = core::get_or(l.style, "wobble", Json());
+    const double wobble = core::py_truthy(held) ? core::to_float(held) : 0.0;
+    if (!(wobble > 0)) return 0.0;
+    const double w = l.w_mm.truthy() ? l.w_mm.value() : 40.0;
+    const double h = l.h_mm.truthy() ? l.h_mm.value() : 20.0;
+    return std::clamp(core::py_round(render::text::balloon::kWobbleWave * std::min(1.0, wobble) * std::min(w, h), 2), 0.0, 3.0);
+}
+
+Json StoryPanel::tails_as(const core::StoryLine& l, const std::string& kind) {
+    // every tail of the line given the kind. A tail turned inward has its tip moved inside the balloon (a notch is cut
+    // from the outline toward its tip), one turned back out has it moved outside again — on the line from the
+    // balloon's middle through the tip, so it keeps pointing the same way.
+    const double a = (l.w_mm.truthy() ? l.w_mm.value() : 40.0) / 2;
+    const double b = (l.h_mm.truthy() ? l.h_mm.value() : 20.0) / 2;
+    const double cx = l.x_mm.value() + a;
+    const double cy = l.y_mm.value() + b;
+    Json out = Json::array();
+    for (Json t : PageCanvas::tails_of(l)) {
+        const Json was = core::get_or(t, "kind", Json());
+        const bool was_inward = was == Json("inward");
+        if (kind == "wedge") {
+            t.erase("kind");
+        } else {
+            t["kind"] = kind;
+        }
+        if ((kind == "inward") != was_inward && t.contains("to") && t["to"].is_array() && t["to"].size() == 2 && t["to"][0].is_number() &&
+            t["to"][1].is_number()) {
+            double dx = core::to_float(t["to"][0]) - cx;
+            double dy = core::to_float(t["to"][1]) - cy;
+            if (dx == 0 && dy == 0) dy = 1;  // (a tip on the middle: downward)
+            const double gauge = std::sqrt((dx / a) * (dx / a) + (dy / b) * (dy / b));  // (1 on the box's own ellipse)
+            const bool inside = gauge < 1;
+            if (kind == "inward" && !inside) {
+                t["to"] = Json::array({core::py_round(cx + dx / gauge * 0.55, 2), core::py_round(cy + dy / gauge * 0.55, 2)});
+                t.erase("via");
+                t.erase("vias");
+            } else if (kind != "inward" && inside) {
+                t["to"] = Json::array({core::py_round(cx + dx / gauge * 1.6, 2), core::py_round(cy + dy / gauge * 1.6, 2)});
+            }
+        }
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+void StoryPanel::show_shape_rows(const core::StoryLine& l) {
+    // each row only for the kinds it changes (render/text/balloons body_of): nothing greyed out that does nothing
+    const std::string kind = l.balloon.empty() ? std::string("speech") : l.balloon;
+    const bool drawn = l.path.has_value() && !l.path->empty();  // (a balloon drawn by hand: its outline is its own)
+    const bool none = kind_in(kind, {"sfx", "none", "picture"});
+    const bool squared = kind_in(kind, {"box", "narration", "dotted_box", "tone_box", "fancy_box"});
+    // (a dotted box is drawn as dots along its square edge and a fancy box has its marks at its square corners: no
+    // rounded corners for either, and no trembling line for the dots)
+    style_form->setRowVisible(corner, !drawn && (kind == "rounded" || (squared && kind != "dotted_box" && kind != "fancy_box") || kind == "polygon"));
+    style_form->setRowVisible(squircle, !drawn && kind == "rounded");
+    style_form->setRowVisible(sides, !drawn && kind == "polygon");
+    style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash", "dotted_box"})));
+    style_form->setRowVisible(spike_alt, !drawn && kind == "shout");
+    style_form->setRowVisible(dash, !none && !kind_in(kind, {"dotted_box", "flash"}));
+    // (a narration, a flash and the framed boxes are drawn without tails: render/text/balloons no_tail)
+    const bool tailed = !none && !kind_in(kind, {"narration", "flash", "dotted_box", "tone_box", "fancy_box"});
+    style_form->setRowVisible(tail_kind, tailed && kind != "thought");  // (a thought's tails are always bubbles)
+    style_form->setRowVisible(tail_fillet, tailed);
+    corner->setEnabled(!squircle->isChecked() || kind != "rounded");  // (the fuller box has its own corners)
+}
+
+bool StoryPanel::left_as_shown(const QWidget* field, double value, double half_step) {
+    // a field left as the panel showed it (within half of what it shows a step of): no edit, no step of 取り消し. What a
+    // line holds that the field cannot show exactly — more decimals, a value past its range, a default written out —
+    // is not rewritten by walking through the field.
+    const auto found = shown_.find(field);
+    if (found != shown_.end() && std::abs(value - found->second) < half_step) return true;
+    shown_[field] = value;
+    return false;
+}
+
+void StoryPanel::set_shape_key(const QWidget* field, double shown, double half_step, const char* key, const Json& value) {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_ || left_as_shown(field, shown, half_step)) return;
+    style(Json{{key, value}});
+}
+
+void StoryPanel::set_wave() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_ || left_as_shown(wave, wave->value(), 0.005)) return;
+    Json change{{"wave_mm", wave->value() > 0 ? Json(wave->value()) : Json()}};
+    if (l->style.contains("wobble")) {
+        // a line of before: its wobble was drawn as this trembling; the amount said here takes its place. Its letters
+        // keep the ellipse they were fitted in (a line with a wobble was fitted in its box's own ellipse, whatever
+        // its hand said: hand false says so from now)
+        change["wobble"] = nullptr;
+        if (core::is_oval(*l) && core::py_truthy(core::get_or(l->style, "wobble", Json())) && core::get_or(l->style, "hand", Json()) != Json(false)) {
+            change["hand"] = false;
+        }
+    }
+    style(change);
+}
+
+void StoryPanel::set_tail_kind() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_ || PageCanvas::tails_of(*l).empty()) return;
+    const std::string kind = tail_kind->currentData().toString().toStdString();
+    const Json tails = tails_as(*l, kind);
+    if (tails == PageCanvas::tails_of(*l)) return;
+    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"tails", tails}}}));
+}
+
+void StoryPanel::set_tail_fillet() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_) return;
+    if (tail_fillet->value() < 0) tail_fillet->setValue(tail_fillet->minimum());  // (below 0: 自動)
+    const Json before = PageCanvas::tails_of(*l);
+    // (left as the first tail's was shown: no edit — tails that differ from one another stay as they are)
+    if (before.empty() || left_as_shown(tail_fillet, tail_fillet->value(), 0.005)) return;
+    Json tails = Json::array();
+    for (Json t : before) {
+        if (!t.is_object()) continue;
+        if (tail_fillet->value() < 0) {
+            t.erase("fillet_mm");
+        } else {
+            t["fillet_mm"] = tail_fillet->value();
+        }
+        tails.push_back(std::move(t));
+    }
+    if (tails == before) return;
+    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"tails", tails}}}));
 }
 
 void StoryPanel::pick_gradient() {

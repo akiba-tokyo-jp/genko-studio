@@ -78,6 +78,8 @@ genko_library(genko_app
     main_window_guides.cpp
     main_window_materials.cpp
     main_window_lines.cpp
+    main_window_fukidashi.cpp
+    balloon_palette.cpp
     main_window_book.cpp
     main_window_color.cpp
     book_dialogs.cpp
