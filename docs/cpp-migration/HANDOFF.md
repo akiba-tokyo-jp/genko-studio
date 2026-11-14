@@ -17,6 +17,89 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## フキダシの追加（fukidashi@2。SPEC BALLOON-02）— 2026-11-14
+
+### 利用者の決定（2026-11-14）
+- 今風のフキダシに 4 つを足す:「1、2、3足してください」。(1) 筆や G ペンのように太さの変わる線（強弱・入り抜き）、(2) ホラーのしたたる形、(3) 記号の形（ハート・星・花・ひし形。星は `points: 4` で四方のきらめき）、(4) どの輪郭の中にもトーン・グラデーションのトーン・色のグラデーション。
+- リードの決め（設計 fukidashi-extra-plan の 13）: 拡張の名前は `fukidashi@2`。記号は 4 つとも。色のグラデーションも入れる（白黒のページではグラデーションのトーンを使うよう手引きとツールチップに書く）。トーンの上の文字にはトーン枠と同じ白い縁を自動で付ける。記号はネームの計画には入れない。
+- 群: 群 1 が土台（core・render・service・storage・文言・op の一覧・SPEC と schema・単体とサービスの試験・速さの目安）。群 2 が画面とエージェント（種類のメニュー・パレット・台詞パネル・MCP の説明・手引き・GUI の試験）。この節は群 1。
+
+### 群 1 でしたこと（ブランチ `native/fonts-fukidashi2`。main da6acebd に書体の追加を載せた上）
+- 設計: SPEC.md BALLOON-02、schema-v4.md「フキダシの追加」。op の一覧（`genko schema` と docs/ops.schema.json）の `edit_line` に種類 4 つと「style (fukidashi 2)」。
+- **まず控え**（設計の手順 0）: 手を入れる前の版で、見本の 2 冊（前の種類の本 4 ページ・今風の見本 3 ページ）の 150・600 dpi の絵の sha256 と、保存した project.json を記録した（tests/data/fukidashi/pins の pages.json・classic_project.json・clean_project.json）。test_fukidashi の aBookWithoutTheAdditionsIsDrawnAsBefore・…IsSavedAsBefore が最後まで通っている。前からの控え（PSD の sha256、tests/data/type/plain_lines.json）も動いていない。
+- core: `core/fukidashi.{hpp,cpp}` に `kFukidashi2Feature`・`uses_fukidashi2`・`is_symbol`・`symbol_points`・`star_inner`・`drip_reach`・`body_box`。`letter_box` は本体の箱から始まる（しずくの無い台詞は前と同じ数）。`ops_lines.cpp` に種類 4 つ・鍵 11 個・範囲の確かめ・正規の形、ひし形と星のしっぽの隠れ方。storage の書き手と読み手に `fukidashi@2`。
+- render: `render/text/balloon_clean` に記号の輪郭（`heart`・`star`・`flower`・`diamond`）、しっぽの出る楕円（`star_guide`・`flower_guide`・`star_centre`）、文字の場所（`symbol_room`）、しずくの 1 本（`drip`）、ペンの線（`Pen`・`pen_runs`・`pen_plane`。`Run` に形の番号を足した）。雲は「山を並べる」関数に切り出した（同じ式・同じ順。控えで確かめた）。`balloons.cpp` に本体の箱・しずくの並び（`add_drips`）・中のトーン（`tone_bytes`。格子が 512 px 以内で繰り返すときは 1 周期を描いて覚える）・色のグラデーション（`Masks` に blend と ramp、composite で画素ごと）・ペン（`pen_of`）。`lettering.cpp` は記号を「形に収める」種類に足し、トーンの上の文字の白い縁を足した。
+- service: `service::letter::measure_styled(breaks, balloon, em, style)`（多角形の辺・星と花の数と深さ・しずくの分の高さを style から読む）、`symbol_room(kind, points, inner)`。`measure`・`fits` は記号を受け取る。文言（service/wording.cpp）に 16 の文（範囲ごとの文 12、トーンとグラデーションの形が違うときの文 2、数でない値の文 2）。
+- 見本と試験: tests/support/fukidashi_books.hpp に `additions_book()`（1 ページに 1 つの追加: 記号・ペン・しずく・塗り）。test_fukidashi に 23 の試験（データの行を入れて 284 件）、test_fukidashi_service に 4 つ（41 件）、test_perf_render に速さの目安 1 つ（15 通り）。SKIP は無い。見本の絵は `GENKO_FUKIDASHI_OUT=<フォルダ>` を付けて test_fukidashi を流すと cleanupTestCase で書く（`GENKO_FUKIDASHI_SHEETS=additions` で追加の分だけ）。
+
+### 群 2 が使うもの
+- **種類**: `heart`・`star`・`flower`・`diamond`（`add_line`・`edit_line` の `balloon`）。
+- **鍵・範囲・無いとき**（どれも `edit_line` の `style`。null で消える）:
+
+| 鍵 | 範囲 | 無いとき | 意味 |
+|---|---|---|---|
+| `pen_swell` | 0〜0.9 | 強弱なし | 太さ ×（1 ＋ 値 × 法線·太い側の向き）。`border_mm` は平均の太さのまま |
+| `pen_angle` | 0〜360 | 45 | 太い側の向き（0 右・90 下） |
+| `pen_taper` | 0〜1 | 入り抜きなし | 筆の両端へ細る長さの割合（端は 0.15 倍） |
+| `pen_strokes` | 1〜8（整数） | 2 | 角の無い輪郭を描く筆数（角のある輪郭は角から角まで） |
+| `drip_mm` | 0〜30 | しずくなし | いちばん長いしずく。箱の高さの 0.6 まで。箱はその分だけ高くする |
+| `drips` | 1〜24（整数） | 幅で決まる（3〜16） | しずくの枠の数 |
+| `drip_width_mm` | 0.3〜10 | 幅の 7%（1.2〜4 mm） | しずくのふつうの太さ |
+| `drip_seed` | 0〜999999（整数） | 0 | 並び。「並びを変える」は 1 足す |
+| `points` | 4〜12（整数） | 星 5・花 6 | 星の先・花びらの数 |
+| `fill_tone` | `{density 0〜0.9, lpi 20〜85, angle 0〜90, pattern "dot"/"line", to? 0〜0.9, dir? −360〜360, radial?, inset_mm? 0〜5}` | トーンなし | `density` は必ず要る。op が返す形は `density`・`lpi`（60）・`angle`（45）・`pattern`（dot）が必ず入る。パネルはこの形をまるごと書く |
+| `fill_gradient` | `{to: [r, g, b], dir? −360〜360, radial?}` | なし | `fill_rgb`（無ければ白）から `to` へ。op が返す形は `to`・`dir`（90） |
+
+  星の深さは前からの `spike_depth`（0.05〜0.6。星は無ければ 0.38。`points: 4, spike_depth: 0.6` がきらめき）、角の丸みは `corner_mm`（ハートの先・星の先と谷・ひし形の角）。
+- **パレットが消す鍵**: 上の 11 個を `balloon_look_keys()` に足す（後から当てたプリセットが前の追加を消せるように）。台詞パネルの「既定の設定に戻す」は core::line_style_keys() から作るので、もう 63 個を消す（test_gui_lines の期待値を 52 → 63 にした。下）。
+- **関数**: 寸法は `service::letter::measure_styled(breaks, kind, em, style)`。**app/lettering.cpp の measure・box_size・refit_for_kind には記号としずくの場合がまだ無い**（今は記号を箱の種類として測る）。群 2 で、記号の 4 種類を capsule・polygon と同じ道（service の式）へ回し、`own_shape` に足し、`drip_mm` のある台詞は高さにその分を足す。種類の判定は `core::is_symbol(kind)`、しずくの届く長さは `core::drip_reach(line)`、本体の箱は `core::body_box(line)`。見本の絵は今までどおり `render::text::draw_group`（パレットの 56 dpi ではトーンは 2 px の格子で、点ではなく灰色に見える）。
+- **隠す行の目安**: しずくは手で描いた輪郭・`dotted_box`・`flash`・`picture`・`sfx`・`none` では描かれない。ペンは `dotted_box`・`flash` では描かれず、破線（`whisper`・`dash_mm`）では強弱だけ。`points` は星と花だけ。トーンとグラデーションは `sfx`・`none`・`picture` では描かれない。op はどれも受け取って持つ（断らない）。パレットがしずくのプリセットを手で描いた輪郭に当てたときの文（設計の 6）:「手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）」。
+- **断りの文**（service/wording。画面でも同じ文が出る）: 「フキダシの線の強弱は 0〜0.9 です」「線の太い側の向きは 0〜360 度です」「線の入り抜きは 0〜1 です」「フキダシの線を描く筆数は 1〜8 です」「しずくの長さは 0〜30 mm です」「しずくの数は 1〜24 です」「しずくの太さは 0.3〜10 mm です」「しずくの並びの番号は 0〜999999 です」「星のとがり・花びらの数は 4〜12 です」「フキダシの中のトーンの濃さは 0〜90% です」「フキダシの中のトーンの線数は 20〜85 です」「フキダシの中のトーンの柄は、点か線から選びます」「フキダシの中のトーンの指定が正しくありません」「フキダシの中のグラデーションの指定が正しくありません」「フキダシの線・しずくの設定は数で指定します」「フキダシの筆数・しずくの数や番号・とがりの数は整数で指定します」。
+- **群 2 に残ること**: 種類のメニュー（ハート・星・花・ひし形）と commands.json、パレットのプリセット、台詞パネルの行、MCP の apply_ops・propose_lines の説明、手引き（SKILL.md・drawing.md と integrations/ の写し）、GUI と e2e の試験。手引きには「白黒のページでは `fill_gradient` でなく `fill_tone` の `to`」と書く。
+
+### 変えた既存の試験（意図した変更。緩めていない）
+- test_gui_lines theLinesPanelListsReordersAndEdits: 「既定の設定に戻す」が消す鍵の数 52 → 63。この操作は core が受け取る鍵の一覧（core::line_style_keys）から作るので、core に鍵を 11 個足すと数が変わる（設計では群 2 の項目だったが、原因は土台の側にある）。
+- docs/ops.schema.json: native の一覧と同じ文に（edit_line の balloon と「style (fukidashi 2)」）。
+- ほかの期待値は変えていない。
+
+### 確かめたこと（Linux Release。関係する試験だけ）
+- すべてを作り直した（ビルドの全ターゲット 572 手順、エラーなし）うえで、関係する試験 49 本を 2 本ずつ流して 49 本とも合格（2182 件。失敗 0）: test_fukidashi（356 件。前は 72）・test_fukidashi_service（59 件。前は 18）・test_render_page・test_storage・test_contract_storage・test_model・test_command_bus・test_ops・test_studio_ops・test_features・test_type_text・test_type_styles・test_contract_type・test_contract_type_styles・test_contract_type_fonts・test_contract_opentype・test_measure_features・test_ruby・test_ruby_render・test_psd_text・test_psd_smart・test_contract_psd・test_contract_psd_text・test_contract_psd_smart・test_smart_stack・test_tones_effects・test_tone_ops・test_font_catalog・test_font_faces・test_font_service・test_layout_ideas・test_service・test_ledger_service_a/b/c・test_cli_e2e・test_save_e2e・test_ops_e2e・test_mcp_api_e2e・test_gui_ledger_a（どの断りも日本語で読める）・test_gui_lines・test_gui_fukidashi・test_gui_ruby・test_gui_output・test_gui_type・test_gui_type_panels・test_gui_fonts・test_gui_actions・test_perf_render。全体の試験は流していない。
+- 記録に SKIP は 17 件あるが、どれも前からのもの（test_save_e2e の障害の差し込み 16 件は Release のビルドには無い、test_perf_render の psd_of_groups_at_350dpi は環境変数が無いとき）。この群で足した試験に SKIP は無い。FAIL・QFATAL は 0。
+- 控えの試験（手を入れる前の 2 冊、追加の見本）は、失敗するのを見てから記録して通した。ほかの新しい試験は、それぞれの実装のあとに書いた。書いたときに落ちて実装を直した所: 記号の箱が大きすぎる、星の 1 列が測った寸法で折り返される、下向きのグラデーションの色が行の中で 1 段ずれる。見本の絵を見て直した所: 花の上が平らになる、しずくの付け根で線が切れる（そのあと「線が開かない」試験を足した）。
+- 設計の「確かめていない」の項: (1) 雲を切り出しても画素が同じ → 控えで確かめた。(2) 文字を編集できる PSD の白い縁 → トーン枠の自動の縁は、文字の絵に描くのと同じ値から文字レイヤーの境界線（`SetLetters::halo`）として出ていて、`fill_tone` も同じ値を通る（test_fukidashi の theLettersOverAToneHaveAWhiteEdge で幅と色が同じことを確かめた）。(3) ページの端で切れる領域 → aBalloonThePageCutsOffIsTheSame（全部の追加を付けた 4 種類、150・600 dpi で、大きいページの同じ所と同じ画素）。(4) service/atari.cpp は言われた種類をそのまま使い `letter::measure(breaks, balloon)` で測る（記号はその種類の既定の数で測られる）。service/finish.cpp の `tailed` は、記号を話し言葉の種類として扱う（話し手がいればしっぽを向ける。楕円と同じ）。どちらもコードは変えていない。(5) 速さと、小さい円をたくさん描くときの速さ → 下。
+
+### 見本を見て決めたこと
+- ハート: 設計の「2 つの円が 1 点で接し、先まで直線」だと切れ込みが幅の無い筋になり、下が三角に見えるので、山を少し重ねて（中心 ±0.485・半径 0.515）切れ込みに角度を付け、下の辺を外へふくらむ曲線にした。左右は点ごとに同じ。
+- 星: 先を「短い半径の 0.10 の丸み」で丸めると、細い先（きらめき）が 3 割近く削れるので、無いときは先を短い半径の 0.035 だけ縮める丸みにした（`corner_mm` を書けばその半径）。
+- 花: 山を半円にすると円弧の作り方（半円未満）が破れて上が平らになったので、高さを幅の 0.46 にした。雲とはっきり違って見える。
+- しずく: 傾いた輪郭（ハートの下・楕円の脇）では、上の辺の付け根に小さな段ができたので、指の形は両方の辺が輪郭を出た所から始め、それより上はまっすぐにした。輪郭が指の角をちょうど通ると継ぎ目が 2 つできて線が切れたので、角を少し下げた。番号によっては本数が少なくなる（4 枠で 1 本だけ、など）。それは「並びを変える」で変えてもらう。
+- ペン: 四角は辺ごとに 1 筆で、角で細くなる。しっぽのあるフキダシは先から先までが 1 筆。楕円の 2 筆は左上と右下で細くなる（右下は太い側なので、強弱の山が途中でくびれる。1 筆なら左上だけ）。白黒にしても線は切れない（いちばん細い所で 1 px）。
+- トーン: 600 dpi を白黒にすると、点は面積で 3 割以上かかった画素が黒になるので 2 割ほど太る（60 線の 50% では市松に近くなる）。濃さ 10〜30% では点がそろって見える。
+
+### 速さ（test_perf_render。表示だけ。B4・600 dpi（6071 × 8598 px）に 10 個。数字は揺れる: 同じ条件でも、機械が混んだ回は 1.7 倍まで延びた）
+- 今日の元の数字（何も足さない 10 個。3 回）: フキダシなし 373〜550 ms、ありを最初から 672〜1168 ms、もう一度 399〜595 ms、形だけ 312〜466 ms（1 個 31〜47 ms）。静かな回は前の記録（680 ms）と同じ。機械が混むと 1.7 倍まで延びる。下の差は同じ回の「何も足さない 10 個」との差。
+- ペンの線: 形だけで 1 個 −14〜＋11 ms（揺れの中。差は見えない）。しずく: −7〜＋11 ms（同じ）。記号 10 個: −21〜＋12 ms（同じ）。色のグラデーション: −16〜＋22 ms。
+- トーン（形だけ、1 個あたり）: 点 ＋11〜＋12 ms（1 回は揺れで −11）、濃くなる点 ＋4〜＋28 ms、線の内側を白く ＋4〜＋30 ms、濃くなる線 ＋8〜＋25 ms、15° の細かい格子で濃くなる点（最初に 64 枚の周期を作る）＋4〜＋40 ms、繰り返さない粗い格子（20 線・30°。1 個に 1000 個あまりの点を 1 つずつ描く）＋44〜＋72 ms。全部を一度に: ＋18〜＋56 ms。
+- **ページ全体では、トーンのフキダシ 10 個で最初の 1 回が ＋2.3〜2.9 秒**。ほとんどが文字の白い縁（1 本 0.25〜0.3 秒）で、トーンを付けずに文字に縁取り（`outline_mm: 0.7`）を付けただけでも同じだけ延びる（＋2.6〜2.9 秒）。前からある縁取りの処理の速さで、この群では変えていない。2 回目からは覚えているので速い。
+- 設計の見積もり（1 個あたり ペン ＋1〜4、しずく ＋3〜8、トーン ＋3〜6、グラデーション ＋5〜10 ms）と比べると、ペン・しずくは見積もりの中、トーンとグラデーションは 2〜4 倍。この目安は長いしっぽのせいで 1 個の領域が 2600 × 2400 px あり、トーンの手間は領域の広さで決まる。
+
+### 設計と違う所
+- 記号の寸法: 「（塊＋余白）× 倍率を出してから短い辺を広げる」ではなく、その記号らしい縦横の比の中で、塊が入るいちばん小さい箱を探す（13 通りの比を試す）。縦長の言葉で箱が大きくなりすぎないように。
+- 記号の中で列を折る長さ: 箱の高さではなく、文字の場所が真ん中を通る長さにした（星の 1 列が測った寸法で折り返されないように）。
+- 記号は話し言葉の種類として、文末の「。」を落とす（capsule・polygon は前のまま変えていない）。
+- トーン: 点の中心はトーンのレイヤーと同じ所（設計の式に画素の半分を足した）。繰り返しの周期は N ではなく N ÷ gcd(m, n)（60 線 45° は 14 px）。濃さが π/4 を超える所の半径は表で補う（重なりで面積が足りなくなるので）。`fill: none` でもトーンは敷く。`density` は必ず書く。
+- しずく: 長さは、そのしずくが出る輪郭の所から測る（本体の下の端からではない）。いちばん長い 1 本だけ箱の下の端まで。
+- ペン: 角の無い線の筆の始まりは「周りの 0.875 の所」ではなく、線がいちばん細くなる所（45° の楕円では同じ所）。描き方は帯の分かれ道を作らず、いつも台形とくさびの和集合。つなぐ処理は設計どおりにできた（つなげなかった切れ端を 1 本ずつ描く逃げ道は残してある）。
+- app/lettering.cpp には触れていない（設計の 4.1 は群 1 の記号の節に書いていたが、画面の側なので群 2 に残した。上の「群 2 が使うもの」）。
+
+### 残り・気を付けること
+- **前からの不具合を見つけた（直していない）**: 四角（`box`）のしっぽが箱の角へ向かって出ると、線が切れる（fukidashi@1 のまま。ペンとは関係ない。箱 40..90 × 40..86 mm、しっぽの先 (104, 104) で起きる）。直すとすでにある本の画素が変わるので、決めてもらってから。
+- トーンの上の文字の白い縁は、前からの縁取り（`outline_mm`・トーン枠）と同じ処理で、600 dpi で 1 本あたり 0.25〜0.3 秒かかる（最初の 1 回。覚えたあとは速い）。トーンのフキダシが多いページの最初の描画はその分遅い。縁取りの処理そのものは変えていない。
+- 繰り返さない粗い格子（たとえば 20 線・30°）のトーンは点を 1 つずつ描く。600 dpi で 1 個 60〜80 ms。1200 dpi ではその数倍。
+- 見本の絵は利用者の目で見てもらう（ハートの形、しずくの太さと長さ、筆のくびれ、星の先の丸み）。
+- 群 2: 種類のメニュー・パレット・台詞パネル・MCP の説明・手引き・GUI の試験。app/lettering.cpp の寸法の道。
+- Windows のビルドはしていない（`__int128`・`near`/`far`・非コピー型の `?:` は使っていない。新しい角度は libm_float の sinf・cosf。`tones::screen_vector` はトーンのレイヤーと同じく、整数に丸める前に環境の cos を使う）。
+
 ## 書体の追加（F1: ファイル・ライセンス・一覧）— 2026-11-14
 
 ### 利用者の決定（2026-11-13）
