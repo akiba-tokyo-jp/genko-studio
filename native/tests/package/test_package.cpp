@@ -369,7 +369,7 @@ private slots:
             if (r["relationshipType"] == Json("CONTAINS") && file_of.contains(to)) package_of[file_of[to]] << QString::fromStdString(from);
         }
         std::map<std::string, QString> declared;
-        for (const Json& package : sbom["packages"]) declared[package["SPDXID"].get<std::string>()] = QString::fromStdString(package["licenseDeclared"].get<std::string>());
+        for (const Json& package : sbom["packages"]) declared[package["SPDXID"].get<std::string>()] = QString::fromStdString(package.value("licenseDeclared", std::string()));
         int lettering = 0, genei = 0, littlelimit = 0;
         for (const QString& name : expected) {
             if (name == QStringLiteral("FONTS.json")) continue;
@@ -478,15 +478,21 @@ private slots:
         const gt::Run from_menu = gt::run(exec.captured(1), {QStringLiteral("--version")}, env, 120000);
         QVERIFY2(from_menu.finished && from_menu.exit_code == 0, qPrintable(from_menu.described()));
         // (書体の追加 F2: run through the link in ~/.local/bin — not the folder the program is in —, it finds the forty faces
-        // beside the real program: the doctor reads every one, and the list of faces says each is there)
-        const gt::Run doctored = gt::run(link, {QStringLiteral("doctor"), home + QStringLiteral("/books/mine.genko")}, env, 300000, {}, home);
+        // beside the real program: the doctor reads every one, and the list of faces says each is there. As another person
+        // of the computer, with a home and a book of their own: this one's home is compared after the uninstall, below)
+        const QString visitor = scratch_.filePath(QStringLiteral("visitor"));
+        QVERIFY(QDir().mkpath(visitor));
+        const QProcessEnvironment other = bare(visitor);
+        const QString theirs = visitor + QStringLiteral("/books/theirs.genko");
+        QVERIFY(gt::run(link, {QStringLiteral("new"), theirs}, other, 120000).exit_code == 0);
+        const gt::Run doctored = gt::run(link, {QStringLiteral("doctor"), theirs}, other, 300000, {}, visitor);
         QVERIFY2(doctored.finished && doctored.exit_code == 0, qPrintable(doctored.described()));
         QCOMPARE(gt::one_line(doctored.out)["problems"], Json::array());
-        const gt::Run faces = gt::run(link, {QStringLiteral("studio"), QStringLiteral("inspect"), home + QStringLiteral("/books/mine.genko"), QStringLiteral("fonts")}, env,
-                                      120000, {}, home);
+        const gt::Run faces = gt::run(link, {QStringLiteral("studio"), QStringLiteral("inspect"), theirs, QStringLiteral("fonts")}, other, 120000, {}, visitor);
         QVERIFY2(faces.finished && faces.exit_code == 0, qPrintable(faces.described()));
         int there = 0;
-        for (const Json& row : gt::one_line(faces.out)["fonts"]["bundled"]) there += row.value("available", false) ? 1 : 0;
+        const Json told = gt::one_line(faces.out);
+        for (const Json& row : told["fonts"]["bundled"]) there += row.value("available", false) ? 1 : 0;
         QCOMPARE(there, 40);
         // a second time: refused, nothing changed
         const auto installed_tree = gt::tree_hashes(target);
