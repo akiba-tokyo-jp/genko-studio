@@ -1214,9 +1214,15 @@ private slots:
     }
 
     // --- the sample sheets (written when asked: GENKO_FUKIDASHI_OUT) -------------------------------------------------------
-    void sampleSheets() {
+    // (not a test of their own, and never a SKIP: the audit of a stage's run refuses every skipped slot. As the screenshots
+    // of test_gui_color, they are written at the end of a run that names a folder)
+    void cleanupTestCase() {
         const QByteArray out = qgetenv("GENKO_FUKIDASHI_OUT");
-        if (out.isEmpty()) QSKIP("the sample sheets are written when GENKO_FUKIDASHI_OUT names a folder");
+        if (!out.isEmpty()) write_sample_sheets(out);
+    }
+
+private:
+    static void write_sample_sheets(const QByteArray& out) {
         const std::filesystem::path dir(out.toStdString());
         std::filesystem::create_directories(dir);
         const auto write = [&](const std::string& name, const Image& image) {

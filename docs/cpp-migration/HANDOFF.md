@@ -114,7 +114,7 @@
 - 152 本の実行ファイル（test_gui_* 全部・*_e2e 全部・service・ledger_service_a/b/c・fukidashi・fukidashi_service・layout_ideas・studio_files・studio_ops・mcp_connection・storage・model・strokes・command_bus・ops・features・render_page・psd_text・smart_stack・smart_render・ruby・ruby_render・type_text・contract の type 3 本・opentype・psd_text・psd・storage・render_cli・pipeline・export・export_cli・annotations・layer_comps・measure・pcraft・slices・smart・video・align・anim・color_model・image_ops・ink・layers・paths・transform・prefs・retouch・guides・copy・open・variables・artboards・page_size・brushes_model・color_model・groups・page_geometry・page_size・pyre・spell・variables・adjust・ai_link・perf_render・package・control_channel・session・migration・tiles・web_export・pcraft・prefs_table・json・buildinfo）: 試験の関数 2986 件が合格、不合格 0、スキップ 25（Release では動かない障害注入 22 件、見本と画面の絵の書き出し 2 件、PSD の速さの見本 1 件）。3 本を並べて流した。全体の試験・ASan・test_soak_app は流していない。
 - 新しい試験: test_gui_fukidashi 9 件（メニュー 5 つ、手描き風の設定が無い・前の鍵の台詞の編集、形の設定の鍵と取り消し、パレットと絵、選んだ台詞に当てる、次に置く台詞、capsule・polygon の寸法、画面の絵の書き出し）、test_fukidashi aZigzagTailClosesWithAPoint（直す前は落ちることを確かめた）。
 - パレットの絵 32 枚を描き直す時間（表示だけ。書体を読んだ後、1.5 倍の画面で）: 49 ms。配置（saveState・restoreState）で開閉が戻ることも試験で見る。
-- 画面の絵（作業用の場所。GENKO_FUKIDASHI_OUT を付けた test_gui_fukidashi screenshots が書く）: パレット（明・暗）、台詞パネルの設定（明・暗）。日本語は字で出ていて、切れている所は無い。
+- 画面の絵（作業用の場所。GENKO_FUKIDASHI_OUT にフォルダを指定して test_gui_fukidashi を走らせると、最後に書く）: パレット（明・暗）、台詞パネルの設定（明・暗）。日本語は字で出ていて、切れている所は無い。
 
 #### 残り・気を付けること（B2・B3）
 - Windows の実機のビルドは未確認。

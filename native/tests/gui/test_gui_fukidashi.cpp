@@ -1372,9 +1372,15 @@ private slots:
     }
 
     // --- the pictures for the lead (written when asked: GENKO_FUKIDASHI_OUT) ---------------------------------------------
-    void screenshots() {
+    // (not a test of their own, and never a SKIP: the audit of a stage's run refuses every skipped slot. As the screenshots
+    // of test_gui_color, they are written at the end of a run that names a folder)
+    void cleanupTestCase() {
         const QByteArray out = qgetenv("GENKO_FUKIDASHI_OUT");
-        if (out.isEmpty()) QSKIP("the screenshots are written when GENKO_FUKIDASHI_OUT names a folder");
+        if (!out.isEmpty()) write_screenshots(out);
+    }
+
+private:
+    void write_screenshots(const QByteArray& out) {
         const QString dir = QString::fromUtf8(out);
         QDir().mkpath(dir);
         for (const char* mode : {"light", "dark"}) {
@@ -1424,7 +1430,6 @@ private slots:
         app::theme::apply(qApp);
     }
 
-private:
     static Json PageCanvas_tails(const core::StoryLine& l) { return app::PageCanvas::tails_of(l); }
 };
 
