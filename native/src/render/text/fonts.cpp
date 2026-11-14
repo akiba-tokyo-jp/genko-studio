@@ -10,7 +10,9 @@
 #include <array>
 
 #include "core/error.hpp"
+#include "core/font_catalog.hpp"
 #include "core/pyconv.hpp"
+#include "render/font_files.hpp"
 #include "render/not_yet_ported.hpp"
 
 namespace genko::render::text {
@@ -117,6 +119,23 @@ constexpr std::array<std::pair<char32_t, char32_t>, 6> kLookalike{{{U'―', U'�
                                                                    {U'‐', U'-'},
                                                                    {U'∼', U'〜'}}};
 
+// fonts@1: an added face whose file is on this computer (null: not an added face, or its file is not there).
+const core::fonts::Entry* added_here(std::string_view key) {
+    const core::fonts::Entry* entry = core::fonts::find(key);
+    return entry != nullptr && entry->added && font_files::present(key) ? entry : nullptr;
+}
+
+// An added face as a Face: one font for everything, and its partner where it names one that can be drawn with (a face
+// of before, or an added one whose file is there too).
+Face added_face(const core::fonts::Entry& entry) {
+    Face face{entry.key, entry.key, entry.key};
+    if (!entry.fallback.empty() && (bundled(entry.fallback) != nullptr || added_here(entry.fallback) != nullptr)) {
+        const Bundled* b = bundled(entry.fallback);
+        face.fallback = b != nullptr ? std::string(b->other) : entry.fallback;
+    }
+    return face;
+}
+
 }  // namespace
 
 Face face_of(const core::Json& spec_in, std::string_view default_key) {
@@ -129,7 +148,10 @@ Face face_of(const core::Json& spec_in, std::string_view default_key) {
     }
     const std::string& name = spec.get_ref<const std::string&>();
     if (const Bundled* b = bundled(name)) return Face{name, std::string(b->kana), std::string(b->other)};
-    if (name.find('\0') == std::string::npos && QFileInfo(QString::fromStdString(name)).isFile()) {
+    const bool added = core::fonts::added(name);
+    if (const core::fonts::Entry* entry = added ? added_here(name) : nullptr) return added_face(*entry);
+    // (an added face whose file is not there: the default, below — its key is never read as a file's path)
+    if (!added && name.find('\0') == std::string::npos && QFileInfo(QString::fromStdString(name)).isFile()) {
         return Face{name, name, name};
     }
     const Bundled* fallback = bundled(default_key);
@@ -138,8 +160,9 @@ Face face_of(const core::Json& spec_in, std::string_view default_key) {
 }
 
 bool face_exists(std::string_view name) {
-    return bundled(name) != nullptr ||
-           (name.find('\0') == std::string_view::npos && QFileInfo(QString::fromUtf8(name.data(), static_cast<qsizetype>(name.size()))).isFile());
+    if (bundled(name) != nullptr) return true;
+    if (core::fonts::added(name)) return font_files::present(name);
+    return (name.find('\0') == std::string_view::npos && QFileInfo(QString::fromUtf8(name.data(), static_cast<qsizetype>(name.size()))).isFile());
 }
 
 bool is_kana_like(std::u32string_view ch) {
@@ -189,6 +212,16 @@ bool Fonts::has_glyph(const std::string& path, std::u32string_view ch) {
     const auto key = std::make_pair(path, std::u32string(ch));
     if (const auto it = glyphs_.find(key); it != glyphs_.end()) return it->second;
     const TrueTypeFont& font = truetype(path, 32);
+    if (font.strict_cmap()) {
+        // fonts@1: an added face has the letters its cmap gives a glyph (a variation selector rides on its letter)
+        bool has = !ch.empty();
+        for (const char32_t c : ch) {
+            const bool selector = (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0100 && c <= 0xE01EF);
+            if (!selector && font.glyph_index(c) == 0) has = false;
+        }
+        glyphs_.emplace(key, has);
+        return has;
+    }
     const Image mask = font.getmask2(ch).first;
     const auto box = mask.getbbox();
     bool has = false;
@@ -212,21 +245,33 @@ std::string Fonts::path_for(const Face& face, std::u32string_view ch) {
     if (ch.size() != 1 || has_glyph(first, ch)) return first;
     // a character the face lacks (e.g. ― in some Minchos): the other half, then the bundled Gothic
     const std::string other = first == face.kana ? face.other : face.kana;
-    for (const std::string& path : {other, std::string(kGothic), std::string(kSfx)}) {
+    if (has_glyph(other, ch)) return other;
+    // fonts@1: the partner of a face without kanji draws what the face lacks, before the bundled Gothic
+    if (!face.fallback.empty() && has_glyph(face.fallback, ch)) return face.fallback;
+    for (const std::string& path : {std::string(kGothic), std::string(kSfx)}) {
         if (has_glyph(path, ch)) return path;
     }
     return first;
 }
 
 std::u32string Fonts::normalize(const Face& face, std::u32string_view text) {
+    // fonts@1: an added face's own look-alikes (the catalogue's: ！ → !, ？ → ? where the face has only the ASCII marks),
+    // by the face's key — nothing for a face of before or a font file, whose swaps are LOOKALIKE alone as they always were
+    const core::fonts::Entry* entry = core::fonts::find(face.key);
+    const std::vector<std::pair<char32_t, char32_t>>* own = entry != nullptr && entry->added && !entry->lookalike.empty() ? &entry->lookalike : nullptr;
     std::u32string out;
     out.reserve(text.size());
     for (char32_t ch : text) {
-        const auto it = std::find_if(kLookalike.begin(), kLookalike.end(), [&](const auto& p) { return p.first == ch; });
-        if (it != kLookalike.end()) {
+        std::optional<char32_t> alike;
+        if (const auto it = std::find_if(kLookalike.begin(), kLookalike.end(), [&](const auto& p) { return p.first == ch; }); it != kLookalike.end()) {
+            alike = it->second;
+        } else if (own != nullptr) {
+            if (const auto mine = std::find_if(own->begin(), own->end(), [&](const auto& p) { return p.first == ch; }); mine != own->end()) alike = mine->second;
+        }
+        if (alike) {
             const std::u32string one(1, ch);
-            const std::u32string alt(1, it->second);
-            if (!has_glyph(face.kana, one) && !has_glyph(face.other, one) && has_glyph(face.other, alt)) ch = it->second;
+            const std::u32string alt(1, *alike);
+            if (!has_glyph(face.kana, one) && !has_glyph(face.other, one) && has_glyph(face.other, alt)) ch = *alike;
         }
         out.push_back(ch);
     }

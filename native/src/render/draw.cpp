@@ -29,7 +29,9 @@
 #include "render/page.hpp"
 
 #include "core/error.hpp"
+#include "core/font_catalog.hpp"
 #include "core/pynum.hpp"
+#include "render/font_files.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -744,6 +746,7 @@ std::shared_ptr<const QByteArray> font_bytes(const std::string& named) {
     const std::string font = font_face(named).first;  // (PC5 G-d: a collection's face — its file's bytes)
     if (bundled_text_font(font)) return bundled_bytes(font);
     if (font == kPillowDefaultKey) return bundled_bytes("pillow_default");
+    if (core::fonts::added(font)) return font_files::bytes(font);  // (fonts@1: an added face — never a file of that name)
     if (font.size() > 4096) throw core::Error("value", "font name exceeded");
     QFile source(QString::fromStdString(font));
     if (!source.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) throw NotYetPorted("default_font");
@@ -788,6 +791,10 @@ struct TrueTypeFonts::State {
             entry->bytes = bundled_bytes(font);
         } else if (font == kPillowDefaultKey) {
             entry->bytes = bundled_bytes("pillow_default");
+        } else if (core::fonts::added(font)) {
+            // fonts@1: an added face by its key — its file's bytes, shared by every piece of lettering (one that is not
+            // there is a font file that cannot be read: NotYetPorted("default_font"))
+            entry->bytes = font_files::bytes(font);
         } else {
             // a font file: Python's truetype() falls back to Pillow's own default font when the file cannot be read
             if (font.size() > 4096) throw core::Error("value", "font name exceeded");
@@ -862,6 +869,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
         throw NotYetPorted("default_font");  // (the face let go with `opened`)
     }
     if (s.memory.second) detail::throw_imaging_error();
+    opened->strict_cmap_ = core::fonts::added(font_face(font).first);  // (fonts@1: an added face's letters are its cmap's)
     return *s.fonts.emplace(key, std::move(opened)).first->second;
 }
 
@@ -906,6 +914,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size, c
         (void)FT_Done_MM_Var(s.library, mm);
     }
     if (s.memory.second) detail::throw_imaging_error();
+    opened->strict_cmap_ = core::fonts::added(font_face(font).first);
     return *s.varied.emplace(key, std::move(opened)).first->second;
 }
 

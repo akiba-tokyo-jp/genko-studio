@@ -1,13 +1,13 @@
 {
   "schema": "genko-fonts@1",
-  "about": "Lettering fonts bundled with Genko Studio (native/resources/fonts/). F1 (2026-11-13): the files, licences, provenance and coverage. The six \"existing\" fonts are compiled into the program (native/resources/genko_text.qrc); the \"new\" ones are not yet registered anywhere (F2).",
+  "about": "Lettering fonts bundled with Genko Studio (native/resources/fonts/). F1 (2026-11-13): the files, licences, provenance and coverage. F2 (2026-11-14): this file is the program's catalogue (embedded in genko_core, core/font_catalog). The six fonts of storage \"embedded\" are compiled into the program (native/resources/genko_text.qrc); the forty of storage \"file\" are installed beside it (share/genko-studio/fonts) and a book that names one says the feature fonts@1. fallback: the face that draws what a kana-only or partial face lacks. lookalike: this face's own swaps for a mark it lacks. vertical.presentation_forms: the cmap holds every vertical bracket form (U+FE35… U+FE44, U+FE47, U+FE48) the vertical setting asks for; false: the horizontal bracket is turned.",
   "generated": "2026-11-13",
   "counts": {
     "fonts": 46,
-    "existing": 6,
-    "new": 40,
+    "embedded": 6,
+    "file": 40,
     "bytes_total": 177872176,
-    "bytes_new": 157549348
+    "bytes_file": 157549348
   },
   "sources": {
     "google/fonts": {
@@ -36,7 +36,7 @@
     "punctuation": "、。「」『』！？…―～・; punctuation_missing lists exact misses, punctuation_missing_after_lookalike what is still missing after the app's look-alike swap (― → — U+2014, ～ → 〜 U+301C; render/text/fonts.cpp kLookalike)",
     "ascii_complete": "0–9, A–Z, a–z",
     "kanji": "full = every JIS X 0208 level-1 kanji, every jōyō kanji and at least 99 % of level 2; none = no level-1 or level-2 kanji; partial = anything else. Numbers: level 1 of 2,965, level 2 of 3,390, jōyō of 2,136 (Unihan 17.0 kJoyoKanji; for 𠮟・塡・剝・頰 the usual form 叱・填・剥・頬 also counts)",
-    "vertical": "supported = a GSUB vert feature and vhea/vmtx tables are present (vrt2 is recorded separately)"
+    "vertical": "supported = a GSUB vert feature and vhea/vmtx tables are present (vrt2 is recorded separately); presentation_forms = measured by native/tests/unit/test_font_faces.cpp through FreeType's cmap"
   },
   "categories": [
     {
@@ -90,59 +90,17 @@
       "name_ja": "アンチック（既定の台詞）",
       "kana": "mincho",
       "other": "gothic",
-      "status": "existing",
-      "note": "kana and Japanese punctuation from mincho (ZenOldMincho-SemiBold), everything else from gothic (ZenKakuGothicNew-Bold); render/text/fonts.cpp kBundled"
-    }
-  ],
-  "composite_suggestions": [
-    {
-      "key": "cute_cherry",
-      "kana": "cute_cherry",
-      "other": "maru_black",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "cute_daruma",
-      "kana": "cute_daruma",
-      "other": "pop_mochiy",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "hand_slackside",
-      "kana": "hand_slackside",
-      "other": "hand",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "horror_chokoku",
-      "kana": "horror_chokoku",
-      "other": "mincho_black",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "techno_monomaniac",
-      "kana": "techno_monomaniac",
-      "other": "gothic_black",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "sfx_inline",
-      "kana": "sfx_inline",
-      "other": "gothic_black",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
-    },
-    {
-      "key": "sfx_aoboshi",
-      "kana": "sfx_aoboshi",
-      "other": "mincho_tokumin",
-      "note": "kana-only or partial-kanji display face: take the kanji (and any character it lacks) from the suggested face of similar weight"
+      "note": "kana and Japanese punctuation from mincho (ZenOldMincho-SemiBold), everything else from gothic (ZenKakuGothicNew-Bold); render/text/fonts.cpp kBundled; the face of a line that names no font",
+      "storage": "embedded",
+      "feature": null
     }
   ],
   "fonts": [
     {
       "key": "gothic",
       "file": "ZenKakuGothicNew-Bold.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "ZEN角ゴシック B",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -165,11 +123,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkakugothicnew-OFL.txt",
@@ -191,7 +151,8 @@
     {
       "key": "mincho",
       "file": "ZenOldMincho-SemiBold.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "ZENオールド明朝 SB",
       "category": "narration",
       "category_ja": "ナレーション・モノローグ",
@@ -214,11 +175,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenoldmincho-OFL.txt",
@@ -240,7 +203,8 @@
     {
       "key": "maru",
       "file": "ZenMaruGothic-Bold.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "ZEN丸ゴシック B",
       "category": "maru",
       "category_ja": "丸ゴシック",
@@ -263,11 +227,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenmarugothic-OFL.txt",
@@ -289,7 +255,8 @@
     {
       "key": "hand",
       "file": "Yomogi-Regular.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "よもぎ",
       "category": "hand",
       "category_ja": "手書き",
@@ -312,11 +279,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/yomogi-OFL.txt",
@@ -338,7 +307,8 @@
     {
       "key": "sfx",
       "file": "DelaGothicOne-Regular.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "デラゴシック",
       "category": "sfx",
       "category_ja": "効果音",
@@ -361,11 +331,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/delagothicone-OFL.txt",
@@ -387,7 +359,8 @@
     {
       "key": "sfx_pop",
       "file": "ReggaeOne-Regular.ttf",
-      "status": "existing",
+      "storage": "embedded",
+      "feature": null,
       "name_ja": "レゲエ",
       "category": "sfx",
       "category_ja": "効果音",
@@ -410,11 +383,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/reggaeone-OFL.txt",
@@ -436,7 +411,8 @@
     {
       "key": "antique_genei",
       "file": "GenEiAntiqueNv6-M.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "源暎アンチック",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -459,11 +435,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/geneiantique-OFL.txt",
@@ -497,7 +475,8 @@
     {
       "key": "antique_shippori",
       "file": "ShipporiAntique-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "しっぽりアンチック",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -520,11 +499,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3386,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/shipporiantique-OFL.txt",
@@ -549,7 +530,8 @@
     {
       "key": "antigothic_medium",
       "file": "ZenKakuGothicAntique-Medium.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN角ゴシックアンチック M",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -572,11 +554,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkakugothicantique-OFL.txt",
@@ -598,7 +582,8 @@
     {
       "key": "antigothic_bold",
       "file": "ZenKakuGothicAntique-Bold.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN角ゴシックアンチック B",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -621,11 +606,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkakugothicantique-OFL.txt",
@@ -647,7 +634,8 @@
     {
       "key": "antique_zen",
       "file": "ZenAntique-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZENアンチック",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -670,11 +658,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenantique-OFL.txt",
@@ -696,7 +686,8 @@
     {
       "key": "gothic_regular",
       "file": "ZenKakuGothicNew-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN角ゴシック R",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -719,11 +710,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkakugothicnew-OFL.txt",
@@ -745,7 +738,8 @@
     {
       "key": "gothic_seed",
       "file": "LINESeedJP-Bold.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "LINE Seed JP B",
       "category": "dialogue",
       "category_ja": "台詞",
@@ -768,11 +762,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/lineseedjp-OFL.txt",
@@ -794,7 +790,8 @@
     {
       "key": "mincho_shippori",
       "file": "ShipporiMincho-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "しっぽり明朝",
       "category": "narration",
       "category_ja": "ナレーション・モノローグ",
@@ -817,11 +814,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/shipporimincho-OFL.txt",
@@ -843,7 +842,8 @@
     {
       "key": "mincho_hina",
       "file": "HinaMincho-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ひな明朝",
       "category": "narration",
       "category_ja": "ナレーション・モノローグ",
@@ -866,11 +866,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/hinamincho-OFL.txt",
@@ -892,7 +894,8 @@
     {
       "key": "klee",
       "file": "KleeOne-SemiBold.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "クレー One SB",
       "category": "narration",
       "category_ja": "ナレーション・モノローグ",
@@ -915,11 +918,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/kleeone-OFL.txt",
@@ -941,7 +946,8 @@
     {
       "key": "gothic_black",
       "file": "ZenKakuGothicNew-Black.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN角ゴシック Bk",
       "category": "shout",
       "category_ja": "叫び",
@@ -964,11 +970,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkakugothicnew-OFL.txt",
@@ -990,7 +998,8 @@
     {
       "key": "gothic_kiwami",
       "file": "GenEiKiwamiGo.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "源暎きわみゴ",
       "category": "shout",
       "category_ja": "叫び",
@@ -1013,11 +1022,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/geneikiwamigo-OFL.txt",
@@ -1049,7 +1060,8 @@
     {
       "key": "mincho_black",
       "file": "ZenOldMincho-Black.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZENオールド明朝 Bk",
       "category": "shout",
       "category_ja": "叫び",
@@ -1072,11 +1084,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenoldmincho-OFL.txt",
@@ -1098,7 +1112,8 @@
     {
       "key": "mincho_tokumin",
       "file": "KaiseiTokumin-ExtraBold.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "解星 特ミン EB",
       "category": "shout",
       "category_ja": "叫び",
@@ -1121,11 +1136,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/kaiseitokumin-OFL.txt",
@@ -1147,7 +1164,8 @@
     {
       "key": "maru_regular",
       "file": "ZenMaruGothic-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN丸ゴシック R",
       "category": "maru",
       "category_ja": "丸ゴシック",
@@ -1170,11 +1188,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenmarugothic-OFL.txt",
@@ -1196,7 +1216,8 @@
     {
       "key": "maru_black",
       "file": "ZenMaruGothic-Black.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN丸ゴシック Bk",
       "category": "maru",
       "category_ja": "丸ゴシック",
@@ -1219,11 +1240,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenmarugothic-OFL.txt",
@@ -1245,7 +1268,8 @@
     {
       "key": "pop_mochiy",
       "file": "MochiyPopOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "モッチーポップ",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1268,11 +1292,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/mochiypopone-OFL.txt",
@@ -1294,7 +1320,8 @@
     {
       "key": "pop_rocknroll",
       "file": "RocknRollOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ロックンロール",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1317,11 +1344,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/rocknrollone-OFL.txt",
@@ -1343,7 +1372,8 @@
     {
       "key": "cute_hachimaru",
       "file": "HachiMaruPop-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "はちまるポップ",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1366,11 +1396,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/hachimarupop-OFL.txt",
@@ -1392,7 +1424,8 @@
     {
       "key": "cute_kiwi",
       "file": "KiwiMaru-Medium.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "キウイ丸 M",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1415,11 +1448,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/kiwimaru-OFL.txt",
@@ -1441,7 +1476,8 @@
     {
       "key": "mincho_decol",
       "file": "KaiseiDecol-Medium.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "解星 デコール M",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1464,11 +1500,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/kaiseidecol-OFL.txt",
@@ -1490,7 +1528,8 @@
     {
       "key": "cute_cherry",
       "file": "CherryBombOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "チェリーボム",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1513,11 +1552,13 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "maru_black",
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/cherrybombone-OFL.txt",
@@ -1540,7 +1581,8 @@
     {
       "key": "cute_daruma",
       "file": "DarumadropOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "だるまどろっぷ",
       "category": "cute",
       "category_ja": "かわいい・ポップ",
@@ -1563,11 +1605,17 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "pop_mochiy",
+      "lookalike": {
+        "！": "!",
+        "？": "?"
+      },
       "vertical": {
         "supported": false,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": false
+        "vhea_vmtx": false,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/darumadropone-OFL.txt",
@@ -1590,7 +1638,8 @@
     {
       "key": "hand_kurenaido",
       "file": "ZenKurenaido-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ZEN紅道",
       "category": "hand",
       "category_ja": "手書き",
@@ -1613,11 +1662,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/zenkurenaido-OFL.txt",
@@ -1639,7 +1690,8 @@
     {
       "key": "marker_yusei",
       "file": "YuseiMagic-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "油性マジック",
       "category": "hand",
       "category_ja": "手書き",
@@ -1662,11 +1714,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/yuseimagic-OFL.txt",
@@ -1688,7 +1742,8 @@
     {
       "key": "hand_slackside",
       "file": "SlacksideOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "スラックサイド",
       "category": "hand",
       "category_ja": "手書き",
@@ -1711,11 +1766,17 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "hand",
+      "lookalike": {
+        "！": "!",
+        "？": "?"
+      },
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/slacksideone-OFL.txt",
@@ -1738,7 +1799,8 @@
     {
       "key": "brush_syuku",
       "file": "YujiSyuku-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "佑字 肅",
       "category": "brush",
       "category_ja": "筆",
@@ -1761,11 +1823,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/yujisyuku-OFL.txt",
@@ -1787,7 +1851,8 @@
     {
       "key": "brush_boku",
       "file": "YujiBoku-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "佑字 朴",
       "category": "brush",
       "category_ja": "筆",
@@ -1810,11 +1875,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/yujiboku-OFL.txt",
@@ -1836,7 +1903,8 @@
     {
       "key": "brush_potta",
       "file": "PottaOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ポッタ",
       "category": "brush",
       "category_ja": "筆",
@@ -1859,11 +1927,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/pottaone-OFL.txt",
@@ -1885,7 +1955,8 @@
     {
       "key": "horror_tegomin",
       "file": "NewTegomin-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ニューテゴミン",
       "category": "horror",
       "category_ja": "ホラー",
@@ -1908,11 +1979,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/newtegomin-OFL.txt",
@@ -1934,7 +2007,8 @@
     {
       "key": "horror_chokoku",
       "file": "Chokokutai-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "彫刻体",
       "category": "horror",
       "category_ja": "ホラー",
@@ -1957,11 +2031,13 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "mincho_black",
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/chokokutai-OFL.txt",
@@ -1984,7 +2060,8 @@
     {
       "key": "dot16",
       "file": "DotGothic16-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ドットゴシック16",
       "category": "machine",
       "category_ja": "機械・ドット",
@@ -2007,11 +2084,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/dotgothic16-OFL.txt",
@@ -2033,7 +2112,8 @@
     {
       "key": "dot12",
       "file": "k8x12.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "k8x12（8×12 ドット）",
       "category": "machine",
       "category_ja": "機械・ドット",
@@ -2056,11 +2136,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": false,
         "gsub_vert": false,
         "gsub_vrt2": false,
-        "vhea_vmtx": false
+        "vhea_vmtx": false,
+        "presentation_forms": true
       },
       "license": "LicenseRef-LittleLimit-Free",
       "license_file": "licenses/k8x12-LICENSE.txt",
@@ -2087,7 +2169,8 @@
     {
       "key": "dot8",
       "file": "misaki_gothic_2nd.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "美咲ゴシック第2（8×8 ドット）",
       "category": "machine",
       "category_ja": "機械・ドット",
@@ -2110,11 +2193,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": false,
         "gsub_vert": false,
         "gsub_vrt2": false,
-        "vhea_vmtx": false
+        "vhea_vmtx": false,
+        "presentation_forms": true
       },
       "license": "LicenseRef-LittleLimit-Free",
       "license_file": "licenses/misaki-LICENSE.txt",
@@ -2141,7 +2226,8 @@
     {
       "key": "stick",
       "file": "Stick-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ステッキ",
       "category": "machine",
       "category_ja": "機械・ドット",
@@ -2164,11 +2250,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/stick-OFL.txt",
@@ -2190,7 +2278,8 @@
     {
       "key": "techno_monomaniac",
       "file": "MonomaniacOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "モノマニアック",
       "category": "machine",
       "category_ja": "機械・ドット",
@@ -2213,11 +2302,17 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "gothic_black",
+      "lookalike": {
+        "！": "!",
+        "？": "?"
+      },
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/monomaniacone-OFL.txt",
@@ -2240,7 +2335,8 @@
     {
       "key": "sfx_outline",
       "file": "RampartOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "ランパート（立体の袋文字）",
       "category": "sfx",
       "category_ja": "効果音",
@@ -2263,11 +2359,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/rampartone-OFL.txt",
@@ -2289,7 +2387,8 @@
     {
       "key": "sfx_inline",
       "file": "TrainOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "トレイン（インライン）",
       "category": "sfx",
       "category_ja": "効果音",
@@ -2312,11 +2411,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 0,
       "kanji_joyo": 2106,
+      "fallback": "gothic_black",
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/trainone-OFL.txt",
@@ -2339,7 +2440,8 @@
     {
       "key": "sfx_aoboshi",
       "file": "AoboshiOne-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "あおぼし",
       "category": "sfx",
       "category_ja": "効果音",
@@ -2362,11 +2464,13 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
+      "fallback": "mincho_tokumin",
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/aoboshione-OFL.txt",
@@ -2389,7 +2493,8 @@
     {
       "key": "narrow_lubrifont",
       "file": "WDXLLubrifontJPN-Regular.ttf",
-      "status": "new",
+      "storage": "file",
+      "feature": "fonts@1",
       "name_ja": "WDXL 滑油字 JP N",
       "category": "other",
       "category_ja": "その他",
@@ -2412,11 +2517,13 @@
       "kanji_jis_level1": 2965,
       "kanji_jis_level2": 3390,
       "kanji_joyo": 2136,
+      "fallback": null,
       "vertical": {
         "supported": true,
         "gsub_vert": true,
         "gsub_vrt2": true,
-        "vhea_vmtx": true
+        "vhea_vmtx": true,
+        "presentation_forms": true
       },
       "license": "OFL-1.1",
       "license_file": "licenses/wdxllubrifontjpn-OFL.txt",

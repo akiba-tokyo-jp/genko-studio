@@ -32,6 +32,7 @@
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
+#include "core/font_catalog.hpp"
 #include "core/fukidashi.hpp"
 #include "core/komawari.hpp"
 #include "core/type_text.hpp"
@@ -677,6 +678,11 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // a line or a type layer's record uses one
     std::erase(features, std::string(core::kFukidashiFeature));
     if (core::uses_fukidashi(doc)) features.emplace_back(core::kFukidashiFeature);
+    // fonts@1 (書体の追加 F2, core/font_catalog.hpp): one of the forty added faces named — by a line, a ruby, a type layer's
+    // record, a type style or the book's usual face —, named while one is. By the catalogue alone: the same on a computer
+    // where the face's file is missing
+    std::erase(features, std::string(core::fonts::kFontsFeature));
+    if (core::fonts::uses_feature(doc)) features.emplace_back(core::fonts::kFontsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

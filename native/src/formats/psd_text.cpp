@@ -11,6 +11,7 @@
 #include <map>
 #include <mutex>
 
+#include "core/font_catalog.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -158,6 +159,14 @@ std::string font_name(render::text::Fonts& fonts, const std::string& path) {
         const std::lock_guard<std::mutex> lock(mutex);
         if (const auto it = known.find(path); it != known.end()) return it->second;
     }
+    // fonts@1: an added face is named as the catalogue names it (its file's own PostScript name, held there: no file read)
+    if (const core::fonts::Entry* entry = core::fonts::find(path); entry != nullptr && entry->added && !entry->postscript.empty()) {
+        std::string name = font_token(entry->postscript);
+        if (name.empty()) name = "Font";
+        const std::lock_guard<std::mutex> lock(mutex);
+        known.emplace(path, name);
+        return name;
+    }
     std::string bytes;
     try {
         (void)fonts.truetype(path, 12);  // (a bundled font's resources are there once it is opened)
@@ -189,7 +198,7 @@ void font_warnings(const core::StoryLine& line, std::int64_t page, const std::op
         if (c == U'\n' || render::text::py_isspace(c) || render::text::is_vs(c)) continue;
         const std::string path = fonts.path_for(face, std::u32string(1, c));
         note(path);
-        if (path != face.kana && path != face.other) elsewhere.push_back(c);
+        if (!face.own(path)) elsewhere.push_back(c);  // (fonts@1: the face's partner is its own)
     }
     if (!elsewhere.empty()) {
         warnings.push_back(Json{{"page", page}, {"line", line.id}, {"kind", "font_fallback"}, {"detail", render::text::utf8(elsewhere)}});

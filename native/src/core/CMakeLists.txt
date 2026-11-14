@@ -19,6 +19,17 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(commands_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_COMMANDS_FILE}")
 
+# The lettering faces' catalogue (fonts@1, core/font_catalog: `genko inspect … fonts`, the feature a book names, the faces'
+# partners) is embedded from native/resources/fonts/FONTS.json, byte for byte; a change to the file re-runs CMake.
+set(GENKO_FONT_CATALOG_FILE "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json")
+file(READ "${GENKO_FONT_CATALOG_FILE}" _genko_fonts_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," GENKO_FONT_CATALOG_BYTES "${_genko_fonts_hex}")
+set(_b "0x[0-9a-f][0-9a-f],")
+string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n"
+       GENKO_FONT_CATALOG_BYTES "${GENKO_FONT_CATALOG_BYTES}")
+configure_file(font_catalog_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/font_catalog_data.cpp" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_FONT_CATALOG_FILE}")
+
 # The Unicode names of Python's unicodedata.lookup (core/pyre's \N{…}), embedded from data/unicode_names.bin
 # (tools/migration/pyre_tables.py writes it); a change to the file re-runs CMake.
 set(GENKO_PYRE_NAMES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/unicode_names.bin")
@@ -70,6 +81,8 @@ genko_library(genko_core
     ops_color.cpp
     frames.cpp
     fukidashi.cpp
+    # 書体の追加 F2 (fonts@1: the catalogue of the lettering faces, the feature a book names)
+    font_catalog.cpp
     strokes.cpp
     covers.cpp
     pyrandom.cpp
@@ -171,6 +184,7 @@ genko_library(genko_core
     # PC5 H-f (画素の縦横比: pixel-aspect@1 — the pages' ratio, its menu's ratios, set_pixel_aspect)
     pixel_aspect.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/font_catalog_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

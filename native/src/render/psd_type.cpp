@@ -11,6 +11,7 @@
 #include <tuple>
 
 #include "core/error.hpp"
+#include "core/font_catalog.hpp"
 #include "core/ink.hpp"
 #include "core/pynum.hpp"
 #include "core/ruby.hpp"
@@ -228,8 +229,11 @@ const std::map<std::string, std::string>& bundled_names() {
 std::optional<std::string> bundled_font(std::string_view postscript) {
     const auto& names = bundled_names();
     const auto it = names.find(std::string(postscript));
-    if (it == names.end()) return std::nullopt;
-    return it->second;
+    if (it != names.end()) return it->second;
+    // fonts@1: an added face by the PostScript name the catalogue holds for it (no file is read; a face whose file is not
+    // on this computer is still the face the text names — drawn in the default face meanwhile, and listed as missing)
+    if (const core::fonts::Entry* entry = core::fonts::by_postscript(postscript)) return entry->key;
+    return std::nullopt;
 }
 
 std::string antialias_of(std::string_view anta, int engine) {

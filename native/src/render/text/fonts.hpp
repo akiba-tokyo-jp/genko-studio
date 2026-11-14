@@ -27,13 +27,20 @@ std::string utf8(std::u32string_view text);
 bool py_isspace(char32_t c);
 bool py_isspace(std::u32string_view text);
 
-// A face: its key ("antique", …, or a font file's path) and the fonts of its kana and of everything else, each a
-// name render::TrueTypeFonts opens (a bundled font's name, "gothic", "mincho", …, or a font file's path).
+// A face: its key ("antique", …, an added face's key, or a font file's path) and the fonts of its kana and of everything
+// else, each a name render::TrueTypeFonts opens (a bundled font's name, "gothic", "mincho", …, an added face's key —
+// fonts@1, core/font_catalog.hpp —, or a font file's path).
+// fonts@1: `fallback` is the partner of an added face that has no kanji, or only some — the font that draws what the
+// face lacks, tried after the face's other half and before the bundled Gothic (empty: none, as every face of before and
+// every font file; also empty when the partner's own file is not on this computer).
 struct Face {
     std::string key;
     std::string kana;
     std::string other;
+    std::string fallback = {};
     bool composite() const { return kana != other; }
+    // Whether a font is one of the face's own (its halves, its partner): a letter drawn in another is a stand-in.
+    bool own(const std::string& font) const { return font == kana || font == other || (!fallback.empty() && font == fallback); }
 };
 
 inline constexpr std::string_view kDefaultDialogue = "antique";
@@ -41,8 +48,12 @@ inline constexpr std::string_view kDefaultSfx = "sfx";
 
 // fonts.face(spec, default): a bundled key, a font file's path (a file that exists), or null (the default). A spec
 // that is neither gives the default face. Python's TypeError for a spec that is not a str.
+// fonts@1: after the bundled keys and before any file is looked for, the key of an added face — the face itself when
+// its file is on this computer (render/font_files), with its partner; the default face when it is not (never a file
+// that happens to have the key's name).
 Face face_of(const core::Json& spec, std::string_view default_key = kDefaultDialogue);
-// Whether face_of finds `name` (a bundled key, or a font file that exists) rather than giving the default.
+// Whether face_of finds `name` (a bundled key, an added face whose file is there, or a font file that exists) rather
+// than giving the default.
 bool face_exists(std::string_view name);
 
 // fonts.is_kana_like(char): the first character is kana, the long vowel mark or Japanese punctuation.
@@ -61,13 +72,16 @@ public:
     // (render::pillow_default_font) when the file cannot be read (as truetype() draws it then).
     std::string readable(const std::string& path);
     // fonts.has_glyph(path, char): the font draws the character with something other than its "no glyph" box (a
-    // character drawn as nothing counts when it is whitespace).
+    // character drawn as nothing counts when it is whitespace). fonts@1: an added face has the letters its cmap has
+    // (TrueTypeFont::strict_cmap) — the look of a pixel font's full cell is no "no glyph" box.
     bool has_glyph(const std::string& path, std::u32string_view ch);
     // Face.font(size, char)
     const TrueTypeFont& font(const Face& face, std::int64_t size, std::u32string_view ch = U"漢");
-    // The font file Face.font takes for the character (the face's half for it, or the first that has it).
+    // The font file Face.font takes for the character (the face's half for it, or the first that has it: its other
+    // half, its partner — fonts@1 —, the bundled Gothic, the effects face).
     std::string path_for(const Face& face, std::u32string_view ch);
-    // Face.normalize(text): characters the face lacks swapped for look-alikes it has (― → —, ～ → 〜 …).
+    // Face.normalize(text): characters the face lacks swapped for look-alikes it has (― → —, ～ → 〜 …). fonts@1: and
+    // an added face's own (the catalogue's lookalike: ！ → !, ？ → ? in a face drawn without the full-width marks).
     std::u32string normalize(const Face& face, std::u32string_view text);
 
     std::stop_token stop() const { return fonts_.stop(); }

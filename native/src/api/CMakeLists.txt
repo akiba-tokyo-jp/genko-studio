@@ -14,3 +14,17 @@ else()
   target_compile_definitions(genko PRIVATE GENKO_WITH_APP=0)
 endif()
 genko_target_flags(genko)
+# fonts@1 (書体の追加 F2, render/font_files.hpp): the program finds the added lettering faces in ../share/genko-studio/fonts
+# from the folder it is in — a package installs them there (GenkoPackage.cmake) —, so a build tree has that folder too:
+# a link to native/resources/fonts (a copy where links need a privilege: Windows).
+set(_genko_dev_fonts "$<TARGET_FILE_DIR:genko>/../share/genko-studio/fonts")
+if(WIN32)
+  add_custom_command(TARGET genko POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${GENKO_SOURCE_ROOT}/resources/fonts" "${_genko_dev_fonts}"
+    VERBATIM)
+else()
+  add_custom_command(TARGET genko POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:genko>/../share/genko-studio"
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink "${GENKO_SOURCE_ROOT}/resources/fonts" "${_genko_dev_fonts}"
+    VERBATIM)
+endif()

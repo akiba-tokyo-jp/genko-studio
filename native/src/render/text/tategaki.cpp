@@ -616,7 +616,14 @@ Image blank(std::int64_t w, std::int64_t h) {
 }
 
 // _has_glyph(font, char): the font draws it larger than a speck
+// (fonts@1: an added face must have it in its cmap too — what a font draws for a letter it lacks, its "no glyph" box, is
+// larger than a speck as well, and a bracket's vertical form would be that box: the bracket is turned instead)
 bool has_drawn_glyph(const TrueTypeFont& font, std::u32string_view ch) {
+    if (font.strict_cmap()) {
+        for (const char32_t c : ch) {
+            if (font.glyph_index(c) == 0) return false;
+        }
+    }
     const auto box = font.getmask2(ch).first.getbbox();
     return box && box->x1 - box->x0 > 1 && box->y1 - box->y0 > 1;
 }
@@ -828,7 +835,7 @@ void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, const
     if (notes == nullptr || letter.empty() || py_isspace(letter)) return;
     if (!fonts.has_glyph(used, letter)) {
         notes->push_back(RubyNote{"glyph_missing", span, utf8(letter)});
-    } else if (used != face.kana && used != face.other) {
+    } else if (!face.own(used)) {  // (fonts@1: a letter in the face's partner is the face's own, not a stand-in)
         notes->push_back(RubyNote{"font_fallback", span, utf8(letter)});
     }
 }

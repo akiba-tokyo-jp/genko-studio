@@ -49,7 +49,8 @@ core::Json para_attrs(const core::Json& keys, double mm_per_px, bool vertical);
 core::Json char_keys(const core::Json& attrs, double px_per_mm, const std::function<std::string(const std::string&)>& font_name);
 core::Json para_keys(const core::Json& attrs, double px_per_mm, bool vertical);
 
-// The bundled font (its name: "gothic", "mincho", …) whose PostScript name this is; none for another.
+// The bundled font (its name: "gothic", "mincho", …) whose PostScript name this is — fonts@1: or the added face (its
+// key) the catalogue holds that name for (core/font_catalog.hpp) —; none for another.
 std::optional<std::string> bundled_font(std::string_view postscript);
 
 // Photoshop's anti-alias (the TxLr descriptor's AntA value; EngineData's AntiAlias where that one is not known) as
