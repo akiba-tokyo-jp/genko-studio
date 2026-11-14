@@ -809,6 +809,49 @@ private slots:
         QVERIFY(persons.find("timeline@1") != std::string::npos && persons.find("\"work\"") != std::string::npos);
     }
 
+    // fukidashi@2 (SPEC BALLOON-02): an agent's apply_ops takes the symbol kinds and the additions' keys as a person's ops
+    // do — kept in their normal form, the book naming fukidashi@2 —, refuses a value out of range with the Japanese
+    // sentence, and its tool's description says the kinds and keys (the description is text: the tools' input schemas,
+    // pinned above, do not change); the book renders.
+    void anAgentsBalloonAdditions() {
+        const QString dir = fresh("fukidashi2");
+        const QString book = dir + "/root/f.genko";
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            QVERIFY(!make_book(mcp, "f.genko", 1).empty());
+            const Json listed = mcp.request(2, "tools/list");
+            std::string description;
+            for (const Json& t : listed["result"]["tools"]) {
+                if (str(t["name"]) == "apply_ops") description = str(t["description"]);
+            }
+            for (const char* said : {"heart", "star", "flower", "diamond", "pen_swell", "pen_taper", "drip_mm", "drip_seed", "fill_tone", "fill_gradient", "points"}) {
+                QVERIFY2(description.find(said) != std::string::npos, said);
+            }
+            const auto apply = [&mcp](const Json& ops) {
+                return Mcp::text(mcp.call("apply_ops", Json::object({{"project", "f.genko"}, {"ops", ops}, {"commit", true}})));
+            };
+            const Json taken = apply(Json::array({Json::object({{"op", "add_line"}, {"page", 1}, {"id", "H1"}, {"text", "すき"}, {"balloon", "heart"}, {"x_mm", 40},
+                                                                {"y_mm", 40}, {"w_mm", 30}, {"h_mm", 32},
+                                                                {"style", Json::object({{"pen_swell", 0.5}, {"drip_mm", 5}, {"fill_tone", Json::object({{"density", 0.1}, {"to", 0.5}})}})}})}));
+            QCOMPARE(taken["ok"], Json(true));
+            const Json refused = apply(Json::array({Json::object({{"op", "edit_line"}, {"id", "H1"}, {"style", Json::object({{"pen_swell", 2}})}})}));
+            QCOMPARE(refused["ok"], Json(false));
+            const std::string all = genko::core::dump_python(refused);
+            QVERIFY2(all.find("pen_swell must be between 0 and 0.9") != std::string::npos || all.find("フキダシの線の強弱は 0〜0.9 です") != std::string::npos, all.c_str());
+            mcp.lines();
+        }
+        const Json saved = Json::parse(genko::test::read_bytes(book + "/project.json"));
+        const Json& features = saved["features"];
+        QVERIFY(std::find(features.begin(), features.end(), Json("fukidashi@2")) != features.end());
+        const Json& line = saved["story"][0];
+        QCOMPARE(line["balloon"], Json("heart"));
+        QCOMPARE(line["style"]["fill_tone"], (Json{{"density", 0.1}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"to", 0.5}, {"dir", 90.0}}));
+        const genko::test::Run drawn = genko::test::run_genko({"render", book, "--page", "1", "--dpi", "150", "--out", dir + "/f.png"});
+        QVERIFY2(drawn.exit_code == 0, (drawn.out + drawn.err).constData());
+        QVERIFY(QFileInfo(dir + "/f.png").size() > 1000);
+    }
+
     // An agent's Undo past a state an older Genko's `genko gc` removed (schema-v4 §8): refused in Japanese (undo_refused,
     // history_missing's words), nothing of the book written.
     void undoPastAGoneState() {
