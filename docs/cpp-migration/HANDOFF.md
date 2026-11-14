@@ -374,6 +374,46 @@
 - **新しく作る本のいつもの書体を源暎アンチック（`antique_genei`）にする**: 替わるのは新しく作る本だけ。既存の本（`font_path` の無い本を含む）は今のまま（いつもの書体はアンチック）。書体のファイルが無い環境では、知らせを出してこれまでのアンチックで描く（F2 の決まりのまま）。
 - 実装はフキダシの追加（群 1 の直しと群 2）の後に、同じ枝で行う。
 
+### 括弧の四角と新しい本のいつもの書体の実装（ブランチ `native/fonts-fukidashi2`。4920f827 の上）— 2026-11-14
+
+上の「利用者の決定（2026-11-14）」の 2 つを入れた。設計は SPEC FONT-01 の「利用者の決定（2026-11-14）」、schema-v4「書体」。
+
+#### 括弧の四角
+- **原因**（cmap で確かめた）: 横組みの括弧はどちらの書体にもある。四角になっていたのは**縦組みだけ**。縦組みは括弧を縦書き用の字形（︵ など）に替えて、その書体で描く。前からの書体は字の有無を字の箱の大きさで見る（`has_drawn_glyph`）ので、字形の無い書体では「字の無い印」の四角を字として描いていた。cmap に縦書き用の字形が無いのは、効果音（デラゴシック）の『』（）()【】［］〈〉《》（﹃﹄︵︶︻︼﹇﹈︿﹀︽︾）と、手書き風（よもぎ）の［］（﹇﹈）だけ。「」の字形（﹁﹂）はどちらにもある。ゴシック・明朝・丸ゴシック・勢い（レゲエ）は 16 の字形を全部持つ。
+- **直し**: `render/text/tategaki.cpp` の `column_font`。縦組みのマス（本文とルビ）を描く書体を選ぶとき、前からの書体（`gothic`・`mincho`・`maru`・`hand`・`sfx`・`sfx_pop`）で、その括弧の縦書き用の字形が cmap に無ければ、同じ大きさのゴシック（`gothic`）で描く（ゴシックの縦の行と同じ絵）。追加の 40 書体（cmap で見て、無ければ回す。前のまま）・書体ファイル・横組み・ほかの字は変えない。
+- PSD の文字レイヤーの書体の名前（`SetChar::font`）と、ルビの代わりの書体の知らせ（`note_font`）は前のまま（その括弧も書体の名前で書く）。保存のバイトは変わらない。
+- 見本: 作業用の `fonts-decisions/before/`・`after/`（`brackets-{sfx,hand,gothic}-{down,across}.png` 300 dpi、`sheet-fonts-150-plain-1.png`）。変わったのは `sfx`・`hand` の縦だけ（横とゴシックはバイトまで同じ）。`GENKO_FONTS_OUT` で test_font_faces が書く。
+
+#### 新しい本のいつもの書体
+- `core::fonts::kNewBookFace`（`antique_genei`）と `core::fonts::make_new_book(doc)`（`font_path` を源暎アンチックに、`features` に `fonts@1`。保存前の本も「前の版の本」と見なされないように）。
+- 呼ぶ所（人が本を新しく作る道すべて）: 画面の新規…の漫画の原稿（`NewProjectDialog::create`）と画像（`create_image`）、窓の無題の本（`app::untitled_book`: 起動のとき、すべてを閉じた後）、`genko new`（`--image` も）、HTTP `/v1/new`、`StudioService::create_project`（MCP の `create_project`、`genko studio init`）。
+- 呼ばない所: ファイルから開いた本（`genko new --from`・開く…・PSD・PCraft）、本の写し、スマートオブジェクトの中身、アクションのコンタクトシートとパノラマの結果、`core::new_episode` そのもの（試験とほかの道が使う。変えると既存の本の道まで変わる）。
+- 画面: 文字ツールの「書体」の最初の行は「いつもの書体（源暎アンチック）」、2 行目に「アンチック」、パレットの源暎アンチックの行は「この本のいつもの書体」（F2 の仕組みのまま。新しい本の窓には書体の選び方が無い）。
+- ファイルが無いとき: F2 の決まりのまま、アンチックで描き（前からの本と 1 画素も違わない）、検査は最初のページに `font_not_installed`、画面は帯で知らせる。
+- **帯の高さ**（直した）: 帯の文を、折り返した高さの箱（`BandWords`。足りないときは 2 行まで縮み、残りはスクロール）に入れた。書体のファイルが無い新しい本を小さい画面（1024×640 の 125 % 以上）で承認箱と一緒に開くと、帯が台詞の文の高さだけページを押し出し、ページが窓の外に出ていた（test_gui_layout `theWindowsFitEveryScreen` の main-studio。試験のプログラムの横には書体のフォルダーが無いので、そこでは新しい本はいつもファイルが無い）。広い窓では前と同じ高さ。
+
+#### 変えた期待値（緩めていない。どれも「新しい本は源暎アンチックと fonts@1 を持つ」から）
+- test_contract_color_model・test_contract_channels・test_contract_image_ops: `genko new` の本の `features` の期待に `fonts@1` を入れた（「何も無い」は `["fonts@1"]`、`["color-mode@1", "color-model@1"]` は `fonts@1` を足して、`["channels@1"]` も同じ）。
+- test_psd_text の CLI の本（`make_cli_book`）: 絵の値（Python の image way の 4 ページ）の本はいつもの書体が無い本なので、`genko new` の後で `set_meta {font_path: ""}` を当ててから同じ ops を当てる（PSD の値は変えていない）。
+- test_layout_ideas `submitNameSavesAsBeforeK1`（k1_probe.inc）: 8362d5fc の本と比べるため、`font_path: "antique_genei"` と `fonts@1` を 8362d5fc の書き方（空・無し）に戻してから SHA-256 を取る（値は変えていない。その前に、本が源暎アンチックを持っていることを確かめる）。
+- test_package `theInstalledProgramFindsEveryFace`: 「40 書体のどれも名指ししない本」として使う本を、`genko new` の後でいつもの書体を空に戻す（その本が源暎アンチックで作られたことも確かめる）。
+- 括弧の直しで動いた既存の期待値は無い（効果音・手書き風の縦の括弧を固定していた試験は無かった。書体の見本 fonts-150-*-1.png の左上 2 つは変わる）。
+
+#### 足した試験
+- test_font_faces: `bracketsOfBeforeTheFontLacksDownAreTheGothics`（cmap で欠けている字形を数える: 効果音 14・手書き風 2・ほかの前からの書体 0。縦の行で、その括弧のマスだけが変わり、ゴシックの行の同じマスと同じ絵。ほかの画素は括弧を「」に替えた行と同じ。横はその書体の括弧そのもの）、`theFacesOfBeforeDrawWhatTheyDrew`（効果音・手書き風の縦・横・ルビとふちどり、横の括弧、効果音の種類の行、手書き風の字形のある括弧の縦: 直す前のビルドで取った 10 の値）、`aNewBookIsInGeneiAntiqueABookOfBeforeInAntique`、`aNewBookWithoutItsFaceFileIsInAntiqueAndSaid`。
+- test_font_catalog: `aNewBookStartsInGeneiAntique`（保存して読み直し、もう一度書いて同じバイト）、`aBookWithNoUsualFaceKeepsNone`（`font_path` が空・無い本は空のまま、同じバイト）。前の本が同じバイトで保存されることは、前からの `aBookOfBeforeIsWrittenToTheSameBytes`。
+- test_cli_e2e `aNewBookStartsInGeneiAntique`（`genko new`・`--image`・`genko studio init`。`--from` は変えない。`apply` の後も同じ）、test_mcp_api_e2e `aBookMadeThroughMcpStartsInGeneiAntique`（`create_project` と `apply_ops` の後）と `httpApiKeepsAnAddedFacesKey` の `/v1/new`、test_gui_fonts `aNewBookStartsInGeneiAntique`（新規の漫画・画像、窓の無題の本、ファイルが無いときの帯の文）。
+
+#### 確かめたこと（Linux Release、2 本ずつ）
+- 関係する試験 95 本が合格（3,051 項目。失敗 0。SKIP 19 はどれも Release に故障の差し込みが無いための前からのもの: test_save_e2e・test_app_e2e・test_gui_save・test_migrate_e2e）: 書体（test_font_faces・test_font_catalog・test_font_service・test_psd_text）、描画と保存（test_render_page・test_storage・test_type_text・test_type_styles・test_ruby_render・test_command_bus・test_fukidashi・test_fukidashi_service）、e2e（test_cli_e2e・test_mcp_api_e2e・test_save_e2e・test_ops_e2e・test_migrate_e2e・test_refusals_e2e・test_app_e2e・test_control_channel）、サービス（test_service・test_studio_ops・test_layout_ideas・test_ledger_service_a〜c・test_ai_link・test_paper・test_style_presets・test_retouch）、`genko new` を使う照らし合わせ 39 本（test_contract_*）、画面 28 本（test_gui_fonts・layout・book・lines・type・type_panels・ruby・file・save・studio・ledger_a〜c・actions・look・prefs・ai・anim・carried・smart・smart_contents・output・view・styles・tool_presets・workspace・fukidashi・shapes）。続けて test_package（8 項目）も合格。
+- 1 回目に落ちたのは 7 本: 上の「変えた期待値」の 5 本、test_gui_layout（上の帯の高さ。直した）、test_ledger_service_b（手引きを書き換えたのにプログラムに組み込んだ手引きが古いビルドのままだった。ビルドし直して合格）。
+
+#### 残り・確かめていないもの
+- Windows・MSVC・macOS、ASan、Debug。全体の試験。
+- パスで名指しした書体ファイルが縦書き用の字形を持たないときは、前のまま（字の無い印の四角が出ることがある）。決定は前からの書体についてだけなので変えていない。
+- 帯は、とても狭い窓（1024×640 の 200 %、承認箱あり）では「この知らせを閉じる」が欠けて見えることがある（帯の幅が窓を広げないようにしたため。文は全部スクロールで読める）。
+- 新しい本の画面の絵（`GENKO_FONTS_GUI_OUT`）は撮り直していない。
+
 ### F2 2 回目のレビューの直し（ブランチ `native/fonts-fukidashi2`。フキダシの追加 群 1 の 279ed84f の上）— 2026-11-14
 
 読むだけの 2 回目のレビュー（直しの回・群 2・群 3。P1 無し、P2 が 1、P3 が 18）を、リードの決定のとおりに直した。レビューが実行で確かめた「40 書体を使わない本は、2026-11-13 の配布物とバイトも画素も同じ」は保っている（`aBookOfBeforeIsWrittenToTheSameBytes`、Python との照らし合わせの試験、test_render_page）。フキダシのコードと試験には触っていない（`checks.cpp` は書体の所だけ）。

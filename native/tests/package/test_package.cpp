@@ -406,6 +406,14 @@ private slots:
         const QString program = prefix_ + QLatin1Char('/') + kProgram;
         const QString book = home_ + QStringLiteral("/books/faces.genko");
         QVERIFY(gt::run(program, {QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("1")}, env, 120000).exit_code == 0);
+        // (a book made new names 源暎アンチック as its usual face — the user's decision of 2026-11-14 —: this one is to be a
+        // book that names none of the forty, so its usual face is set back to none, アンチック)
+        QCOMPARE(genko::core::parse_python_json(gt::read_bytes(book + QStringLiteral("/project.json")))["font_path"], Json("antique_genei"));
+        {
+            const QString usual = scratch_.filePath(QStringLiteral("usual.json"));
+            gt::write_bytes(usual, R"([{"op": "set_meta", "font_path": ""}])");
+            QVERIFY(gt::run(program, {QStringLiteral("apply"), book, usual}, env, 120000).exit_code == 0);
+        }
         const auto doctor = [&](const QString& with) {
             const gt::Run run = gt::run(with, {QStringLiteral("doctor"), book}, env, 300000, {}, scratch_.path());
             return gt::one_line(run.out);
