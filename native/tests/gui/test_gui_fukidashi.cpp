@@ -6,6 +6,8 @@
 // look (取り消し gives the line back exactly) or is the look of the next line the text tool places; and the box of a
 // capsule and of a polygon typed in the window is the one the auto-lettering measures (service::letter::measure).
 
+#include <QRegularExpression>
+#include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDockWidget>
@@ -26,7 +28,9 @@
 
 #include <cmath>
 #include <functional>
+#include <set>
 
+#include "app/ask.hpp"
 #include "app/balloon_palette.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -190,7 +194,7 @@ private slots:
         // (the kinds as listed: the oval, then the capsule; the box, then the polygon)
         QStringList labels;
         for (const auto& kind : app::lettering::kinds()) labels << kind.second;
-        QCOMPARE(labels.size(), 17);
+        QCOMPARE(labels.size(), 21);  // (fukidashi@2: the four symbols with the 17 of before)
         QCOMPARE(labels.mid(0, 5), QStringList({QStringLiteral("普通（楕円）"), kCapsule, QStringLiteral("角丸"), QStringLiteral("四角"), kPolygon}));
         // (two kinds said as they are drawn — dashes, lines spreading out; keys chosen under their names of before stay)
         QVERIFY(labels.contains(QStringLiteral("ささやき（破線）")) && labels.contains(QStringLiteral("フラッシュ（放射状の線）")));
@@ -731,7 +735,7 @@ private slots:
         QVERIFY(s.menu_at(QStringLiteral("ページ/台詞"))->actions().contains(open));
         // the presets: about thirty, each its own key and name, a tooltip, a kind the ops take
         const auto& presets = app::balloon_presets();
-        QVERIFY(presets.size() >= 24 && presets.size() <= 34);
+        QVERIFY(presets.size() >= 24 && presets.size() <= 52);  // (fukidashi@2: 17 more — the pen's line, drips, the symbols, the tone)
         QStringList keys, names;
         for (const app::BalloonPreset& preset : presets) {
             keys << QString::fromLatin1(preset.key);
@@ -1374,6 +1378,247 @@ private slots:
     // --- the pictures for the lead (written when asked: GENKO_FUKIDASHI_OUT) ---------------------------------------------
     // (not a test of their own, and never a SKIP: the audit of a stage's run refuses every skipped slot. As the screenshots
     // of test_gui_color, they are written at the end of a run that names a folder)
+    // --- fukidashi@2 (SPEC BALLOON-02): the additions in the window -------------------------------------------------------
+
+    // The four symbols are kinds of every menu (after the polygon); chosen from a balloon's menu they are drawn with the
+    // box fitted to the words about the balloon's middle, in one step (they hold their letters in their own shape), the
+    // letters kept at their size; and the palette has the additions' 17 looks, each drawn, each its own picture.
+    void theSymbolsAreKindsAndThePaletteHasTheAdditions() {
+        Studio s;
+        QStringList labels;
+        for (const auto& kind : app::lettering::kinds()) labels << kind.second;
+        QCOMPARE(labels.mid(4, 5), QStringList({kPolygon, QStringLiteral("ハート（甘い声）"), QStringLiteral("星（はしゃぐ声・きらめき）"), QStringLiteral("花（やわらかい声）"),
+                                                QStringLiteral("ひし形（冷たいひとこと）")}));
+        for (const QString& label : labels) QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(label).hasMatch(), qPrintable(label));
+        const std::string id = s.put(Json{{"op", "add_line"}, {"text", "すき\nだよ"}, {"balloon", "speech"}, {"x_mm", 60}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 24}});
+        for (const char* kind : {"heart", "star", "flower", "diamond"}) {
+            s.choose(id);
+            const Json before = snapshot(*s.line(id));
+            const std::size_t count = s.ops.size();
+            QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
+            for (QAction* a : shapes->actions())
+                if (a->text() == app::lettering::kind_label(kind)) a->trigger();
+            QCOMPARE(s.ops.size(), count + 2);
+            QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"balloon", kind}}));
+            QCOMPARE(s.ops[count + 1]["op"], Json("move_line"));
+            const core::StoryLine& line = *s.line(id);
+            // (the box the service measures for those words: two columns of two)
+            const std::array<double, 2> measured = service::letter::measure_styled({"すき", "だよ"}, kind, service::letter::kEmMm, Json::object());
+            QVERIFY2(std::fabs(line.w_mm.value() - core::py_round(measured[0], 2)) <= 0.011 && std::fabs(line.h_mm.value() - core::py_round(measured[1], 2)) <= 0.011,
+                     qPrintable(QStringLiteral("%1: %2 × %3 for %4 × %5").arg(kind).arg(line.w_mm.value()).arg(line.h_mm.value()).arg(measured[0]).arg(measured[1])));
+            QVERIFY(std::fabs(line.x_mm.value() + line.w_mm.value() / 2 - 75.0) <= 0.011);  // (its middle where it was)
+            QCOMPARE(render::text::text_layout(line, 600).em, std::int64_t{118});
+            s.trigger("act_undo");
+            QCOMPARE(snapshot(*s.line(id)), before);
+        }
+        // (the palette's additions)
+        const char* added[] = {"pen_swell", "g_pen", "brush", "g_pen_shout", "drips", "horror_black", "melting_box", "horror_wave", "heart", "star", "sparkle",
+                               "flower", "diamond", "tone", "gradient_tone", "tone_shout", "gradient_dark"};
+        QCOMPARE(std::size(added), std::size_t{17});
+        QCOMPARE(app::balloon_presets().size(), std::size_t{32 + 17});
+        std::set<std::string> pictures;
+        for (const char* key : added) {
+            const app::BalloonPreset* preset = app::balloon_preset(QString::fromLatin1(key));
+            QVERIFY2(preset != nullptr, key);
+            const QImage picture = app::preset_picture(*preset, 1.0);
+            QVERIFY2(dark_pixels(picture) > 100, key);
+            const QImage plain = picture.convertToFormat(QImage::Format_RGB888);
+            pictures.insert(std::string(reinterpret_cast<const char*>(plain.constBits()), static_cast<std::size_t>(plain.sizeInBytes())));
+            // (its words, as the person reads them)
+            QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(QString::fromUtf8(preset->name) + QString::fromUtf8(preset->tip)).hasMatch(), key);
+        }
+        QCOMPARE(pictures.size(), std::size(added));  // (each its own picture)
+        // (the keys a preset takes away from a line given another look: the additions' with the others)
+        const std::vector<std::string>& look = app::balloon_look_keys();
+        for (const char* key : {"pen_swell", "pen_angle", "pen_taper", "pen_strokes", "drip_mm", "drips", "drip_width_mm", "drip_seed", "points", "fill_tone", "fill_gradient"}) {
+            QVERIFY2(std::find(look.begin(), look.end(), key) != look.end(), key);
+        }
+    }
+
+    // A preset of the additions given to a line: its look in one step of 取り消し — the plain look takes the additions
+    // away again; a look with drips makes the box as much taller (the body kept), and one without them as much shorter;
+    // a look with drips given to a balloon drawn by hand says plainly that it has none.
+    void aPresetOfTheAdditionsRestylesALine() {
+        Studio s;
+        const std::string id = s.put(Json{{"op", "add_line"}, {"text", "こわい"}, {"balloon", "speech"}, {"x_mm", 60}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 24}});
+        const Json before = snapshot(*s.line(id));
+        s.choose(id);
+        s.window->restyle_with_balloon_preset(QStringLiteral("horror_black"));
+        const core::StoryLine& dripping = *s.line(id);
+        QCOMPARE(dripping.style["drip_mm"], Json(7.0));
+        QCOMPARE(dripping.h_mm.value(), 31.0);  // (24 and the drips' 7: the body as it was)
+        QCOMPARE(dripping.y_mm.value(), 60.0);
+        QCOMPARE(dripping.w_mm.value(), 30.0);
+        s.trigger("act_undo");
+        QCOMPARE(snapshot(*s.line(id)), before);
+        s.trigger("act_redo");
+        // (from drips to the pen's line: the drips go, the box with them; the black goes too — a look's every key)
+        s.window->restyle_with_balloon_preset(QStringLiteral("g_pen"));
+        const core::StoryLine& pen = *s.line(id);
+        QCOMPARE(pen.h_mm.value(), 24.0);
+        QVERIFY(!pen.style.contains("drip_mm") && !pen.style.contains("fill_rgb") && !pen.style.contains("drip_seed"));
+        QCOMPARE(pen.style["pen_swell"], Json(0.5));
+        QCOMPARE(pen.style["pen_taper"], Json(0.6));
+        // (the plain look: nothing of the additions left)
+        s.window->restyle_with_balloon_preset(QStringLiteral("oval"));
+        for (const std::string& key : app::balloon_look_keys()) QVERIFY2(!s.line(id)->style.contains(key), key.c_str());
+        // (a tone and a gradient tone: the whole tone, as the op keeps it)
+        s.window->restyle_with_balloon_preset(QStringLiteral("gradient_tone"));
+        QCOMPARE(s.line(id)->style["fill_tone"], (Json{{"density", 0.05}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"to", 0.5}, {"dir", 90.0}}));
+        // (drawn by hand: its outline as it is, the look's line and fill — and no drips, said so)
+        const Json path = Json::array({Json::array({100, 100}), Json::array({130, 96}), Json::array({138, 120}), Json::array({110, 128})});
+        const std::string drawn = s.put(Json{{"op", "add_line"}, {"text", "て"}, {"balloon", "speech"}, {"path", path}});
+        s.choose(drawn);
+        const Json box{{"x", s.line(drawn)->x_mm.json()}, {"y", s.line(drawn)->y_mm.json()}, {"w", s.line(drawn)->w_mm.json()}, {"h", s.line(drawn)->h_mm.json()}};
+        s.window->restyle_with_balloon_preset(QStringLiteral("drips"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）"));
+        QCOMPARE((Json{{"x", s.line(drawn)->x_mm.json()}, {"y", s.line(drawn)->y_mm.json()}, {"w", s.line(drawn)->w_mm.json()}, {"h", s.line(drawn)->h_mm.json()}}), box);
+        // (a symbol's look given to an oval: the kind and the box fitted to the words, one step)
+        s.choose(id);
+        const std::size_t count = s.ops.size();
+        s.window->restyle_with_balloon_preset(QStringLiteral("sparkle"));
+        QCOMPARE(s.line(id)->balloon, std::string("star"));
+        QCOMPARE(s.line(id)->style["points"], Json(4));
+        QCOMPARE(s.ops.size(), count + 2);  // (the kind and its look, then the box)
+        QCOMPARE(render::text::text_layout(*s.line(id), 600).em, std::int64_t{118});
+    }
+
+    // The 台詞 panel's settings of the additions: shown only where they do something; each change one edit_line of its
+    // key (the drips' length with the box's height, the tone as a whole) and one step of 取り消し; their words in
+    // Japanese, each with a tooltip.
+    void eachAdditionSettingWritesItsKey() {
+        Studio s;
+        const auto add = [&](const char* kind, Json more = Json::object()) {
+            Json op{{"op", "add_line"}, {"text", "ねえ\n聞いて"}, {"balloon", kind}, {"x_mm", 60}, {"y_mm", 60}, {"w_mm", 32}, {"h_mm", 26}};
+            for (const auto& [key, value] : more.items()) op[key] = value;
+            return s.put(op);
+        };
+        const std::string speech = add("speech");
+        const std::string star = add("star");
+        const std::string flower = add("flower");
+        const std::string dotted = add("dotted_box");
+        const std::string flash = add("flash");
+        const std::string sfx = add("sfx");
+        const Json path = Json::array({Json::array({100, 100}), Json::array({130, 96}), Json::array({138, 120}), Json::array({110, 128})});
+        const std::string drawn = add("speech", Json{{"path", path}});
+        auto& p = s.panel();
+        QFormLayout* form = p.style_form;
+        const std::initializer_list<std::pair<QWidget*, const char*>> fields{
+            {p.pen_swell, "pen_swell"}, {p.pen_angle, "pen_angle"}, {p.pen_taper, "pen_taper"}, {p.pen_strokes, "pen_strokes"},
+            {p.drip_length, "drip_length"}, {p.drip_count, "drip_count"}, {p.drip_width, "drip_width"}, {p.drip_seed, "drip_seed"},
+            {p.points, "points"}, {p.tone_density, "tone_density"}, {p.tone_lpi, "tone_lpi"}, {p.tone_pattern, "tone_pattern"},
+            {p.tone_to, "tone_to"}, {p.tone_dir, "tone_dir"}, {p.fill_blend, "fill_blend"}};
+        const auto rows = [&] {
+            QStringList shown;
+            for (const auto& [widget, name] : fields) {
+                if (form->isRowVisible(widget)) shown << QString::fromLatin1(name);
+            }
+            return shown.join(QLatin1Char(' '));
+        };
+        s.choose(speech);
+        QCOMPARE(rows(), QStringLiteral("pen_swell pen_taper drip_length tone_density fill_blend"));
+        s.choose(star);
+        QCOMPARE(rows(), QStringLiteral("pen_swell pen_taper drip_length points tone_density fill_blend"));
+        s.choose(flower);
+        QCOMPARE(rows(), QStringLiteral("pen_swell pen_taper drip_length points tone_density fill_blend"));
+        s.choose(dotted);
+        QCOMPARE(rows(), QStringLiteral("tone_density fill_blend"));  // (dots along its edge: no pen, no drips)
+        s.choose(flash);
+        QCOMPARE(rows(), QStringLiteral("tone_density fill_blend"));
+        s.choose(drawn);
+        QCOMPARE(rows(), QStringLiteral("pen_swell pen_taper tone_density fill_blend"));  // (drawn by hand: no drips)
+        s.choose(sfx);
+        QCOMPARE(rows(), QString());
+        // (their names, words and tooltips: Japanese, no key's name)
+        for (const auto& [widget, name] : fields) {
+            QCOMPARE(widget->objectName(), QStringLiteral("story_") + QString::fromLatin1(name));
+            QVERIFY2(!widget->toolTip().isEmpty(), name);
+            QString words = widget->toolTip();
+            if (const auto* label = qobject_cast<QLabel*>(form->labelForField(widget))) words += label->text();
+            if (const auto* button = qobject_cast<QPushButton*>(widget)) words += button->text();
+            if (const auto* box = qobject_cast<QAbstractSpinBox*>(widget)) words += box->specialValueText();
+            QVERIFY2(!QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(words).hasMatch(), qPrintable(words));
+        }
+        QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.pen_swell))->text(), QStringLiteral("線の強弱"));
+        QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.pen_taper))->text(), QStringLiteral("入り抜き"));
+        QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.drip_length))->text(), QStringLiteral("しずくの長さ"));
+        QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.tone_density))->text(), QStringLiteral("中のトーン"));
+        QVERIFY(p.tone_density->toolTip().contains(QStringLiteral("4〜90%")));  // (the range that prints, said where it is set)
+        QVERIFY(p.fill_blend->toolTip().contains(QStringLiteral("白黒の原稿")));
+
+        // one setting changed: the op, the key the line holds, one undo back
+        const auto one = [&](const std::string& id, const std::function<void()>& change, const Json& ops, const char* what) {
+            s.choose(id);
+            const Json before = snapshot(*s.line(id));
+            const std::size_t count = s.ops.size();
+            change();
+            QVERIFY2(s.ops.size() == count + ops.size(), what);
+            for (std::size_t i = 0; i < ops.size(); ++i) {
+                QVERIFY2(s.ops[count + i] == ops[i], qPrintable(QStringLiteral("%1: %2").arg(what, QString::fromStdString(s.ops[count + i].dump()))));
+            }
+            s.trigger("act_undo");
+            QVERIFY2(snapshot(*s.line(id)) == before, what);
+            s.trigger("act_redo");
+        };
+        const auto edit = [](const std::string& id, Json style) { return Json{{"op", "edit_line"}, {"id", id}, {"style", std::move(style)}}; };
+        const auto typed = [](QAbstractSpinBox* box, double value) {
+            if (auto* d = qobject_cast<QDoubleSpinBox*>(box)) d->setValue(value);
+            if (auto* i = qobject_cast<QSpinBox*>(box)) i->setValue(static_cast<int>(value));
+            emit box->editingFinished();
+        };
+        one(speech, [&] { typed(p.pen_swell, 0.5); }, Json::array({edit(speech, Json{{"pen_swell", 0.5}})}), "線の強弱");
+        s.choose(speech);
+        QVERIFY(form->isRowVisible(p.pen_angle));  // (shown once the line swells)
+        one(speech, [&] { typed(p.pen_angle, 90); }, Json::array({edit(speech, Json{{"pen_angle", 90}})}), "太い側の向き");
+        one(speech, [&] { typed(p.pen_taper, 0.6); }, Json::array({edit(speech, Json{{"pen_taper", 0.6}})}), "入り抜き");
+        s.choose(speech);
+        QVERIFY(form->isRowVisible(p.pen_strokes));
+        one(speech, [&] { typed(p.pen_strokes, 3); }, Json::array({edit(speech, Json{{"pen_strokes", 3}})}), "筆の運び");
+        // (the drips' length: and the box that much taller in the same step — 26 and 6)
+        one(speech, [&] { typed(p.drip_length, 6); },
+            Json::array({edit(speech, Json{{"drip_mm", 6.0}}), Json{{"op", "move_line"}, {"id", speech}, {"h_mm", 32.0}}}), "しずくの長さ");
+        s.choose(speech);
+        QVERIFY(form->isRowVisible(p.drip_count) && form->isRowVisible(p.drip_seed));
+        one(speech, [&] { typed(p.drip_count, 7); }, Json::array({edit(speech, Json{{"drips", 7}})}), "しずくの数");
+        one(speech, [&] { typed(p.drip_width, 2); }, Json::array({edit(speech, Json{{"drip_width_mm", 2.0}})}), "しずくの太さ");
+        one(speech, [&] { p.drip_seed->click(); }, Json::array({edit(speech, Json{{"drip_seed", 1}})}), "しずくの並びを変える");
+        one(speech, [&] { p.drip_seed->click(); }, Json::array({edit(speech, Json{{"drip_seed", 2}})}), "もう一度");
+        one(star, [&] { typed(p.points, 4); }, Json::array({edit(star, Json{{"points", 4}})}), "星の先の数");
+        s.choose(star);
+        QCOMPARE(p.spike_depth->value(), 0.38);  // (a star's own depth, not a shout's)
+        // (the tone: the whole of it at once)
+        const Json tone{{"density", 0.1}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}};
+        one(speech, [&] { typed(p.tone_density, 10); }, Json::array({edit(speech, Json{{"fill_tone", tone}})}), "中のトーン");
+        s.choose(speech);
+        QVERIFY(form->isRowVisible(p.tone_lpi) && form->isRowVisible(p.tone_to) && !form->isRowVisible(p.tone_dir));
+        Json graded = tone;
+        graded["to"] = 0.5;
+        graded["dir"] = 90.0;
+        one(speech, [&] { typed(p.tone_to, 50); }, Json::array({edit(speech, Json{{"fill_tone", graded}})}), "先の濃さ");
+        Json lines = graded;
+        lines["pattern"] = "line";
+        one(speech, [&] {
+            p.tone_pattern->setCurrentIndex(1);
+            emit p.tone_pattern->activated(1);
+        }, Json::array({edit(speech, Json{{"fill_tone", lines}})}), "トーンの柄");
+        one(speech, [&] { typed(p.tone_density, p.tone_density->minimum()); }, Json::array({edit(speech, Json{{"fill_tone", nullptr}})}), "トーンなし");
+        // (a field left as it was shown: nothing)
+        s.choose(speech);
+        const std::size_t count = s.ops.size();
+        typed(p.pen_swell, p.pen_swell->value());
+        typed(p.tone_density, p.tone_density->value());
+        QCOMPARE(s.ops.size(), count);
+        // (the blend: a colour asked; set, the button takes it off again)
+        auto responder = std::make_shared<app::ask::Responder>();
+        responder->colour = [](const QColor&, const QString&) { return std::optional<QColor>(QColor(10, 20, 30)); };
+        app::ask::set_responder(responder);
+        one(speech, [&] { p.fill_blend->click(); }, Json::array({edit(speech, Json{{"fill_gradient", Json{{"to", Json::array({10, 20, 30})}, {"dir", 90.0}}}})}), "中の色のグラデーション");
+        s.choose(speech);
+        QCOMPARE(p.fill_blend->text(), QStringLiteral("中の色のグラデーションを外す"));
+        one(speech, [&] { p.fill_blend->click(); }, Json::array({edit(speech, Json{{"fill_gradient", nullptr}})}), "外す");
+        app::ask::set_responder(nullptr);
+    }
+
     void cleanupTestCase() {
         const QByteArray out = qgetenv("GENKO_FUKIDASHI_OUT");
         if (!out.isEmpty()) write_screenshots(out);
@@ -1408,6 +1653,19 @@ private:
             QTest::qWait(200);
             const QString suffix = QLatin1String(mode) == QLatin1String("light") ? QString() : QStringLiteral("-dark");
             QVERIFY(s.window->balloon_dock()->grab().save(dir + QStringLiteral("/gui-palette%1.png").arg(suffix)));
+            {  // (fukidashi@2: the palette scrolled to its last looks — the additions —, and the menu of kinds)
+                QListWidget* list = s.palette().list();
+                list->scrollToItem(list->item(list->count() - 1));
+                s.window->arm_balloon_preset(QStringLiteral("heart"));
+                QTest::qWait(200);
+                QVERIFY(s.window->balloon_dock()->grab().save(dir + QStringLiteral("/gui-palette-additions%1.png").arg(suffix)));
+                s.window->arm_balloon_preset(QString());
+                QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
+                shapes->popup(s.window->mapToGlobal(QPoint(400, 120)));
+                QTest::qWait(300);
+                QVERIFY(shapes->grab().save(dir + QStringLiteral("/gui-kinds%1.png").arg(suffix)));
+                shapes->hide();
+            }
             // the 台詞 panel's settings of the chosen line (beside the select tool), a polygon with a tail chosen
             s.window->arm_balloon_preset(QString());
             s.choose(id);
@@ -1424,6 +1682,17 @@ private:
                 QVERIFY(options->grab().save(dir + QStringLiteral("/gui-panel%1.png").arg(suffix)));
             } else {
                 QVERIFY(box->grab().save(dir + QStringLiteral("/gui-panel%1.png").arg(suffix)));
+            }
+            {  // (fukidashi@2: the panel of a star with the pen's line, drips and a gradient tone — every row of the additions)
+                const std::string star = s.put(Json{{"op", "add_line"}, {"text", "やった"}, {"balloon", "star"}, {"x_mm", 40}, {"y_mm", 140}, {"w_mm", 36}, {"h_mm", 40},
+                                                    {"style", Json{{"pen_swell", 0.5}, {"pen_taper", 0.6}, {"drip_mm", 6}, {"points", 6},
+                                                                   {"fill_tone", Json{{"density", 0.05}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"to", 0.5}, {"dir", 90.0}}}}}});
+                s.choose(star);
+                QTest::qWait(200);
+                QWidget* shot = options != nullptr ? static_cast<QWidget*>(options) : box;
+                if (scroll != nullptr) scroll->ensureWidgetVisible(s.panel().fill_blend);
+                QTest::qWait(100);
+                QVERIFY(shot->grab().save(dir + QStringLiteral("/gui-panel-additions%1.png").arg(suffix)));
             }
             app::settings()->remove(QStringLiteral("ui/theme"));
         }

@@ -290,7 +290,7 @@ private slots:
                                      QStringLiteral("シェイプに変換")}));
         QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
         QVERIFY(shapes != nullptr);
-        QCOMPARE(shapes->actions().size(), 17);  // (fukidashi@1: 縦長（カプセル） and 多角形（機械の声） with Python's 15)
+        QCOMPARE(shapes->actions().size(), 21);  // (fukidashi@1: 縦長（カプセル） and 多角形（機械の声） with Python's 15; fukidashi@2: the four symbols)
         QCOMPARE(shapes->actions().front()->text(), QStringLiteral("普通（楕円）"));
         QCOMPARE(shapes->actions().back()->text(), QStringLiteral("飾り枠（テーマ・題目）"));
         // the 台詞 panel: a tab of the right row (not closed: as Python's), scrolling on a small screen
@@ -304,7 +304,7 @@ private slots:
         // ツールの設定: the text tool's page (TextToolSettings), and the select tool's with the chosen line's lettering
         auto* settings = s.window->text_settings();
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("text")), static_cast<QWidget*>(settings));
-        QCOMPARE(settings->balloon->count(), 17);  // (fukidashi@1: with the capsule and the polygon)
+        QCOMPARE(settings->balloon->count(), 21);  // (fukidashi@1: with the capsule and the polygon; fukidashi@2: the four symbols)
         QCOMPARE(settings->balloon->currentData().toString(), QStringLiteral("speech"));
         QVERIFY(settings->vertical->isChecked());
         QCOMPARE(settings->draw_balloon->text(), QStringLiteral("フキダシを手で描く"));

@@ -747,7 +747,9 @@ void StoryPanel::show_picked() {
     mark->setCurrentIndex(std::max(0, mark->findData(qs(core::py_str(st["emphasis_mark"])))));
     double_line->setChecked(core::py_truthy(st["double"]));
     spikes->setValue(read([&] { return core::py_truthy(st["spikes"]) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(st["spikes"]), 0, 80)) : 0; }, 0));
-    spike_depth->setValue(f("spike_depth", l->balloon == "star" ? 0.38 : 0.2));  // (fukidashi@2: a star's own depth)
+    // (fukidashi@2: a star's own depth — its line's, or 0.38 when it says none: the book's default of 0.2 is a shout's)
+    spike_depth->setValue(l->balloon == "star" ? read([&] { return l->style.contains("spike_depth") ? core::to_float(l->style["spike_depth"]) : 0.38; }, 0.38)
+                                               : f("spike_depth", 0.2));
     fill_cover->setValue(read(
         [&] {
             const double percent = 100 * (st["fill_opacity"].is_null() ? 1.0 : core::to_float(st["fill_opacity"]));
