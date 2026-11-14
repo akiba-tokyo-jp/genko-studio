@@ -100,7 +100,8 @@ void MainWindow::use_font_face(const QString& key, const QString& how) {
     const QString name = face_name(key);
     const std::string face = key.toStdString();
     // (a face whose file is not on this computer is not given to anything: said, nothing changed)
-    if (core::fonts::added(face) && !render::font_files::file_there(face)) {
+    // (asked for by name, a face is read and checked here if it was not yet: one file, the one about to be drawn in)
+    if (core::fonts::added(face) && !render::font_files::present(face)) {
         if (font_palette_ != nullptr) font_palette_->refresh_files();
         flash(QStringLiteral("書体「%1」のファイルが、このパソコンにありません。アプリを入れ直すと使えます").arg(name), 6000);
         return;

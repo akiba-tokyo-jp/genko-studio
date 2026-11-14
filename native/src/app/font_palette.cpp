@@ -52,6 +52,13 @@ QSize face_sample_size() { return QSize(kSampleW, kSampleH); }
 QImage face_sample(const QString& key, double scale) {
     // (kept by the face and the scale: set once a process)
     static std::map<std::pair<QString, int>, QImage> kept;
+    // (… for the files as they are: a file found to be another's since, or — in tests — another folder, and the samples
+    // are set again)
+    static std::pair<std::string, std::uint64_t> kept_of;
+    if (const std::pair<std::string, std::uint64_t> now{render::font_files::dir(), render::font_files::generation()}; now != kept_of) {
+        kept.clear();
+        kept_of = now;
+    }
     const int dpi = std::max(kDpi, static_cast<int>(std::lround(kDpi * scale)));
     if (const auto found = kept.find({key, dpi}); found != kept.end()) return found->second;
     const double factor = static_cast<double>(dpi) / kDpi;

@@ -33,6 +33,7 @@
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 #include "app/font_palette.hpp"
+#include "app/ime.hpp"
 #include "app/inject.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
@@ -46,6 +47,7 @@
 #include "render/font_files.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
@@ -455,6 +457,8 @@ private slots:
         const Json made = s.type_at(QPointF(100, 100), QStringLiteral("こわい"));
         QVERIFY2(made.is_object(), "no line was typed");
         QCOMPARE(made["style"]["font"], Json("horror_tegomin"));
+        // (the line typed is the chosen one now, the select tool in hand: a click there would be that line's face)
+        s.choose_none();
         // (another: in its place — the box never grows past one more than the seven)
         s.click(QStringLiteral("dot16"));
         QCOMPARE(font->count(), 8);
@@ -645,14 +649,25 @@ private slots:
         if (s.window->glyphs_panel() != nullptr) {
             s.window->glyphs_panel()->refresh();
             QCoreApplication::processEvents();
-            const QStringList with_one = QFontDatabase::families();
-            QVERIFY(with_one.size() <= before.size() + 1);
+            // (what Qt gained for the face shown — a font file may bring more than one family's name)
+            const auto gained = [&before] {
+                QStringList out;
+                for (const QString& family : QFontDatabase::families()) {
+                    if (!before.contains(family)) out << family;
+                }
+                return out;
+            };
+            const QStringList first = gained();
+            QVERIFY2(first.size() >= 1 && first.join(QLatin1Char(' ')).contains(QStringLiteral("Hina")), qPrintable(first.join(QLatin1Char('|'))));
             s.choose(id);
             panel->family->setCurrentIndex(panel->family->findData(QStringLiteral("klee")));
             emit panel->family->activated(panel->family->currentIndex());
+            QCOMPARE(s.font_of(id), QStringLiteral("klee"));
             s.window->glyphs_panel()->refresh();
             QCoreApplication::processEvents();
-            QVERIFY(QFontDatabase::families().size() <= before.size() + 1);
+            const QStringList second = gained();
+            QVERIFY2(second.size() >= 1 && second.join(QLatin1Char(' ')).contains(QStringLiteral("Klee")), qPrintable(second.join(QLatin1Char('|'))));
+            for (const QString& family : first) QVERIFY2(!second.contains(family), qPrintable(family));  // (the one before: let go)
         }
     }
 
