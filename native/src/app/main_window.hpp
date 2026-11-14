@@ -489,6 +489,9 @@ public:
     void close_fonts_notice();
     void tell_of_fonts(const QString& words);
     void say_of_fonts(const QString& words, int ms);
+    // (the status label made narrower while it shows such a sentence — the widgets beside it grew —: the sentence
+    // moved to the band, as if it had not fitted in the first place)
+    void refit_fonts_sentence();
     BalloonPalette* balloon_palette() const { return balloon_palette_; }
     QDockWidget* balloon_dock() const { return balloon_dock_; }
     void use_balloon_preset(const QString& key, const QString& how = {});
@@ -1617,6 +1620,9 @@ private:
     // or the band was closed)
     std::vector<std::pair<std::weak_ptr<Session>, QString>> fonts_told_;
     QWidget* fonts_band_ = nullptr;
+    QString fonts_flashed_;  // (what say_of_fonts last put in the status line: the sentence, or the word that it is in the band)
+    bool fonts_refitting_ = false;
+    bool status_fits(const QString& words) const;
     QLabel* fonts_band_text_ = nullptr;
     QPushButton* fonts_band_close_ = nullptr;
     void show_fonts_band(const QString& words);

@@ -1338,14 +1338,16 @@ private slots:
                 int in_line = 0, in_band = 0;
                 const auto whole = [&](const QString& sentence) {
                     QCoreApplication::processEvents();
-                    if (status->sizeHint().width() > status->width()) return false;  // (what the line shows is not cut)
-                    if (window.last_notice() == sentence) {
+                    const bool line_cut = status->sizeHint().width() > status->width();
+                    if (window.last_notice() == sentence) {  // (in the status line: as wide as its words need, or wider)
                         ++in_line;
-                        return true;
+                        return !line_cut;
                     }
-                    // (in the band: all of it, in a label that wraps, the line saying where)
-                    const bool there = window.last_notice() == pointer && window.fonts_notice() == sentence && window.fonts_band()->isVisible() &&
-                                       window.fonts_band_text()->wordWrap() &&
+                    // (in the band: all of it, in a label that wraps; the line says where it is, whole — or, too short
+                    // even for that, says nothing of it)
+                    if (status->text().contains(sentence.left(8))) return false;
+                    if (status->text().contains(pointer) && line_cut) return false;
+                    const bool there = window.fonts_notice() == sentence && window.fonts_band()->isVisible() && window.fonts_band_text()->wordWrap() &&
                                        QTextDocumentFragment::fromHtml(window.fonts_band_text()->text()).toPlainText() == sentence;
                     in_band += there ? 1 : 0;
                     return there;
@@ -1360,7 +1362,14 @@ private slots:
                                                       : QStringLiteral("選んだ台詞の書体を「%1」にしました（元に戻す で取り消せます）").arg(face.label)),
                              qPrintable(QStringLiteral("%1 at %2: %3").arg(face.key).arg(window.width()).arg(window.last_notice())));
                     window.use_font_face(face.key, QStringLiteral("next"));
-                    QVERIFY2(whole(QStringLiteral("書体「%1」を選びました。置きたい所をクリックして、台詞を打ちます").arg(face.label)), qPrintable(face.key));
+                    QVERIFY2(whole(QStringLiteral("書体「%1」を選びました。置きたい所をクリックして、台詞を打ちます").arg(face.label)),
+                             qPrintable(QStringLiteral("%1 at %2: last [%3] status [%4] %5/%6 band [%7]")
+                                            .arg(face.key)
+                                            .arg(window.width())
+                                            .arg(window.last_notice(), status->text())
+                                            .arg(status->sizeHint().width())
+                                            .arg(status->width())
+                                            .arg(window.fonts_notice())));
                     if (face.key == QLatin1String("antique")) continue;  // (the book's usual face already)
                     window.use_font_face(face.key, QStringLiteral("book"));
                     QVERIFY2(whole(QStringLiteral("この本のいつもの書体を「%1」にしました（元に戻す で取り消せます）").arg(face.label)), qPrintable(face.key));
@@ -1550,7 +1559,10 @@ private:
                 QTRY_VERIFY_WITH_TIMEOUT(window->fonts_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
                 window->action(QStringLiteral("act_type_replace_missing"))->trigger();
                 QTest::qWait(300);
-                QVERIFY(window->status_label()->sizeHint().width() <= window->status_label()->width());
+                // (what was done and what was left, both whole: in the band here — the line is too short for either)
+                QVERIFY(window->fonts_notice().contains(QStringLiteral("そのままにしました")));
+                QVERIFY(!window->status_label()->text().contains(QStringLiteral("見つからないフォント")) ||
+                        window->status_label()->sizeHint().width() <= window->status_label()->width());
                 QVERIFY(window->grab().save(dir + QStringLiteral("/gui-fonts-default-width-band%1.png").arg(shade)));
                 use_source_fonts();
                 window->canvas()->selected_line_id = std::string("a");

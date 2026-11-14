@@ -11,11 +11,14 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QFutureWatcher>
+#include <QEvent>
 #include <QLabel>
+#include <QLayout>
 #include <QListWidget>
 #include <QMenu>
 #include <QPointer>
 #include <QPushButton>
+#include <QStatusBar>
 #include <QTimer>
 #include <QtConcurrent>
 
@@ -56,6 +59,26 @@ QString named(const QStringList& labels) {
     return out;
 }
 
+const QString& band_pointer() {
+    static const QString words = QStringLiteral("書体の知らせを、ページの上に出しました");
+    return words;
+}
+
+// The status label watched for its width: narrower while it shows a sentence of the fonts, the sentence is moved.
+class StatusWidth : public QObject {
+public:
+    explicit StatusWidth(MainWindow* window) : QObject(window), window_(window) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize) window_->refit_fonts_sentence();
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    MainWindow* window_;
+};
+
 }  // namespace
 
 void MainWindow::build_font_actions() {
@@ -76,6 +99,7 @@ void MainWindow::build_font_dock() {
     view_menu_->addAction(font_dock_->toggleViewAction());
     connect(font_palette_, &FontPalette::picked, this, [this](const QString& key, const QString& how) { use_font_face(key, how); });
     connect(text_settings_, &TextToolSettings::moreFonts, this, [this] { show_dock(QStringLiteral("書体")); });
+    status_->installEventFilter(new StatusWidth(this));
     // (the text tool's own 書体 chosen: that face — the palette's mark follows it)
     connect(text_settings_->font, &QComboBox::activated, this, [this](int) {
         const QString key = text_settings_->font->currentData().toString();
@@ -192,20 +216,49 @@ QStringList MainWindow::faces_not_installed() const {
     return out;
 }
 
+bool MainWindow::status_fits(const QString& words) const {
+    QFont bold = status_->font();
+    bold.setBold(true);
+    return QFontMetrics(bold).horizontalAdvance(words) + 4 <= status_->contentsRect().width();
+}
+
 void MainWindow::say_of_fonts(const QString& words, int ms) {
-    // (a sentence the one-line status label would cut — a narrow window, long names — is shown whole in the band)
-    const QFontMetrics metrics([this] {
-        QFont bold = status_->font();
-        bold.setBold(true);
-        return bold;
-    }());
-    const int room = status_->contentsRect().width();
-    if (!isVisible() || room <= 0 || metrics.horizontalAdvance(words) + 4 <= room) {
+    // (a sentence the one-line status label would cut — a narrow window, long names — is shown whole in the band; the
+    // line then says where it is, unless it is too short even for that: then it says nothing new)
+    if (statusBar()->layout() != nullptr) statusBar()->layout()->activate();  // (the label's width as it is now: the widgets beside it may have just changed)
+    fonts_flashed_.clear();
+    if (!isVisible() || status_->contentsRect().width() <= 0 || status_fits(words)) {
         flash(words, ms);
+        fonts_flashed_ = words;
         return;
     }
     tell_of_fonts(words);
-    flash(QStringLiteral("書体の知らせを、ページの上に出しました"), ms);
+    if (status_fits(band_pointer())) {
+        flash(band_pointer(), ms);
+        fonts_flashed_ = band_pointer();
+    }
+}
+
+void MainWindow::refit_fonts_sentence() {
+    if (fonts_refitting_ || fonts_flashed_.isEmpty() || !isVisible()) return;
+    if (last_notice_ != fonts_flashed_ || !flash_timer_.isActive()) {  // (the line has said something else since, or its time is up)
+        fonts_flashed_.clear();
+        return;
+    }
+    if (status_fits(fonts_flashed_)) return;
+    fonts_refitting_ = true;
+    const QString was = fonts_flashed_;
+    fonts_flashed_.clear();
+    flash_timer_.stop();
+    refresh_status();  // (the line back to what it says of the page)
+    if (was != band_pointer()) {
+        tell_of_fonts(was);
+        if (status_fits(band_pointer())) {
+            flash(band_pointer(), 4000);
+            fonts_flashed_ = band_pointer();
+        }
+    }
+    fonts_refitting_ = false;
 }
 
 void MainWindow::tell_of_fonts(const QString& words) {
