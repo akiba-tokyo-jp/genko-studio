@@ -21,6 +21,7 @@
 #include "core/model.hpp"
 #include "formats/checks.hpp"
 #include "render/ops_registry.hpp"
+#include "render/text/balloon_clean.hpp"
 #include "render/text/lettering.hpp"
 #include "service/book.hpp"
 #include "service/layout.hpp"
@@ -416,8 +417,8 @@ private slots:
         QTest::newRow("pen_angle below") << style(Json{{"pen_angle", -1}}) << QStringLiteral("線の太い側の向きは 0〜360 度です");
         QTest::newRow("pen_taper above") << style(Json{{"pen_taper", 1.2}}) << QStringLiteral("線の入り抜きは 0〜1 です");
         QTest::newRow("pen_taper below") << style(Json{{"pen_taper", -0.2}}) << QStringLiteral("線の入り抜きは 0〜1 です");
-        QTest::newRow("pen_strokes above") << style(Json{{"pen_strokes", 9}}) << QStringLiteral("フキダシの線を描く筆数は 1〜8 です");
-        QTest::newRow("pen_strokes below") << style(Json{{"pen_strokes", -2}}) << QStringLiteral("フキダシの線を描く筆数は 1〜8 です");
+        QTest::newRow("pen_strokes above") << style(Json{{"pen_strokes", 9}}) << QStringLiteral("フキダシの線を何筆で描くかは 1〜8 です");
+        QTest::newRow("pen_strokes below") << style(Json{{"pen_strokes", -2}}) << QStringLiteral("フキダシの線を何筆で描くかは 1〜8 です");
         QTest::newRow("drip_mm above") << style(Json{{"drip_mm", 31}}) << QStringLiteral("しずくの長さは 0〜30 mm です");
         QTest::newRow("drip_mm below") << style(Json{{"drip_mm", -1}}) << QStringLiteral("しずくの長さは 0〜30 mm です");
         QTest::newRow("drips above") << style(Json{{"drips", 25}}) << QStringLiteral("しずくの数は 1〜24 です");
@@ -426,29 +427,41 @@ private slots:
         QTest::newRow("drip_width_mm below") << style(Json{{"drip_width_mm", 0.1}}) << QStringLiteral("しずくの太さは 0.3〜10 mm です");
         QTest::newRow("drip_seed above") << style(Json{{"drip_seed", 1000000}}) << QStringLiteral("しずくの並びの番号は 0〜999999 です");
         QTest::newRow("drip_seed below") << style(Json{{"drip_seed", -1}}) << QStringLiteral("しずくの並びの番号は 0〜999999 です");
-        QTest::newRow("points above") << style(Json{{"points", 13}}) << QStringLiteral("星のとがり・花びらの数は 4〜12 です");
-        QTest::newRow("points below") << style(Json{{"points", 3}}) << QStringLiteral("星のとがり・花びらの数は 4〜12 です");
-        QTest::newRow("tone density above") << tone(Json{{"density", 0.95}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜90% です");
-        QTest::newRow("tone density below") << tone(Json{{"density", -0.1}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜90% です");
-        QTest::newRow("tone to above") << tone(Json{{"density", 0.1}, {"to", 1.0}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜90% です");
+        QTest::newRow("points above") << style(Json{{"points", 13}}) << QStringLiteral("星の先と花びらの数は 4〜12 です");
+        QTest::newRow("points below") << style(Json{{"points", 3}}) << QStringLiteral("星の先と花びらの数は 4〜12 です");
+        QTest::newRow("tone density above") << tone(Json{{"density", 0.95}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜0.9（90%）です");
+        QTest::newRow("tone density below") << tone(Json{{"density", -0.1}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜0.9（90%）です");
+        QTest::newRow("tone density said in per cent") << tone(Json{{"density", 30}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜0.9（90%）です");
+        QTest::newRow("tone to above") << tone(Json{{"density", 0.1}, {"to", 1.0}}) << QStringLiteral("フキダシの中のトーンの濃さは 0〜0.9（90%）です");
         QTest::newRow("tone lpi above") << tone(Json{{"density", 0.1}, {"lpi", 90}}) << QStringLiteral("フキダシの中のトーンの線数は 20〜85 です");
         QTest::newRow("tone lpi below") << tone(Json{{"density", 0.1}, {"lpi", 10}}) << QStringLiteral("フキダシの中のトーンの線数は 20〜85 です");
         QTest::newRow("tone pattern") << tone(Json{{"density", 0.1}, {"pattern", "cross"}}) << QStringLiteral("フキダシの中のトーンの柄は、点か線から選びます");
         const QString bad_tone = QStringLiteral("フキダシの中のトーンの指定が正しくありません");
         QTest::newRow("tone not an object") << style(Json{{"fill_tone", 0.3}}) << bad_tone;
-        QTest::newRow("tone without a density") << tone(Json{{"lpi", 60}}) << bad_tone;
+        QTest::newRow("tone without a density") << tone(Json{{"lpi", 60}}) << QStringLiteral("フキダシの中のトーンには濃さが要ります");
         QTest::newRow("tone with a key it has not") << tone(Json{{"density", 0.1}, {"colour", "red"}}) << bad_tone;
-        QTest::newRow("tone angle") << tone(Json{{"density", 0.1}, {"angle", 120}}) << bad_tone;
-        QTest::newRow("tone inset") << tone(Json{{"density", 0.1}, {"inset_mm", 9}}) << bad_tone;
+        QTest::newRow("tone angle") << tone(Json{{"density", 0.1}, {"angle", 120}}) << QStringLiteral("フキダシの中のトーンの角度は 0〜90 度です");
+        QTest::newRow("tone direction") << tone(Json{{"density", 0.1}, {"to", 0.5}, {"dir", 400}}) << QStringLiteral("フキダシの中のトーンが濃くなる向きは −360〜360 度です");
+        QTest::newRow("tone inset") << tone(Json{{"density", 0.1}, {"inset_mm", 9}}) << QStringLiteral("フキダシの中のトーンを線から離す幅は 0〜5 mm です");
         QTest::newRow("tone density not a number") << tone(Json{{"density", "dark"}}) << bad_tone;
         const QString bad_blend = QStringLiteral("フキダシの中のグラデーションの指定が正しくありません");
         QTest::newRow("blend not an object") << style(Json{{"fill_gradient", "blue"}}) << bad_blend;
-        QTest::newRow("blend without an end") << style(Json{{"fill_gradient", Json{{"dir", 90}}}}) << bad_blend;
-        QTest::newRow("blend of two numbers") << style(Json{{"fill_gradient", Json{{"to", Json::array({1, 2})}}}}) << bad_blend;
-        QTest::newRow("blend past 255") << style(Json{{"fill_gradient", Json{{"to", Json::array({300, 0, 0})}}}}) << bad_blend;
+        QTest::newRow("blend without an end") << style(Json{{"fill_gradient", Json{{"dir", 90}}}}) << QStringLiteral("フキダシの中のグラデーションの先の色は、0〜255 の数 3 つで指定します");
+        const QString colour = QStringLiteral("フキダシの中のグラデーションの先の色は、0〜255 の数 3 つで指定します");
+        QTest::newRow("blend of two numbers") << style(Json{{"fill_gradient", Json{{"to", Json::array({1, 2})}}}}) << colour;
+        QTest::newRow("blend past 255") << style(Json{{"fill_gradient", Json{{"to", Json::array({300, 0, 0})}}}}) << colour;
+        QTest::newRow("blend to words") << style(Json{{"fill_gradient", Json{{"to", Json::array({1, 2, "x"})}}}}) << colour;
+        QTest::newRow("blend direction") << style(Json{{"fill_gradient", Json{{"to", Json::array({1, 2, 3})}, {"dir", -400}}}}) << QStringLiteral("フキダシの中のグラデーションの向きは −360〜360 度です");
         QTest::newRow("blend with a key it has not") << style(Json{{"fill_gradient", Json{{"to", Json::array({1, 2, 3})}, {"from", Json::array({1, 2, 3})}}}}) << bad_blend;
-        QTest::newRow("swell not a number") << style(Json{{"pen_swell", "heavy"}}) << QStringLiteral("フキダシの線・しずくの設定は数で指定します");
-        QTest::newRow("drips not a number") << style(Json{{"drips", "many"}}) << QStringLiteral("フキダシの筆数・しずくの数や番号・とがりの数は整数で指定します");
+        QTest::newRow("swell not a number") << style(Json{{"pen_swell", "heavy"}}) << QStringLiteral("フキダシの線の強弱は数で指定します");
+        QTest::newRow("angle not a number") << style(Json{{"pen_angle", "down"}}) << QStringLiteral("線の太い側の向きは数で指定します");
+        QTest::newRow("taper not a number") << style(Json{{"pen_taper", "x"}}) << QStringLiteral("線の入り抜きは数で指定します");
+        QTest::newRow("strokes not a number") << style(Json{{"pen_strokes", "two"}}) << QStringLiteral("フキダシの線を何筆で描くかは整数で指定します");
+        QTest::newRow("drip length not a number") << style(Json{{"drip_mm", "long"}}) << QStringLiteral("しずくの長さは数で指定します");
+        QTest::newRow("drips not a number") << style(Json{{"drips", "many"}}) << QStringLiteral("しずくの数は整数で指定します");
+        QTest::newRow("drip width not a number") << style(Json{{"drip_width_mm", "wide"}}) << QStringLiteral("しずくの太さは数で指定します");
+        QTest::newRow("seed not a number") << style(Json{{"drip_seed", "x"}}) << QStringLiteral("しずくの並びの番号は整数で指定します");
+        QTest::newRow("points not a number") << style(Json{{"points", "five"}}) << QStringLiteral("星の先と花びらの数は整数で指定します");
     }
     void theAdditionsRefusalsReadInJapanese() {
         QFETCH(QString, ops);
@@ -558,6 +571,26 @@ private slots:
         star_doc = run_ops(star_doc, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"y_mm", 62}}}));  // (its middle at 60, 82; its lower point reaches 102)
         const Json star_tip = star_doc.story.front().tails.front()["to"];
         QVERIFY2(std::fabs(star_tip[0].get<double>() - 60.0) < 0.02 && star_tip[1].get<double>() > 102.0 + 2.5 && star_tip[1].get<double>() < 102.0 + 3.5, star_tip.dump().c_str());
+        // (the review's P3-6: a five-point star's middle — where its points stand round and its tails leave from — lies
+        // below its box's; a tip moved out goes the way it lay from that middle, out past the star)
+        Document five = run_ops(blank_book(), Json::array({line_op("star", Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 40}})}));
+        five = run_ops(five, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"tails", Json::array({Json{{"to", Json::array({60.0, 74.0})}}})}}}));
+        five = run_ops(five, Json::array({Json{{"op", "move_line"}, {"id", "L1"}, {"w_mm", 41}}}));  // (40..81 × 40..80)
+        const genko::render::text::clean::P middle = genko::render::text::clean::star_centre(genko::render::text::clean::Box{40, 40, 81, 80}, 5, 0.62);
+        QVERIFY(middle.y > 60.5);
+        const Json moved = five.story.front().tails.front()["to"];
+        const double mx = moved[0].get<double>() - middle.x, my = moved[1].get<double>() - middle.y;
+        const double ox = 60.0 - middle.x, oy = 74.0 - middle.y;
+        QVERIFY2(std::fabs(mx * oy - my * ox) / std::hypot(ox, oy) < 0.02, moved.dump().c_str());  // (on the way from the star's middle through where it was)
+        QVERIFY2(my > 0 && !genko::core::tail_hidden(five.story.front(), moved), moved.dump().c_str());
+        // (a line that drips: its tails are measured against its body — the box less the drips' reach)
+        Document dripping = run_ops(blank_book(), Json::array({line_op("speech", Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 40}, {"style", Json{{"drip_mm", 10}}}})}));
+        const genko::core::StoryLine& line = dripping.story.front();  // (its body 40..80 × 40..70)
+        QVERIFY(genko::core::tail_hidden(line, Json::array({60.0, 69.0})));
+        QVERIFY(!genko::core::tail_hidden(line, Json::array({60.0, 74.0})));  // (inside the box, below the body: among the drips)
+        dripping = run_ops(dripping, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"tails", Json::array({Json{{"to", Json::array({60.0, 74.0})}}})}},
+                                                  Json{{"op", "move_line"}, {"id", "L1"}, {"x_mm", 40.5}}}));
+        QCOMPARE(dripping.story.front().tails.front()["to"], Json::array({60.0, 74.0}));  // (not hidden: left where it points)
     }
 };
 

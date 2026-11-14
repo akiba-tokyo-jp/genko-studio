@@ -1891,7 +1891,8 @@ private slots:
             double sum = 0.0;
             const double step = 0.125;
             for (double d = -width * 2.5 - 3; d <= 3; d += step) sum += plane_at(band, on.x + nx * d, on.y + ny * d) * step;
-            const double expected = width * (1 + swell * (nx * pen.heavy.x + ny * pen.heavy.y));
+            // (never under a pixel and a half: the line's thinnest)
+            const double expected = std::max(std::min(1.5, width), width * (1 + swell * (nx * pen.heavy.x + ny * pen.heavy.y)));
             QVERIFY2(std::fabs(sum - expected) <= 0.5, qPrintable(QStringLiteral("%1°: %2 for %3").arg(degrees).arg(sum).arg(expected)));
         }
         // (without a swell or a taper the pen's line is the even line, within a hundredth of a pixel's coverage)
@@ -1907,7 +1908,7 @@ private slots:
     // 入り抜き: each stroke thins toward its two ends and is its full width between them — the share of the stroke that
     // thins is pen_taper —; a smooth outline is drawn in pen_strokes strokes, beginning where its line is lightest (up and
     // to the left, for the heavy way of 45°); an outline with corners from corner to corner; a stroke shorter than six
-    // widths is not thinned; and nowhere is the line thinner than a pixel: it never opens.
+    // widths is not thinned; and nowhere is the line thinner than a pixel and a half: it never opens.
     void aStrokeThinsTowardItsEnds() {
         const clean::P centre{300.0, 260.0};
         const std::vector<clean::Shape> oval{clean::whole(clean::ellipse(clean::Box{centre.x - 220, centre.y - 220, centre.x + 220, centre.y + 220}))};
@@ -1915,7 +1916,7 @@ private slots:
         for (const int strokes : {1, 2, 3, 4, 8}) {
             for (const double taper : {0.3, 0.6, 1.0}) {
                 clean::Pen pen;
-                pen.width = 8.0;
+                pen.width = 12.0;
                 pen.taper = taper;
                 pen.strokes = strokes;
                 pen.heavy = {std::sqrt(0.5), std::sqrt(0.5)};
@@ -1930,18 +1931,18 @@ private slots:
                     const double r = run.reach[i];
                     least = std::min(least, r), most = std::max(most, r);
                     const double before = run.reach[(i + n - 1) % n], after = run.reach[(i + 1) % n];
-                    if (r <= before && r < after && r < 8.0 * 0.3) {
+                    if (r <= before && r < after && r < 12.0 * 0.3) {
                         ++thin_places;
                         const double at = std::atan2(run.points[i].y - centre.y, run.points[i].x - centre.x) * 180 / 3.141592653589793;
                         double off = std::fmod(at - 225.0 + 720.0, 360.0 / strokes);
                         off = std::min(off, 360.0 / strokes - off);
                         QVERIFY2(off < 3.0, qPrintable(QStringLiteral("%1 strokes: a thin place at %2°").arg(strokes).arg(at)));
                     }
-                    full += r >= 8.0 - 1e-9 ? 1 : 0;
+                    full += r >= 12.0 - 1e-9 ? 1 : 0;
                     count += 1;
                 }
                 QCOMPARE(thin_places, strokes);
-                QVERIFY2(std::fabs(least - 8.0 * 0.15) < 0.05 && std::fabs(most - 8.0) < 1e-9, qPrintable(QStringLiteral("%1 .. %2").arg(least).arg(most)));
+                QVERIFY2(std::fabs(least - 12.0 * 0.15) < 0.05 && std::fabs(most - 12.0) < 1e-9, qPrintable(QStringLiteral("%1 .. %2").arg(least).arg(most)));
                 // (the share at full width: what the taper leaves, 1 − taper, within the points' spacing)
                 QVERIFY2(std::fabs(full / count - (1 - taper)) < 0.04, qPrintable(QStringLiteral("%1 strokes, taper %2: %3 full").arg(strokes).arg(taper).arg(full / count)));
                 // (no stretch between two points longer than the step)
@@ -1965,7 +1966,7 @@ private slots:
             const double r = sides.front().reach[i];
             const bool corner = (std::fabs(p.x - 100) < 1e-6 || std::fabs(p.x - 500) < 1e-6) && (std::fabs(p.y - 100) < 1e-6 || std::fabs(p.y - 400) < 1e-6);
             const bool middle = std::fabs(p.x - 300) < 30 || std::fabs(p.y - 250) < 30;
-            if (corner) QVERIFY2(std::fabs(r - 1.2) < 1e-6, qPrintable(QString::number(r)));
+            if (corner) QVERIFY2(std::fabs(r - 1.5) < 1e-6, qPrintable(QString::number(r)));  // (0.15 of 8 px is 1.2: a pixel and a half at the least)
             if (middle) QVERIFY2(std::fabs(r - 8.0) < 1e-9, qPrintable(QString::number(r)));
             QCOMPARE(sides.front().stroke_start[i] != 0, corner);
         }
@@ -1987,7 +1988,7 @@ private slots:
         fine.taper = 1.0;
         fine.swell = 0.9;
         for (const clean::PenRun& run : clean::pen_runs(clean::edge_runs(oval), oval, fine)) {
-            for (const double r : run.reach) QVERIFY(r >= 1.0);
+            for (const double r : run.reach) QVERIFY(r >= 1.5);
         }
         fine.width = 0.6;
         for (const clean::PenRun& run : clean::pen_runs(clean::edge_runs(oval), oval, fine)) {
@@ -2143,7 +2144,8 @@ private slots:
 
     // The pen's strokes are the line's own, not the resolution's: the same balloon drawn at 150, 600 and 1200 dpi has the
     // same pieces of line, each with as many strokes, beginning at the same places (within a third of a millimetre) and
-    // as heavy along each stroke (within an eighth of the line's width — at 150 dpi the thinnest line is a whole pixel).
+    // as heavy along each stroke (within an eighth of the line's width, a quarter on a stroke shorter than eight widths —
+    // at 150 dpi the thinnest line is a pixel and a half).
     // Every kind, with a tail; rounded corners and sharp ones (the review's P2-1: a rounded corner cut into few points at
     // one resolution and many at another was a corner at one and none at the other).
     void thePensStrokesAreTheSameAtEveryResolution_data() {
@@ -2193,6 +2195,7 @@ private slots:
             struct Stroke {
                 balloon::Pt at;
                 std::array<double, 9> weight;
+                double length = 0.0;
             };
             const auto strokes_of = [&](int dpi) {
                 std::vector<std::vector<Stroke>> out;
@@ -2222,6 +2225,7 @@ private slots:
                         double to = k + 1 < starts.size() ? along[starts[k + 1]] : (trace.closed ? along[starts.front()] + total : from);
                         Stroke stroke;
                         stroke.at = trace.points_mm[starts[k]];
+                        stroke.length = to - from;
                         for (std::size_t j = 0; j < 9; ++j) stroke.weight[j] = weight_at(from + (to - from) * (static_cast<double>(j) + 1) / 10);
                         list.push_back(stroke);
                     }
@@ -2243,9 +2247,12 @@ private slots:
                         const double apart = std::hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]);
                         QVERIFY2(apart <= 0.34, qPrintable(QStringLiteral("%1: stroke %2 begins %3 mm away").arg(which).arg(k).arg(apart)));
                         for (std::size_t j = 0; j < 9; ++j) {
-                            // (at 150 dpi a line of 0.6 mm is 4 px and never thinner than 1: a quarter of its width)
-                            const double low = other == &coarse ? 0.25 : 0.0;
-                            QVERIFY2(std::fabs(std::max(a.weight[j], low) - std::max(b.weight[j], low)) <= 0.125,
+                            // (at 150 dpi a line of 0.6 mm is 4 px and never thinner than 1.5: three eighths of its width)
+                            const double low = other == &coarse ? 0.375 : 0.0;
+                            // (a stroke shorter than eight widths — 4.8 mm — is thinned by how long it is, and a pixel of
+                            // the coarser picture is 0.17 mm of it: a quarter of the width)
+                            const double within = a.length < 4.8 ? 0.25 : 0.125;
+                            QVERIFY2(std::fabs(std::max(a.weight[j], low) - std::max(b.weight[j], low)) <= within,
                                      qPrintable(QStringLiteral("%1: stroke %2 at %3 tenths: %4 for %5").arg(which).arg(k).arg(j + 1).arg(b.weight[j]).arg(a.weight[j])));
                         }
                     }
@@ -2595,7 +2602,7 @@ private slots:
         const auto px_of = [](int dpi, double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
         const Json path = Json::array({Json::array({42, 44}), Json::array({70, 40}), Json::array({90, 54}), Json::array({84, 78}), Json::array({58, 80}), Json::array({40, 65})});
         for (const int dpi : {150, 600, 1200}) {
-            const double page = dpi == 1200 ? 110 : 140;
+            const double page = dpi == 1200 ? 115 : 140;  // (the picture: page × page − 20 mm — the balloon and its tail reach 100 × 92)
             {  // (a notch: its sides are part of the one line, closed)
                 const Document doc = one_line("speech", Json{{"tails", Json::array({Json{{"to", Json::array({70, 62})}, {"kind", "inward"}}})}, {"style", pen}});
                 const Image drawn = balloon_alone(doc, dpi, page, page - 20);
@@ -2607,9 +2614,9 @@ private slots:
             for (const bool curved : {false, true}) {  // (drawn by hand)
                 Json style = pen;
                 if (curved) style["path_curve"] = true;
-                const Document doc = one_line("speech", Json{{"path", path}, {"tail", Json::array({100, 96})}, {"style", style}});
+                const Document doc = one_line("speech", Json{{"path", path}, {"tail", Json::array({70, 92})}, {"style", style}});  // (a tail from its foot, clear of its corners)
                 const Image drawn = balloon_alone(doc, dpi, page, page - 20);
-                QVERIFY2(closed_round(grey_of(drawn), px_of(dpi, 65), px_of(dpi, 60), 200), curved ? "smoothed" : "as given");
+                QVERIFY2(closed_round(grey_of(drawn), px_of(dpi, 65), px_of(dpi, 60), 200), qPrintable(QStringLiteral("%1 at %2 dpi").arg(curved ? "smoothed" : "as given").arg(dpi)));
                 const auto traces = genko::render::text::balloon::pen_trace({&doc.story.front()}, dpi);
                 QCOMPARE(traces.size(), std::size_t{1});
                 int starts = 0;
@@ -2743,10 +2750,14 @@ private slots:
         const auto toned = [](double density, double lpi = 60.0) {
             return one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", density}, {"lpi", lpi}}}, {"line_rgb", Json::array({0, 0, 0})}}}}, "あ");
         };
-        for (const double density : {0.04, 0.06, 0.1, 0.3, 0.5, 0.7, 0.8, 0.9}) {
+        // (between, where neighbouring dots nearly touch — about 60 to 75% at 60 lines and 600 dpi —, the neck between two
+        // dots leaves a white speck of a pixel or two: the passing from dots to holes of every screen, not a tone too light
+        // or too dark; HANDOFF says so)
+        for (const double density : {0.04, 0.06, 0.1, 0.3, 0.5, 0.9}) {
             QVERIFY2(lone(toned(density), 0) == 0, qPrintable(QStringLiteral("black pixels alone at %1").arg(density)));
-            qInfo("60 lines at %g: %d white pixels alone", density, lone(toned(density), 1));
+            QVERIFY2(lone(toned(density), 1) == 0, qPrintable(QStringLiteral("white pixels alone at %1").arg(density)));
         }
+        QVERIFY(lone(toned(0.84, 85.0), 1) == 0);  // (85 lines: up to 84%, its holes whole)
         QVERIFY(lone(toned(0.01), 0) > 0);  // (what the check is for)
         // (the check)
         const auto codes = [](const Document& doc) {

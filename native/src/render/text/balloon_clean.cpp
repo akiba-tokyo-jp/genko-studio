@@ -1865,7 +1865,9 @@ bool one_of_places(const Contour& places, P p, double within) {
 
 std::vector<PenRun> pen_runs(const std::vector<Run>& runs, const std::vector<Shape>& shapes, const Pen& pen) {
     std::vector<PenRun> out;
-    const double least = std::min(1.0, pen.width);  // (the line never opens: a pixel at the least — its width, when it is slimmer)
+    // (the line never opens: a pixel and a half at the least — its width, when it is slimmer —, so that where two thinned
+    // ends meet at a sharp angle no pixel of the line is left too faint to print)
+    const double least = std::min(1.5, pen.width);
     const double step = std::max(2.0, pen.step);
     // (the width the strokes' rules count in: the line's own before it is made whole pixels, so that a stroke is thinned
     // the same at every resolution)
