@@ -39,6 +39,7 @@
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "core/ruby.hpp"
+#include "formats/checks.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/draw.hpp"
 #include "render/font_files.hpp"
@@ -188,6 +189,15 @@ const Json& catalog_font(const std::string& key) {
 
 genko::core::ApplyResult run_ops(const Document& doc, const Json& ops) {
     return genko::core::CommandBus(genko::render::ops_registry()).apply(doc, ops, genko::core::Actor("human:作者"));
+}
+
+// The page's check issues about a font file that is not there (formats/checks: font_not_installed).
+std::vector<Json> font_issues(const Document& doc) {
+    std::vector<Json> out;
+    for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) {
+        if (issue.value("code", std::string()) == "font_not_installed") out.push_back(issue);
+    }
+    return out;
 }
 
 Document blank_book(int pages = 1) { return genko::core::new_episode("書体", genko::core::Num(1), pages, genko::core::PageSpec::a4_mono()); }
@@ -797,12 +807,46 @@ private slots:
             QCOMPARE(asked.results.size(), std::size_t(1));
             QCOMPARE(asked.results[0]["missing"], Json::array({Json{{"font", e->key}, {"texts", 1}}}));
             QCOMPARE(fonts::named(asked.doc), std::vector<std::string>{e->key});
+            // (the page's check says so, once for the line, by the face's name: font_not_installed, a warning)
+            const std::vector<Json> said = font_issues(doc);
+            QCOMPARE(said.size(), std::size_t(1));
+            QCOMPARE(said[0]["level"], Json("warning"));
+            QCOMPARE(said[0]["target"], (Json{{"kind", "line"}, {"id", "L1"}}));
+            const std::string message = said[0]["message"].get<std::string>();
+            QVERIFY2(message.find("書体「" + e->label + "」のファイルがこのパソコンに見つからない") != std::string::npos, message.c_str());
+            QVERIFY2(message.find("いつもの書体で描いた") != std::string::npos, message.c_str());
         }();
         use_source_fonts();
-        // (and with the files back the same book names nothing missing)
+        // (and with the files back the same book names nothing missing, and its check says nothing of fonts)
         Document doc = blank_book();
         doc.story.push_back(lettering(e->key));
         QCOMPARE(run_ops(doc, Json::array({Json{{"op", "replace_fonts"}}})).results[0]["missing"], Json::array());
+        QVERIFY(font_issues(doc).empty());
+    }
+
+    // The check of a book of before says what it said: a font file that is not there, a name nobody knows and the faces of
+    // before are no font_not_installed — with or without the added faces' files —, and the issues of such a page are the
+    // same either way.
+    void theCheckOfABookOfBeforeSaysWhatItSaid() {
+        Document doc = blank_book();
+        int n = 0;
+        for (const char* font : {"", "gothic", "sfx_pop", "/no/such/font.otf", "no_such_face", "Dot16"}) {
+            genko::core::StoryLine line = lettering(font);
+            line.id = "B" + std::to_string(++n);
+            line.x_mm = genko::core::Num(20.0 + 28.0 * n);
+            line.w_mm = genko::core::Num(24.0);
+            doc.story.push_back(std::move(line));
+        }
+        const Json with_files = genko::formats::checks::page_issues(doc, doc.page(0));
+        QVERIFY(font_issues(doc).empty());
+        QTemporaryDir empty;
+        files::set_dir_for_testing(empty.path().toStdString());
+        text::clear_layout_cache();
+        const Json without = genko::formats::checks::page_issues(doc, doc.page(0));
+        const bool none = font_issues(doc).empty();
+        use_source_fonts();
+        QVERIFY(none);
+        QCOMPARE(without, with_files);
     }
 
     // A face whose own file is there but whose partner's is not: its kana are its own, and its kanji go to the bundled

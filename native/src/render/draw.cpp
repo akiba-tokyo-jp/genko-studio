@@ -869,7 +869,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
         throw NotYetPorted("default_font");  // (the face let go with `opened`)
     }
     if (s.memory.second) detail::throw_imaging_error();
-    opened->strict_cmap_ = core::fonts::added(font_face(font).first);  // (fonts@1: an added face's letters are its cmap's)
+    opened->strict_cmap_ = !ours && core::fonts::added(font_face(font).first);  // (fonts@1: an added face's letters are its cmap's)
     return *s.fonts.emplace(key, std::move(opened)).first->second;
 }
 

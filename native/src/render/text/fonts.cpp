@@ -257,7 +257,7 @@ std::string Fonts::path_for(const Face& face, std::u32string_view ch) {
 std::u32string Fonts::normalize(const Face& face, std::u32string_view text) {
     // fonts@1: an added face's own look-alikes (the catalogue's: ！ → !, ？ → ? where the face has only the ASCII marks),
     // by the face's key — nothing for a face of before or a font file, whose swaps are LOOKALIKE alone as they always were
-    const core::fonts::Entry* entry = core::fonts::find(face.key);
+    const core::fonts::Entry* entry = bundled(face.key) != nullptr ? nullptr : core::fonts::find(face.key);
     const std::vector<std::pair<char32_t, char32_t>>* own = entry != nullptr && entry->added && !entry->lookalike.empty() ? &entry->lookalike : nullptr;
     std::u32string out;
     out.reserve(text.size());

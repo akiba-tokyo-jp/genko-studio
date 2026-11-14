@@ -225,7 +225,13 @@ private slots:
                                   "LIBRAW-LGPL-ja.md", "licenses/libraw/COPYRIGHT", "licenses/libraw/LICENSE.LGPL", "licenses/libraw/LICENSE.CDDL"}) {  // (PC4 F-e)
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
-        QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList({QStringLiteral("*-OFL.txt")}, QDir::Files).size(), 7);
+        // (書体の追加 F1: the six fonts of before, the screen's, and the forty added — 39 families under the OFL, each with its
+        // own text, and the two pixel fonts under their author's terms)
+        QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList({QStringLiteral("*-OFL.txt")}, QDir::Files).size(), 39);
+        for (const char* there : {"licenses/fonts/k8x12-LICENSE.txt", "licenses/fonts/misaki-LICENSE.txt"}) {
+            QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
+        }
+        QCOMPARE(QDir(doc + QStringLiteral("/licenses/fonts")).entryList(QDir::Files).size(), 41);
 #ifndef _WIN32
         QVERIFY(QFileInfo(doc + QStringLiteral("/licenses/icu/LICENSE")).size() > 0);
         QCOMPARE(QDir(doc + QStringLiteral("/licenses/xcb-util")).entryList({QStringLiteral("*.copyright")}, QDir::Files).size(), 6);

@@ -18,6 +18,7 @@
 #include "core/balloon_tails.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/font_catalog.hpp"
 #include "core/fukidashi.hpp"
 #include "core/paths.hpp"
 #include "core/placement.hpp"
@@ -26,6 +27,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
+#include "render/font_files.hpp"
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
@@ -475,6 +477,22 @@ void ruby_note_issues(const core::StoryLine& line, const core::Page& page, const
     }
 }
 
+// fonts@1 (書体の追加 F2): a line that names one of the faces Genko comes with whose file is not on this computer is drawn
+// in its kind's default face (render::text::face_of): a warning, so the person knows the page is not as it was lettered.
+// Only for the forty added keys: a font file that is not there, or a name nobody knows, says what it always said (nothing
+// here), so a book of before is told what it was told.
+void font_file_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
+    if (!line.style.is_object()) return;
+    const auto font = line.style.find("font");
+    if (font == line.style.end() || !font->is_string()) return;
+    const core::fonts::Entry* face = core::fonts::find(font->get_ref<const std::string&>());
+    if (face == nullptr || !face->added || render::font_files::present(face->key)) return;
+    out.push_back(issue("warning", "font_not_installed", page,
+                        "台詞「" + short_text + "」の書体「" + face->label +
+                            "」のファイルがこのパソコンに見つからないため、いつもの書体で描いた（Genko を入れ直すと直ります）",
+                        box, "line", line.id));
+}
+
 }  // namespace
 
 Json page_issues(const core::Document& episode, const core::Page& page) {
@@ -532,6 +550,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
             ruby_review_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
             ruby_note_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
         }
+        font_file_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);  // (fonts@1)
     }
     cut_faces(page, out);
     for (std::size_t i = 0; i < placed.size(); ++i) {
