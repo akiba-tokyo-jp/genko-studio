@@ -123,6 +123,38 @@ std::array<int, 2> ink_size(const Image& image) {
 }
 
 
+// Whether a line drawn dark on a white picture closes round `inside` (x, y): the white that reaches the picture's edge
+// does not reach it (four ways from pixel to pixel; `dark`: below this is line).
+bool closed_round(const Grey& g, int inside_x, int inside_y, int dark = 128) {
+    std::vector<char> seen(static_cast<std::size_t>(g.w) * static_cast<std::size_t>(g.h), 0);
+    std::vector<std::pair<int, int>> stack;
+    const auto visit = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= g.w || y >= g.h) return;
+        char& mark = seen[static_cast<std::size_t>(y) * static_cast<std::size_t>(g.w) + static_cast<std::size_t>(x)];
+        if (mark != 0 || g.at(x, y) < dark) return;
+        mark = 1;
+        stack.emplace_back(x, y);
+    };
+    for (int x = 0; x < g.w; ++x) visit(x, 0), visit(x, g.h - 1);
+    for (int y = 0; y < g.h; ++y) visit(0, y), visit(g.w - 1, y);
+    while (!stack.empty()) {
+        const auto [x, y] = stack.back();
+        stack.pop_back();
+        visit(x + 1, y), visit(x - 1, y), visit(x, y + 1), visit(x, y - 1);
+    }
+    return seen[static_cast<std::size_t>(inside_y) * static_cast<std::size_t>(g.w) + static_cast<std::size_t>(inside_x)] == 0;
+}
+
+// A line's balloon alone (no letters) on a white picture of `w_mm` × `h_mm` at `dpi`.
+Image balloon_alone(const Document& doc, int dpi, double w_mm = 140, double h_mm = 120) {
+    const genko::render::Size size{static_cast<int>(w_mm / 25.4 * dpi), static_cast<int>(h_mm / 25.4 * dpi)};
+    Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+    const genko::render::text::LetterParts balloon_only{true, false, false, false};
+    genko::render::text::clear_balloon_cache();
+    genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+    return page;
+}
+
 // --- the pins of before fukidashi@2 (tests/data/fukidashi/pins) -------------------------------------------------------------
 
 std::string sha256_of(std::string_view bytes) {
@@ -1692,6 +1724,98 @@ private slots:
         // (black is every pixel a dot covers 30% of or more — grey above 180 is white —: each dot a fifth of a pixel bigger
         // all round, so up to a fifth more than the dots' own area at 600 dpi)
         QVERIFY2(share > density - 0.02 && share < density * 1.2 + 0.02, qPrintable(QStringLiteral("%1 of %2").arg(share).arg(density)));
+    }
+
+    // --- fukidashi@2: drips ----------------------------------------------------------------------------------------------------
+
+    // style.drip_mm: the balloon's body takes the box less that much of its foot, and drips run down from it — never past
+    // the box: nothing is drawn below the box's foot or beside it, the longest drip reaches the foot, and above the
+    // drips' roots the balloon is the balloon of the body's box alone, pixel for pixel.
+    void dripsHangInsideTheBox_data() {
+        QTest::addColumn<QString>("kind");
+        for (const char* kind : {"speech", "box", "rounded", "capsule", "polygon", "shout", "cloud", "heart", "star", "diamond", "narration"}) QTest::newRow(kind) << QString::fromLatin1(kind);
+    }
+    void dripsHangInsideTheBox() {
+        QFETCH(QString, kind);
+        const std::string k = kind.toStdString();
+        const int dpi = 300;
+        // (the box 40..90 × 40..88 mm, drips of 8 mm: the body 40..80)
+        const Document dripping = one_line(k.c_str(), Json{{"h_mm", 48}, {"style", Json{{"drip_mm", 8}, {"drip_seed", 5}}}});
+        const Document body = one_line(k.c_str(), Json{{"h_mm", 40}});
+        const Grey with = grey_of(balloon_alone(dripping, dpi)), without = grey_of(balloon_alone(body, dpi));
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const int x0 = px(40), x1 = px(90), y1 = px(88), body_foot = px(80);
+        int below = 0, beside = 0, hanging = 0, lowest = 0;
+        for (int y = 0; y < with.h; ++y) {
+            for (int x = 0; x < with.w; ++x) {
+                if (with.at(x, y) == 255) continue;
+                if (y >= y1) ++below;
+                if (x < x0 || x >= x1) ++beside;
+                if (y >= body_foot + 2) ++hanging, lowest = std::max(lowest, y);
+            }
+        }
+        QCOMPARE(below, 0);
+        QCOMPARE(beside, 0);
+        QVERIFY2(hanging > 200, qPrintable(QString::number(hanging)));
+        QVERIFY2(lowest >= y1 - 2, qPrintable(QStringLiteral("the longest drip ends at %1 of %2").arg(lowest).arg(y1)));
+        // (the upper three fifths of the body: as without drips)
+        const int upto = px(40 + 40 * 0.6);
+        int unlike = 0;
+        for (int y = 0; y < upto; ++y) {
+            for (int x = 0; x < with.w; ++x) unlike += with.at(x, y) != without.at(x, y) ? 1 : 0;
+        }
+        QCOMPARE(unlike, 0);
+        // (and the line closes round the balloon: no gap where a drip joins it)
+        QVERIFY(closed_round(with, px(65), px(60)));
+    }
+
+    // The drips are the line's own: the same line draws the same drips wherever it lies (300 px to the right: the same
+    // pixels, moved) and each time; another seed draws others; and nothing but the seed arranges them — a line with
+    // another id draws the same.
+    void theSameSeedDrawsTheSameDrips() {
+        const int dpi = 300;
+        const auto drawn = [&](double x_mm, int seed, const char* id = "L1") {
+            Document doc = one_line("speech", Json{{"id", id}, {"x_mm", x_mm}, {"w_mm", 50.8}, {"h_mm", 48}, {"style", Json{{"drip_mm", 8}, {"drip_seed", seed}}}});
+            return balloon_alone(doc, dpi, 8.5 * 25.4, 5 * 25.4);
+        };
+        const Image here = drawn(42.333333333333336, 3);   // (500 px)
+        const Image there = drawn(67.73333333333333, 3);   // (800 px: 300 px to the right)
+        const genko::render::Box a{400, 0, 1200, here.height()};
+        const genko::render::Box b{700, 0, 1500, there.height()};
+        QVERIFY(here.crop(a).tobytes() == there.crop(b).tobytes());
+        QVERIFY(drawn(42.333333333333336, 3).tobytes() == here.tobytes());
+        QVERIFY(drawn(42.333333333333336, 3, "another").tobytes() == here.tobytes());
+        QVERIFY(drawn(42.333333333333336, 4).tobytes() != here.tobytes());
+        QVERIFY(drawn(42.333333333333336, 0).tobytes() != here.tobytes());
+        // (no seed said is seed 0)
+        const Document unsaid = one_line("speech", Json{{"x_mm", 42.333333333333336}, {"w_mm", 50.8}, {"h_mm", 48}, {"style", Json{{"drip_mm", 8}}}});
+        QVERIFY(balloon_alone(unsaid, dpi, 8.5 * 25.4, 5 * 25.4).tobytes() == drawn(42.333333333333336, 0).tobytes());
+    }
+
+    // Whatever the seed, the number and the width, the line closes round the balloon and its drips — no gap where a drip
+    // joins the outline, no drip left open —, on a smooth outline and on one with corners; and a line that says how many
+    // drips and how wide has them so: more drips are more ink below the body.
+    void dripsNeverOpenTheLine_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<int>("seed");
+        for (const char* kind : {"speech", "rounded", "heart", "shout", "box"}) {
+            for (int seed = 0; seed < 24; ++seed) QTest::newRow(qPrintable(QStringLiteral("%1, seed %2").arg(kind).arg(seed))) << QString::fromLatin1(kind) << seed;
+        }
+    }
+    void dripsNeverOpenTheLine() {
+        QFETCH(QString, kind);
+        QFETCH(int, seed);
+        const int dpi = 300;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        Json style{{"drip_mm", 4.0 + seed % 5 * 2.0}, {"drip_seed", seed}};
+        if (seed % 3 == 1) style["drips"] = 3 + seed % 9;
+        if (seed % 4 == 2) style["drip_width_mm"] = 0.8 + seed % 6 * 0.6;
+        if (seed % 7 == 3) style["border_mm"] = 0.7;
+        const Document doc = one_line(kind.toStdString().c_str(), Json{{"h_mm", 50}, {"style", style}});
+        const Grey g = grey_of(balloon_alone(doc, dpi));
+        QVERIFY2(closed_round(g, px(65), px(55)), style.dump().c_str());
+        // (below the body the white inside a drip is closed in too: the white the edge reaches has no ink outside the box)
+        for (int y = px(90) + 1; y < g.h; ++y) QVERIFY(g.at(px(65), y) == 255);
     }
 
     // A part of the additions' sample is the whole page cut there, every pixel: each page at 600 dpi in tiles, and at 150.

@@ -1256,6 +1256,56 @@ std::vector<Shape> joins_between(const Contour& a, const Contour& b, double reac
     return out;
 }
 
+Shape drip(double x, double root_y, double left_top, double right_top, double half, double length) {
+    Shape shape;
+    if (!(half > 0) || !(length > 0)) return shape;
+    // its right side, from the root down, as (half width, how far down): then the round end, and the left side its
+    // mirror image
+    std::vector<P> side;
+    side.push_back({half, 0.0});
+    // (a side that changes width between two heights: leaving and arriving straight down)
+    const auto eased = [&](double w0, double y0, double w1, double y1) {
+        if (y1 - y0 < 0.5) return;
+        const int steps = std::clamp(static_cast<int>(std::ceil((y1 - y0) / 2)), 6, 64);
+        const double ym = (y0 + y1) / 2;
+        for (int j = 1; j <= steps; ++j) {
+            const double t = static_cast<double>(j) / steps;
+            const double u = 1 - t;
+            const double b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
+            push(side, {(b0 + b1) * w0 + (b2 + b3) * w1, b0 * y0 + (b1 + b2) * ym + b3 * y1});
+        }
+    };
+    double end = 0.0;     // (the round end's radius)
+    double middle = 0.0;  // (and how far down its middle lies)
+    if (length >= 3.2 * half) {
+        // a neck of 0.6 of the root's width, then a drop of 0.9
+        end = 0.9 * half;
+        middle = length - end;
+        const double neck = 0.6 * half;
+        const double flare = std::min(1.3 * half, middle * 0.35);
+        const double swell = std::max(flare, middle - 1.5 * half);
+        eased(half, 0.0, neck, flare);
+        if (swell > flare) push(side, {neck, swell});
+        eased(neck, swell, end, middle);
+    } else {
+        end = std::min(0.85 * half, length);
+        middle = length - end;
+        eased(half, 0.0, end, middle);
+    }
+    if (side.back().x != end || side.back().y != middle) push(side, {end, middle});
+    const std::vector<P> quarter = unit_quarter(std::max(3, quarter_depth(end)));  // ((sin a, cos a): from straight down the page's right to its foot)
+    shape.points.push_back({x - half, left_top});
+    shape.points.push_back({x + half, right_top});
+    for (const P& p : side) push(shape.points, {x + p.x, root_y + p.y});
+    for (std::size_t i = 1; i < quarter.size(); ++i) push(shape.points, {x + end * quarter[i].y, root_y + middle + end * quarter[i].x});
+    shape.points.back().x = x;  // (its tip, on its line)
+    for (std::size_t i = quarter.size() - 1; i-- > 0;) push(shape.points, {x - end * quarter[i].y, root_y + middle + end * quarter[i].x});
+    for (std::size_t i = side.size(); i-- > 0;) push(shape.points, {x - side[i].x, root_y + side[i].y});
+    shape.stroke.assign(shape.points.size(), 1);
+    shape.stroke[0] = 0;  // (across its top, inside the balloon)
+    return shape;
+}
+
 Shape neck(P from, P to, double width) {
     const P across = mul(inward(unit(sub(to, from))), width / 2);
     Shape shape;

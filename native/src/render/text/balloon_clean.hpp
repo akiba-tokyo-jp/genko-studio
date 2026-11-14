@@ -139,6 +139,12 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
 std::vector<Contour> bubble_trail(const Contour& guide, P centre, P tip, double radius);
 // The rounded joins where two outlines cross (joined balloons): a patch in each notch, `reach` along both.
 std::vector<Shape> joins_between(const Contour& a, const Contour& b, double reach);
+// fukidashi@2 (SPEC BALLOON-02) — a drip hanging from a balloon: a finger about the upright line x = `x`, `half` its
+// half width where it leaves the outline (at `root_y`), `length` long from there down to its tip. A long one (over 3.2
+// of its half width) slims to a neck and ends in a round drop; a short one ends round. Its two sides begin inside the
+// balloon, at `left_top` and `right_top` (y); the stretch between them is not part of the outline. Its own mirror image
+// about its line.
+Shape drip(double x, double root_y, double left_top, double right_top, double half, double length);
 // A neck between two outlines that do not meet (joined balloons a little apart): from one middle to the other,
 // `width` wide.
 Shape neck(P from, P to, double width);

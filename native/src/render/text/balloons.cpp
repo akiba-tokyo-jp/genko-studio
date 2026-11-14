@@ -128,6 +128,7 @@ struct Body {
     P centre;
     double least = 0.0;  // (its narrow half size)
     bool smooth = false;
+    bool soft = false;   // (no corner anywhere: smooth, or smooth but for its trembling — a drip's join with it is rounded)
     std::string kind;
 };
 
@@ -215,6 +216,7 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         body.smooth = true;
     }
     if (body.guide.empty()) body.guide = body.outline;
+    body.soft = body.smooth;
     if (body.smooth && kind != "flash") {
         const double wave = wave_px(lst, line, dpi);
         if (wave > 0) {  // (a trembling outline: its tails leave the outline it trembles about, with a corner)
@@ -625,6 +627,90 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
     return clean::union_plane(dots, size.width, size.height).values;
 }
 
+// --- fukidashi@2 (SPEC BALLOON-02): drips ---------------------------------------------------------------------------------
+
+// The drips of a line's balloon (style.drip_mm and drips, drip_width_mm, drip_seed), added to the group's shapes: fingers
+// that hang from the body's outline, the longest down to the box's foot `foot`. They stand in equal slots across the
+// middle of the body — 0.8 of its width, 0.9 for a square kind —, as many as style.drips (not said: one every 3.2
+// widths, 3 to 16), each as wide as style.drip_width_mm (not said: 7% of the body's width, 1.2 to 4 mm). What differs
+// from drip to drip comes from Python's random.Random(drip_seed) alone — the seed the line holds —, drawn in one order:
+// first which slot of the middle third holds the longest drip, then for each slot how far off its slot's middle it
+// stands (±0.3 of a slot), how long it is (0.25 to 1 of the reach), how wide (0.7 to 1.3 of the width), and whether it
+// is there at all (four in five are). The same line draws the same drips, wherever it lies.
+void add_drips(std::vector<clean::Shape>& shapes, const core::StoryLine& line, const Json& lst, const Body& body, const clean::Box& box, double foot,
+               double line_width, int dpi) {
+    if (body.outline.size() < 3 || body.guide.size() < 3) return;
+    const double reach = foot - box.y1;
+    if (!(reach >= 1)) return;
+    // (the outline the drips leave from: across its own width)
+    double gx0 = body.guide.front().x, gx1 = gx0, gy0 = body.guide.front().y, gy1 = gy0;
+    for (const P& p : body.guide) {
+        gx0 = core::py_min(gx0, p.x), gx1 = core::py_max(gx1, p.x);
+        gy0 = core::py_min(gy0, p.y), gy1 = core::py_max(gy1, p.y);
+    }
+    const double mm = dpi / 25.4;
+    const double body_w = box.x1 - box.x0;
+    const double usual = at(lst, "drip_width_mm").is_number() ? core::py_max(0.3, core::py_min(10.0, core::to_float(at(lst, "drip_width_mm")))) * mm
+                                                              : core::py_max(1.2 * mm, core::py_min(4.0 * mm, body_w * 0.07));
+    const double span = (gx1 - gx0) * (square(body.kind) ? 0.9 : 0.8);
+    std::int64_t count = at(lst, "drips").is_number() ? core::to_int(at(lst, "drips")) : core::py_round_int(span / (3.2 * usual));
+    count = at(lst, "drips").is_number() ? std::clamp<std::int64_t>(count, 1, 24) : std::clamp<std::int64_t>(count, 3, 16);
+    const std::int64_t seed = at(lst, "drip_seed").is_number() ? std::clamp<std::int64_t>(core::to_int(at(lst, "drip_seed")), 0, 999999) : 0;
+    (void)line;
+    core::PyRandom rng(seed);
+    const std::int64_t third = count / 3;
+    const std::int64_t longest = third + static_cast<std::int64_t>(rng.random() * static_cast<double>(std::max<std::int64_t>(1, count - 2 * third)));
+    const double slot = span / static_cast<double>(count);
+    const double first = (gx0 + gx1) / 2 - span / 2;
+    const std::vector<double> guide_lengths = clean::lengths_of(body.guide);
+    const std::vector<double> outline_lengths = clean::lengths_of(body.outline);
+    const double from_y = (gy0 + gy1) / 2;
+    // (where the upright line at x leaves an outline below the guide's middle; nothing when it does not cross it there)
+    const auto leaves = [&](const clean::Contour& outline, const std::vector<double>& lengths, double x) -> std::optional<double> {
+        if (!clean::inside(outline, {x, from_y})) return std::nullopt;
+        const P on = clean::point_at(outline, lengths, clean::facing(outline, lengths, {x, from_y}, {x, foot + 10}));
+        if (std::fabs(on.x - x) > 0.01 || on.y <= from_y) return std::nullopt;
+        return on.y;
+    };
+    const auto below = [&](double x) { return leaves(body.guide, guide_lengths, x); };
+    for (std::int64_t k = 0; k < count; ++k) {
+        const double off = rng.uniform(-0.3, 0.3);
+        const double share = rng.uniform(0.25, 1.0);
+        const double wide = rng.uniform(0.7, 1.3);
+        const bool there = rng.random() >= 0.2 || k == longest;
+        if (!there) continue;
+        const double x = std::floor(first + (static_cast<double>(k) + 0.5 + off) * slot) + 0.5;  // (on a pixel's middle: an upright drip is its own mirror image on the page)
+        const double half = core::py_max(1.0, usual * wide / 2);
+        // (it hangs from the outline itself — a burst's point, a cloud's bump —, its sides beginning inside, from the
+        // outline its tails leave from)
+        const std::optional<double> root = leaves(body.outline, outline_lengths, x), left = below(x - half), right = below(x + half);
+        if (!root || !left || !right) continue;  // (off the outline's foot: no drip there)
+        // (how far down it reaches, from where its middle leaves the outline; it is a finger from where both its sides
+        // have left the outline — on a slope its upper side runs straight down to there — and at least a round end long)
+        // (a little past where the lower of its sides leaves the outline: the outline crosses its side, not a corner of it)
+        const double clear = core::py_max(*root, core::py_max(leaves(body.outline, outline_lengths, x - half).value_or(*root),
+                                                              leaves(body.outline, outline_lengths, x + half).value_or(*root))) +
+                             core::py_max(1.5, half * 0.3);
+        const double tip = core::py_min(foot, core::py_max(k == longest ? foot : *root + reach * share, clear + 1.2 * half));
+        const double length = tip - clear;
+        if (!(length >= 1)) continue;
+        // (its sides begin a little inside the balloon — less if the balloon is thin there)
+        double depth = core::py_max(2.0, line_width * 3 + 2);
+        bool held = false;
+        for (int attempt = 0; attempt < 4 && !held; ++attempt) {
+            held = clean::inside(body.outline, {x - half, *left - depth}) && clean::inside(body.outline, {x + half, *right - depth});
+            if (!held) depth /= 2;
+        }
+        if (!held) continue;
+        clean::Shape finger = clean::drip(x, clear, *left - depth, *right - depth, half, length);
+        if (finger.points.size() < 3) continue;
+        if (body.soft) {  // (its join with the balloon rounded, as liquid gathers before it runs)
+            for (clean::Shape& join : clean::joins_between(body.outline, finger.points, core::py_max(line_width * 1.5, half * 0.9))) shapes.push_back(std::move(join));
+        }
+        shapes.push_back(std::move(finger));
+    }
+}
+
 // --- one group's shapes (_paint_shapes) ------------------------------------------------------------------------------
 
 using Tails = std::vector<std::pair<const core::StoryLine*, Json>>;
@@ -683,8 +769,14 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     std::vector<Body> bodies;
     std::vector<clean::Box> locals;
     std::vector<std::pair<clean::Box, P>> fades;
+    std::vector<clean::Box> whole_boxes;  // (each line's own box; `locals`: its balloon's body — the box less its drips' reach)
     for (std::size_t i = 0; i < lines.size(); ++i) {
-        locals.push_back(local(boxes[i]));
+        whole_boxes.push_back(local(boxes[i]));
+        locals.push_back(whole_boxes.back());
+        if (core::drip_reach(*lines[i]) > 0) {  // (fukidashi@2: the body's foot raised; the drips run down to the box's)
+            const std::array<double, 4> body = core::body_box(*lines[i]);
+            locals.back().y1 = core::py_max(locals.back().y0 + 1, core::py_min(locals.back().y1, static_cast<double>(px(body[1] + body[3], dpi) - ry0)));
+        }
         bodies.push_back(body_of(*lines[i], style_of(*lines[i]), locals.back(), region, dpi));
         shapes.push_back(clean::whole(bodies.back().outline));
     }
@@ -768,6 +860,10 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         if (tail_style == "fade") fades.emplace_back(box, tip);
     }
 
+    for (std::size_t i = 0; i < lines.size(); ++i) {  // (fukidashi@2: the drips)
+        if (locals[i].y1 < whole_boxes[i].y1) add_drips(shapes, *lines[i], style_of(*lines[i]), bodies[i], locals[i], whole_boxes[i].y1, width, dpi);
+    }
+
     // their coverage: the fill is their union; the line, what lies within its width of the union's edge
     const clean::Plane fill = clean::fill_plane(shapes, size.width, size.height);
     const std::size_t count = fill.values.size();
@@ -835,7 +931,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         clean::Plane dots;
         dots.width = size.width;
         dots.height = size.height;
-        dots.values = tone_plane(*tone, ramp_over(locals, tone->dir, tone->radial), size, dpi, rx0, ry0);
+        dots.values = tone_plane(*tone, ramp_over(whole_boxes, tone->dir, tone->radial), size, dpi, rx0, ry0);
         if (tone->inset_mm > 0) {
             const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), width + tone->inset_mm / 25.4 * dpi, size.width, size.height);
             for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
@@ -853,7 +949,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         // (fukidashi@2: the fill a blend from its own colour to another)
         out.blend = true;
         out.blend_to = colour_of(at(blend, "to"), out.paper);
-        out.ramp = ramp_over(locals, setting(blend, "dir", 90.0, -360.0, 360.0), core::py_truthy(at(blend, "radial")));
+        out.ramp = ramp_over(whole_boxes, setting(blend, "dir", 90.0, -360.0, 360.0), core::py_truthy(at(blend, "radial")));
     }
     out.line_rgb = colour_of(at(st, "line_rgb"), kOutline);
     clean::Plane plane;

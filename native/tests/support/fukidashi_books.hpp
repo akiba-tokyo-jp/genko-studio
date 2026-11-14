@@ -412,6 +412,40 @@ inline core::Document additions_book() {
             {"star", 36, 34, "太い線", Json{{"border_mm", 0.8}}, no_tail},
         },
         4, 47.0, 43.0);
+    // --- page 3: the drips (each box its body and, below it, the drips' reach) ---
+    const auto drip = [](double mm, Json more = Json::object()) {
+        Json st{{"drip_mm", mm}};
+        for (const auto& [key, value] : more.items()) st[key] = value;
+        return st;
+    };
+    lay(3,
+        {
+            {"speech", 36, 34, "こわい\nよ", drip(6), no_tail},
+            {"speech", 36, 34, "ならび\n1", drip(6, Json{{"drip_seed", 1}}), no_tail},
+            {"speech", 36, 34, "ならび\n2", drip(6, Json{{"drip_seed", 2}}), to(24, 22)},
+            {"speech", 36, 34, "ならび\n7", drip(6, Json{{"drip_seed", 7}}), no_tail},
+            {"speech", 36, 31, "短い", drip(3), no_tail},
+            {"speech", 36, 40, "長い", drip(12), no_tail},
+            {"speech", 36, 34, "3 本", drip(6, Json{{"drips", 3}}), no_tail},
+            {"speech", 36, 34, "12 本", drip(6, Json{{"drips", 12}, {"drip_width_mm", 1.2}}), no_tail},
+            {"speech", 36, 36, "太い\nしずく", drip(8, Json{{"drip_width_mm", 4}, {"drips", 5}}), no_tail},
+            {"speech", 36, 36, "細い\nしずく", drip(8, Json{{"drip_width_mm", 0.8}}), no_tail},
+            {"box", 36, 32, "溶ける\n四角", drip(7), no_tail},
+            {"rounded", 36, 34, "かどまる", drip(7, Json{{"drip_seed", 4}}), to(-24, 24)},
+            {"speech", 36, 36, "ホラー", with(drip(8, Json{{"drip_seed", 3}}), black), no_tail},
+            {"box", 36, 34, "ベタの\n四角", with(drip(8, Json{{"drip_seed", 5}}), black), no_tail},
+            {"shout", 40, 40, "ぎゃあ", with(drip(8, Json{{"drip_seed", 2}}), black), no_tail},
+            {"speech", 36, 36, "ふるえる\n声", with(drip(8, Json{{"drip_seed", 6}, {"wave_mm", 0.35}}), black), to(24, 24)},
+            {"shout", 40, 40, "叫び", drip(8), no_tail},
+            {"cloud", 38, 38, "もくもく", drip(8, Json{{"drip_seed", 9}}), no_tail},
+            {"capsule", 15, 40, "たてなが", drip(7), no_tail},
+            {"heart", 36, 38, "のろい", drip(7, Json{{"drip_seed", 1}}), no_tail},
+            {"speech", 36, 36, "太い線", drip(8, Json{{"border_mm", 0.8}, {"drip_seed", 11}}), no_tail},
+            {"speech", 36, 36, "トーンと", drip(8, Json{{"drip_seed", 12}, {"fill_tone", Json{{"density", 0.1}, {"to", 0.6}}}}), no_tail},
+            {"polygon", 36, 36, "キカイ", drip(7, Json{{"drip_seed", 13}}), no_tail},
+            {"speech", 36, 36, "二重", drip(7, Json{{"drip_seed", 14}, {"double", true}}), no_tail},
+        },
+        4, 47.0, 43.0);
     // --- page 4: a tone, a tone that grows darker, and a blend of colours, inside the outlines ---
     const auto tone = [](Json spec) { return Json{{"fill_tone", std::move(spec)}}; };
     const auto blend = [](Json spec, Json from = Json()) {
