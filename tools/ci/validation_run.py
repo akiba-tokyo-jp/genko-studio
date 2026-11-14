@@ -609,7 +609,12 @@ def pair_results(folder, plan):
         if pins and any(p != pins[0] for p in pins):
             failures.append(platform_name + ': 構成間のsource不一致')
     # resumed: 続きから走らせた構成（回の数、落ちてから合格した試験、前の回の不合格の理由）。原因はHANDOFFに書く。
-    return {'passed': not failures, 'failures': failures, 'presets': sorted(rows), 'performance': 'not_run', 'resumed': resumed}
+    # plan・configurations: どの段階の、どの範囲の合格か（2026-11-14 から milestone は「全構成の全試験」ではない。
+    # ASan と Windows は差分に関係する試験で、写真加工の試験を ASan から外すことがある）。
+    return {'passed': not failures, 'failures': failures, 'presets': sorted(rows), 'performance': 'not_run', 'resumed': resumed,
+            'plan': {'phase': plan.get('phase'), 'tier': plan.get('tier'), 'schema': plan.get('schema'),
+                     'asan_without_photo': len(plan.get('asan_without_photo') or [])},
+            'configurations': {preset: {'suite': wanted.get('suite'), 'tests': len(wanted.get('tests', []))} for preset, wanted in sorted(expected.items())}}
 
 
 def main():

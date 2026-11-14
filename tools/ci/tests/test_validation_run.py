@@ -127,6 +127,25 @@ class PairTests(unittest.TestCase):
             plan, _, _ = self.evidence(folder)
             self.assertTrue(runner.pair_results(folder, plan)['passed'])
 
+    def test_the_audit_says_which_scope_passed(self):
+        # (review P3: matrix-audit.json did not say the phase or how many tests each configuration ran — a stage exit on
+        # the related tests and a run of everything looked the same)
+        with tempfile.TemporaryDirectory() as folder:
+            plan, out, state = self.evidence(folder)
+            plan.update(tier='related', schema=2, asan_without_photo=['test_fx', 'test_smart'])
+            state['plan_hash'] = runner.plan_hash(plan)
+            (out / 'result.json').write_text(json.dumps(state))
+            audit = runner.pair_results(folder, plan)
+            self.assertTrue(audit['passed'], audit)
+            self.assertEqual(audit['plan'], {'phase': 'development', 'tier': 'related', 'schema': 2, 'asan_without_photo': 2})
+            self.assertEqual(audit['configurations'], {'linux-debug': {'suite': 'related', 'tests': 1}})
+            # (a plan of before the fields: said as it is, not guessed)
+            old = {'phase': 'development', 'matrix': plan['matrix']}
+            state['plan_hash'] = runner.plan_hash(old)
+            (out / 'result.json').write_text(json.dumps(state))
+            audit = runner.pair_results(folder, old)
+            self.assertEqual(audit['plan'], {'phase': 'development', 'tier': None, 'schema': None, 'asan_without_photo': 0})
+
     def test_partial_artifact_missing_log_fails(self):
         with tempfile.TemporaryDirectory() as folder:
             plan, out, _ = self.evidence(folder)

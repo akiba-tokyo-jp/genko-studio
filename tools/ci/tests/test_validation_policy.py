@@ -1,12 +1,15 @@
 """検証頻度・選択・安全側への拡大を確認する回帰試験。"""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('validation_policy', ROOT / 'tools/ci/validation_policy.py')
@@ -1041,6 +1044,196 @@ class PhotoListTests(unittest.TestCase):
             self.assertGreater(len(rows['linux-asan'] & policy.PHOTO_TESTS), 60, path)
 
 
+def load_checker():
+    spec = importlib.util.spec_from_file_location('validation_closure_check', ROOT / 'tools/ci/validation_closure_check.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    return checker
+
+
+def write_ninja_deps(file, deps, version=4):
+    """A .ninja_deps log as ninja writes it: path records, then one deps record for each output."""
+    paths = []
+    for out, inputs in deps.items():
+        for path in [out] + list(inputs):
+            if path not in paths:
+                paths.append(path)
+    data = b'# ninjadeps\n' + struct.pack('<i', version)
+    for index, path in enumerate(paths):
+        raw = path.encode('utf-8')
+        raw += b'\0' * (-len(raw) % 4)
+        data += struct.pack('<I', len(raw) + 4) + raw + struct.pack('<I', ~index & 0xffffffff)
+    for out, inputs in deps.items():
+        body = struct.pack('<i', paths.index(out)) + (struct.pack('<Q', 1) if version == 4 else struct.pack('<I', 1))
+        body += b''.join(struct.pack('<i', paths.index(i)) for i in inputs)
+        data += struct.pack('<I', len(body) | 0x80000000) + body
+    Path(file).write_bytes(data)
+
+
+class ClosureCheckerTests(unittest.TestCase):
+    """The checker's judging on a made-up build, with nm's answers given (review P2-2, P3)."""
+
+    def setUp(self):
+        self.checker = load_checker()
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.root = write_tree(Path(self.folder.name) / 'tree', MADE_UP).resolve()
+        self.build = self.root / 'build'
+        (self.build / 'tests').mkdir(parents=True)
+        (self.build / 'src/api').mkdir(parents=True)
+        (self.build / 'CMakeCache.txt').write_text(f'CMAKE_HOME_DIRECTORY:INTERNAL={self.root}/native\nGENKO_SANITIZE:STRING=\n')
+        tree = policy.SourceTree(self.root)
+        self.sources = sorted(p for p in tree.text if p.endswith(policy.IMPLEMENTATION_SUFFIXES))
+        self.table = {}      # (file → nm's rows)
+        commands = []
+        deps = {}
+        for index, source in enumerate(self.sources):
+            obj = self.build / 'obj' / (source.replace('/', '_') + '.o')
+            obj.parent.mkdir(exist_ok=True)
+            obj.write_bytes(b'')
+            os.utime(self.root / source, (1000, 1000))
+            os.utime(obj, (2000, 2000))
+            commands.append({'directory': str(self.build), 'command': 'c++ -c', 'file': str(self.root / source), 'output': 'obj/' + obj.name})
+            self.table[str(obj)] = [('sym_' + source.replace('/', '_').replace('.', '_'), 'T'), ('main', 'T') if 'main' in source or 'helper' in source else ('weak_' + str(index), 'W')]
+            headers = sorted(h for h in tree.closure([source]) if not h.endswith(policy.IMPLEMENTATION_SUFFIXES) and h in tree.includes and h in self.include_closure(tree, source))
+            deps['obj/' + obj.name] = ['../' + source] + ['../' + h for h in headers] + ['/usr/include/stdio.h']
+        for header in (p for p in tree.text if not p.endswith(policy.IMPLEMENTATION_SUFFIXES)):
+            os.utime(self.root / header, (1000, 1000))
+        (self.build / 'compile_commands.json').write_text(json.dumps(commands))
+        self.deps = deps
+        write_ninja_deps(self.build / '.ninja_deps', deps)
+        self.tree = tree
+        # every registered test and program linked from exactly its closure
+        for name, seeds in list(tree.tests.items()) + list(tree.programs.items()):
+            self.link(name, [p for p in tree.closure(seeds) if p.endswith(policy.IMPLEMENTATION_SUFFIXES)])
+
+    @staticmethod
+    def include_closure(tree, source):
+        seen = set()
+        stack = [source]
+        while stack:
+            for header in tree.includes.get(stack.pop(), ()):
+                if header not in seen:
+                    seen.add(header)
+                    stack.append(header)
+        return seen
+
+    def symbol(self, source):
+        return 'sym_' + source.replace('/', '_').replace('.', '_')
+
+    def link(self, name, sources):
+        binary = (self.build / 'src/api' / name) if name == 'genko' else (self.build / 'tests' / name)
+        binary.write_bytes(b'')
+        os.utime(binary, (3000, 3000))
+        self.table[str(binary)] = [(self.symbol(s), 'T') for s in sources] + [('main', 'T')]
+
+    def check(self, **more):
+        def symbols(path, defined_only=False):
+            return self.table.get(str(path))
+        with unittest.mock.patch.object(self.checker, 'symbols', symbols):
+            return self.checker.check(self.build, **more)
+
+    def test_a_build_linked_from_the_closures_passes(self):
+        report = self.check()
+        self.assertEqual((report['passed'], report['why_not_passed'], report['misses'], report['header_misses']), (True, [], [], []))
+        self.assertEqual(report['binaries_checked'], len(self.tree.tests) + len(self.tree.programs))
+        self.assertEqual(report['binaries_up_to_date'], report['binaries_checked'])
+        self.assertGreater(report['headers_checked'], 5)
+        self.assertEqual(report['linked'], report['in_closure'])
+        self.assertEqual(report['extra'], 0)
+        self.assertEqual(report['not_covered'], self.checker.NOT_COVERED)
+        self.assertGreaterEqual(len(report['not_covered']), 4)
+        # (linked from less than the closure: still a pass, the difference counted)
+        self.link('test_alpha', ['native/tests/unit/test_alpha.cpp', 'native/src/core/a.cpp'])
+        report = self.check()
+        self.assertTrue(report['passed'])
+        self.assertGreater(report['extra'], 0)
+
+    def test_an_object_linked_from_outside_the_closure_is_a_miss(self):
+        self.link('test_alpha', ['native/tests/unit/test_alpha.cpp', 'native/src/core/a.cpp', 'native/src/core/window.cpp'])
+        report = self.check()
+        self.assertFalse(report['passed'])
+        self.assertEqual(report['misses'], [['test_alpha', 'code', 'native/src/core/window.cpp']])
+        self.assertIn('閉包に無いソースがリンクされている', report['why_not_passed'])
+
+    def test_what_it_cannot_see_is_not_a_pass(self):
+        # (review P2-2: with every object unreadable it said "0 misses, passed")
+        saved = dict(self.table)
+        for obj in [k for k in self.table if k.endswith('.o')]:
+            self.table[obj] = None
+        report = self.check()
+        self.assertFalse(report['passed'])
+        self.assertEqual(len(report['objects_unreadable']), len(self.sources))
+        self.assertIn('読めないオブジェクトがある', report['why_not_passed'])
+        self.table = dict(saved)
+        one = next(k for k in self.table if k.endswith('core_a.cpp.o'))
+        self.table[one] = None
+        self.assertEqual(self.check()['why_not_passed'], ['読めないオブジェクトがある'])
+        # a registered test with no binary, or one nm cannot read
+        self.table = dict(saved)
+        (self.build / 'tests/test_beta').unlink()
+        report = self.check()
+        self.assertEqual((report['passed'], report['binaries_missing']), (False, ['test_beta']))
+        self.assertEqual(report['why_not_passed'], ['登録された実行物が無い・読めない'])
+        self.link('test_beta', [p for p in self.tree.closure(self.tree.tests['test_beta']) if p.endswith(policy.IMPLEMENTATION_SUFFIXES)])
+        self.assertTrue(self.check()['passed'])
+        self.table[str(self.build / 'tests/test_beta')] = None
+        self.assertEqual(self.check()['why_not_passed'], ['登録された実行物が無い・読めない'])
+
+    def test_a_build_older_than_the_tree_or_half_linked_is_not_a_pass(self):
+        os.utime(self.root / 'native/src/core/a.cpp', (2500, 2500))       # (edited after it was compiled)
+        report = self.check()
+        self.assertEqual(report['why_not_passed'], ['オブジェクトより新しいソース・ヘッダーがある（ビルドし直す前）'])
+        self.assertEqual(report['sources_newer_than_their_objects'], [['native/src/core/a.cpp', 'native/src/core/a.cpp']])
+        os.utime(self.root / 'native/src/core/a.cpp', (1000, 1000))
+        os.utime(self.root / 'native/src/core/b.hpp', (2500, 2500))       # (a header it read)
+        report = self.check()
+        self.assertEqual(report['why_not_passed'], ['オブジェクトより新しいソース・ヘッダーがある（ビルドし直す前）'])
+        self.assertIn(['native/src/core/a.cpp', 'native/src/core/b.hpp'], report['sources_newer_than_their_objects'])
+        os.utime(self.root / 'native/src/core/b.hpp', (1000, 1000))
+        obj = next(k for k in self.table if k.endswith('core_a.cpp.o'))
+        os.utime(obj, (3500, 3500))                                         # (compiled again, not linked yet)
+        report = self.check()
+        self.assertEqual(report['why_not_passed'], ['実行物より新しいオブジェクトがある（リンクし直す前）'])
+        self.assertIn('test_alpha', report['binaries_older_than_their_objects'])
+        self.assertEqual(report['binaries_up_to_date'] + len(report['binaries_older_than_their_objects']), report['binaries_checked'])
+
+    def test_a_header_the_compiler_read_outside_the_include_closure(self):
+        # (an include root the policy does not know: the compiler found later.hpp for a.cpp, the text of a.cpp does not lead to it)
+        self.deps['obj/native_src_core_a.cpp.o'].append('../native/src/core/later.hpp')
+        write_ninja_deps(self.build / '.ninja_deps', self.deps)
+        report = self.check()
+        self.assertEqual(report['header_misses'], [['native/src/core/a.cpp', 'native/src/core/later.hpp']])
+        self.assertEqual(report['why_not_passed'], ['コンパイラが読んだヘッダーがインクルードの閉包に無い'])
+        (self.build / '.ninja_deps').unlink()
+        self.assertEqual(self.check()['why_not_passed'], ['ninja の依存の記録（.ninja_deps）が無い・読めない'])
+        (self.build / '.ninja_deps').write_bytes(b'not a log')
+        self.assertEqual(self.check()['why_not_passed'], ['ninja の依存の記録（.ninja_deps）が無い・読めない'])
+
+    def test_another_tree_than_the_builds_is_only_for_reference(self):
+        with tempfile.TemporaryDirectory() as folder:
+            other = write_tree(folder, MADE_UP)
+            report = self.check(root=other)
+            self.assertEqual((report['passed'], report['misses']), (False, []))
+            self.assertEqual(report['why_not_passed'], ['閉包を作った木がビルドの木と違う（参考の結果）'])
+
+    def test_the_dependency_log_is_read_in_both_versions(self):
+        deps = {'a.o': ['../a.cpp', '../a.hpp'], 'b.o': ['../b.cpp']}
+        for version in (3, 4):
+            with tempfile.TemporaryDirectory() as folder:
+                log = Path(folder) / '.ninja_deps'
+                write_ninja_deps(log, deps, version)
+                self.assertEqual(self.checker.ninja_deps(log), deps)
+                # (a record cut short at the log's end — a build that was stopped — is left out)
+                log.write_bytes(log.read_bytes() + b'\x10\x00\x00\x80\x00\x00')
+                self.assertEqual(self.checker.ninja_deps(log), deps)
+        with tempfile.TemporaryDirectory() as folder:
+            log = Path(folder) / '.ninja_deps'
+            log.write_bytes(b'# ninjadeps\n' + struct.pack('<i', 9))
+            with self.assertRaises(ValueError):
+                self.checker.ninja_deps(log)
+
+
 class RenameTests(unittest.TestCase):
     def test_a_renamed_file_is_its_old_path_gone(self):
         # (review P1-2: git's rename detection listed only the new name, so "a path that is gone → everything" never fired:
@@ -1521,9 +1714,7 @@ class RealTreeTests(unittest.TestCase):
                          json.dumps(policy.make_plan(paths, 'milestone', ROOT), sort_keys=True))
 
     def test_the_closure_checker_refuses_a_build_it_cannot_judge(self):
-        spec = importlib.util.spec_from_file_location('validation_closure_check', ROOT / 'tools/ci/validation_closure_check.py')
-        checker = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(checker)
+        checker = load_checker()
         with tempfile.TemporaryDirectory() as folder:
             build = Path(folder)
             (build / 'compile_commands.json').write_text('[]')
