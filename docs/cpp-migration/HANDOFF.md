@@ -310,7 +310,7 @@
   - ASan の試験を 4 並列にした回: test_cli_e2e が落ちた。原因は memory cgroup の上限（14 GB）で、試験が起こした genko の子プロセスを OOM killer が止めた（dmesg の記録あり。プロセスを起こす e2e の試験が同時に走り、ASan の genko が 14 個、各 1 GB で並んだ）。製品の不具合ではない。**ASan の試験は 2 並列まで**（4 並列は使わない）。
   - 2 並列に戻した回は lead が止めた: test_fukidashi の sampleSheets と test_gui_fukidashi の screenshots（見本の絵の書き出し）が、GENKO_FUKIDASHI_OUT が無いと QSKIP していた。監査は ASan の SKIP を一つも認めないので、走り切っても不合格になる。4 並列の回のログを「続きから」の読み方（試験ごとの結末）で読んで分かった。絵の書き出しを試験の項目から外し、フォルダを指定した回の cleanupTestCase で書く（6b2f5411。test_gui_color の画面の絵と同じやり方。監査は変えていない）。ASan で 2 本を、指定なし（72・11 項目、SKIP 0）と指定あり（絵 40 枚が書かれる）で確かめた。
 - 次から気を付けること: 開発中の関係する試験（V1）は ctest の合否しか見ていなかったので、足した QSKIP に気付かなかった。試験に QSKIP を足したら、出口の前に関係する試験のログで `SKIP` を見る。
-- test_fx_lens は ASan で 1 本 51〜75 分かかり（今回 3,054 秒）、ASan の所要時間の 3 割前後を占める。分ければ並列が効き、止まったときのやり直しも短くなる（未着手。利用者に相談する）。
+- test_fx_lens は ASan で 1 本 51〜75 分かかっていた（今回 3,054 秒。ASan の所要時間の 3 割前後）。**直した（2a998875、利用者の決定 2026-11-14）**: 遅いのはフィルターではなく試験の補助だった。`pixel()` が呼ぶたびに ColorRasterView を作り、view は作るときに float の画像の全サンプルを検査するので、画像を回るループが画素の数だけ全体の検査を繰り返していた（theSameLookAtEveryResolution が Release で 79 秒のうち 73 秒）。ループの外で view を 1 つ作って読む。読む値・比べ方・許容値は同じ。Release で 79 秒 → 3.5 秒。実行ファイルは分けていない。RUN_SERIAL と制限時間はそのまま。ASan での時間は次の出口で測る。ほかのフィルター系の重い項目（test_fx everyKindAsASmartFilter、test_smart_filters likeRasterizeAndFilterRaster、test_precision_merge_controls a4HighPrecision600dpi など）は実際に描いている時間で、同じ無駄ではない。
 
 ### 試験の「続きから」（validation_run.py --resume）— 利用者の決定 2026-11-14
 - 利用者の決定: 「「続きから」を入れてください」「他の試験でも同様のようなテストがあれば変更してください」。機械の再起動と環境が原因の失敗で、ASan の全体の試験を最初からやり直すことが 1 日に 3 回続いた（合わせて約 5 時間）。
