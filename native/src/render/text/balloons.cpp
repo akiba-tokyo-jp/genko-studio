@@ -243,7 +243,7 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
     if (body.smooth && kind != "flash") {
         const double wave = wave_px(lst, line, dpi);
         if (wave > 0) {  // (a trembling outline: its tails leave the outline it trembles about, with a corner)
-            body.outline = clean::waved(body.outline, wave, core::py_max(wave * 7, 2.4 / 25.4 * dpi));
+            body.outline = clean::waved(body.outline, wave, core::py_max(wave * 7, 2.4 / 25.4 * dpi), body.corners);
             body.smooth = false;
             body.corners.clear();  // (a trembling outline is one line all the way round)
         }

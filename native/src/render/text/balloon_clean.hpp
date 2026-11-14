@@ -96,8 +96,9 @@ Contour sawtooth(const Box& box, int teeth, double depth);
 // A closed Catmull–Rom curve through the points (a balloon drawn by hand, smoothed), within `tolerance` of the curve.
 Contour smooth_closed(const Contour& points, double tolerance = 0.05);
 // The outline trembling: pushed out and in along its normal by `amplitude`, a whole number of waves of about
-// `wavelength` round it.
-Contour waved(const Contour& closed, double amplitude, double wavelength);
+// `wavelength` round it. Within a wave of each of `corners` that turns in (fukidashi@2: a heart's cleft) the push calms
+// to nothing, so that the line does not cross itself there; the corners that turn out keep their wave.
+Contour waved(const Contour& closed, double amplitude, double wavelength, const Contour& corners = {});
 // The outline made `factor` times as big about `centre`.
 Contour scaled_about(const Contour& closed, P centre, double factor);
 

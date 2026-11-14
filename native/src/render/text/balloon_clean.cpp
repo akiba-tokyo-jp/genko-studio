@@ -943,7 +943,7 @@ Contour smooth_closed(const Contour& points, double tolerance) {
     return out;
 }
 
-Contour waved(const Contour& closed, double amplitude, double wavelength) {
+Contour waved(const Contour& closed, double amplitude, double wavelength, const Contour& corners) {
     const std::vector<double> lengths = lengths_of(closed);
     const double total = lengths.back();
     if (!(amplitude > 0) || !(total > 0) || !(wavelength > 0)) return closed;
@@ -951,6 +951,21 @@ Contour waved(const Contour& closed, double amplitude, double wavelength) {
     const std::int64_t per = 24;  // (points a wave)
     const std::int64_t count = waves * per;
     const bool clockwise = shoelace(closed) > 0;  // (y down: a positive sum runs clockwise on the page)
+    // (fukidashi@2: the corners that turn in — a heart's cleft —, where along the outline each lies: the wave pushed out
+    // on both sides of such a corner would cross itself there, so it calms to nothing within a wave of it. A corner that
+    // turns out — a box's, a polygon's, a heart's point — keeps its wave as before.)
+    std::vector<double> calm;
+    for (const P& corner : corners) {
+        std::size_t at = 0;
+        for (std::size_t i = 1; i < closed.size(); ++i) {
+            if (distance(closed[i], corner) < distance(closed[at], corner)) at = i;
+        }
+        const double s = lengths[at];
+        const P before = point_at(closed, lengths, s - wavelength / 4);
+        const P after = point_at(closed, lengths, s + wavelength / 4);
+        const double turn = cross(sub(closed[at], before), sub(after, closed[at]));
+        if (clockwise ? turn < 0 : turn > 0) calm.push_back(s);
+    }
     Contour out;
     out.reserve(static_cast<std::size_t>(count));
     const double step = total / static_cast<double>(count);
@@ -961,7 +976,13 @@ Contour waved(const Contour& closed, double amplitude, double wavelength) {
         const P in = clockwise ? inward(along) : mul(inward(along), -1.0);
         // (a crest where the outline begins — its top — so a balloon that is its own mirror image stays one)
         const float phase = static_cast<float>(2 * kPi * static_cast<double>(i % per) / static_cast<double>(per));
-        const double push_out = amplitude * static_cast<double>(libm::cosf(phase));
+        double reach = amplitude;
+        for (const double c : calm) {
+            const double gap = std::fabs(s - c);
+            const double x = std::min(1.0, std::min(gap, total - gap) / wavelength);
+            reach = std::min(reach, amplitude * x * x * (3 - 2 * x));
+        }
+        const double push_out = reach * static_cast<double>(libm::cosf(phase));
         out.push_back(sub(here, mul(in, push_out)));
     }
     return out;

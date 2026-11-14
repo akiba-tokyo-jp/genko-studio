@@ -2469,6 +2469,62 @@ private slots:
         }
     }
 
+    // A trembling heart's cleft is one V, not a cross (found on the fix round's own sample sheet: the wave pushed out on
+    // both sides of the cleft crossed itself there, and the line drew an X with two long points, at every resolution).
+    // The wave calms to nothing within a wave of a corner that turns in; a corner that turns out keeps its wave, so a
+    // box's, a polygon's or a diamond's trembling outline is what it was.
+    void aTremblingHeartsCleftDoesNotCrossItself() {
+        const auto px = [](double mm, int dpi) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        for (const int dpi : {300, 600, 1200}) {
+            for (const double wave : {0.2, 0.3, 0.6}) {
+                for (const Json& more : {Json{{"border_mm", 0.7}}, Json{{"border_mm", 0.3}}, Json{{"border_mm", 0.7}, {"pen_taper", 0.8}}, Json{{"border_mm", 0.5}, {"pen_swell", 0.5}}}) {
+                    Json st = more;
+                    st["wave_mm"] = wave;
+                    const Document doc = one_line("heart", Json{{"x_mm", 10}, {"y_mm", 10}, {"w_mm", 30}, {"h_mm", 28}, {"style", st}});
+                    const Grey g = grey_of(balloon_alone(doc, dpi, 50, 48));
+                    // (the ink in the middle 12 mm, down to the heart's middle: its deepest, and how wide the ink is
+                    // within 0.6 mm of that — a V's point is about a line wide, the cross was 1.4 to 4.9 mm)
+                    int deepest = -1;
+                    for (int y = px(10, dpi); y < px(24, dpi); ++y) {
+                        for (int x = px(19, dpi); x < px(31, dpi); ++x) {
+                            if (g.at(x, y) < 128) deepest = y;
+                        }
+                    }
+                    QVERIFY(deepest > 0);
+                    int left = g.w, right = -1;
+                    for (int y = deepest - px(0.6, dpi); y <= deepest; ++y) {
+                        for (int x = px(19, dpi); x < px(31, dpi); ++x) {
+                            if (g.at(x, y) < 128) {
+                                left = std::min(left, x);
+                                right = std::max(right, x);
+                            }
+                        }
+                    }
+                    const double spread = (right - left) / static_cast<double>(dpi) * 25.4;
+                    QVERIFY2(spread < 1.0, qPrintable(QStringLiteral("%1 dpi, %2: the cleft's point is %3 mm wide").arg(dpi).arg(QString::fromStdString(st.dump())).arg(spread)));
+                }
+            }
+        }
+        // (a corner that turns out keeps its wave: the same outline with the corners said as without)
+        const auto same = [](const clean::Contour& a, const clean::Contour& b) {
+            return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](clean::P p, clean::P q) { return p.x == q.x && p.y == q.y; });
+        };
+        const clean::Box box{0, 0, 600, 400};
+        for (const double radius : {0.0, 20.0}) {
+            clean::Contour corners;
+            const clean::Contour square = clean::rounded(box, radius, &corners);
+            QVERIFY(!corners.empty());
+            QVERIFY(same(clean::waved(square, 7, 50, corners), clean::waved(square, 7, 50)));
+        }
+        clean::Contour corners;
+        const clean::Contour diamond = clean::diamond(box, 10, &corners);
+        QVERIFY(same(clean::waved(diamond, 7, 50, corners), clean::waved(diamond, 7, 50)));
+        const clean::Contour octagon = clean::polygon(box, 8, 10, &corners);
+        QVERIFY(same(clean::waved(octagon, 7, 50, corners), clean::waved(octagon, 7, 50)));
+        const clean::Contour heart = clean::heart(box, 10, &corners);
+        QVERIFY(!same(clean::waved(heart, 7, 50, corners), clean::waved(heart, 7, 50)));
+    }
+
     // The white edge of the letters over a tone follows the tone that is drawn (the review's P3-2): a group of joined
     // balloons has its first line's — the second line's letters have the edge when the first line has the tone, whatever
     // the second says, and none when the first has none —; a tone that draws nothing gives no edge.
