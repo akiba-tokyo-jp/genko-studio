@@ -23,6 +23,7 @@
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
 #include "render/draw.hpp"
+#include "render/font_files.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/op_limits.hpp"
@@ -104,7 +105,8 @@ const Json& at(const Json& st, const char* key) {
 // PC5 G-d: a face of a font collection (.ttc) — the character attribute face_index — as the fonts open it (render::face_font):
 // a face of one font file (not the bundled fonts' composite of two); face 0 as it is.
 Face collection_face(Face f, const Json& index) {
-    if (!index.is_number_integer() || index.get<std::int64_t>() <= 0 || f.composite()) return f;
+    // (fonts@1: an added face is one font of one face — a number left on the record by another font is not its face's)
+    if (!index.is_number_integer() || index.get<std::int64_t>() <= 0 || f.composite() || f.added) return f;
     f.kana = f.other = face_font(f.other, static_cast<unsigned>(index.get<std::int64_t>()));
     return f;
 }
@@ -145,6 +147,18 @@ std::vector<std::u32string> emphasis_of(Fonts& fonts, const core::StoryLine& lin
     for (const std::string& run : line.emphasis_runs) {
         if (!run.empty()) out.push_back(fonts.normalize(face, u32(run)));
     }
+    return out;
+}
+
+// fonts@1: the line's words set larger, bolder or in a colour (style_runs) as the lettering looks for them in the text
+// set. In an added face they go through the face's swaps as the text does — ！ → ! in a face drawn without the
+// full-width mark, the dashes and waves of LOOKALIKE —, or a shouted word that ends in ！ would not be found in its own
+// line. In a face of before the words are taken as they are, as they always were.
+std::vector<std::pair<std::string, Json>> style_runs_of(Fonts& fonts, const core::StoryLine& line, const Face& face) {
+    if (!face.added || line.style_runs.empty()) return line.style_runs;
+    std::vector<std::pair<std::string, Json>> out;
+    out.reserve(line.style_runs.size());
+    for (const auto& [words, style] : line.style_runs) out.emplace_back(utf8(fonts.normalize(face, u32(words))), style);
     return out;
 }
 
@@ -363,7 +377,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     args.latin = latin;
     args.emphasis_runs = emphasis_of(fonts, line, face);
     args.emphasis_mark = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
-    args.style_runs = line.style_runs;
+    args.style_runs = style_runs_of(fonts, line, face);
     args.bold = line_weight(st);
     args.ruby_scale = float_or(at(st, "ruby_scale"), 0.5);
     args.mono_ruby = core::py_truthy(at(st, "mono_ruby"));
@@ -382,7 +396,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
         args.tcy_spans = tcy_spans_of(line, args.text, from);  // (PC5 G-d: the ranges' own 縦中横)
         // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm — as across: review P3-12)
         const double base_mm = float_or(at(st, "size_mm"), kCapMm);
-        const std::vector<Json> words = char_styles(letters, line.style_runs, Json());
+        const std::vector<Json> words = char_styles(letters, args.style_runs, Json());
         for (std::size_t k = 0; k < attrs.size(); ++k) {
             const Json& a = attrs[k];
             const Json& size_mm = at(a, "size_mm");
@@ -932,7 +946,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
     }
     const int weight = line_weight(st);
     // (the OpenType rows take the line's weight from the record's resolved attributes: the words' own alone here)
-    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight && !opentype ? Json{{"bold", weight}} : Json());
+    const std::vector<Json> styles_flat = char_styles(flat, style_runs_of(fonts, line, face), weight && !opentype ? Json{{"bold", weight}} : Json());
     std::vector<Json> styles;  // (styles per character of the text, "\n" included)
     std::size_t k = 0;
     for (const char32_t c : text) styles.push_back(c == U'\n' ? Json::object() : styles_flat[k++]);
@@ -1135,8 +1149,9 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
                 if (draw_text) {
                     Draw draw(out);
                     const Ink ink = Ink::with_alpha(rgb, 255);
-                    draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, letter, fonts.font(face, size, std::u32string(1, text[i])),
-                              ink, {}, thick, thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
+                    const TrueTypeFont& letter_font = fonts.font(face, size, std::u32string(1, text[i]));
+                    draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, drawable(letter, letter_font), letter_font, ink, {}, thick,
+                              thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
                 }
                 const double w = advance(i) - static_cast<double>(em) * tracking;
                 if (set_row != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn)
@@ -2184,6 +2199,9 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
     for (const auto& [words, style] : line.style_runs) style_runs.push_back(Json::array({words, style}));
     Json key = Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), detail::keyed_style(line.style),
                             Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
+    // (fonts@1: an added face found gone or changed while Genko runs — what was set before it is not used again; nothing is
+    // added to the key until that happens)
+    if (const std::uint64_t lost = font_files::generation(); lost != 0) key.push_back(Json::array({"fonts", lost}));
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
     if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
     // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes —,

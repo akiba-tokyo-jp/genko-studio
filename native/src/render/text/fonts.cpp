@@ -125,10 +125,14 @@ const core::fonts::Entry* added_here(std::string_view key) {
     return entry != nullptr && entry->added && font_files::present(key) ? entry : nullptr;
 }
 
+// fonts@1: whether a font that could not be opened is an added face's (its key, or a face of its file by number).
+bool lost_face(const std::string& font) { return bundled(font) == nullptr && core::fonts::added(font_face(font).first); }
+
 // An added face as a Face: one font for everything, and its partner where it names one that can be drawn with (a face
 // of before, or an added one whose file is there too).
 Face added_face(const core::fonts::Entry& entry) {
     Face face{entry.key, entry.key, entry.key};
+    face.added = true;
     if (!entry.fallback.empty() && (bundled(entry.fallback) != nullptr || added_here(entry.fallback) != nullptr)) {
         const Bundled* b = bundled(entry.fallback);
         face.fallback = b != nullptr ? std::string(b->other) : entry.fallback;
@@ -181,6 +185,10 @@ const TrueTypeFont& Fonts::truetype(const std::string& path, std::int64_t size) 
         // genko.fonts.truetype: a font file that cannot be read (moved with the book to another computer, not a font) is
         // drawn with Pillow's own default font at its size 10 (`except (OSError, ValueError): ImageFont.load_default()`)
         if (e.element() != "default_font") throw;
+        // fonts@1: an added face whose file went away or changed after the face was chosen (render/font_files: it is not
+        // installed from now on, and what is set after this is set in the default face) — this piece of lettering takes
+        // the bundled Gothic for it, never a font of another kind
+        if (lost_face(path)) return fonts_.truetype(std::string(kGothic), static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)));
         return fonts_.load_default();
     }
 }
@@ -191,6 +199,7 @@ const TrueTypeFont& Fonts::truetype(const std::string& path, std::int64_t size, 
         return fonts_.truetype(path, static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)), axes);
     } catch (const NotYetPorted& e) {
         if (e.element() != "default_font") throw;
+        if (lost_face(path)) return fonts_.truetype(std::string(kGothic), static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)));
         return fonts_.load_default();
     }
 }
@@ -202,7 +211,7 @@ std::string Fonts::readable(const std::string& path) {
         (void)fonts_.truetype(path, 32);
     } catch (const NotYetPorted& e) {
         if (e.element() != "default_font") throw;
-        out = pillow_default_font();
+        out = lost_face(path) ? std::string(kGothic) : pillow_default_font();
     }
     readable_.emplace(path, out);
     return out;
@@ -240,7 +249,12 @@ bool Fonts::has_glyph(const std::string& path, std::u32string_view ch) {
 
 const TrueTypeFont& Fonts::font(const Face& face, std::int64_t size, std::u32string_view ch) { return truetype(path_for(face, ch), size); }
 
-std::string Fonts::path_for(const Face& face, std::u32string_view ch) {
+std::string Fonts::path_for(const Face& face, std::u32string_view cell) {
+    std::u32string_view ch = cell;
+    if (face.added && ch.size() > 1) {  // (fonts@1: a letter and its variation selectors — the letter decides)
+        const bool selectors = std::all_of(ch.begin() + 1, ch.end(), [](char32_t c) { return (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0100 && c <= 0xE01EF); });
+        if (selectors) ch = ch.substr(0, 1);
+    }
     const std::string& first = is_kana_like(ch) ? face.kana : face.other;
     if (ch.size() != 1 || has_glyph(first, ch)) return first;
     // a character the face lacks (e.g. ― in some Minchos): the other half, then the bundled Gothic
@@ -257,7 +271,7 @@ std::string Fonts::path_for(const Face& face, std::u32string_view ch) {
 std::u32string Fonts::normalize(const Face& face, std::u32string_view text) {
     // fonts@1: an added face's own look-alikes (the catalogue's: ！ → !, ？ → ? where the face has only the ASCII marks),
     // by the face's key — nothing for a face of before or a font file, whose swaps are LOOKALIKE alone as they always were
-    const core::fonts::Entry* entry = bundled(face.key) != nullptr ? nullptr : core::fonts::find(face.key);
+    const core::fonts::Entry* entry = face.added ? core::fonts::find(face.key) : nullptr;
     const std::vector<std::pair<char32_t, char32_t>>* own = entry != nullptr && entry->added && !entry->lookalike.empty() ? &entry->lookalike : nullptr;
     std::u32string out;
     out.reserve(text.size());

@@ -1,5 +1,6 @@
 {
  "ruby_cases.json": "06b8e611c434ac7166e985e94992179d03c318d2ea9601d872cdf73997505771",
  "psd_text_book.json": "50fd09dcbd9e7488dd78187a3d7b4c3e644fe73108432a3c6ccdf4113ad13f96",
- "fonts/kanji-sets.json": "01f867ac109377cd4ad614c6ba4588bd4155d6b82273d03d5d28857c4b304a94"
+ "fonts/kanji-sets.json": "01f867ac109377cd4ad614c6ba4588bd4155d6b82273d03d5d28857c4b304a94",
+ "fonts/book_before/project.json": "4341b28186f62d1b018a473c2fa6a8fb6f5bb73a41f520e88b5d1217171c89fe"
 }

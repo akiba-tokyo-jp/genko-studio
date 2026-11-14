@@ -24,6 +24,7 @@
 #include "app/theme.hpp"
 #include "core/paths.hpp"
 #include "core/prefs_table.hpp"
+#include "render/font_files.hpp"
 #include "service/stylecat.hpp"
 
 namespace genko::app {
@@ -62,6 +63,7 @@ int run_app(int argc, char** argv) {
         }
     }
     QApplication app(argc, argv);
+    render::font_files::prime();  // (fonts@1: where the added faces' files are, asked of Qt once, on this thread)
     const QStringList arguments = QCoreApplication::arguments().mid(2);
     std::optional<fs::path> path;
     QStringList waiting;  // (genko:// links for the window: Python's run_app(None, link))

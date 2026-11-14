@@ -687,7 +687,18 @@ Image placed(Image raw, std::u32string_view drawn, std::int64_t em, bool rotate)
 
 }  // namespace
 
-Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+std::u32string drawable(std::u32string_view letter, const TrueTypeFont& font) {
+    std::u32string out(letter);
+    if (!font.strict_cmap() || out.size() < 2) return out;
+    std::erase_if(out, [&](char32_t c) { return is_vs(c) && font.glyph_index(c) == 0; });
+    return out.empty() ? std::u32string(letter) : out;
+}
+
+Image glyph(std::u32string_view cell, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+    // (fonts@1: in an added face a variation selector the font has no glyph for is not drawn — the letter alone, as the
+    // font draws it, not the letter and a "no glyph" box)
+    const std::u32string letter = drawable(cell, font);
+    const std::u32string_view ch(letter);
     bool rotate = member(kRotateCw, ch);
     std::u32string drawn(ch);
     const auto form = vertical_form(ch);

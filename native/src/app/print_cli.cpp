@@ -31,6 +31,7 @@
 #include "formats/exporting.hpp"
 #include "formats/print_marks.hpp"
 #include "render/brushes.hpp"
+#include "render/font_files.hpp"
 #include "render/not_yet_ported.hpp"
 #include "storage/reader.hpp"
 
@@ -82,6 +83,7 @@ int print_command(int argc, char** argv) {
     // (a Qt without a screen when none is set: PDFs and dry runs where there is no display)
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
+    render::font_files::prime();  // (fonts@1)
     QStringList args = QCoreApplication::arguments().mid(2);  // (after `genko print`)
     const bool ascii = args.removeAll(QStringLiteral("--ascii")) > 0;
     static const QStringList kValued{QStringLiteral("--pages"),   QStringLiteral("--printer"),  QStringLiteral("--pdf"),         QStringLiteral("--copies"),

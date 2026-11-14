@@ -17,7 +17,7 @@ target_compile_definitions(genko_test_support PRIVATE
   GENKO_LOCK_HELPER="$<TARGET_FILE:genko_lock_helper>"
   GENKO_ARGV_HELPER="$<TARGET_FILE:genko_argv_helper>")
 genko_target_flags(genko_test_support)
-add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper)
+add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper genko_dev_fonts)
 
 genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS unit)
 # The HTTP server of `genko serve` and `genko mcp --transport streamable-http` (M5③): errors, the head before the body.
@@ -367,6 +367,7 @@ genko_test(test_font_catalog SOURCES unit/test_font_catalog.cpp DEPS genko_test_
 genko_test(test_font_faces SOURCES unit/test_font_faces.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 1800)
 set_tests_properties(test_font_faces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+target_compile_definitions(test_font_faces PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}")
 # PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.

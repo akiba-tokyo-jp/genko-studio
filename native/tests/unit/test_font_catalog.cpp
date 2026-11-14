@@ -24,6 +24,7 @@
 
 #include "core/font_catalog.hpp"
 #include "core/model.hpp"
+#include "core/paths.hpp"
 #include "core/type_text.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
@@ -53,7 +54,7 @@ genko::core::StoryLine line_of(const char* id, const std::string& text) {
 
 Json payload_of(const Document& doc) {
     QTemporaryDir dir;
-    genko::storage::AssetStore store(std::filesystem::path(dir.path().toStdString()));
+    genko::storage::AssetStore store(genko::core::path_from_utf8(dir.path().toStdString()));
     return genko::storage::project_payload_v4(doc, store);
 }
 
@@ -370,9 +371,9 @@ private slots:
             doc.story.back().ruby_runs = {Json::array({"ルビ", "るび"})};
         }
         QTemporaryDir dir;
-        const std::filesystem::path book(dir.path().toStdString());
+        const std::filesystem::path book = genko::core::path_from_utf8(dir.path().toStdString());
         genko::test::write_project(doc, book / "a");
-        const std::string first = genko::test::read_bytes(QString::fromStdString((book / "a" / "project.json").string()));
+        const std::string first = genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "a" / "project.json")));
         const Json written = genko::core::parse_python_json(first);
         QCOMPARE(written["features"], Json::parse(R"(["fonts@1", "ruby-layout@1"])"));
         QCOMPARE(written["story"][0]["style"]["font"], Json("horror_tegomin"));
@@ -383,7 +384,7 @@ private slots:
         QCOMPARE(fonts::named(read.document), (std::vector<std::string>{"horror_tegomin", "maru_regular"}));
         QVERIFY(fonts::named_unannounced(read.document).empty());
         genko::test::write_project(read.document, book / "b");
-        QCOMPARE(genko::test::read_bytes(QString::fromStdString((book / "b" / "project.json").string())), first);
+        QCOMPARE(genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "b" / "project.json"))), first);
 
         // (the same book with the name taken out of its features — what a build of before F2 would have written for the
         // same words —: read, it names the faces unannounced; saved, it says the feature)
@@ -399,8 +400,8 @@ private slots:
     // fonts@1, nor does a new book, nor one lettered in the seven faces, a font file and a name nobody knows.
     void aBookOfBeforeIsWrittenAsItWas() {
         for (const char* name : {"old_book", "old_book2"}) {
-            const std::filesystem::path dir(genko::test::test_data(QStringLiteral("fukidashi/") + QString::fromLatin1(name)).toStdString());
-            const Json file = Json::parse(genko::test::read_bytes(QString::fromStdString((dir / "project.json").string())));
+            const std::filesystem::path dir = genko::core::path_from_utf8(genko::test::test_data(QStringLiteral("fukidashi/") + QString::fromLatin1(name)).toStdString());
+            const Json file = Json::parse(genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(dir / "project.json"))));
             const genko::storage::LoadResult read = genko::storage::load_document(dir);
             QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
             QVERIFY(fonts::named(read.document).empty());
@@ -431,6 +432,37 @@ private slots:
         QVERIFY(fonts::named_unannounced(doc).empty());
     }
 
+    // A book a build of before F2 wrote is written back to the very bytes it had: tests/data/fonts/book_before, made by
+    // the packaged build of 2026-11-13 (before the added faces, and before fukidashi@1 — it holds no oval and no border of
+    // 0, which that feature reads otherwise) with lines in each of the seven faces, a font file that is not there, a name
+    // nobody knows, a ruby's own face, words set larger, the book's usual face. Read by this build and written: the same
+    // project.json, byte for byte (its SHA-256 in tests/data/MANIFEST.json).
+    void aBookOfBeforeIsWrittenToTheSameBytes() {
+        const QString fixture = genko::test::test_data(QStringLiteral("fonts/book_before"));
+        const std::string was = genko::test::read_bytes(fixture + QStringLiteral("/project.json"));
+        const Json manifest = genko::test::read_json(genko::test::test_data(QStringLiteral("MANIFEST.json")));
+        QCOMPARE(QCryptographicHash::hash(QByteArray::fromStdString(was), QCryptographicHash::Sha256).toHex().toStdString(),
+                 manifest["fonts/book_before/project.json"].get<std::string>());
+        const genko::storage::LoadResult read = genko::storage::load_document(genko::core::path_from_utf8(fixture.toStdString()));
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        QVERIFY(read.report.issues.empty());
+        QCOMPARE(read.document.story.size(), std::size_t(11));
+        QVERIFY(fonts::named(read.document).empty());
+        QTemporaryDir dir;
+        const QString out = dir.path() + QStringLiteral("/書体の本");  // (a folder whose name is not ASCII)
+        genko::test::write_project(read.document, genko::core::path_from_utf8(out.toStdString()));
+        const std::string now = genko::test::read_bytes(out + QStringLiteral("/project.json"));
+        if (now != was) {
+            // (where they part, for the one who reads the failure)
+            std::size_t at = 0;
+            while (at < now.size() && at < was.size() && now[at] == was[at]) ++at;
+            QFAIL(qPrintable(QStringLiteral("project.json differs from byte %1: was …%2… now …%3…")
+                                 .arg(at)
+                                 .arg(QString::fromStdString(was.substr(at > 40 ? at - 40 : 0, 120)))
+                                 .arg(QString::fromStdString(now.substr(at > 40 ? at - 40 : 0, 120)))));
+        }
+    }
+
     // A book whose face's file is missing opens writable: nothing here has any font file to look at (the folder the
     // files would be in does not exist for this program), every one of the forty is named, and the book is read without a
     // word, saved to the same bytes, and still names them.
@@ -444,15 +476,15 @@ private slots:
         }
         QCOMPARE(n, 40);
         QTemporaryDir dir;
-        const std::filesystem::path book(dir.path().toStdString());
+        const std::filesystem::path book = genko::core::path_from_utf8(dir.path().toStdString());
         genko::test::write_project(doc, book / "a");
         const genko::storage::LoadResult read = genko::storage::load_document(book / "a");
         QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
         QVERIFY(read.report.issues.empty());
         QCOMPARE(fonts::named(read.document).size(), std::size_t(40));
         genko::test::write_project(read.document, book / "b");
-        QCOMPARE(genko::test::read_bytes(QString::fromStdString((book / "b" / "project.json").string())),
-                 genko::test::read_bytes(QString::fromStdString((book / "a" / "project.json").string())));
+        QCOMPARE(genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "b" / "project.json"))),
+                 genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "a" / "project.json"))));
     }
 };
 

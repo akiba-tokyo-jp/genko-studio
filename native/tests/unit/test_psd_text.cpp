@@ -360,6 +360,15 @@ class TestPsdText : public QObject {
 
 private slots:
     void initTestCase() { QVERIFY(tmp_.isValid()); }
+    // (fonts@1: a slot that named a folder for the added faces' files and stopped half way leaves it named — put back
+    // before the next one, and only then: the other slots share what was set before)
+    void cleanup() {
+        const QString own = QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../share/genko-studio/fonts"));
+        if (QString::fromStdString(genko::render::font_files::dir()) != own) {
+            genko::render::font_files::set_dir_for_testing(std::nullopt);
+            genko::render::text::clear_layout_cache();
+        }
+    }
 
     // The book is the one MANIFEST.json fixes.
     void bookIsFixed() {

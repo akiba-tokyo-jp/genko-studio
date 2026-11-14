@@ -37,6 +37,7 @@
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
 #include "core/anim.hpp"
+#include "render/font_files.hpp"
 #include "render/footage.hpp"
 #include "core/video.hpp"
 #include "core/clock.hpp"
@@ -4054,6 +4055,7 @@ int run_cli(int argc, char** argv) {
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
     QCoreApplication app(argc, argv);  // (arguments in UTF-8 on Windows too)
+    render::font_files::prime();  // (fonts@1: where the added faces' files are, asked of Qt once, here, before any drawing thread)
     QStringList args = QCoreApplication::arguments().mid(1);
     const bool ascii = args.removeAll(QStringLiteral("--ascii")) > 0;
     if (args.isEmpty()) return usage("genko <command> — try `genko --version`");

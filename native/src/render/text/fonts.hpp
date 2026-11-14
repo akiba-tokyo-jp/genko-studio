@@ -38,6 +38,7 @@ struct Face {
     std::string kana;
     std::string other;
     std::string fallback = {};
+    bool added = false;  // (fonts@1: one of the forty added faces — its letters read from its cmap, its own look-alikes)
     bool composite() const { return kana != other; }
     // Whether a font is one of the face's own (its halves, its partner): a letter drawn in another is a stand-in.
     bool own(const std::string& font) const { return font == kana || font == other || (!fallback.empty() && font == fallback); }
@@ -78,7 +79,9 @@ public:
     // Face.font(size, char)
     const TrueTypeFont& font(const Face& face, std::int64_t size, std::u32string_view ch = U"漢");
     // The font file Face.font takes for the character (the face's half for it, or the first that has it: its other
-    // half, its partner — fonts@1 —, the bundled Gothic, the effects face).
+    // half, its partner — fonts@1 —, the bundled Gothic, the effects face). fonts@1: in an added face a letter with its
+    // variation selector is looked for by the letter (a kanji with a selector goes to the partner as the kanji does); a
+    // face of before takes its half for any cell of more than one character, as always.
     std::string path_for(const Face& face, std::u32string_view ch);
     // Face.normalize(text): characters the face lacks swapped for look-alikes it has (― → —, ～ → 〜 …). fonts@1: and
     // an added face's own (the catalogue's lookalike: ！ → !, ？ → ? in a face drawn without the full-width marks).
