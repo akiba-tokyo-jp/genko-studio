@@ -334,6 +334,57 @@
 - 前からの `sfx`・`hand` の縦のかっこの不具合と、横組みの最後の行の `_` が切れること（どちらも前から。触っていない）。
 - 全体の試験は流していない（関係する試験だけ。決まりのとおり）。
 
+### F2 2 回目のレビューの直し（ブランチ `native/fonts-fukidashi2`。フキダシの追加 群 1 の 279ed84f の上）— 2026-11-14
+
+読むだけの 2 回目のレビュー（直しの回・群 2・群 3。P1 無し、P2 が 1、P3 が 18）を、リードの決定のとおりに直した。レビューが実行で確かめた「40 書体を使わない本は、2026-11-13 の配布物とバイトも画素も同じ」は保っている（`aBookOfBeforeIsWrittenToTheSameBytes`、Python との照らし合わせの試験、test_render_page）。フキダシのコードと試験には触っていない（`checks.cpp` は書体の所だけ）。
+
+#### 直したこと（番号はレビューのもの。かっこは守る試験）
+- **P2-1 いつもの書体がある本でアンチックを選ぶ**: 本に `font_path` があるあいだ、文字ツールの「書体」に「アンチック」（`antique`）の行を足す（`tool_settings.cpp` の `show_usual`・`show_face`）。パレットでアンチックを次の台詞に選ぶとこの行になり、置いた台詞は `style.font: "antique"`。パレットの最初の行は「アンチック」で、「この本のいつもの書体」は、いまのいつもの書体の行に出る（`FontPalette::set_usual`）。（test_gui_fonts `antiqueForTheNextLineInABookWithItsOwnUsualFace`・`theBooksUsualFaceIsSetAndShown`）
+- **P3-1 doctor**: 40 個は stat だけ。SHA-256 まで読むのは本が名指しした書体だけ。名指しした書体の問題は `problems`（`ok: false`）、ほかは `installation`（`ok` は変えない。問題があるときだけの鍵）。書体を使わない本の doctor は 0.03 秒（レビューが測った 0.94 秒から）。（test_package `theInstalledProgramFindsEveryFace`）
+- **P3-2 検査の穴**: 文字スタイルから来る書体（`core::type_text::resolve_chars`）、ページが見せるスマートオブジェクトの中身の文字レイヤー（入れ子も）、本のいつもの書体の相方。相方の警告は、その言葉に相方が描く字があるときだけ（その書体の cmap で見る）。中身・大きさが違うファイルは「ファイルが無いか、壊れているため」（`font_files::damaged`）。（test_font_faces `theMissingFaceIsSaidThroughStylesContentsAndTheUsualFace`・`everyLabelAndWarningReadsInJapanese`・`aFileOfTheSameSizeButOtherContentIsNotInstalled`）
+- **P3-3 見本の先読み**: 別のスレッドは `bytes()` を呼び、見本を組むまで中身を持つ。`font_files` は、覚えから外した中身でも、まだ誰かが持っていれば読み直さずにそれを渡す。画面の倍率が変わったら先読みもやり直す。ドックをしまうと作るのを止める。（test_gui_fonts `aScreenOfAnotherScaleMakesTheSamplesAgain`・`theDockOrTheWindowClosedWhileAFileIsRead`、test_font_faces `bytesAreSharedAndBounded`）
+- **P3-4 いつもの書体の表示**: 本が変わるたびに追いかける（`on_book_changed` → `show_usual_face`）。取り消し・やり直し・`set_meta` で変わる。（`theBooksUsualFaceIsSetAndShown`）
+- **P3-5 ルビ**: `StoryPanel::set_chosen_ruby_font` は「ルビを選んでいない・同じ書体・変えられなかった・変えた」を返す。変えたときだけ「…にしました」。（`aChosenRubyTakesTheFace`・`aRefusedRubyPickIsNotSaidAsDone`）
+- **P3-6 キーが見える所**: 字形パネルの書体の名前、PSD の書き出しの窓の注意書き。（`openingTheFontListAddsNoAddedFaceToQt`・`thePsdNoteNamesTheFaceNotItsKey`）
+- **P3-7 名前を 1 つに**: 前からの 6 つは文字ツールの名前（ゴシック・明朝・丸ゴシック・手書き風・極太（効果音）・勢い（効果音））。パレットの行だけ「ゴシック（ZEN角ゴシック B）」「極太（効果音・デラゴシック）」と書体の名前を添える（`lettering::FaceRow::row`、`lettering::face_name`）。（`thePaletteListsTheFacesByCategory`）
+- **P3-8 文**: 帯の 2 つの文（「この本が使っている書体…その文字は代わりの書体（台詞はアンチック）で描いています…」「この本が指定している書体…は、前の版には無かったためアンチックで描いていました。この版からはその書体で描くので、見た目が変わります」）、検査の相方の文（「書体「X」の漢字などを受け持つ書体「Y」のファイルが…無いため、その字はゴシックで描いた…」）、`lint`（効果音は「極太の書体で描かれる」）、`FONTS.json` の `use_ja` 3 つから「1 ファイル」を外した。「この原稿」は「この本」に。（`everyWordReadsInJapanese`、test_font_service `lintKnowsTheAddedFaces`）
+- **P3-9 状態行で切れる文**: 書体の文は `MainWindow::say_of_fonts` を通る。状態行に収まればそこに、収まらなければ帯に全部出して、状態行は「書体の知らせを、ページの上に出しました」（それも収まらなければ何も言わない）。出した後で状態行が狭くなったときも帯へ移す（`refit_fonts_sentence`）。置き換えの長い文は帯（`tell_of_fonts`）。選んだときの文は短くした。（`noSentenceIsCutInTheStatusLine`: 窓を開いたままの幅 784・1300・760 で、47 書体 × 3 通り）
+- **P3-10 帯のボタン**: 帯は `fontsBand`（枠）・`fontsBandText`（文）・`fontsBandClose`（ボタン「この知らせを閉じる」。キーボードで押せる）。（`whatIsSaidWhenABookIsOpened`）
+- **P3-11 開いたときの中身の確かめ**: 本が名指しした書体は、開いたときに別のスレッドで `present`（中身まで）。大きさだけ同じ別物も帯に出る。（同上）
+- **P3-12 読めなかったファイル**: 開けない・読み切れない・無いは、2 度試して、その 1 回だけ「入っていない」（覚えない）。中身が違うものだけ、プロセスの間ずっと。答えが変わるたびに `generation()` が進み、描いたものを描き直す。読めない間は検査が警告する。（test_font_faces `aFileThatCouldNotBeReadIsAskedForAgain`）
+- **P3-13 構成で止める**: `native/cmake/GenkoFontList.cmake`（`genko_font_files`）。一覧の書体ファイルが無ければ、配布物の構成とビルドの木の手順が、ファイルの名前を言って止まる。（`aMissingFontFileStopsTheConfigure`）
+- **P3-14 ビルドの木の写し**: 書体は大きさだけで比べ、一覧は中身が違うときだけ写す（時刻は見ない）。（`theBuildTreeStepLinksOrCopies`）
+- **P3-15 PSD の相方**: ファイルが無いとき、漢字が無い書体の漢字は相方の名前で書く（`detail::asked_font`）。**漢字が一部の書体（`sfx_inline` の 1 つ）は直せない**: どの漢字を持つかは書体ファイルが無いと分からないので、全部の字がその書体の名前になる。書き出しの窓の注意書きがそう言う。（test_font_service `psdNamesTheFaceAskedForWithoutItsFile`、test_psd_text `aPartnersLettersAreNotWarned`）
+- **P3-16 置き換えの答え**: `map` が追加のキーを名指ししたら、答えに `kept: [{font, label, why}]`。（test_font_service `replaceAllNeverStripsAnAddedFace`）
+- **P3-17 試験**: `if` 付きの確かめを外した（HTTP の入れ子、字形パネル）。足りなかった場合を足した（上の各項目）。配布物の 2 項目を Linux だけのブロックから出した（中身に Linux だけのものは無い。**Windows では流していない**）。0 ミリ秒のタイマーの数え方に寄りかかる確かめは、画面の出来事を回す前に見るようにした。
+- **P3-18**: SPEC の「1 画素も違わない」は、本にいつもの書体が無いときだけ、と書き直した。
+
+#### 前の節から変わった所（上の群 1〜3 の節を読むときに）
+- 「答えはプロセスの間ずっと同じ」は、中身が違うファイルだけ。無い・読めないは毎回見る（P3-12）。
+- `genko doctor` は 40 個を全部は読まない（P3-1）。`verify(true)`・`missing()` を呼ぶのは試験だけになった。
+- 開いたときの知らせの文、選んだときの文、検査の相方の文は、上の P3-8・P3-9 のもの。帯は `QLabel` でなく枠＋文＋ボタン。
+- パレットの最初の行は「アンチック（いつもの書体）」でなく「アンチック」＋「この本のいつもの書体」。
+- `set_chosen_ruby_font` は `bool` でなく `StoryPanel::RubyFace`。
+
+#### 変えた期待値（緩めていない）
+- test_font_faces: 相方の警告の文と、出る数（漢字が一部の書体は、持っている漢字だけの言葉では出ない）。`bytesAreSharedAndBounded`（持っている人がいれば、その中身が返る）。中身が違うファイルの警告の文。
+- test_font_service: `lint` に効果音の 1 件。PSD の書体の並びに相方（`MochiyPopOne-Regular`）。
+- test_psd_text `without.fonts`: 相方の `ZenOldMincho-Black` が入る（P3-15）。
+- test_package: doctor の決まり（P3-1）。
+- test_gui_fonts: 文・行の名前・帯の作り（P3-7〜P3-10）。本にいつもの書体があるとき、文字ツールの「書体」は 8 行。
+- 前からの本で、いつもの書体が前からの 6 つのキーのとき、文字ツールの最初の行は「いつもの書体（明朝）」のように、その書体の名前になる（前は「（アンチック）」。レビューの P3-4 のとおり、前より正しい）。書体ファイルのパスのときは「いつもの書体（書体ファイル）」。
+
+#### 確かめたこと（最後のビルド。Linux Release、2 本ずつ）
+- 関係する試験 58 本が合格（2,424 項目。失敗 0、SKIP 0）: test_font_faces（508）・test_font_catalog（96）・test_font_service・test_psd_text・test_package・test_mcp_api_e2e・test_cli_e2e・test_gui_fonts（24 項目）と、画面の 20 本（lines・type_panels・type・ruby・fukidashi・output・actions・prefs・look・book・layout・workspace・studio・view・file・smart・tool_presets・styles・ledger_a〜c）、test_service・test_ledger_service_a〜c・test_contract_prefs・test_control_channel、描画と保存（test_render_page・test_storage・test_model・test_command_bus・test_type_text・test_type_styles・test_ruby・test_ruby_render・test_pcraft・test_smart・test_psd_smart・test_fukidashi・test_fukidashi_service）、照らし合わせ（test_contract_psd_text・psd・type・type_fonts・export・pcraft・storage・render_cli・pipeline・smart）。
+- 配布物（導入したフォルダーを `tar -czf`）: tar.gz 162,123,887 バイト、展開して 333,850,689 バイト、書体のフォルダー 157,645,649 バイト、`bin/genko` 86,540,552 バイト（フキダシの追加 群 1 の分も入った値）。
+- 画面の絵（作業用の `fonts-f2/gui/` に 22 枚。`GENKO_FONTS_GUI_OUT`）: 前の 18 枚を作り直し、窓を開いたままの幅での 2 通り（置き換えの長い文が帯に全部出ているもの、選んだときの文が帯に出ているもの）を明るい・暗いで足した。
+
+#### 直していないもの・確かめていないもの
+- 漢字が一部の書体の、ファイルが無いときの PSD の名前（P3-15 の残り。上）。
+- Windows・MSVC・macOS（配布物の 2 項目、ビルドの木の写し、`QtConcurrent` の先読み、0 ミリ秒のタイマー）、ASan、Debug。全体の試験。
+- 読めないファイルの試験（権限を外して開けなくする所）は Unix だけ。
+- 状態行で切れるのは、書体の文だけ直した。アプリのほかの文は、窓を開いたままの幅（状態行 286 px）では今も切れる（前から）。
+
 ## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合
 
 ### 利用者の決定（2026-11-13）
