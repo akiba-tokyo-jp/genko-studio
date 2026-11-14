@@ -1258,6 +1258,470 @@ private slots:
         QVERIFY(shape_gauge("capsule", 45, 195, 50, 200) > 1.0);
     }
 
+    // --- fukidashi@2: the symbols -------------------------------------------------------------------------------------------
+
+    // A heart, a star, a flower and a diamond are their own mirror image left to right, point for point and bit for bit,
+    // and touch their box's four sides — in a box of any shape, with any number of points.
+    void symbolsAreTheirOwnMirrorImage() {
+        std::vector<std::pair<std::string, clean::Contour>> outlines;
+        for (const clean::Box& box : {clean::Box{-211.5, -160.25, 211.5, 160.25}, clean::Box{-90.0, -300.5, 90.0, 300.5}, clean::Box{-40.0, -37.0, 40.0, 37.0}}) {
+            outlines.emplace_back("heart", clean::heart(box, -1.0));
+            outlines.emplace_back("heart, a round point", clean::heart(box, 12.0));
+            outlines.emplace_back("diamond", clean::diamond(box, -1.0));
+            outlines.emplace_back("diamond, sharp", clean::diamond(box, 0.0));
+            for (int points = 4; points <= 12; ++points) {
+                outlines.emplace_back("star of " + std::to_string(points), clean::star(box, points, 0.62, -1.0));
+                outlines.emplace_back("sharp star of " + std::to_string(points), clean::star(box, points, 0.4, 0.0));
+                outlines.emplace_back("flower of " + std::to_string(points), clean::flower(box, points));
+            }
+        }
+        for (const auto& [name, outline] : outlines) {
+            const std::size_t n = outline.size();
+            QVERIFY2(n >= 4, name.c_str());
+            QVERIFY2(outline[0].x == 0.0, name.c_str());  // (it begins on the middle line, at its top)
+            for (std::size_t i = 1; i < n; ++i) {
+                const clean::P& a = outline[i];
+                const clean::P& b = outline[n - i];
+                QVERIFY2(a.x == -b.x && a.y == b.y, qPrintable(QStringLiteral("%1: point %2").arg(QString::fromStdString(name)).arg(i)));
+            }
+            QVERIFY2(clean::shoelace(outline) > 0, name.c_str());  // (clockwise on the page)
+            double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+            for (const clean::P& p : outline) x0 = std::min(x0, p.x), y0 = std::min(y0, p.y), x1 = std::max(x1, p.x), y1 = std::max(y1, p.y);
+            // (the box is the one whose half width the outline reaches: each of the three above)
+            const double half_w = x1, half_h = (y1 - y0) / 2;
+            QVERIFY2(std::fabs(x0 + x1) < 1e-9 && std::fabs(y0 + y1) < 1e-9, name.c_str());
+            QVERIFY2((std::fabs(half_w - 211.5) < 1e-9 && std::fabs(half_h - 160.25) < 1e-9) || (std::fabs(half_w - 90.0) < 1e-9 && std::fabs(half_h - 300.5) < 1e-9) ||
+                         (std::fabs(half_w - 40.0) < 1e-9 && std::fabs(half_h - 37.0) < 1e-9),
+                     qPrintable(QStringLiteral("%1: %2 × %3").arg(QString::fromStdString(name)).arg(half_w).arg(half_h)));
+        }
+        // (a flower is not a cloud, and a star of four points with deep valleys is the sparkle: slim points)
+        const clean::Box box{-200, -200, 200, 200};
+        {  // (a flower's petals stand higher than a cloud's bumps: the valley beside the top one lies further in)
+            const auto valley = [](const clean::Contour& outline) {
+                double least = 1e9;
+                for (const clean::P& p : outline) least = std::min(least, std::hypot(p.x, p.y));
+                return least;
+            };
+            QVERIFY(valley(clean::flower(box, 8)) < valley(clean::cloud(box, 8)) - 10);
+        }
+        const clean::Contour sparkle = clean::star(box, 4, 0.4, 0.0);
+        QVERIFY(!clean::inside(sparkle, {120, 120}) && clean::inside(sparkle, {0, 190}) && clean::inside(sparkle, {190, 0}));
+        // (the room a symbol leaves its letters lies inside it, and holds the box's middle)
+        for (const char* kind : {"heart", "star", "flower", "diamond"}) {
+            for (const int points : {4, 5, 6, 9}) {
+                const clean::Contour room = clean::symbol_room(kind, box, points, 0.62);
+                const std::string k = kind;
+                const clean::Contour outline = k == "heart" ? clean::heart(box, -1.0) : k == "diamond" ? clean::diamond(box, -1.0)
+                                               : k == "star" ? clean::star(box, points, 0.62, -1.0) : clean::flower(box, points);
+                QVERIFY2(room.size() >= 3 && clean::inside(room, {0, 0}), kind);
+                for (const clean::P& p : room) {
+                    // (a hair inside: the room's corners lie on the outline itself)
+                    QVERIFY2(clean::inside(outline, {p.x * 0.98, p.y * 0.98}), qPrintable(QStringLiteral("%1 of %2: %3, %4").arg(kind).arg(points).arg(p.x).arg(p.y)));
+                }
+            }
+        }
+    }
+
+    // A symbol's letters are set inside it at any resolution: at the size asked (5 mm — not made smaller for a box that
+    // holds them), their block inside the symbol's outline.
+    void theLettersFitASymbol_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<int>("dpi");
+        for (const char* kind : {"heart", "star", "flower", "diamond"}) {
+            for (const int dpi : {150, 350, 600, 1200}) QTest::newRow(qPrintable(QStringLiteral("%1 at %2").arg(kind).arg(dpi))) << QString::fromLatin1(kind) << dpi;
+        }
+    }
+    void theLettersFitASymbol() {
+        QFETCH(QString, kind);
+        QFETCH(int, dpi);
+        const std::string k = kind.toStdString();
+        const Document doc = one_line(k.c_str(), Json{{"x_mm", 40}, {"y_mm", 40}, {"w_mm", 46}, {"h_mm", 44}}, "すき\nだよ");
+        const genko::core::StoryLine& line = doc.story.front();
+        const genko::render::text::Layout layout = genko::render::text::text_layout(line, dpi);
+        const double em = 5.0 / 25.4 * dpi;
+        QVERIFY2(std::fabs(static_cast<double>(layout.em) - em) <= 1.0, qPrintable(QStringLiteral("em %1 of %2").arg(layout.em).arg(em)));
+        const double a = 46 / 25.4 * dpi / 2, b = 44 / 25.4 * dpi / 2;
+        const clean::Box box{-a, -b, a, b};
+        const clean::Contour outline = k == "heart" ? clean::heart(box, -1.0) : k == "diamond" ? clean::diamond(box, -1.0)
+                                       : k == "star" ? clean::star(box, 5, 0.62, -1.0) : clean::flower(box, 6);
+        // (the ink's box, from the letters' picture: every corner inside the symbol)
+        const std::string alpha = layout.image.getchannel(layout.image.bands() - 1).tobytes();
+        int x0 = layout.image.width(), y0 = layout.image.height(), x1 = 0, y1 = 0;
+        for (int y = 0; y < layout.image.height(); ++y) {
+            for (int x = 0; x < layout.image.width(); ++x) {
+                if (static_cast<unsigned char>(alpha[static_cast<std::size_t>(y) * static_cast<std::size_t>(layout.image.width()) + static_cast<std::size_t>(x)]) <= 40) continue;
+                x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x + 1), y1 = std::max(y1, y + 1);
+            }
+        }
+        QVERIFY(x1 > x0 && y1 > y0);
+        for (const double x : {static_cast<double>(x0), static_cast<double>(x1)}) {
+            for (const double y : {static_cast<double>(y0), static_cast<double>(y1)}) {
+                QVERIFY2(clean::inside(outline, {layout.corner_x + x, layout.corner_y + y}),
+                         qPrintable(QStringLiteral("a corner of the letters at %1, %2 is outside").arg(layout.corner_x + x).arg(layout.corner_y + y)));
+            }
+        }
+        // (and drawn: the balloon is there — its line dark round the letters, the page white outside its box)
+        const Grey g = grey_of(page_part(doc, dpi, 38, 38, 50, 48));
+        int dark = 0;
+        for (const char c : g.v) dark += static_cast<unsigned char>(c) < 128 ? 1 : 0;
+        QVERIFY(dark > g.w);
+        QVERIFY(g.at(1, 1) > 250 && g.at(g.w - 2, 1) > 250);
+    }
+
+    // fukidashi@2 is named while a line uses a symbol kind or one of the additions' keys, and not otherwise; none of them
+    // names fukidashi@1 (which is named for exactly what it was), and a book may name both. A book that names a feature
+    // this build does not know — as a build of before meets fukidashi@2 — is opened read-only.
+    void theSecondFeatureIsNamedWhileUsed() {
+        const auto names = [](const Json& payload, std::string_view feature) {
+            const Json& features = payload["features"];
+            return std::find(features.begin(), features.end(), Json(std::string(feature))) != features.end();
+        };
+        const std::string_view second = genko::core::kFukidashi2Feature;
+        QCOMPARE(second, std::string_view("fukidashi@2"));
+        QVERIFY(!names(payload_of(one_line("speech")), second));
+        QVERIFY(!names(payload_of(genko::test::clean_book()), second));  // (the kinds and keys of fukidashi@1: not the second)
+        for (const char* kind : {"heart", "star", "flower", "diamond"}) {
+            const Json payload = payload_of(one_line(kind));
+            QVERIFY2(names(payload, second), kind);
+            QVERIFY2(!names_feature(payload), kind);
+        }
+        const Json styles = Json::array({Json{{"pen_swell", 0.4}}, Json{{"pen_angle", 90}}, Json{{"pen_taper", 0.5}}, Json{{"pen_strokes", 3}}, Json{{"drip_mm", 5}},
+                                         Json{{"drips", 5}}, Json{{"drip_width_mm", 2}}, Json{{"drip_seed", 3}}, Json{{"points", 6}},
+                                         Json{{"fill_tone", Json{{"density", 0.2}}}}, Json{{"fill_gradient", Json{{"to", Json::array({200, 220, 255})}}}}});
+        for (const Json& style : styles) {
+            Document doc = one_line("speech", Json{{"style", style}});
+            QVERIFY2(names(payload_of(doc), second), style.dump().c_str());
+            QVERIFY2(!names_feature(payload_of(doc)), style.dump().c_str());
+            // (the key taken away again, the feature goes)
+            doc = run_ops(doc, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"style", Json{{style.begin().key(), nullptr}}}}}));
+            QVERIFY2(!names(payload_of(doc), second), style.dump().c_str());
+        }
+        Document doc = one_line("heart");
+        doc = run_ops(doc, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"balloon", "speech"}}}));
+        QVERIFY(!names(payload_of(doc), second));
+        // (both at once; read back by this build for writing, both still named)
+        const Document both = one_line("capsule", Json{{"style", Json{{"wave_mm", 0.3}, {"pen_swell", 0.5}}}});
+        QVERIFY(names(payload_of(both), second) && names_feature(payload_of(both)));
+        QTemporaryDir dir;
+        const std::filesystem::path path(dir.path().toStdString());
+        genko::test::write_project(one_line("star", Json{{"style", Json{{"points", 4}, {"drip_mm", 4}}}}), path);
+        const genko::storage::LoadResult read = genko::storage::load_document(path);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        QVERIFY(names(payload_of(read.document), second));
+        QCOMPARE(read.document.story.front().balloon, std::string("star"));
+        QCOMPARE(read.document.story.front().style["points"], Json(4));
+        // (a type layer's record counts as a line does: any_line — a symbol there names it too. And a feature this build
+        // does not know: read-only, with the reason)
+        Json payload = Json::parse(genko::test::read_bytes(QString::fromStdString((path / "project.json").string())));
+        payload["features"].push_back("fukidashi@3");
+        genko::storage::write_atomic(path / "project.json", payload.dump(2));
+        const genko::storage::LoadResult unknown = genko::storage::load_document(path);
+        QVERIFY(!unknown.document.read_only_reason.empty());
+    }
+
+    // --- fukidashi@2: a tone and a blend inside the outline -----------------------------------------------------------------
+
+    // style.fill_tone lays a screentone inside any outline: its ink covers the density asked, within two hundredths — dots
+    // at 10, 30, 50, 70 and 90%, lines at 20 and 60%, at 600 dpi and (a coarser lattice) at 150 —, in the line's colour.
+    void aToneCoversItsDensity_data() {
+        QTest::addColumn<QString>("pattern");
+        QTest::addColumn<double>("density");
+        QTest::addColumn<double>("lpi");
+        QTest::addColumn<double>("angle");
+        QTest::addColumn<int>("dpi");
+        for (const double density : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+            QTest::newRow(qPrintable(QStringLiteral("dots %1 at 600").arg(density))) << QStringLiteral("dot") << density << 60.0 << 45.0 << 600;
+        }
+        QTest::newRow("dots 0.3 at 150") << QStringLiteral("dot") << 0.3 << 30.0 << 45.0 << 150;
+        QTest::newRow("dots 0.3 at 1200") << QStringLiteral("dot") << 0.3 << 60.0 << 45.0 << 1200;
+        QTest::newRow("dots 0.4 at 15 degrees") << QStringLiteral("dot") << 0.4 << 50.0 << 15.0 << 600;
+        QTest::newRow("dots 0.3, each drawn where it lies") << QStringLiteral("dot") << 0.3 << 20.0 << 30.0 << 600;  // (26, 15: no period within 512 px)
+        QTest::newRow("lines 0.2") << QStringLiteral("line") << 0.2 << 60.0 << 45.0 << 600;
+        QTest::newRow("lines 0.6 across") << QStringLiteral("line") << 0.6 << 40.0 << 0.0 << 600;
+        QTest::newRow("lines 0.35 at 30 degrees") << QStringLiteral("line") << 0.35 << 60.0 << 30.0 << 600;
+        QTest::newRow("lines 0.5 at 150") << QStringLiteral("line") << 0.5 << 30.0 << 45.0 << 150;
+    }
+    void aToneCoversItsDensity() {
+        QFETCH(QString, pattern);
+        QFETCH(double, density);
+        QFETCH(double, lpi);
+        QFETCH(double, angle);
+        QFETCH(int, dpi);
+        const Json tone{{"density", density}, {"lpi", lpi}, {"angle", angle}, {"pattern", pattern.toStdString()}};
+        const Document doc = one_line("box", Json{{"style", Json{{"fill_tone", tone}, {"line_rgb", Json::array({0, 0, 0})}}}});
+        const genko::render::text::LetterParts balloon_only{true, false, false, false};
+        const genko::render::Size size{static_cast<int>(100 / 25.4 * dpi), static_cast<int>(90 / 25.4 * dpi)};
+        Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+        genko::render::text::clear_balloon_cache();
+        genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        // (well inside the box: 46..84 × 46..74 mm of its 40..90 × 40..80)
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const Grey g = grey_of(page.crop(genko::render::Box{px(46), px(46), px(84), px(74)}));
+        double dark = 0;
+        for (const char c : g.v) dark += (255 - static_cast<unsigned char>(c)) / 255.0;
+        const double share = dark / (static_cast<double>(g.w) * g.h);
+        QVERIFY2(std::fabs(share - density) <= 0.02, qPrintable(QStringLiteral("%1 of %2").arg(share).arg(density)));
+    }
+
+    // A tone that grows darker (fill_tone's `to`) does: along its way — down the page when none is said, to the right for
+    // dir 0, from the middle outward for radial — each tenth of the balloon is darker than the one before; and it ends
+    // where it is told, light at the one end and dark at the other.
+    void aToneGrowsDarkerAlongItsWay_data() {
+        QTest::addColumn<QString>("pattern");
+        QTest::addColumn<QString>("way");
+        for (const char* pattern : {"dot", "line"}) {
+            for (const char* way : {"down", "right", "up", "out"}) QTest::newRow(qPrintable(QStringLiteral("%1 %2").arg(pattern, way))) << QString::fromLatin1(pattern) << QString::fromLatin1(way);
+        }
+    }
+    void aToneGrowsDarkerAlongItsWay() {
+        QFETCH(QString, pattern);
+        QFETCH(QString, way);
+        Json tone{{"density", 0.05}, {"to", 0.7}, {"pattern", pattern.toStdString()}};
+        if (way == "right") tone["dir"] = 0;
+        if (way == "up") tone["dir"] = 270;
+        if (way == "out") tone["radial"] = true;
+        const int dpi = 600;
+        const Document doc = one_line("box", Json{{"style", Json{{"fill_tone", tone}, {"line_rgb", Json::array({0, 0, 0})}}}});
+        const genko::render::text::LetterParts balloon_only{true, false, false, false};
+        const genko::render::Size size{static_cast<int>(100 / 25.4 * dpi), static_cast<int>(90 / 25.4 * dpi)};
+        Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+        genko::render::text::clear_balloon_cache();
+        genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const Grey g = grey_of(page.crop(genko::render::Box{px(41), px(41), px(89), px(79)}));  // (inside the line)
+        // (ten bands along the way; for "out", ten rings of the box's ellipse)
+        std::array<double, 10> dark{}, count{};
+        for (int y = 0; y < g.h; ++y) {
+            for (int x = 0; x < g.w; ++x) {
+                const double u = (x + 0.5) / g.w, v = (y + 0.5) / g.h;
+                double t = way == "right" ? u : way == "up" ? 1 - v : way == "down" ? v : std::hypot(2 * u - 1, 2 * v - 1);
+                if (t >= 1.0) continue;
+                const auto band = static_cast<std::size_t>(t * 10);
+                dark[band] += (255 - g.at(x, y)) / 255.0;
+                count[band] += 1;
+            }
+        }
+        for (std::size_t k = 0; k < 10; ++k) dark[k] /= std::max(1.0, count[k]);
+        for (std::size_t k = 1; k < 10; ++k) {
+            QVERIFY2(dark[k] > dark[k - 1] + 0.03, qPrintable(QStringLiteral("band %1: %2 after %3").arg(k).arg(dark[k]).arg(dark[k - 1])));
+        }
+        QVERIFY2(dark[0] < 0.12 && dark[9] > 0.6 && dark[9] < 0.72, qPrintable(QStringLiteral("%1 .. %2").arg(dark[0]).arg(dark[9])));
+    }
+
+    // A tone lies inside any outline, under the letters and clear of nothing but the line: inside a heart there are dots,
+    // outside it none, the line as it was; with inset_mm white is left inside the line; a tone box with a fill_tone has
+    // that tone and not its own dots; and the dots of two balloons with one tone lie on one lattice of the page — the
+    // same balloon a whole number of the lattice's periods away is the same pixels.
+    void aToneLiesInsideAnyOutline() {
+        const Json tone{{"density", 0.3}};
+        const genko::render::text::LetterParts balloon_only{true, false, false, false};
+        const auto drawn = [&](const Document& doc, int dpi) {
+            const genko::render::Size size{static_cast<int>(140 / 25.4 * dpi), static_cast<int>(120 / 25.4 * dpi)};
+            Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+            genko::render::text::clear_balloon_cache();
+            genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+            return page;
+        };
+        for (const char* kind : {"speech", "heart", "shout", "cloud", "star", "rounded", "capsule"}) {
+            const Document plain = one_line(kind, Json{{"tail", Json::array({100, 95})}});
+            const Document toned = one_line(kind, Json{{"tail", Json::array({100, 95})}, {"style", Json{{"fill_tone", tone}}}});
+            const Grey a = grey_of(drawn(plain, 300)), b = grey_of(drawn(toned, 300));
+            int inside_dark = 0, lighter = 0;
+            for (int y = 0; y < a.h; ++y) {
+                for (int x = 0; x < a.w; ++x) {
+                    const int was = a.at(x, y), is = b.at(x, y);
+                    if (is > was) ++lighter;                      // (a tone only adds ink)
+                    if (was > 250 && is < 128) ++inside_dark;      // (a dot where the fill was white)
+                }
+            }
+            QVERIFY2(lighter == 0, kind);
+            QVERIFY2(inside_dark > 2000, qPrintable(QStringLiteral("%1: %2").arg(kind).arg(inside_dark)));
+            // (the page's corner — outside every balloon — is white, and the line's own pixels — all line: its colour,
+            // 20 — are as they were)
+            QVERIFY(b.at(3, 3) == 255);
+            for (int y = 0; y < a.h; ++y) {
+                for (int x = 0; x < a.w; ++x) {
+                    if (a.at(x, y) == 20) QVERIFY2(b.at(x, y) == 20, kind);
+                }
+            }
+        }
+        {  // (white left inside the line: the pixels within a millimetre of the box's edge are white, further in there are dots)
+            const Document inset = one_line("box", Json{{"style", Json{{"fill_tone", Json{{"density", 0.3}, {"inset_mm", 1.5}}}}}});
+            const Grey g = grey_of(drawn(inset, 300));
+            const auto px = [](double mm) { return static_cast<int>(std::lround(mm / 25.4 * 300)); };
+            int near_dark = 0, deep_dark = 0;
+            for (int y = px(50); y < px(70); ++y) {
+                for (int x = px(40.7); x < px(41.6); ++x) near_dark += g.at(x, y) < 200 ? 1 : 0;
+                for (int x = px(43); x < px(46); ++x) deep_dark += g.at(x, y) < 128 ? 1 : 0;
+            }
+            QCOMPARE(near_dark, 0);
+            QVERIFY(deep_dark > 100);
+        }
+        {  // (a tone box: the tone asked instead of its own)
+            const Document own = one_line("tone_box");
+            const Document asked = one_line("tone_box", Json{{"style", Json{{"fill_tone", Json{{"density", 0.5}, {"pattern", "line"}}}}}});
+            const Grey a = grey_of(drawn(own, 300).crop(genko::render::Box{560, 560, 900, 800})), b = grey_of(drawn(asked, 300).crop(genko::render::Box{560, 560, 900, 800}));
+            double da = 0, db = 0;
+            for (const char c : a.v) da += (255 - static_cast<unsigned char>(c)) / 255.0;
+            for (const char c : b.v) db += (255 - static_cast<unsigned char>(c)) / 255.0;
+            QVERIFY2(da / a.v.size() < 0.16 && db / b.v.size() > 0.4, qPrintable(QStringLiteral("%1, %2").arg(da / a.v.size()).arg(db / b.v.size())));
+        }
+        {  // (one lattice for the page: at 600 dpi, 60 lines at 45° is the vector (7, 7) — the same dots every 14 px.
+           // A balloon 14 × 20 px to the right is the same pixels, moved; one 5 px to the right is not)
+            const auto at_x = [&](double x_px) {
+                const Document doc = one_line("box", Json{{"x_mm", x_px / 600 * 25.4}, {"y_mm", 1000.0 / 600 * 25.4}, {"w_mm", 30}, {"h_mm", 20}, {"style", Json{{"fill_tone", tone}}}});
+                return drawn(doc, 600);
+            };
+            const Image here = at_x(900), there = at_x(900 + 280), off = at_x(905);
+            const genko::render::Box a{800, 900, 1800, 1600};
+            QVERIFY(here.crop(a).tobytes() == there.crop(genko::render::Box{a.x0 + 280, a.y0, a.x1 + 280, a.y1}).tobytes());
+            QVERIFY(here.crop(a).tobytes() != off.crop(genko::render::Box{a.x0 + 5, a.y0, a.x1 + 5, a.y1}).tobytes());
+        }
+    }
+
+    // The letters over a tone get a white edge, as a tone box's do (and none when the line says its own outline, or has no
+    // balloon for the tone to lie in).
+    void theLettersOverAToneHaveAWhiteEdge() {
+        const auto layout = [](const char* kind, Json style) {
+            const Document doc = one_line(kind, Json{{"style", std::move(style)}}, "あ");
+            return genko::render::text::text_layout(doc.story.front(), 600);
+        };
+        const Json tone{{"fill_tone", Json{{"density", 0.3}}}};
+        const auto plain = layout("speech", Json::object());
+        const auto toned = layout("speech", tone);
+        const std::int64_t grow = std::max<std::int64_t>(2, plain.em / 7);
+        QCOMPARE(toned.image.width(), plain.image.width() + 2 * static_cast<int>(grow + 1));
+        QCOMPARE(layout("tone_box", Json::object()).image.width(), layout("tone_box", tone).image.width());
+        QCOMPARE(layout("sfx", tone).image.width(), layout("sfx", Json::object()).image.width());
+        QCOMPARE(layout("none", tone).image.width(), layout("none", Json::object()).image.width());
+        // (the edge is white: somewhere in the letters' picture a white pixel that is there — and none without the tone)
+        const auto whites = [](const Image& image) {
+            const std::string bytes = image.convert("RGBA").tobytes();
+            int n = 0;
+            for (std::size_t i = 0; i < bytes.size() / 4; ++i) {
+                n += static_cast<unsigned char>(bytes[i * 4 + 3]) > 200 && static_cast<unsigned char>(bytes[i * 4]) > 240 ? 1 : 0;
+            }
+            return n;
+        };
+        QVERIFY(whites(toned.image) > 500);
+        QCOMPARE(whites(plain.image), 0);
+    }
+
+    // style.fill_gradient: the fill runs from its own colour to another — down the page, from the fill's colour at the
+    // top to the other at the foot, each row between them in turn; from white when no colour is said; on a picture with
+    // transparency (a balloon's own layer) and on one of another kind the same colours.
+    void aBlendRunsFromOneColourToTheOther() {
+        const genko::render::text::LetterParts balloon_only{true, false, false, false};
+        const Document doc = one_line("box", Json{{"style", Json{{"fill_rgb", Json::array({255, 240, 100})}, {"fill_gradient", Json{{"to", Json::array({40, 90, 250})}}}}}});
+        const int dpi = 300;
+        const genko::render::Size size{static_cast<int>(100 / 25.4 * dpi), static_cast<int>(90 / 25.4 * dpi)};
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        Image page = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+        genko::render::text::clear_balloon_cache();
+        genko::render::text::draw_lines(genko::render::text::whole_page(page), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        const std::string rgb = page.tobytes();
+        const auto at = [&](int x, int y) {
+            const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(page.width()) + static_cast<std::size_t>(x)) * 3;
+            return std::array<int, 3>{static_cast<unsigned char>(rgb[i]), static_cast<unsigned char>(rgb[i + 1]), static_cast<unsigned char>(rgb[i + 2])};
+        };
+        const int x = px(65), top = px(40.6), foot = px(79.4);
+        const auto first = at(x, top), last = at(x, foot);
+        QVERIFY2(std::abs(first[0] - 255) <= 4 && std::abs(first[1] - 240) <= 4 && std::abs(first[2] - 100) <= 4, qPrintable(QStringLiteral("%1 %2 %3").arg(first[0]).arg(first[1]).arg(first[2])));
+        QVERIFY2(std::abs(last[0] - 40) <= 4 && std::abs(last[1] - 90) <= 4 && std::abs(last[2] - 250) <= 4, qPrintable(QStringLiteral("%1 %2 %3").arg(last[0]).arg(last[1]).arg(last[2])));
+        for (int y = top + 1; y <= foot; ++y) {  // (red and green fall, blue rises, never the other way; the same along a row)
+            const auto here = at(x, y), above = at(x, y - 1);
+            QVERIFY(here[0] <= above[0] && here[1] <= above[1] && here[2] >= above[2]);
+            QVERIFY(at(px(45), y) == here);
+        }
+        const auto middle = at(x, (top + foot) / 2);
+        QVERIFY(std::abs(middle[0] - 148) <= 3 && std::abs(middle[2] - 175) <= 3);
+        // (no colour said: from white)
+        const Document white = one_line("speech", Json{{"style", Json{{"fill_gradient", Json{{"to", Json::array({0, 0, 0})}, {"dir", 0}}}}}});
+        Image second = Image::create("RGB", size, genko::render::Ink{255, 255, 255});
+        genko::render::text::clear_balloon_cache();
+        genko::render::text::draw_lines(genko::render::text::whole_page(second), {&white.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        const Grey g = grey_of(second);
+        QVERIFY(g.at(px(42), px(60)) > 235 && g.at(px(88), px(60)) < 30 && std::abs(g.at(px(65), px(60)) - 128) <= 4);
+        // (on its own layer — transparent where the balloon is not — and on a grey picture: the same colours)
+        Image layer = Image::create("RGBA", size, genko::render::Ink{0, 0, 0, 0});
+        genko::render::text::draw_lines(genko::render::text::whole_page(layer), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        const std::string rgba = layer.tobytes();
+        for (const int y : {top, (top + foot) / 2, foot}) {
+            const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(layer.width()) + static_cast<std::size_t>(x)) * 4;
+            const auto here = at(x, y);
+            QVERIFY(static_cast<unsigned char>(rgba[i + 3]) == 255);
+            for (std::size_t c = 0; c < 3; ++c) QVERIFY(std::abs(static_cast<unsigned char>(rgba[i + c]) - here[c]) <= 1);
+        }
+        // (a picture of another kind with three colours — the fill is laid as a picture of the blend, brought to its kind)
+        Image other = Image::create("YCbCr", size, genko::render::Ink{255, 128, 128});
+        genko::render::text::draw_lines(genko::render::text::whole_page(other), {&doc.story.front()}, dpi, std::nullopt, false, nullptr, {}, nullptr, &balloon_only);
+        const std::string back = other.convert("RGB").tobytes();
+        for (const int y : {top, (top + foot) / 2, foot}) {
+            const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(other.width()) + static_cast<std::size_t>(x)) * 3;
+            const auto here = at(x, y);
+            for (std::size_t c = 0; c < 3; ++c) {
+                QVERIFY2(std::abs(static_cast<unsigned char>(back[i + c]) - here[c]) <= 3, qPrintable(QStringLiteral("row %1 band %2: %3 for %4").arg(y).arg(c).arg(static_cast<unsigned char>(back[i + c])).arg(here[c])));
+            }
+        }
+    }
+
+    // A tone printed (the page made black and white at 600 and at 1200 dpi): its dots are whole — no black pixel alone,
+    // and about the density asked is black.
+    void aPrintedToneIsClean_data() {
+        QTest::addColumn<int>("dpi");
+        QTest::addColumn<double>("density");
+        for (const int dpi : {600, 1200}) {
+            for (const double density : {0.1, 0.3, 0.5}) QTest::newRow(qPrintable(QStringLiteral("%1 at %2").arg(density).arg(dpi))) << dpi << density;
+        }
+    }
+    void aPrintedToneIsClean() {
+        QFETCH(int, dpi);
+        QFETCH(double, density);
+        const Document doc = one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", density}}}, {"line_rgb", Json::array({0, 0, 0})}}}}, "あ");
+        const Grey g = grey_of(genko::render::to_bitonal(page_part(doc, dpi, 46, 46, 12, 28)));  // (inside the oval, clear of the letter)
+        int black = 0, alone = 0;
+        for (int y = 1; y + 1 < g.h; ++y) {
+            for (int x = 1; x + 1 < g.w; ++x) {
+                if (g.at(x, y) >= 128) continue;
+                ++black;
+                if (g.at(x - 1, y) >= 128 && g.at(x + 1, y) >= 128 && g.at(x, y - 1) >= 128 && g.at(x, y + 1) >= 128) ++alone;
+            }
+        }
+        const double share = static_cast<double>(black) / ((g.w - 2) * (g.h - 2));
+        QCOMPARE(alone, 0);
+        // (black is every pixel a dot covers 30% of or more — grey above 180 is white —: each dot a fifth of a pixel bigger
+        // all round, so up to a fifth more than the dots' own area at 600 dpi)
+        QVERIFY2(share > density - 0.02 && share < density * 1.2 + 0.02, qPrintable(QStringLiteral("%1 of %2").arg(share).arg(density)));
+    }
+
+    // A part of the additions' sample is the whole page cut there, every pixel: each page at 600 dpi in tiles, and at 150.
+    void aTileOfTheAdditionsIsThePageCutThere_data() {
+        QTest::addColumn<int>("dpi");
+        QTest::addColumn<int>("page");
+        const Document doc = genko::test::additions_book();
+        for (std::size_t page = 0; page < doc.pages.size(); ++page) {
+            if (doc.story_for_page(genko::core::Num(static_cast<double>(page + 1))).empty()) continue;
+            for (const int dpi : {600, 150}) QTest::newRow(qPrintable(QStringLiteral("page %1 at %2").arg(page + 1).arg(dpi))) << dpi << static_cast<int>(page);
+        }
+    }
+    void aTileOfTheAdditionsIsThePageCutThere() {
+        QFETCH(int, dpi);
+        QFETCH(int, page);
+        const Document doc = genko::test::additions_book();
+        const Image whole = page_picture(doc, dpi, static_cast<std::size_t>(page));
+        const int side = dpi == 600 ? 1024 : 300;
+        for (int y = 0; y < whole.height(); y += side) {
+            for (int x = 0; x < whole.width(); x += side) {
+                genko::render::text::clear_balloon_cache();  // (each tile works its balloons out again)
+                genko::render::RenderOptions options;
+                options.region = genko::render::RenderRegion{x, y, std::min(side, whole.width() - x), std::min(side, whole.height() - y)};
+                const Image tile = genko::render::render_page(doc.page(static_cast<std::size_t>(page)), dpi, options, &doc).image;
+                const Image cut = whole.crop(genko::render::Box{x, y, x + options.region->w, y + options.region->h});
+                QVERIFY2(tile.tobytes() == cut.tobytes(), qPrintable(QStringLiteral("tile at %1, %2").arg(x).arg(y)));
+            }
+        }
+    }
+
     // --- what fukidashi@2 leaves alone ----------------------------------------------------------------------------------
 
     // The additions (the pen's line, the drips, the symbols, the tone and the blend inside any outline: SPEC BALLOON-02)
@@ -1305,7 +1769,14 @@ private slots:
     // of test_gui_color, they are written at the end of a run that names a folder)
     void cleanupTestCase() {
         const QByteArray out = qgetenv("GENKO_FUKIDASHI_OUT");
-        if (!out.isEmpty()) write_sample_sheets(out);
+        if (out.isEmpty()) return;
+        // (GENKO_FUKIDASHI_SHEETS=additions: only the sheets of fukidashi@2's additions)
+        if (qgetenv("GENKO_FUKIDASHI_SHEETS") == "additions") {
+            std::filesystem::create_directories(std::filesystem::path(out.toStdString()));
+            write_addition_sheets(std::filesystem::path(out.toStdString()));
+            return;
+        }
+        write_sample_sheets(out);
     }
 
 private:
@@ -1348,11 +1819,38 @@ private:
         for (const auto& part : parts) write(part.name, page_part(doc, 600, part.x, part.y, 84, 84, part.page));
         // (the same pages made black and white, as the monochrome print: a part)
         write("clean-600-mono.png", genko::render::to_bitonal(page_part(doc, 600, 12, 6, 84, 84, 1)).convert("L"));
+        write_addition_sheets(dir);
         // (the book of before, as this build draws it: beside the pictures main's build made of it)
         const Document old = genko::storage::load_document(old_book_dir()).document;
         for (std::size_t i = 0; i < old.pages.size(); ++i) write("after-" + std::to_string(i + 1) + ".png", page_picture(old, 200, i));
         const Document old2 = genko::storage::load_document(old_book_dir(QStringLiteral("old_book2"))).document;
         for (std::size_t i = 0; i < old2.pages.size(); ++i) write("after2-" + std::to_string(i + 1) + ".png", page_picture(old2, 200, i));
+    }
+
+    // fukidashi@2: the sample of the additions — each page at 150 dpi, its parts at 600 dpi pixel for pixel, and the same
+    // parts made black and white as the monochrome print.
+    static void write_addition_sheets(const std::filesystem::path& dir) {
+        const auto write = [&](const std::string& name, const Image& image) {
+            genko::storage::write_atomic(dir / name, genko::formats::png_bytes(image.convert("RGB")));
+        };
+        const Document doc = genko::test::additions_book();
+        const char* names[] = {"symbols", "pen", "drips", "fills"};
+        for (std::size_t page = 0; page < doc.pages.size(); ++page) {
+            bool any = false;
+            for (const genko::core::StoryLine& line : doc.story) any = any || line.page_index.value() == static_cast<double>(page + 1);
+            if (!any) continue;
+            const std::string name = names[page];
+            write("add-150-" + name + ".png", page_picture(doc, 150, page));
+            int part = 0;
+            for (const double y : {8.0, 94.0, 180.0}) {
+                for (const double x : {12.0, 104.0}) {
+                    const Image crop = page_part(doc, 600, x, y, 94, 94, page);
+                    const std::string at = std::string(1, static_cast<char>('a' + part++));
+                    write("add-600-" + name + "-" + at + ".png", crop);
+                    write("add-600-" + name + "-" + at + "-mono.png", genko::render::to_bitonal(crop).convert("L"));
+                }
+            }
+        }
     }
 };
 

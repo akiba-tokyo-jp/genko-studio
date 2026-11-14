@@ -678,6 +678,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // a line or a type layer's record uses one
     std::erase(features, std::string(core::kFukidashiFeature));
     if (core::uses_fukidashi(doc)) features.emplace_back(core::kFukidashiFeature);
+    // fukidashi@2 (SPEC BALLOON-02): the pen's line, the drips, the symbol kinds, a tone or a blend inside any outline —
+    // named while a line or a type layer's record uses one (a build that knows fukidashi@1 alone would draw something else)
+    std::erase(features, std::string(core::kFukidashi2Feature));
+    if (core::uses_fukidashi2(doc)) features.emplace_back(core::kFukidashi2Feature);
     // fonts@1 (書体の追加 F2, core/font_catalog.hpp): one of the forty added faces named — by a line, a ruby, a type layer's
     // record, a type style or the book's usual face —, named while one is. By the catalogue alone: the same on a computer
     // where the face's file is missing

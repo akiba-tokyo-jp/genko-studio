@@ -2186,6 +2186,8 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kKomawariFeature ||
            // fukidashi@1 (core/fukidashi.hpp)
            feature == core::kFukidashiFeature ||
+           // fukidashi@2 (core/fukidashi.hpp)
+           feature == core::kFukidashi2Feature ||
            // fonts@1 (core/font_catalog.hpp)
            feature == core::fonts::kFontsFeature;
 }

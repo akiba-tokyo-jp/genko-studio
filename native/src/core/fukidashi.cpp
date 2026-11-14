@@ -1,6 +1,7 @@
 #include "core/fukidashi.hpp"
 
 #include <initializer_list>
+#include <optional>
 
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -62,8 +63,56 @@ bool letters_in_oval(const StoryLine& line) {
 
 bool legacy_oval(const StoryLine& line) { return letters_in_oval(line) && !(line.path && !line.path->empty()); }
 
-std::array<double, 4> letter_box(const StoryLine& line) {
+bool is_symbol(std::string_view kind) { return kind == "heart" || kind == "star" || kind == "flower" || kind == "diamond"; }
+
+namespace {
+
+// A number of a line's style (0, 0.0 and what is not a number: none).
+std::optional<double> style_number(const StoryLine& line, std::string_view key) {
+    if (!line.style.is_object()) return std::nullopt;
+    const auto found = line.style.find(key);
+    if (found == line.style.end() || !found->is_number()) return std::nullopt;
+    const double value = found->is_number_integer() ? static_cast<double>(found->get<std::int64_t>()) : found->get<double>();
+    if (value == 0.0 || value != value) return std::nullopt;
+    return value;
+}
+
+}  // namespace
+
+int symbol_points(const StoryLine& line) {
+    const std::optional<double> points = style_number(line, "points");
+    if (!points) return line.balloon == "flower" ? 6 : 5;
+    return static_cast<int>(py_max(4.0, py_min(12.0, *points)));
+}
+
+double star_inner(const StoryLine& line) {
+    const double depth = style_number(line, "spike_depth").value_or(0.38);
+    return 1 - py_max(0.05, py_min(0.6, depth));
+}
+
+double drip_reach(const StoryLine& line) {
+    if (!line.style.is_object()) return 0.0;
+    const auto drip = line.style.find("drip_mm");
+    if (drip == line.style.end() || !drip->is_number()) return 0.0;
+    if (line.path && !line.path->empty()) return 0.0;
+    for (const std::string_view kind : {"dotted_box", "flash", "picture", "sfx", "none"}) {
+        if (line.balloon == kind) return 0.0;
+    }
+    const double h = line.h_mm.value();
+    const double asked = drip->is_number_integer() ? static_cast<double>(drip->get<std::int64_t>()) : drip->get<double>();
+    if (!(asked > 0) || !(h > 0) || !(line.w_mm.value() > 0)) return 0.0;
+    return py_round(py_min(py_min(asked, 30.0), 0.6 * h), 9);
+}
+
+std::array<double, 4> body_box(const StoryLine& line) {
     const double x = line.x_mm.value(), y = line.y_mm.value(), w = line.w_mm.value(), h = line.h_mm.value();
+    const double drip = drip_reach(line);
+    if (!(drip > 0)) return {x, y, w, h};
+    return {x, y, w, py_round(h - drip, 9)};
+}
+
+std::array<double, 4> letter_box(const StoryLine& line) {
+    const auto [x, y, w, h] = body_box(line);
     if (!legacy_oval(line) || !(w > 0) || !(h > 0)) return {x, y, w, h};
     const double letters_w = py_round(w / kOvalGrowth, 9);
     const double letters_h = py_round(h / kOvalGrowth, 9);
@@ -118,6 +167,21 @@ bool uses_fukidashi(const StoryLine& line) {
 
 bool uses_fukidashi(const Document& doc) {
     return any_line(doc, [](const StoryLine& line) { return uses_fukidashi(line); });
+}
+
+bool uses_fukidashi2(const StoryLine& line) {
+    if (is_symbol(line.balloon)) return true;
+    if (line.style.is_object()) {
+        for (const std::string_view key : {"pen_swell", "pen_angle", "pen_taper", "pen_strokes", "drip_mm", "drips", "drip_width_mm", "drip_seed", "points",
+                                           "fill_tone", "fill_gradient"}) {
+            if (line.style.contains(key)) return true;
+        }
+    }
+    return false;
+}
+
+bool uses_fukidashi2(const Document& doc) {
+    return any_line(doc, [](const StoryLine& line) { return uses_fukidashi2(line); });
 }
 
 bool says_balloon_geometry(const Document& doc) {

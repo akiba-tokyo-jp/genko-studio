@@ -66,10 +66,12 @@ bool one_of(std::string_view kind, std::initializer_list<std::string_view> kinds
 const std::initializer_list<std::string_view> kElliptic{"speech", "cloud", "thought", "shout", "electric", "flash", "whisper"};
 const std::initializer_list<std::string_view> kFrames{"dotted_box", "tone_box", "fancy_box"};
 const std::initializer_list<std::string_view> kSquare{"box", "narration", "dotted_box", "tone_box", "fancy_box"};
-const std::initializer_list<std::string_view> kHugged{"speech", "thought", "whisper", "flash", "shout", "capsule", "polygon"};
+const std::initializer_list<std::string_view> kHugged{"speech", "thought", "whisper", "flash", "shout", "capsule", "polygon",
+                                                      "heart", "star", "flower", "diamond"};  // (fukidashi@2: the symbols)
 const std::initializer_list<std::string_view> kUneven{"speech", "thought", "whisper"};
 const std::initializer_list<std::string_view> kSpoken{"speech", "rounded", "box",   "cloud", "thought",
-                                                      "shout",  "electric", "flash", "whisper"};
+                                                      "shout",  "electric", "flash", "whisper",
+                                                      "heart",  "star",     "flower", "diamond"};  // (fukidashi@2: the symbols)
 
 // Python's a // b of ints, and of floats (float_floor_div: fmod, then the quotient snapped to a whole number)
 std::int64_t floordiv(std::int64_t a, std::int64_t b) {
@@ -1485,6 +1487,25 @@ double shape_gauge(std::string_view kind, double x, double y, double a, double b
     return std::sqrt((ax / sa) * (ax / sa) + (ay / sb) * (ay / sb));
 }
 
+double symbol_gauge(const std::vector<std::array<double, 2>>& room, double a, double b, double block_a, double block_b) {
+    if (room.size() < 3) return 1.0;
+    if (block_a < 0) block_a = a;
+    if (block_b < 0) block_b = b;
+    // (the block moved up or down to where it needs the least room — as fit_in_shape moves the letters: a heart's room
+    // and an odd star's are not the same above and below)
+    // (by 0.3 of the box's half height at most, a fortieth at a time: within what fit_in_shape's steps reach)
+    double best = 0.0;
+    for (int step = -12; step <= 12; ++step) {
+        const double dy = b * static_cast<double>(step) / 40.0;
+        double worst = 0.0;
+        for (const double x : {-block_a, block_a}) {
+            for (const double y : {-block_b, block_b}) worst = core::py_max(worst, shape_gauge("symbol", x, y + dy, a, b, &room));
+        }
+        if (step == -12 || worst < best) best = worst;
+    }
+    return best;
+}
+
 std::vector<std::array<std::int64_t, 4>> ink_rects(const Image& image, std::int64_t em) {
     const Image alpha_band = image.mode() == "RGBA" ? image.getchannel("A") : image.convert("L");
     const std::string pixels = alpha_band.tobytes();
@@ -1858,7 +1879,10 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const double oval_w = static_cast<double>(w) * keep;
     const double oval_h = static_cast<double>(h) * keep;
     // (fukidashi@1: a capsule and a polygon hold the letters in their own shape; the ovals and the bursts in an oval)
-    const bool shaped = hug && (kind == "capsule" || kind == "polygon");
+    // (fukidashi@2: a symbol holds them in the room it leaves — the diamond itself, a star's and a flower's valleys, a
+    // heart below its cleft)
+    const bool symbol = hug && core::is_symbol(kind);
+    const bool shaped = hug && (kind == "capsule" || kind == "polygon" || symbol);
     const double corner_px = at(st, "corner_mm").is_number() ? core::to_float(at(st, "corner_mm")) / 25.4 * dpi : -1.0;  // (0: square corners)
     std::vector<std::array<double, 2>> sides_outline;
     if (hug && kind == "polygon") {
@@ -1866,6 +1890,19 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
         const std::int64_t sides = core::py_truthy(at(st, "sides")) ? core::to_int(at(st, "sides")) : 8;
         for (const clean::P& p : clean::polygon(clean::Box{-a, -b, a, b}, static_cast<int>(sides), corner_px >= 0 ? corner_px : core::py_min(a, b) * 0.14)) {
             sides_outline.push_back({p.x, p.y});
+        }
+    }
+    // (how far a symbol's room reaches across its middle, as shares of the box: what one column — one row — may run)
+    double symbol_across = 1.0, symbol_down = 1.0;
+    if (symbol) {
+        const double a = static_cast<double>(w) / 2, b = static_cast<double>(h) / 2;
+        for (const clean::P& p : clean::symbol_room(kind, clean::Box{-a, -b, a, b}, core::symbol_points(line), core::star_inner(line))) {
+            sides_outline.push_back({p.x, p.y});
+        }
+        if (sides_outline.size() >= 3) {
+            const auto reach = [&](double x, double y) { return 1 / core::py_max(1e-9, shape_gauge(kind, x, y, a, b, &sides_outline)); };
+            symbol_across = core::py_min(1.0, (reach(a, 0.0) + reach(-a, 0.0)) / 2);
+            symbol_down = core::py_min(1.0, (reach(0.0, b) + reach(0.0, -b)) / 2);
         }
     }
     const auto fitted = [&](const std::vector<std::array<double, 2>>& points) {
@@ -1881,6 +1918,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             const double margin = static_cast<double>(2 * size) * kFitPad;
             // (a capsule and a polygon are sized close round their words: the columns may run their whole room)
             const double slack = shaped ? 1.0 : 0.92;
+            if (symbol) return {oval_w * symbol_across - margin, oval_h * symbol_down - margin};
             return {(oval_w - margin) * slack, (oval_h - margin) * slack};
         }
         return inner(kind, static_cast<double>(w), static_cast<double>(h), pad, at(st, "spike_depth"), corner_px);
@@ -1926,7 +1964,9 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     if (core::py_truthy(at(st, "fill_png"))) image = picture_letters(image, at(st, "fill_png"));
     const Json& outline = at(st, "outline_mm");
     std::int64_t grow = core::py_truthy(outline) ? px(core::to_float(outline), dpi) : (kind == "sfx" ? std::max<std::int64_t>(2, floordiv(em, 8)) : 0);
-    if (kind == "tone_box" && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));  // (a white edge over the tone)
+    // (a white edge over the tone: a tone box's, and — fukidashi@2 — any balloon's with a tone inside, style.fill_tone)
+    const bool toned = kind == "tone_box" || (at(st, "fill_tone").is_object() && kind != "none" && kind != "sfx" && kind != "picture");
+    if (toned && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));
     if (grow != 0) {
         image = outlined(image, grow, core::py_truthy(at(st, "outline_rgb")) ? rgb_tuple(at(st, "outline_rgb")) : Rgb{255, 255, 255});
         if (rubies != nullptr) {  // (the letters moved in by the halo's room: grow + 1 each side)

@@ -62,6 +62,27 @@ Contour squircle(const Box& box);
 Contour polygon(const Box& box, int sides, double radius);
 // A cloud: `bumps` scallops of equal length round an ellipse.
 Contour cloud(const Box& box, int bumps);
+// fukidashi@2 (SPEC BALLOON-02) — the symbols. Each is its own mirror image left to right and touches the box's four
+// sides.
+// A diamond: its corners on the middles of the box's sides, rounded by `radius`.
+Contour diamond(const Box& box, double radius);
+// A star of `points` (4..12) points, the first straight up: its valleys at `inner` (0.4..0.95) of its points' reach;
+// its points rounded by `radius` and its valleys by half of it (a negative radius: its own — a point cut short by
+// about 0.035 of the box's narrow half).
+Contour star(const Box& box, int points, double inner, double radius);
+// A flower of `petals` (4..12) round petals, one straight up.
+Contour flower(const Box& box, int petals);
+// A heart: two round lobes over a point, the point rounded by `radius` (negative: 0.05 of the box's narrow half).
+Contour heart(const Box& box, double radius);
+// The middle a star's points stand round (an odd star's is below its box's middle), and the oval that lies inside the
+// valleys of a star or a flower, about that middle: what a tail leaves from.
+P star_centre(const Box& box, int points, double inner);
+Contour star_guide(const Box& box, int points, double inner);
+Contour flower_guide(const Box& box, int petals);
+// The room a symbol leaves its letters: a convex outline inside it — the diamond itself, a star's and a flower's
+// valleys, a heart below its cleft. `kind` is heart, star, flower or diamond (anything else: nothing).
+Contour symbol_room(std::string_view kind, const Box& box, int points, double inner);
+
 // A burst: `spikes` points at equal distances round the ellipse, the valleys `depth` (a share of the radius) in;
 // every other point shorter by `alt` of the depth; the points' reach changed by `jitter[i]` (shares of the radius, one
 // a spike; empty: none).

@@ -11,11 +11,14 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string_view>
 
 #include "core/error.hpp"
+#include "core/fukidashi.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -29,6 +32,7 @@
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/memo.hpp"
+#include "render/tones.hpp"
 
 namespace genko::render::text {
 
@@ -190,6 +194,22 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         const double depth = core::py_max(0.04, core::py_min(0.4, float_or(at(lst, "spike_depth"), 0.12)));
         body.outline = clean::sawtooth(box, static_cast<int>(teeth), depth);
         body.guide = clean::scaled_about(clean::squircle(box), body.centre, (1 - depth) * 0.97);
+    } else if (kind == "heart") {  // (fukidashi@2: the symbols)
+        body.outline = clean::heart(box, corner);
+        body.smooth = true;
+    } else if (kind == "diamond") {
+        body.outline = clean::diamond(box, corner);
+        body.smooth = true;
+    } else if (kind == "star") {
+        const int points = core::symbol_points(line);
+        const double inner = core::star_inner(line);
+        body.outline = clean::star(box, points, inner, corner);
+        body.guide = clean::star_guide(box, points, inner);
+        body.centre = clean::star_centre(box, points, inner);  // (an odd star's points stand round a middle below its box's)
+    } else if (kind == "flower") {
+        const int petals = core::symbol_points(line);
+        body.outline = clean::flower(box, petals);
+        body.guide = clean::flower_guide(box, petals);
     } else {  // speech, thought, whisper, flash
         body.outline = clean::ellipse(box);
         body.smooth = true;
@@ -342,6 +362,269 @@ std::vector<clean::Contour> flash_spokes(const std::vector<clean::Box>& boxes, d
     return spokes;
 }
 
+// --- fukidashi@2 (SPEC BALLOON-02): a tone, and a blend, inside the outline --------------------------------------------
+
+// How far along a tone that grows darker, or a blend of two colours, a place of the group's region lies (0..1): along
+// a direction across the group's boxes, or from their middle outward (1 on the ellipse of their bounds).
+struct Ramp {
+    bool radial = false;
+    double cx = 0.0, cy = 0.0;
+    double ux = 0.0, uy = 1.0;
+    double length = 1.0;
+    double rx = 1.0, ry = 1.0;
+    double at(double x, double y) const {
+        if (radial) {
+            const double dx = (x - cx) / rx, dy = (y - cy) / ry;
+            return clamp01(std::sqrt(dx * dx + dy * dy));
+        }
+        return clamp01(((x - cx) * ux + (y - cy) * uy) / length + 0.5);
+    }
+};
+
+// The ramp over the boxes of a group (region pixels): `degrees` the way it runs (0 to the right, 90 down the page; the
+// float sine and cosine, the same bits everywhere).
+Ramp ramp_over(const std::vector<clean::Box>& boxes, double degrees, bool radial) {
+    Ramp ramp;
+    if (boxes.empty()) return ramp;
+    double x0 = boxes.front().x0, y0 = boxes.front().y0, x1 = boxes.front().x1, y1 = boxes.front().y1;
+    for (const clean::Box& b : boxes) {
+        x0 = core::py_min(x0, b.x0);
+        y0 = core::py_min(y0, b.y0);
+        x1 = core::py_max(x1, b.x1);
+        y1 = core::py_max(y1, b.y1);
+    }
+    ramp.radial = radial;
+    ramp.cx = (x0 + x1) / 2;
+    ramp.cy = (y0 + y1) / 2;
+    ramp.rx = core::py_max(1.0, (x1 - x0) / 2);
+    ramp.ry = core::py_max(1.0, (y1 - y0) / 2);
+    const auto a = static_cast<float>(degrees * (core::kPi / 180.0));
+    ramp.ux = static_cast<double>(libm::cosf(a));
+    ramp.uy = static_cast<double>(libm::sinf(a));
+    // (straight down, up or across: the float sine of a half turn is not quite 0 — a ramp down the page is the same
+    // all along a row)
+    if (std::fabs(ramp.ux) < 1e-6) ramp.ux = 0.0;
+    if (std::fabs(ramp.uy) < 1e-6) ramp.uy = 0.0;
+    ramp.length = core::py_max(1.0, std::fabs(ramp.ux) * (x1 - x0) + std::fabs(ramp.uy) * (y1 - y0));
+    return ramp;
+}
+
+// A number of a tone's or a blend's settings, kept within its range (the reader does not check a book's styles: what
+// is not a number is the default).
+double setting(const Json& spec, std::string_view key, double fallback, double least, double most) {
+    const Json& value = at(spec, key);
+    if (!value.is_number()) return fallback;
+    const double v = core::to_float(value);
+    if (!(v == v)) return fallback;
+    return core::py_max(least, core::py_min(most, v));
+}
+
+// style.fill_tone: a screentone inside the outline, in the line's colour — dots, or lines, on the lattice the tone
+// layers screen with (render/tones' screen_vector: whole pixels, lined up with the page), each pixel's coverage its
+// exact area.
+struct ToneSpec {
+    double density = 0.0;
+    double to = 0.0;
+    bool graded = false;  // (it grows from `density` to `to` along its ramp)
+    bool lines = false;
+    double lpi = 60.0;
+    double angle = 45.0;
+    double dir = 90.0;
+    bool radial = false;
+    double inset_mm = 0.0;
+};
+
+std::optional<ToneSpec> tone_spec(const Json& st) {
+    const Json& spec = at(st, "fill_tone");
+    if (!spec.is_object()) return std::nullopt;
+    ToneSpec tone;
+    tone.density = setting(spec, "density", 0.0, 0.0, 0.9);
+    tone.graded = at(spec, "to").is_number();
+    tone.to = tone.graded ? setting(spec, "to", tone.density, 0.0, 0.9) : tone.density;
+    tone.lines = at(spec, "pattern") == Json("line");
+    tone.lpi = setting(spec, "lpi", 60.0, 20.0, 85.0);
+    tone.angle = setting(spec, "angle", 45.0, 0.0, 90.0);
+    tone.dir = setting(spec, "dir", 90.0, -360.0, 360.0);
+    tone.radial = core::py_truthy(at(spec, "radial"));
+    tone.inset_mm = setting(spec, "inset_mm", 0.0, 0.0, 5.0);
+    return tone;
+}
+
+constexpr int kToneLevels = 64;       // (a tone that grows darker: this many steps of density)
+constexpr std::int64_t kToneTile = 512;  // (a lattice that repeats within this many pixels is drawn once and laid like tiles)
+
+// floor(a / b) for b > 0, and the remainder that goes with it (0 .. b − 1).
+std::int64_t floor_div(std::int64_t a, std::int64_t b) {
+    const std::int64_t q = a / b;
+    return (a % b != 0 && a < 0) ? q - 1 : q;
+}
+std::int64_t floor_mod(std::int64_t a, std::int64_t b) { return a - floor_div(a, b) * b; }
+
+// How much of a pixel lies on the near side of a straight edge: `s` the edge's distance past the pixel's middle,
+// (a, b) the edge's unit normal made positive, a ≥ b. The exact area.
+double edge_share(double s, double a, double b) {
+    const double s1 = (a - b) / 2, s2 = (a + b) / 2;
+    if (s <= -s2) return 0.0;
+    if (s >= s2) return 1.0;
+    if (s < -s1) return (s + s2) * (s + s2) / (2 * a * b);
+    if (s > s1) return 1.0 - (s2 - s) * (s2 - s) / (2 * a * b);
+    return 0.5 + s / a;
+}
+
+// The radius of a tone's dots, in cells, for the dots to cover `density` of the page: a circle of that area — and, above
+// π / 4, where a dot meets the four beside it, the bigger circle whose part that is its own alone has that area (from a
+// table, a line between its entries: no arc cosine at drawing time).
+double dot_radius(double density) {
+    if (!(density > 0)) return 0.0;
+    static constexpr double kDense[][2] = {{0.7853981633974483, 0.5},  {0.80, 0.5052724328106947}, {0.82, 0.5135272122633895}, {0.84, 0.5227962158058063},
+                                           {0.86, 0.5331141606423667}, {0.88, 0.5446096225474605}, {0.90, 0.5575069513285796}};
+    if (density <= kDense[0][0]) return std::sqrt(density / core::kPi);
+    for (std::size_t k = 1; k < std::size(kDense); ++k) {
+        if (density <= kDense[k][0]) {
+            const double t = (density - kDense[k - 1][0]) / (kDense[k][0] - kDense[k - 1][0]);
+            return kDense[k - 1][1] + (kDense[k][1] - kDense[k - 1][1]) * t;
+        }
+    }
+    return kDense[std::size(kDense) - 1][1];
+}
+
+// One period of a dot lattice (m, n) with dots of `radius`: `side` × `side` pixels of coverage, 0..255, from the page's
+// corner. Remembered (a balloon's tone at one density is one of them; a tone that grows darker, up to 64).
+detail::Memo<std::string>& remembered_tone_tiles() {
+    static detail::Memo<std::string> memo(1024, 48LL * 1024 * 1024);
+    return memo;
+}
+
+// The dot of cell (i, j) of the lattice: its middle on the page (the middle of the tone layers' cell: a pixel's middle
+// is its index and a half).
+P dot_middle(std::int64_t i, std::int64_t j, std::int64_t m, std::int64_t n) {
+    return {(static_cast<double>(i) + 0.5) * static_cast<double>(m) - (static_cast<double>(j) + 0.5) * static_cast<double>(n) + 0.5,
+            (static_cast<double>(i) + 0.5) * static_cast<double>(n) + (static_cast<double>(j) + 0.5) * static_cast<double>(m) + 0.5};
+}
+
+// The cells of the lattice whose dots (of at most `reach`) can touch the box (x0, y0, x1, y1): the range of i and of j.
+std::array<std::int64_t, 4> cells_over(double x0, double y0, double x1, double y1, std::int64_t m, std::int64_t n, double reach) {
+    const double norm = static_cast<double>(m * m + n * n);
+    double u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+    bool first = true;
+    for (const double x : {x0 - reach, x1 + reach}) {
+        for (const double y : {y0 - reach, y1 + reach}) {
+            const double u = (x * static_cast<double>(m) + y * static_cast<double>(n)) / norm;
+            const double v = (-x * static_cast<double>(n) + y * static_cast<double>(m)) / norm;
+            if (first) u0 = u1 = u, v0 = v1 = v, first = false;
+            u0 = core::py_min(u0, u), u1 = core::py_max(u1, u), v0 = core::py_min(v0, v), v1 = core::py_max(v1, v);
+        }
+    }
+    return {static_cast<std::int64_t>(std::floor(u0)) - 1, static_cast<std::int64_t>(std::ceil(u1)) + 1, static_cast<std::int64_t>(std::floor(v0)) - 1,
+            static_cast<std::int64_t>(std::ceil(v1)) + 1};
+}
+
+std::shared_ptr<const std::string> tone_tile(std::int64_t m, std::int64_t n, std::int64_t side, double radius) {
+    const std::optional<std::string> key = detail::memo_key(Json::array({"tone", m, n, side, radius}));
+    if (key) {
+        if (auto found = remembered_tone_tiles().get(*key)) return found;
+    }
+    std::vector<clean::Contour> dots;
+    if (radius > 0) {
+        const auto [i0, i1, j0, j1] = cells_over(0.0, 0.0, static_cast<double>(side), static_cast<double>(side), m, n, radius + 1);
+        for (std::int64_t j = j0; j <= j1; ++j) {
+            for (std::int64_t i = i0; i <= i1; ++i) {
+                const P c = dot_middle(i, j, m, n);
+                if (c.x < -radius - 1 || c.y < -radius - 1 || c.x > static_cast<double>(side) + radius + 1 || c.y > static_cast<double>(side) + radius + 1) continue;
+                dots.push_back(clean::circle(c, radius));
+            }
+        }
+    }
+    const clean::Plane plane = clean::union_plane(dots, static_cast<int>(side), static_cast<int>(side));
+    auto bytes = std::make_shared<std::string>(plane.values.size(), '\0');
+    for (std::size_t k = 0; k < plane.values.size(); ++k) {
+        (*bytes)[k] = static_cast<char>(static_cast<std::uint8_t>(clamp01(static_cast<double>(plane.values[k])) * 255.0 + 0.5));
+    }
+    if (key) remembered_tone_tiles().put(*key, bytes, static_cast<std::int64_t>(bytes->size()) + 64);
+    return bytes;
+}
+
+// The tone over the region (coverage 0..1, not yet cut to the balloon): `ramp` in the region's pixels, (ox, oy) the
+// region's corner on the page.
+std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size, int dpi, std::int64_t ox, std::int64_t oy) {
+    const auto w = static_cast<std::size_t>(size.width);
+    const auto h = static_cast<std::size_t>(size.height);
+    std::vector<float> out(w * h, 0.0f);
+    if (!(tone.density > 0) && !(tone.graded && tone.to > 0)) return out;
+    const std::pair<int, int> vector = tones::screen_vector(dpi, tone.lpi, tone.angle);
+    const std::int64_t m = std::abs(vector.first), n = std::abs(vector.second);
+    const std::int64_t norm = m * m + n * n;
+    const double pitch = std::sqrt(static_cast<double>(norm));
+    const auto density_at = [&](double x, double y) {  // (a place of the region)
+        return tone.graded ? tone.density + (tone.to - tone.density) * ramp.at(x, y) : tone.density;
+    };
+    if (tone.lines) {
+        // stripes along the lattice's (m, n), a cell apart, each density × the cell thick: every pixel's share of the
+        // stripe it lies on and of the two beside it
+        const double na = static_cast<double>(std::max(m, n)) / pitch, nb = static_cast<double>(std::min(m, n)) / pitch;
+        for (std::size_t y = 0; y < h; ++y) {
+            const std::int64_t py = static_cast<std::int64_t>(y) + oy;
+            for (std::size_t x = 0; x < w; ++x) {
+                const std::int64_t px = static_cast<std::int64_t>(x) + ox;
+                const double half = density_at(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5) * pitch / 2;
+                if (!(half > 0)) continue;
+                // (how far across its cell the pixel's middle lies, from the stripe's middle line: −pitch / 2 .. pitch / 2)
+                const double s = (static_cast<double>(floor_mod(-px * n + py * m, norm)) / static_cast<double>(norm) - 0.5) * pitch;
+                double share = 0.0;
+                for (const double d : {s - pitch, s, s + pitch}) share += edge_share(d + half, na, nb) - edge_share(d - half, na, nb);
+                out[y * w + x] = static_cast<float>(clamp01(share));
+            }
+        }
+        return out;
+    }
+    const auto radius_of = [&](double density) { return pitch * dot_radius(density); };
+    const auto level_of = [&](double t) { return std::min(kToneLevels - 1, static_cast<int>(t * kToneLevels)); };
+    const auto level_density = [&](int level) { return tone.density + (tone.to - tone.density) * (static_cast<double>(level) + 0.5) / kToneLevels; };
+    // (a cell's density: at its dot's middle, in the region's pixels)
+    const auto cell_level = [&](std::int64_t i, std::int64_t j) {
+        const P c = dot_middle(i, j, m, n);
+        return level_of(ramp.at(c.x - static_cast<double>(ox), c.y - static_cast<double>(oy)));
+    };
+    const std::int64_t common = std::gcd(m, n);
+    const std::int64_t side = norm / std::max<std::int64_t>(1, common);  // (the lattice repeats every `side` pixels, both ways)
+    if (side <= kToneTile) {
+        std::array<std::shared_ptr<const std::string>, kToneLevels> tiles{};
+        const auto tile_of = [&](int level) -> const std::string& {
+            auto& tile = tiles[static_cast<std::size_t>(level)];
+            if (!tile) tile = tone_tile(m, n, side, radius_of(tone.graded ? level_density(level) : tone.density));
+            return *tile;
+        };
+        for (std::size_t y = 0; y < h; ++y) {
+            const std::int64_t py = static_cast<std::int64_t>(y) + oy;
+            const std::size_t row = static_cast<std::size_t>(floor_mod(py, side)) * static_cast<std::size_t>(side);
+            for (std::size_t x = 0; x < w; ++x) {
+                const std::int64_t px = static_cast<std::int64_t>(x) + ox;
+                // (the cell the pixel's middle lies in: whole numbers, as the tone layers count them)
+                const int level = tone.graded ? cell_level(floor_div(px * m + py * n, norm), floor_div(-px * n + py * m, norm)) : 0;
+                const auto v = static_cast<unsigned char>(tile_of(level)[row + static_cast<std::size_t>(floor_mod(px, side))]);
+                out[y * w + x] = static_cast<float>(v) / 255.0f;
+            }
+        }
+        return out;
+    }
+    // (a coarse lattice that does not repeat soon: the region's own dots, each drawn where it lies)
+    const double most = radius_of(core::py_max(tone.density, tone.to));
+    const double fx = static_cast<double>(ox), fy = static_cast<double>(oy);
+    const auto [i0, i1, j0, j1] = cells_over(fx, fy, fx + size.width, fy + size.height, m, n, most + 1);
+    std::vector<clean::Contour> dots;
+    for (std::int64_t j = j0; j <= j1; ++j) {
+        for (std::int64_t i = i0; i <= i1; ++i) {
+            const P c = dot_middle(i, j, m, n);
+            const double radius = radius_of(tone.graded ? level_density(cell_level(i, j)) : tone.density);
+            if (!(radius > 0)) continue;
+            const P local{c.x - fx, c.y - fy};
+            if (local.x < -radius - 1 || local.y < -radius - 1 || local.x > size.width + radius + 1 || local.y > size.height + radius + 1) continue;
+            dots.push_back(clean::circle(local, radius));
+        }
+    }
+    return clean::union_plane(dots, size.width, size.height).values;
+}
+
 // --- one group's shapes (_paint_shapes) ------------------------------------------------------------------------------
 
 using Tails = std::vector<std::pair<const core::StoryLine*, Json>>;
@@ -354,9 +637,14 @@ struct Masks {
     double opacity = 1.0;
     std::vector<std::int64_t> paper;
     Image cover;
-    Image tone;  // (empty unless tone_box)
+    Image tone;  // (empty unless tone_box, or — fukidashi@2 — the line has a tone inside: style.fill_tone)
     std::vector<std::int64_t> line_rgb;
     Image band;
+    // (fukidashi@2, style.fill_gradient: the fill's colour runs from `paper` to `blend_to` along the ramp, in the
+    // region's pixels)
+    bool blend = false;
+    std::vector<std::int64_t> blend_to;
+    Ramp ramp;
 };
 
 std::vector<std::int64_t> colour_of(const Json& value, const std::vector<std::int64_t>& fallback) {
@@ -541,11 +829,31 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         const Json& covering = at(st, "fill_opacity");
         if (!covering.is_null() && core::to_float(covering) < 1) out.opacity = core::py_max(0.0, core::to_float(covering));
     }
-    if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
+    if (const std::optional<ToneSpec> tone = tone_spec(st)) {
+        // (fukidashi@2: a tone inside any outline — the tails and the joined balloons with it, being cut to where the
+        // group lies —, clear of the line by inset_mm when that is said)
+        clean::Plane dots;
+        dots.width = size.width;
+        dots.height = size.height;
+        dots.values = tone_plane(*tone, ramp_over(locals, tone->dir, tone->radial), size, dpi, rx0, ry0);
+        if (tone->inset_mm > 0) {
+            const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), width + tone->inset_mm / 25.4 * dpi, size.width, size.height);
+            for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
+        } else {
+            for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i];
+        }
+        out.tone = as_image(dots);
+    } else if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
         const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), core::py_max(2.0, static_cast<double>(px(1.0, dpi))), size.width, size.height);
         clean::Plane dots = clean::union_plane(tone_dots(size, dpi, rx0, ry0), size.width, size.height);
         for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
         out.tone = as_image(dots);
+    }
+    if (const Json& blend = at(st, "fill_gradient"); out.fill && blend.is_object() && at(blend, "to").is_array() && at(blend, "to").size() >= 3) {
+        // (fukidashi@2: the fill a blend from its own colour to another)
+        out.blend = true;
+        out.blend_to = colour_of(at(blend, "to"), out.paper);
+        out.ramp = ramp_over(locals, setting(blend, "dir", 90.0, -360.0, 360.0), core::py_truthy(at(blend, "radial")));
     }
     out.line_rgb = colour_of(at(st, "line_rgb"), kOutline);
     clean::Plane plane;
@@ -594,12 +902,39 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     const bool all = from == Box{0, 0, masks.cover.width(), masks.cover.height()};
     const Image cover_part = all ? masks.cover : masks.cover.crop(from);
     const Image band_part = all ? masks.band : masks.band.crop(from);
+    double paper[3] = {255.0, 255.0, 255.0};
+    double line[3] = {0.0, 0.0, 0.0};
+    double first_paper[3] = {255.0, 255.0, 255.0};  // (fukidashi@2, a blend: the colours its ramp begins and ends in)
+    double last_paper[3] = {255.0, 255.0, 255.0};
+    for (std::size_t c = 0; c < 3; ++c) {
+        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
+        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
+        first_paper[c] = paper[c];
+        last_paper[c] = c < masks.blend_to.size() ? static_cast<double>(std::clamp<std::int64_t>(masks.blend_to[c], 0, 255)) : paper[c];
+    }
+    // (the fill's colour at a pixel of the part: the blend is worked out from the pixel's place in the group's region, so a
+    // part of the page is the page cut there)
+    const auto blended = [&](std::size_t i, double* colour) {
+        const double t = masks.ramp.at(static_cast<double>(from.x0 + static_cast<int>(i % static_cast<std::size_t>(w))) + 0.5,
+                                       static_cast<double>(from.y0 + static_cast<int>(i / static_cast<std::size_t>(w))) + 0.5);
+        for (std::size_t k = 0; k < 3; ++k) colour[k] = first_paper[k] + (last_paper[k] - first_paper[k]) * t;
+    };
     if (mode != "RGB" && mode != "RGBA") {
         // (any other kind of picture: the fill through what it covers inside the line, then the line)
         if (masks.fill) {
             const double k = masks.opacity;
             const Image inside = chops::subtract(cover_part, band_part).point([k](int v) { return static_cast<int>(static_cast<double>(v) * k + 0.5); });
-            image.paste(Ink::tuple(masks.paper), to, &inside);
+            if (masks.blend) {
+                std::string colours(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 3, '\0');
+                for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); ++i) {
+                    double colour[3];
+                    blended(i, colour);
+                    for (std::size_t c = 0; c < 3; ++c) colours[i * 3 + c] = static_cast<char>(static_cast<std::uint8_t>(clamp01(colour[c] / 255.0) * 255.0 + 0.5));
+                }
+                image.paste(Image::frombytes("RGB", Size{w, h}, colours), to, &inside);
+            } else {
+                image.paste(Ink::tuple(masks.paper), to, &inside);
+            }
         }
         if (!masks.tone.empty()) {
             const Image tone = all ? masks.tone : masks.tone.crop(from);
@@ -613,20 +948,15 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     const std::string tone = masks.tone.empty() ? std::string() : (all ? masks.tone : masks.tone.crop(from)).tobytes();
     const std::size_t bands = mode == "RGBA" ? 4 : 3;
     std::string pixels = image.crop(to).tobytes();
-    double paper[3] = {255.0, 255.0, 255.0};
-    double line[3] = {0.0, 0.0, 0.0};
-    for (std::size_t c = 0; c < 3; ++c) {
-        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
-        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
-    }
     const auto count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     for (std::size_t i = 0; i < count; ++i) {
         const auto band8 = static_cast<unsigned char>(band[i]);
         const auto cover8 = static_cast<unsigned char>(cover[i]);
         if (band8 == 0 && cover8 == 0) continue;
+        if (masks.blend && band8 != 255) blended(i, paper);  // (the fill's colour here)
         if (tone.empty() || tone[i] == '\0') {  // (most of a balloon: all line, or all fill — the colour itself)
             const bool all_line = band8 == 255;
-            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0;
+            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0 && !masks.blend;
             if (all_line || all_fill) {
                 char* whole = &pixels[i * bands];
                 const double* colour = all_line ? line : paper;
@@ -1127,12 +1457,13 @@ EditableLine editable_line(const core::StoryLine& line, int dpi, const std::opti
 void clear_balloon_cache() {
     clear_layout_cache();
     remembered_masks().clear();
+    remembered_tone_tiles().clear();
     remembered_sheets().clear();
     remembered_stretches().clear();
 }
 
 std::int64_t balloon_cache_bytes() {
-    return layout_cache_bytes() + remembered_masks().used() + remembered_sheets().used() + remembered_stretches().used();
+    return layout_cache_bytes() + remembered_masks().used() + remembered_tone_tiles().used() + remembered_sheets().used() + remembered_stretches().used();
 }
 
 }  // namespace genko::render::text

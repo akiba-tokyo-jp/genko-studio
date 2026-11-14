@@ -415,16 +415,18 @@ Contour polygon(const Box& box, int sides, double radius) {
     return two_fold(half, [cx, cy](double x, double y, bool mirrored) { return P{mirrored ? cx - x : cx + x, cy + y}; });
 }
 
-Contour cloud(const Box& box, int bumps) {
-    const int n = std::clamp(bumps, 5, 60);
+namespace {
+
+// Scallops of equal length round an ellipse (`keep` of the box) — a cloud's bumps, a flower's petals —, each `bulge`
+// high against its width, a scallop's middle at the top; stretched to touch the box's four sides. `valleys_out`: where
+// the scallops meet, on the page.
+Contour scalloped(const Box& box, int n, double keep, double bulge, Contour* valleys_out = nullptr) {
     const double rx = box.rx();
     const double ry = box.ry();
     // (the valleys: at equal distances round an ellipse inside the box, a bump's middle at the top)
-    const double keep = 0.86;
     const Contour base = four_fold(quarter_ellipse(rx * keep, ry * keep), 0.0, 0.0);
     const std::vector<double> lengths = lengths_of(base);
     const double total = lengths.back();
-    const double bulge = 0.3;  // (a scallop's height against its width)
     std::vector<P> valleys;
     const bool odd = n % 2 != 0;
     const int count = odd ? (n + 1) / 2 : n / 2;
@@ -465,10 +467,347 @@ Contour cloud(const Box& box, int bumps) {
     const double cx = box.cx();
     const double y0 = box.y0;
     const double high = box.y1 - box.y0;
+    const auto place = [=](double x, double y, bool mirrored) {
+        const double px = x / reach * rx;
+        return P{mirrored ? cx - px : cx + px, y0 + (y - top) / (foot - top) * high};
+    };
+    if (valleys_out != nullptr) {  // (all the way round, clockwise from the first right of the top)
+        valleys_out->clear();
+        for (const P& v : valleys) valleys_out->push_back(place(v.x, v.y, false));
+        for (std::size_t j = valleys.size() - (odd ? 1 : 0); j-- > 0;) valleys_out->push_back(place(valleys[j].x, valleys[j].y, true));
+    }
+    return two_fold(half, place);
+}
+
+// The right half of an outline given by its corners — the first and the last on the middle line x = 0 —, each corner
+// rounded: `reach[i]` of both its sides taken by a curve whose control point is the corner (at most 0.4 of the shorter
+// side; under a quarter of a pixel: the corner as it is). The corners on the middle line are rounded with their mirror
+// image: the half begins and ends on the middle of their curves.
+std::vector<P> rounded_half(const std::vector<P>& corners, const std::vector<double>& reach) {
+    std::vector<P> half;
+    const std::size_t n = corners.size();
+    if (n < 2) return corners;
+    for (std::size_t k = 0; k < n; ++k) {
+        const P here = corners[k];
+        const P before = k == 0 ? P{-corners[1].x, corners[1].y} : corners[k - 1];
+        const P after = k + 1 < n ? corners[k + 1] : P{-corners[n - 2].x, corners[n - 2].y};
+        const double taken = std::min(reach[k], 0.4 * std::min(distance(before, here), distance(here, after)));
+        if (taken < 0.25) {
+            push(half, here);
+            continue;
+        }
+        const P from = sub(here, mul(unit(sub(here, before)), taken));
+        const P to = add(here, mul(unit(sub(after, here)), taken));
+        const int pieces = corner_pieces(from, here, to) * 2;  // (an even number: its middle is a point of it)
+        const int first = k == 0 ? pieces / 2 : 0;
+        const int last = k + 1 == n ? pieces / 2 : pieces;
+        for (int j = first; j <= last; ++j) {
+            const double t = static_cast<double>(j) / static_cast<double>(pieces);
+            const double u = 1 - t;
+            P p{u * u * from.x + 2 * u * t * here.x + t * t * to.x, u * u * from.y + 2 * u * t * here.y + t * t * to.y};
+            if ((k == 0 && j == first) || (k + 1 == n && j == last)) p.x = 0.0;  // (on the middle line)
+            push(half, p);
+        }
+    }
+    return half;
+}
+
+// A half outline about the middle line (x = 0) made the whole outline, stretched to touch the box's four sides.
+Contour fitted_two_fold(const std::vector<P>& half, const Box& box) {
+    if (half.size() < 2) return {};
+    double reach = 0.0, top = half.front().y, foot = half.front().y;
+    for (const P& p : half) {
+        reach = std::max(reach, p.x);
+        top = std::min(top, p.y);
+        foot = std::max(foot, p.y);
+    }
+    if (!(reach > 0) || !(foot > top)) return {};
+    const double cx = box.cx();
+    const double rx = box.rx();
+    const double y0 = box.y0;
+    const double high = box.y1 - box.y0;
     return two_fold(half, [=](double x, double y, bool mirrored) {
         const double px = x / reach * rx;
         return P{mirrored ? cx - px : cx + px, y0 + (y - top) / (foot - top) * high};
     });
+}
+
+// How much of a corner's two sides a rounding of `radius` takes: radius × the tangent of half the corner's turn.
+double corner_reach(P before, P here, P after, double radius) {
+    const double cosine = std::clamp(dot(unit(sub(here, before)), unit(sub(after, here))), -0.999, 0.999);
+    return radius * std::sqrt((1 - cosine) / (1 + cosine));
+}
+
+// A flower's petals: scallops round an ellipse of 0.6 of the box, each 0.46 of its width high — a little less than half a
+// circle (arc_to draws less than half a circle).
+constexpr double kPetalKeep = 0.6;
+constexpr double kPetalBulge = 0.46;
+
+// A star's corners on the unit circle — its points at 1, its valleys at `inner`, the first point straight up, the
+// right half from the top to the foot (2 × the half-steps: n + 1 corners) — and how they are laid in a box: x by
+// 1 / reach of the half width, y from `top` .. `foot` to the box's height.
+struct StarFrame {
+    std::vector<P> corners;
+    double reach = 1.0;
+    double top = -1.0;
+    double foot = 1.0;
+};
+
+StarFrame star_frame(int points, double inner) {
+    StarFrame frame;
+    const int n = std::clamp(points, 4, 12);
+    const double in = std::clamp(inner, 0.2, 0.95);
+    for (int j = 0; j <= n; ++j) {
+        const double r = j % 2 == 0 ? 1.0 : in;
+        if (j == 0) {
+            frame.corners.push_back({0.0, -r});
+        } else if (j == n) {
+            frame.corners.push_back({0.0, r});
+        } else {
+            const float angle = static_cast<float>(-kPi / 2 + kPi * j / n);
+            frame.corners.push_back({r * static_cast<double>(libm::cosf(angle)), r * static_cast<double>(libm::sinf(angle))});
+        }
+    }
+    frame.reach = 0.0;
+    frame.top = frame.corners.front().y;
+    frame.foot = frame.corners.front().y;
+    for (const P& c : frame.corners) {
+        frame.reach = std::max(frame.reach, c.x);
+        frame.top = std::min(frame.top, c.y);
+        frame.foot = std::max(frame.foot, c.y);
+    }
+    return frame;
+}
+
+// (a star's corner laid in the box, about the box's middle)
+P star_placed(const StarFrame& frame, const Box& box, P unit_point) {
+    return {unit_point.x / frame.reach * box.rx(), -box.ry() + (unit_point.y - frame.top) / (frame.foot - frame.top) * 2 * box.ry()};
+}
+
+// A heart's right half about its middle line, in a square of side 2 (y down): a round lobe — the circle about
+// (0.485, −0.5) of radius 0.515, from the cleft where it meets its mirror image, over its top and its right, to 20°
+// below its middle — and from there a curve that leaves the lobe along it and comes to the point at the foot (0, 1) at
+// 42° from the middle line. `scale_x`, `scale_y`: the size it is made for (how finely its curves are cut).
+std::vector<P> heart_half(double scale_x, double scale_y, double* cleft_y = nullptr) {
+    const double cx = 0.485, cy = -0.5, r = 0.515;
+    const double cleft = cy - std::sqrt(r * r - cx * cx);
+    if (cleft_y != nullptr) *cleft_y = cleft;
+    const int depth = quarter_depth(std::max(scale_x, scale_y) * r) + 1;
+    // (unit vectors from the lobe's middle, clockwise on the page: the cleft, straight up, to the right, 20° below)
+    const P to_cleft = unit({-cx, cleft - cy});
+    const double cos20 = 0.9396926207859084, sin20 = 0.3420201433256687;
+    const P stops[4] = {to_cleft, {0.0, -1.0}, {1.0, 0.0}, {cos20, sin20}};
+    std::vector<P> half;
+    half.push_back({0.0, cleft});
+    for (int piece = 0; piece < 3; ++piece) {
+        std::vector<P> arc{stops[piece], stops[piece + 1]};
+        for (int d = 0; d < depth; ++d) {
+            std::vector<P> next;
+            next.reserve(arc.size() * 2 - 1);
+            for (std::size_t i = 0; i + 1 < arc.size(); ++i) {
+                next.push_back(arc[i]);
+                next.push_back(unit(add(arc[i], arc[i + 1])));
+            }
+            next.push_back(arc.back());
+            arc = std::move(next);
+        }
+        for (std::size_t i = 1; i < arc.size(); ++i) push(half, {cx + r * arc[i].x, cy + r * arc[i].y});
+    }
+    const P from{cx + r * cos20, cy + r * sin20};
+    const P tip{0.0, 1.0};
+    const double sin42 = 0.6691306063588582, cos42 = 0.7431448254773942;
+    const double handle = distance(from, tip) * 0.4;
+    const P c1 = add(from, mul({-sin20, cos20}, handle));
+    const P c2{sin42 * handle, 1.0 - cos42 * handle};
+    const int pieces = std::clamp(static_cast<int>(std::ceil(std::sqrt(std::max(scale_x, scale_y)) * 3)), 12, 96);
+    for (int j = 1; j <= pieces; ++j) {
+        const double t = static_cast<double>(j) / pieces;
+        const double u = 1 - t;
+        const double w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+        push(half, {w0 * from.x + w1 * c1.x + w2 * c2.x + w3 * tip.x, w0 * from.y + w1 * c1.y + w2 * c2.y + w3 * tip.y});
+    }
+    half.back() = tip;
+    return half;
+}
+
+}  // namespace
+
+Contour cloud(const Box& box, int bumps) {
+    const int n = std::clamp(bumps, 5, 60);
+    return scalloped(box, n, 0.86, 0.3);  // (a scallop's height against its width: 0.3)
+}
+
+// --- fukidashi@2: the symbols --------------------------------------------------------------------------------------------
+
+Contour diamond(const Box& box, double radius) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    const std::vector<P> corners{{0.0, -ry}, {rx, 0.0}, {0.0, ry}};
+    const double r = radius >= 0 ? radius : std::min(rx, ry) * 0.08;
+    std::vector<double> reach;
+    reach.push_back(corner_reach({-rx, 0.0}, corners[0], corners[1], r));
+    reach.push_back(corner_reach(corners[0], corners[1], corners[2], r));
+    reach.push_back(corner_reach(corners[1], corners[2], {-rx, 0.0}, r));
+    return fitted_two_fold(rounded_half(corners, reach), box);
+}
+
+Contour star(const Box& box, int points, double inner, double radius) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    const StarFrame frame = star_frame(points, inner);
+    std::vector<P> corners;
+    for (const P& c : frame.corners) corners.push_back(star_placed(frame, box, c));
+    corners.front().x = 0.0;
+    corners.back().x = 0.0;
+    const double least = std::min(rx, ry);
+    const std::size_t n = corners.size();
+    std::vector<double> reach(n, 0.0);
+    for (std::size_t k = 0; k < n; ++k) {
+        const P here = corners[k];
+        const P before = k == 0 ? P{-corners[1].x, corners[1].y} : corners[k - 1];
+        const P after = k + 1 < n ? corners[k + 1] : P{-corners[n - 2].x, corners[n - 2].y};
+        const bool point = k % 2 == 0;
+        if (radius >= 0) {
+            reach[k] = corner_reach(before, here, after, point ? radius : radius / 2);
+        } else if (point) {
+            // (its own: the point cut short by 0.035 of the narrow half — the curve's top lies half the way from the
+            // corner to the middle of where it begins and ends)
+            const double cosine = std::clamp(dot(unit(sub(here, before)), unit(sub(after, here))), -0.999, 0.999);
+            const double half_sine = std::sqrt((1 - cosine) / 2);  // (the sine of half the turn: the cosine of half the point's angle)
+            reach[k] = 2 * least * 0.035 / std::max(0.2, half_sine);
+        } else {
+            reach[k] = corner_reach(before, here, after, least * 0.05);
+        }
+    }
+    return fitted_two_fold(rounded_half(corners, reach), box);
+}
+
+P star_centre(const Box& box, int points, double inner) {
+    const StarFrame frame = star_frame(points, inner);
+    const P at = star_placed(frame, box, {0.0, 0.0});
+    return {box.cx() + at.x, box.cy() + at.y};
+}
+
+Contour star_guide(const Box& box, int points, double inner) {
+    const StarFrame frame = star_frame(points, inner);
+    const int n = std::clamp(points, 4, 12);
+    const double in = std::clamp(inner, 0.2, 0.95);
+    // (inside the chords between its valleys: their middles lie at inner × cos(π / n))
+    const double keep = in * static_cast<double>(libm::cosf(static_cast<float>(kPi / n))) * 0.97;
+    const P centre = star_centre(box, points, inner);
+    const double a = keep / frame.reach * box.rx();
+    const double b = keep / (frame.foot - frame.top) * 2 * box.ry();
+    return ellipse(Box{centre.x - a, centre.y - b, centre.x + a, centre.y + b});
+}
+
+Contour flower(const Box& box, int petals) { return scalloped(box, std::clamp(petals, 4, 12), kPetalKeep, kPetalBulge); }
+
+Contour flower_guide(const Box& box, int petals) {
+    Contour valleys;
+    if (scalloped(box, std::clamp(petals, 4, 12), kPetalKeep, kPetalBulge, &valleys).empty() || valleys.empty()) return {};
+    const double rx = box.rx(), ry = box.ry();
+    double keep = 1.0;
+    for (const P& v : valleys) keep = std::min(keep, hyp((v.x - box.cx()) / rx, (v.y - box.cy()) / ry));
+    return scaled_about(ellipse(box), {box.cx(), box.cy()}, keep * 0.97);
+}
+
+Contour heart(const Box& box, double radius) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    std::vector<P> half = heart_half(rx, ry);
+    // (laid in the box — its lobes' top at the box's top, its point at the foot —, then its point rounded)
+    double reach = 0.0, top = half.front().y;
+    for (const P& p : half) {
+        reach = std::max(reach, p.x);
+        top = std::min(top, p.y);
+    }
+    for (P& p : half) p = {p.x / reach * rx, -ry + (p.y - top) / (1.0 - top) * 2 * ry};
+    const double r = radius >= 0 ? radius : std::min(rx, ry) * 0.05;
+    if (r > 0 && half.size() > 3) {
+        // (the point: the last stretch of its side up to `taken` from it, then a curve to the middle line)
+        const P tip = half.back();
+        const P toward = unit(sub(tip, half[half.size() - 2]));
+        const double cosine = std::clamp(toward.x * toward.x - toward.y * toward.y, -0.999, 0.999);  // (the side against its mirror image)
+        const double taken = std::min(r * std::sqrt((1 - cosine) / (1 + cosine)), 0.2 * ry);
+        while (half.size() > 2 && distance(half.back(), tip) < taken) half.pop_back();
+        const P from = half.back();
+        const P to{-from.x, from.y};
+        const int pieces = corner_pieces(from, tip, to) * 2;
+        for (int j = 1; j <= pieces / 2; ++j) {
+            const double t = static_cast<double>(j) / static_cast<double>(pieces);
+            const double u = 1 - t;
+            push(half, {u * u * from.x + 2 * u * t * tip.x + t * t * to.x, u * u * from.y + 2 * u * t * tip.y + t * t * to.y});
+        }
+        half.back().x = 0.0;
+    }
+    return fitted_two_fold(half, box);
+}
+
+Contour symbol_room(std::string_view kind, const Box& box, int points, double inner) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    const double cx = box.cx();
+    const double cy = box.cy();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    if (kind == "diamond") return {{cx, cy - ry}, {cx + rx, cy}, {cx, cy + ry}, {cx - rx, cy}};
+    if (kind == "star") {
+        const StarFrame frame = star_frame(points, inner);
+        Contour room;
+        const std::size_t n = frame.corners.size();
+        for (std::size_t k = 1; k < n; k += 2) {  // (the valleys of the right half, then their mirror images back up)
+            const P at = star_placed(frame, box, frame.corners[k]);
+            room.push_back({cx + (k + 1 == n ? 0.0 : at.x), cy + at.y});
+        }
+        for (std::size_t k = (n % 2 == 0 ? n - 3 : n - 2); k < n; k -= 2) {
+            const P at = star_placed(frame, box, frame.corners[k]);
+            room.push_back({cx - at.x, cy + at.y});
+            if (k < 2) break;
+        }
+        return room;
+    }
+    if (kind == "flower") {
+        Contour valleys;
+        (void)scalloped(box, std::clamp(points, 4, 12), kPetalKeep, kPetalBulge, &valleys);
+        return valleys;
+    }
+    if (kind == "heart") {
+        double cleft = 0.0;
+        std::vector<P> half = heart_half(rx, ry, &cleft);
+        double reach = 0.0, top = half.front().y;
+        for (const P& p : half) {
+            reach = std::max(reach, p.x);
+            top = std::min(top, p.y);
+        }
+        // (below the cleft's level: the lobes from where they come down past it, the sides, the point)
+        Contour right;
+        bool below = false;
+        for (std::size_t i = 1; i < half.size(); ++i) {
+            const bool down = half[i].y > half[i - 1].y;
+            if (!below && down && half[i].y >= cleft) {
+                const double t = (cleft - half[i - 1].y) / (half[i].y - half[i - 1].y);
+                right.push_back({half[i - 1].x + (half[i].x - half[i - 1].x) * t, cleft});
+                below = true;
+            }
+            if (below) right.push_back(half[i]);
+        }
+        Contour room;
+        const auto place = [&](P p, bool mirrored) {
+            const double px = p.x / reach * rx;
+            return P{mirrored ? cx - px : cx + px, cy - ry + (p.y - top) / (1.0 - top) * 2 * ry};
+        };
+        // (every eighth point is enough for a room)
+        const std::size_t step = std::max<std::size_t>(1, right.size() / 24);
+        Contour kept;
+        for (std::size_t i = 0; i < right.size(); i += step) kept.push_back(right[i]);
+        if (kept.empty() || kept.back().y < 1.0) kept.push_back({0.0, 1.0});
+        for (const P& p : kept) room.push_back(place(p, false));
+        for (std::size_t i = kept.size() - 1; i-- > 0;) room.push_back(place(kept[i], true));
+        return room;
+    }
+    return {};
 }
 
 Contour burst(const Box& box, int spikes, double depth, double alt, const std::vector<double>& jitter) {
