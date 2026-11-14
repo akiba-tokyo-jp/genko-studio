@@ -761,6 +761,8 @@
 {"id":"act_export_prefs","name":"書き出しの環境設定…","old_names":[],"menu":["ファイル","書き出し"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_export_as","name":"書き出し形式…（ファイル → 書き出し）","old_names":[],"menu":["ファイル","書き出し"],"keys":{"photoshop":["Ctrl+Alt+Shift+W"],"genko":["Ctrl+Alt+Shift+W"]},"checkable":false,"tool":false},
 {"id":"act_layer_export_as","name":"書き出し形式…（レイヤー）","old_names":[],"menu":["レイヤー"],"keys":{"photoshop":["Ctrl+Alt+Shift+'"],"genko":[]},"checkable":false,"tool":false},
+{"id":"書体","name":"書体","old_names":[],"menu":["ウィンドウ"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},
+{"id":"act_font_palette","name":"書体のパレットを開く","old_names":[],"menu":["ページ","台詞"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_first_frame","name":"最初のフレーム","old_names":[],"menu":[],"keys":{"photoshop":["Home"],"genko":["Home"]},"checkable":false,"tool":false},
 {"id":"act_layer_front","name":"最前面へ","old_names":[],"menu":["レイヤー","重ね順"],"keys":{"photoshop":["Ctrl+Shift+]"],"genko":["Ctrl+Shift+]"]},"checkable":false,"tool":false},
 {"id":"act_smart_stack_maximum","name":"最大","old_names":[],"menu":["レイヤー","スマートオブジェクト","スタックモード"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},

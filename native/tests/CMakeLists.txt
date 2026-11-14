@@ -893,6 +893,10 @@ if(GENKO_BUILD_APP)
   # look, the 台詞 panel's settings of a balloon's shape, the palette of balloons (its pictures, a pick restyling the
   # chosen line or shaping the next one placed), the window's measure of a capsule against the auto-lettering's
   genko_test(test_gui_fukidashi SOURCES gui/test_gui_fukidashi.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # 書体 (fonts@1, 書体の追加 F2-C) in the window: the palette of lettering faces (its dock, the faces by category, each
+  # sample the renderer's, made one at a time after it is shown), the search, a pick for the chosen line / the next line
+  # / a ruby / the book's usual face, a face whose file is not on the computer, what is said when a book is opened
+  genko_test(test_gui_fonts SOURCES gui/test_gui_fonts.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # TEXT-01 in the window: the ruby typed with the input method (the table's "gui" cases), the ruby settings beside the
   # select tool, 要確認 marked, reassigned and cleared, Undo, 台詞の検索・置換, 縦書き・横書き, saved and read back
   genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
