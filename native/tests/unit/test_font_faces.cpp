@@ -709,7 +709,8 @@ private slots:
             for (const char v : mask.tobytes()) sum += static_cast<unsigned char>(v);
             return sum;
         };
-        for (const auto& [key, size] : {std::pair<const char*, int>{"dot12", 12}, {"dot8", 8}}) {
+        const std::pair<const char*, int> strikes[] = {{"dot12", 12}, {"dot8", 8}};
+        for (const auto& [key, size] : strikes) {
             const Image plain = f.truetype(key, size).getmask2(U"あ").first;
             const Image stroked = f.truetype(key, size).getmask2(U"あ", 1).first;
             QVERIFY2(stroked.getbbox().has_value() && ink(stroked) > ink(plain), key);
@@ -1067,13 +1068,14 @@ private:
             out += std::string("  }") + (++n < all["faces"].size() ? ",\n" : "\n");
         }
         out += " }\n}\n";
-        genko::storage::write_atomic(std::filesystem::path(file.toStdString()), out);
+        genko::storage::write_atomic(genko::core::path_from_utf8(file.toStdString()), out);
     }
 
-    // The sheets: every one of the forty and the seven of before, a line down in a balloon — plain, with a reading, and
-    // outlined —, each under its key; parts of them at 600 dpi; and the plain sheet as a computer without the files draws it.
+    // The sheets: every one of the forty and the seven of before, a line down — in a balloon, alone with readings, and
+    // alone outlined —, each under its key; parts of them at 600 dpi; and the first sheets as a computer without the files
+    // draws them.
     static void write_sample_sheets(const QByteArray& out) {
-        const std::filesystem::path dir(out.toStdString());
+        const std::filesystem::path dir = genko::core::path_from_utf8(out.toStdString());
         std::filesystem::create_directories(dir);
         const auto write = [&](const std::string& name, const Image& image) {
             genko::storage::write_atomic(dir / name, genko::formats::png_bytes(image.convert("RGB")));
@@ -1093,7 +1095,7 @@ private:
                 const int page = static_cast<int>(i) / per_page + 1;
                 const double x = cell_x(i), y = cell_y(i);
                 Json style{{"font", keys[i]}, {"size_mm", 5.0}};
-                Json op{{"op", "add_line"}, {"page", page}, {"id", "s" + std::to_string(i)}, {"balloon", kind == "outline" ? "none" : "speech"},
+                Json op{{"op", "add_line"}, {"page", page}, {"id", "s" + std::to_string(i)}, {"balloon", kind == "plain" ? "speech" : "none"},
                         {"x_mm", x}, {"y_mm", y}, {"w_mm", 27.0}, {"h_mm", 70.0}, {"wrap", "vertical"},
                         {"text", "「ぎゃーっ！？」\nちょっと、待って！\n漢字（かんじ）です。"}};
                 if (kind == "ruby") op["ruby_runs"] = Json::array({Json::array({"待", "ま"}), Json::array({"漢字", "かんじ"})});

@@ -78,6 +78,78 @@
 - **似ているので外した**: Zen Antique Soft、Shippori Antique B1（13.1 MB）、Shippori Mincho B1（15.2 MB）、Yuji Mai、Klee One Regular、Kosugi・Kosugi Maru（Apache-2.0）、BIZ UDGothic・BIZ UDMincho、Kaisei Opti・Kaisei HarunoUmi、M PLUS 1p（第 2 水準が一部）、Sawarabi Gothic・Mincho、Tsukimi Rounded、Otomanopee One、びぜんアンチック、源暎ぽっぷる、棘丸ゴシック、k8x12L・k8x12S・美咲ゴシック・美咲明朝。
 - **足りない区分**: 本物の毛筆（行書・草書）と、かすれ・にじみの強いホラー書体は、決まりに合うものが取れる所に無かった。利用者が持つフォントは、いまもファイルのパスで使える。
 
+### F2 群 1（F2-A: 解決と描画。ブランチ `native/fonts-f2`、main da6acebd に F1 の 2 コミットを載せた上）— 2026-11-14
+
+#### 決めたこと（リードの決定 D1〜D12。利用者の言葉は「フォント追加は、任せます 使えるものであれば可能な限り追加してください」）
+- 前からの 6 書体はプログラムに組み込んだまま（.qrc は触らない）。追加の 40 書体はファイルで置き、`FONTS.json` を一覧として `genko_core` に組み込む。
+- キーは F1 の案のまま。本に新しい鍵は足さない。追加の書体を使っているあいだだけ `fonts@1` を名乗る。
+- 書体ファイルが無いときは、その種類のいつもの書体で描いて知らせる（豆腐にしない）。
+- かなだけの書体は、同じキーの中に相方を持つ。全角の「！？」が無い書体は、書体ごとに半角へ置き換える。
+- 追加の書体だけ、字の有無を cmap で決める。前からの 6 書体と、パスで指した書体ファイルは 1 ビットも変えない。
+- 新しい本の既定の書体は変えない。ノンブルは前からの 7 つのまま。MCP の説明文は変えない。
+- **前の本との違いは 1 つだけ受け入れた（D2）**: `fonts@1` を持たない前の本が、たまたま追加のキーと同じ名前（例: `gothic_black`）を `font` に書いていたら、今の版はその書体で描き、次の保存で `fonts@1` を付ける。配布した版が無いので受け入れた。開いたときに 1 度知らせるのは群 3（一覧は `core::fonts::named_unannounced`）。
+- 追加の書体の絵の基準に Python・Pillow は使わない（利用者の決まり）。この Linux のビルドが描いた値を固定した。
+
+#### 作ったもの
+- `native/resources/fonts/FONTS.json`: `status` を `storage`（`embedded`／`file`）と `feature`（null／`fonts@1`）に替え、`fallback`（相方のキー）、`lookalike`（「！？」の置き換え。3 書体だけ）、`vertical.presentation_forms`（縦のかっこの字形を全部持つか。試験で測った値）を足した。`composite_suggestions` は `fallback` に畳んで消した。`counts` の `existing`・`new`・`bytes_new` は `embedded`・`file`・`bytes_file` に替えた。
+- `native/src/core/font_catalog.{hpp,cpp}`（＋ `font_catalog_data.cpp.in`、`core/CMakeLists.txt`）: 一覧を 1 バイトも変えずに組み込む。`core::fonts::` の `entries()`（46）・`categories()`（11）・`find(key)`・`added(key)`・`by_postscript(name)`・`named(doc)`・`uses_feature(doc)`・`named_unannounced(doc)`・`catalog()`・`catalog_text()`・`kFontsFeature`。
+- `native/src/render/font_files.{hpp,cpp}`: 追加の書体のファイル。見る場所は `<プログラムのあるフォルダー>/../share/genko-studio/fonts` の 1 か所だけ（環境変数なし）。`dir()`・`set_dir_for_testing()`・`path(key)`・`present(key)`（普通のファイルで、大きさが一覧と同じ。答えはプロセスの間ずっと同じ）・`bytes(key)`（読み切って閉じる。共有。最近使った順に 64 MB まで）・`missing()`・`verify(hashes)`・`cached_bytes()`・`clear_cache()`。
+- `render/text/fonts.{hpp,cpp}`: `Face` に `fallback` と `own(font)`。`face_of`・`face_exists` は「前からのキー → 追加のキー（ファイルがあるとき）→ ファイルのパス → 既定」。追加のキーはパスとしては決して読まない。`path_for` は「その書体 → もう半分 → 相方 → gothic → sfx」。`normalize` は書体ごとの置き換えも見る。`has_glyph` は追加の書体では cmap。
+- `render/draw.{hpp,cpp}`: `TrueTypeFont::strict_cmap()`。`TrueTypeFonts`・`font_bytes` は追加のキーを `font_files::bytes` から開く（`with_text_font`・`text_font`＝ノンブルの道は触っていない）。
+- `render/text/tategaki.cpp`: 縦のかっこの字形は、追加の書体では cmap にあるときだけ使う（無ければかっこを回す）。相方で描いたルビの字は `font_fallback` にしない。
+- `formats/psd_text.cpp`・`render/psd_type.{hpp,cpp}`: 追加の書体は一覧の PostScript 名で書き出し、読み込みではその名前をキーに戻す（書体ファイルは読まない）。相方の字は `font_fallback` にしない。
+- `storage/writer.cpp`・`reader.cpp`: `fonts@1`（使っているあいだだけ。読み手は知っている拡張として読む）。
+- `formats/checks.cpp`: `font_not_installed`（警告）。追加のキーを名指しした台詞の書体ファイルが無いとき、「台詞「…」の書体「（日本語名）」のファイルがこのパソコンに見つからないため、いつもの書体で描いた（Genko を入れ直すと直ります）」。追加の 40 キーだけ。
+- `native/src/api/CMakeLists.txt`: `genko` をビルドした後、ビルドの木に `<genko のフォルダー>/../share/genko-studio/fonts` を作る（Unix は `native/resources/fonts` へのリンク、Windows はコピー）。
+- 文書: `docs/cpp-migration/schema-v4.md` の §3 の表に `fonts@1`、末尾に「書体」の節。
+- 試験: `native/tests/unit/test_font_catalog.cpp`（95 項目）、`native/tests/unit/test_font_faces.cpp`（453 項目。40 書体それぞれ）、`test_psd_text.cpp` に 3 項目。固定した値は `native/tests/fixtures/render/font-faces-f2.json`（書体ごとに、字のマスクの箱・大きさ・進み幅・SHA-256 と、縦・横・「ルビ＋ふちどり＋極太」の文字組の SHA-256。`GENKO_FONT_FACES_PIN=<ファイル>` で書き直せる）。漢字の数え方の表は `native/tests/data/fonts/kanji-sets.json`（JIS 第 1・第 2 水準と常用漢字。`tools/migration/font_kanji_sets.py` が EUC-JP の表と Unihan 17.0.0 の kJoyoKanji から作る。符号位置の表だけで、描画の基準ではない）。どちらも MANIFEST に sha256 を足した。
+
+#### 群 2・群 3 が使えるもの
+- 書体の一覧と区分: `core::fonts::entries()`・`categories()`・`find()`。画面に出す名前は `Entry::label`、使い道は `use`、区分は `category`、漢字は `kanji`（full／partial／none）、相方は `fallback`。前からの 7 つは今までの一覧（`lettering::bundled_fonts()`・`lint::bundled_fonts()`）のまま。
+- ファイルがあるか: `render::font_files::present(key)`・`missing()`。doctor と配布物の試験には `verify(true)`（40 個の有無・大きさ・sha256）。
+- 試験は `render::font_files::set_dir_for_testing(GENKO_REPO_ROOT "/native/resources/fonts")` を呼ぶ（呼ばない試験の実行物では 40 書体とも「無い」）。フォルダーを替えたら `render::text::clear_layout_cache()` も呼ぶ。
+- 見本の絵は、台詞（`style.font` にキー）を `render::text::text_layout`・`render_page` に渡せば、紙面と同じに描ける（相方の漢字も出る）。
+- 前の本がたまたま追加のキーを名指ししているか: `core::fonts::named_unannounced(doc)`（開いた直後に呼ぶ）。
+- 群 2 に残したもの: `GenkoPackage.cmake`（40 ファイルと `FONTS.json` の導入）・`sbom.cmake`・`THIRD_PARTY.md`（「まだ登録していない」の書き換え）・`test_package` の残り、doctor、`lint` の `unknown_font`（いまは追加の 40 キーを「見つからない」と言う）、`inspect target=fonts`、`wording.cpp`、`headless_server.cpp` の `font_path` の閉じ込め（キーをパスに変えてしまう）、手引き。
+- 群 3 に残したもの: 書体のパレット、文字パネル・字形パネル・ルビの書体・見つからないフォントの画面、`note_missing_glyphs`（相方で描く字を「無い字」と言わないようにする）、開いたときの D2 の知らせ、ファイルが無いことの知らせ（画面）。
+
+#### 計画と変えた所
+1. **hand_slackside の相方を `hand` から `marker_yusei` にした**。相方は追加の書体に限ることにした（試験で守る）。理由は下の「前からの書体の不具合」: 前からの書体は Pillow の流儀で読むので、縦のかっこが豆腐になる字があり、それを前の本のために変えられない。太さもマーカー同士で合う。
+2. **追加の書体の絵の基準は Pillow ではなく、この Linux のビルドの値**（利用者の決まり。計画の D10 の後半のとおり）。`tools/migration/font_faces_reference.py` は作っていない。
+3. **`font_not_installed` の検査を群 1 に入れた**（計画では群 2。リードの依頼文が群 1 の目標に挙げていたため）。`lint`・doctor・`wording.cpp` は群 2 のまま。
+4. **`uses_feature` は `bible.lettering.*.font` を見ない**。この鍵は project.json に無い（スタジオの bible）。自動の文字入れがそこから台詞の `style.font` に写すので、台詞の側で数える。
+5. `FONTS.json` の `counts` の鍵の名前を替えた（上のとおり）。
+6. `font_bytes`・`State::file` は追加のキーを名前のまま受ける（`Face.kana`・`other`・`fallback` に入るのはキーそのもの。パスにはしない）。レイアウトの覚え書きの鍵にパスが入らない。
+
+#### 測って分かったこと（計画が「読んだだけで確かめていない」とした所）
+- **(a) 字の箱で有無を決める流儀の読み違い**: ドットの書体（dot16・dot12・dot8）では 0 件。代わりに、源暎きわみゴ 1,074 字、Yusei Magic 652 字、Monomaniac One 8 字、Rampart One 6 字、Slackside One 6 字、ほか 5 書体で 1 字ずつ（かな・約物・英数字・JIS 第 1・第 2 水準の 6,700 字ほどを 32 px で見た数）が「無い字」と読まれる。cmap で決めないと、源暎きわみゴのかなの半分ほどが前からのゴシックで描かれていた。試験 `hasGlyphFollowsTheCmap` が数を固定している。
+- **(b) 縦のかっこの字形**: 6 書体が一部か全部を持たない（cute_daruma・hand_slackside・techno_monomaniac は ︵︶﹇﹈、sfx_aoboshi は 10 個、dot12・dot8 は 14 個全部）。cmap を見ないと、その 6 書体の縦のかっこは豆腐になっていた。いまは横のかっこを回して描く。
+- 40 書体とも U+FFFF の字は持たない。半角の `!` `?` `0` は 40 書体とも持つ（「！？」を 1 マスに並べるのに使う）。
+- ドットの書体は、作られた大きさ（k8x12 は 12 px、美咲は 8 px）で、書体が持つビットマップで描く（画素は 0 か 255 だけ）。k8x12 の字の幅は 8 px。ふちどりと太字は輪郭から描く。
+- OpenType の文字組（type@1 の記録）の縦: 38 書体で「「」が vert の字形に替わる。k8x12・美咲は cmap のまま。40 書体とも下へ進む（cute_daruma も）。
+- ビルドの木の `genko`（リンクの先の書体）で、追加の書体の台詞が描けることを、試験が `genko render` で確かめている。install.sh のリンク越しは群 2 の `test_package` で確かめる。
+- **確かめていないもの**: Windows・MSVC のビルド、ASan、ZEN 角ゴシックアンチックの漢字が ZEN 角ゴシック New と同じ輪郭かどうか、配布物の大きさ。
+
+#### 前からの書体の不具合（見つけただけで、直していない。直すと前の本の絵が変わる）
+- 前からの `sfx`（デラゴシック）は、縦書きの『』（）()【】［］〈〉《》を「無い字」の箱（□に斜線）で描く。`hand`（よもぎ）は ［］ を箱で描く。縦のかっこの字形を持たないのに、「字を描いた大きさ」だけで有無を決めているため（Python の版と同じ）。「」だけは無事。見本の 1 枚目（`fonts-150-plain-1.png` の左上）に出ている。直すかどうかは利用者・リードの判断（既存の本の絵が変わるので、この群では触っていない）。
+- 横組みの最後の行の `_` が切れる（見本の札で気づいた。前からの書体でも同じ）。調べていない。
+
+#### 直した既存の試験（緩めていない）
+- `native/tests/package/test_package.cpp`: `licenses/fonts` の `*-OFL.txt` の数を 7 → 39、`k8x12-LICENSE.txt`・`misaki-LICENSE.txt` があること、ファイルは 41 個。F1 でライセンス文を足してから落ちていた検査。ほかの既存の試験の期待値は 1 つも変えていない。
+- `test_psd_text.cpp` には項目を足しただけ。
+
+#### 確かめたこと（Linux Release。関係する試験だけ。全体は流していない）
+- 新しい試験: test_font_catalog 95／95、test_font_faces 453／453、test_psd_text の新しい 3 項目。
+- 関係する既存の試験（どれも合格）: test_storage、test_model、test_command_bus、test_render_page（font-glyphs・ノンブルの絵・MANIFEST）、test_ruby、test_ruby_render、test_psd_text、test_fukidashi、test_fukidashi_service、test_type_text、test_type_styles、test_shaping、test_material_stamp、test_pcraft、test_service、test_ledger_service_a・b・c、test_contract_type・opentype・type_styles・type_fonts・storage・render_cli・psd_text・psd・pcraft・pipeline・export・materials、test_cli_e2e、test_save_e2e、test_migrate_e2e、test_ops_e2e、test_gui_lines、test_gui_ruby、test_gui_type、test_gui_type_panels、test_gui_fukidashi、test_gui_book、test_gui_ledger_a、test_perf_render、test_package。
+- SKIP: 自分の試験には無い。前からあるもの: test_save_e2e の 16 項目と test_migrate_e2e の 1 項目（Release に故障の注入が無い）、test_perf_render の 1 項目（`GENKO_PERF_GROUPS_PSD` が無い）。
+- 見本の絵（コミットしない）: 作業用の `fonts-f2/`。47 書体（前からの 7 つと追加の 40）を、フキダシの中の縦書き・ルビ付き・ふちどりの 3 通りで 150 dpi の紙面に（各 3 枚）、8 書体を 600 dpi で、書体ファイルが 1 つも無いパソコンでの同じ紙面を 3 枚。`GENKO_FONTS_OUT=<フォルダー>` を付けて test_font_faces を流すと書き直せる。
+
+#### 残り・気を付けること
+- かなだけの 3 書体（cute_daruma・hand_slackside・techno_monomaniac）は、かなが小さめ・細めに作られていて、相方の漢字のほうが大きく見える。書体ごとの大きさの合わせは入れていない（見本を見て決めること）。
+- 書体ファイルが同じ大きさの別物に差し替わっていたら、`present` は「ある」と答え、FreeType が開けなければ Pillow の既定の書体で描く（読めない書体ファイルの今までの扱い）。sha256 まで見るのは `verify(true)`（doctor・配布物の試験）。
+- `docs/cpp-migration/SPEC.md` に書体の節は足していない（台帳との結び付きがあるので、リードの判断で）。
+- Windows のビルドの木では書体をコピーする（157 MB）。
+
 ## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合
 
 ### 利用者の決定（2026-11-13）
