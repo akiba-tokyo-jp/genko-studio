@@ -951,7 +951,7 @@ private slots:
         genko::formats::PsdTextReport report;
         const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("added-faces")), kDpi, genko::formats::PsdText{true, false}, &report);
         QVERIFY2(report.warnings.empty(), report.to_json().dump().c_str());
-        const Read r = read_psd(written.front().string());
+        const Read r = read_psd(genko::core::path_to_utf8(written.front()));
         const auto fonts_in = [&](const char* layer) {
             std::vector<std::string> out;
             const psd::Layer* found = r.named(layer);
