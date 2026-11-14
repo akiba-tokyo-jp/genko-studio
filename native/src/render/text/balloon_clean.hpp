@@ -167,6 +167,7 @@ struct Run {
     bool closed = false;
     bool cut_first = false;  // (it begins, or ends, where another shape covers the outline: a round end there)
     bool cut_last = false;
+    int shape = -1;          // (the shape it is a piece of: its place in the shapes given)
 };
 std::vector<Run> edge_runs(const std::vector<Shape>& shapes);
 // The same outlines dashed: `on` then `off` along each shape (a whole number of dashes round it, one centred where
@@ -174,6 +175,32 @@ std::vector<Run> edge_runs(const std::vector<Shape>& shapes);
 std::vector<Shape> dashed(const std::vector<Shape>& shapes, double on, double off);
 // What lies within `reach` of the runs (a ribbon `2 × reach` wide along them, mitred at their corners).
 Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int height, bool round_ends = true);
+// fukidashi@2 (SPEC BALLOON-02) — the pen's line: an outline whose width varies along it, as a pen's or a brush's does
+// (強弱・入り抜き). The group's edge is followed as whole outlines — the balloon, its tails, their joins, its drips, the
+// balloons joined to it: one line where they are one outline —, and drawn in strokes: an outline with corners (a turn
+// of more than 30°: a box's, a burst's, a tail's tip) from corner to corner, a smooth one in `strokes` equal parts
+// beginning where its line is lightest.
+struct Pen {
+    double width = 0.0;   // the line's mean width (px): what the even line's is
+    double swell = 0.0;   // 0..0.9: the line is width × (1 + swell × n·heavy), n the outline's outward normal
+    P heavy{0.0, 1.0};    // the way the heavy side faces (a unit vector)
+    double taper = 0.0;   // 0..1: the share of each stroke over which it thins toward its two ends
+    int strokes = 2;      // 1..8: the strokes of an outline without corners
+    double step = 4.0;    // no stretch between two points of the line is longer (px)
+    bool chain = true;    // false (a dashed outline): each run by itself, the swell alone
+};
+// A stretch of the pen's line: its points and how far the line reaches into the group at each (its width there).
+struct PenRun {
+    Contour points;
+    std::vector<double> reach;
+    bool closed = false;
+    bool round_first = false;  // (an open stretch's end where another shape covers the outline: round)
+    bool round_last = false;
+};
+// The runs of a group's edge (edge_runs of the same shapes) as the pen draws them.
+std::vector<PenRun> pen_runs(const std::vector<Run>& runs, const std::vector<Shape>& shapes, const Pen& pen);
+// What lies within each point's reach of the pen's runs (ribbon_plane with a reach of its own at every point).
+Plane pen_plane(const std::vector<PenRun>& runs, int width, int height);
 // Closed outlines filled (dots, diamonds, spokes), as one union.
 Plane union_plane(const std::vector<Contour>& outlines, int width, int height);
 

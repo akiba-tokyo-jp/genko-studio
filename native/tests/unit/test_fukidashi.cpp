@@ -1818,6 +1818,285 @@ private slots:
         for (int y = px(90) + 1; y < g.h; ++y) QVERIFY(g.at(px(65), y) == 255);
     }
 
+    // --- fukidashi@2: the pen's line -------------------------------------------------------------------------------------------
+
+    // 強弱: with pen_swell s the line is width × (1 + s) where its edge faces the heavy way, width × (1 − s) where it faces
+    // the other, and the width itself where it runs along it — the coverage summed across the line, within half a pixel:
+    // on a circle and an ellipse, the heavy way down and to the right (45°, when none is said), down, and to the left.
+    void thePensLineSwellsOnItsHeavySide_data() {
+        QTest::addColumn<double>("rx");
+        QTest::addColumn<double>("ry");
+        QTest::addColumn<double>("width");
+        QTest::addColumn<double>("swell");
+        QTest::addColumn<double>("angle");
+        QTest::newRow("circle, 8 px, 0.5") << 220.0 << 220.0 << 8.0 << 0.5 << 45.0;
+        QTest::newRow("circle, 8 px, 0.9 down") << 220.0 << 220.0 << 8.0 << 0.9 << 90.0;
+        QTest::newRow("ellipse, 8 px, 0.45") << 260.0 << 170.0 << 8.0 << 0.45 << 45.0;
+        QTest::newRow("ellipse, 12 px, 0.6 left") << 260.0 << 170.0 << 12.0 << 0.6 << 180.0;
+        QTest::newRow("ellipse, 3 px, 0.3") << 130.0 << 90.0 << 3.0 << 0.3 << 300.0;
+    }
+    void thePensLineSwellsOnItsHeavySide() {
+        QFETCH(double, rx);
+        QFETCH(double, ry);
+        QFETCH(double, width);
+        QFETCH(double, swell);
+        QFETCH(double, angle);
+        const int w = 600, h = 520;
+        const clean::P centre{300.0, 260.0};
+        const std::vector<clean::Shape> shapes{clean::whole(clean::ellipse(clean::Box{centre.x - rx, centre.y - ry, centre.x + rx, centre.y + ry}))};
+        const clean::Plane fill = clean::fill_plane(shapes, w, h);
+        clean::Pen pen;
+        pen.width = width;
+        pen.swell = swell;
+        pen.heavy = {std::cos(angle * 3.141592653589793 / 180), std::sin(angle * 3.141592653589793 / 180)};
+        const std::vector<clean::PenRun> runs = clean::pen_runs(clean::edge_runs(shapes), shapes, pen);
+        QCOMPARE(runs.size(), std::size_t{1});
+        QVERIFY(runs.front().closed);
+        clean::Plane band = clean::pen_plane(runs, w, h);
+        for (std::size_t i = 0; i < band.values.size(); ++i) band.values[i] *= fill.values[i];
+        for (const double degrees : {0.0, 30.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0}) {
+            const double a = degrees * 3.141592653589793 / 180;
+            const clean::P on{centre.x + rx * std::cos(a), centre.y + ry * std::sin(a)};
+            double nx = std::cos(a) / rx, ny = std::sin(a) / ry;  // (the ellipse's outward normal there)
+            const double len = std::hypot(nx, ny);
+            nx /= len, ny /= len;
+            double sum = 0.0;
+            const double step = 0.125;
+            for (double d = -width * 2.5 - 3; d <= 3; d += step) sum += plane_at(band, on.x + nx * d, on.y + ny * d) * step;
+            const double expected = width * (1 + swell * (nx * pen.heavy.x + ny * pen.heavy.y));
+            QVERIFY2(std::fabs(sum - expected) <= 0.5, qPrintable(QStringLiteral("%1°: %2 for %3").arg(degrees).arg(sum).arg(expected)));
+        }
+        // (without a swell or a taper the pen's line is the even line, within a hundredth of a pixel's coverage)
+        clean::Pen even;
+        even.width = width;
+        const clean::Plane plain = clean::ribbon_plane(clean::edge_runs(shapes), width, w, h);
+        const clean::Plane same = clean::pen_plane(clean::pen_runs(clean::edge_runs(shapes), shapes, even), w, h);
+        double worst = 0.0;
+        for (std::size_t i = 0; i < plain.values.size(); ++i) worst = std::max(worst, static_cast<double>(std::fabs(plain.values[i] * fill.values[i] - same.values[i] * fill.values[i])));
+        QVERIFY2(worst < 0.02, qPrintable(QString::number(worst)));
+    }
+
+    // 入り抜き: each stroke thins toward its two ends and is its full width between them — the share of the stroke that
+    // thins is pen_taper —; a smooth outline is drawn in pen_strokes strokes, beginning where its line is lightest (up and
+    // to the left, for the heavy way of 45°); an outline with corners from corner to corner; a stroke shorter than six
+    // widths is not thinned; and nowhere is the line thinner than a pixel: it never opens.
+    void aStrokeThinsTowardItsEnds() {
+        const clean::P centre{300.0, 260.0};
+        const std::vector<clean::Shape> oval{clean::whole(clean::ellipse(clean::Box{centre.x - 220, centre.y - 220, centre.x + 220, centre.y + 220}))};
+        const double total = 2 * 3.141592653589793 * 220;
+        for (const int strokes : {1, 2, 3, 4, 8}) {
+            for (const double taper : {0.3, 0.6, 1.0}) {
+                clean::Pen pen;
+                pen.width = 8.0;
+                pen.taper = taper;
+                pen.strokes = strokes;
+                pen.heavy = {std::sqrt(0.5), std::sqrt(0.5)};
+                const std::vector<clean::PenRun> runs = clean::pen_runs(clean::edge_runs(oval), oval, pen);
+                QCOMPARE(runs.size(), std::size_t{1});
+                const clean::PenRun& run = runs.front();
+                // (thin places: as many as strokes, the first up and to the left — 225° round the circle —, evenly spaced)
+                int thin_places = 0;
+                double least = 1e9, most = 0.0, full = 0.0, count = 0.0;
+                const std::size_t n = run.points.size();
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double r = run.reach[i];
+                    least = std::min(least, r), most = std::max(most, r);
+                    const double before = run.reach[(i + n - 1) % n], after = run.reach[(i + 1) % n];
+                    if (r <= before && r < after && r < 8.0 * 0.3) {
+                        ++thin_places;
+                        const double at = std::atan2(run.points[i].y - centre.y, run.points[i].x - centre.x) * 180 / 3.141592653589793;
+                        double off = std::fmod(at - 225.0 + 720.0, 360.0 / strokes);
+                        off = std::min(off, 360.0 / strokes - off);
+                        QVERIFY2(off < 3.0, qPrintable(QStringLiteral("%1 strokes: a thin place at %2°").arg(strokes).arg(at)));
+                    }
+                    full += r >= 8.0 - 1e-9 ? 1 : 0;
+                    count += 1;
+                }
+                QCOMPARE(thin_places, strokes);
+                QVERIFY2(std::fabs(least - 8.0 * 0.15) < 0.05 && std::fabs(most - 8.0) < 1e-9, qPrintable(QStringLiteral("%1 .. %2").arg(least).arg(most)));
+                // (the share at full width: what the taper leaves, 1 − taper, within the points' spacing)
+                QVERIFY2(std::fabs(full / count - (1 - taper)) < 0.04, qPrintable(QStringLiteral("%1 strokes, taper %2: %3 full").arg(strokes).arg(taper).arg(full / count)));
+                // (no stretch between two points longer than the step)
+                for (std::size_t i = 0; i < n; ++i) QVERIFY(clean::distance(run.points[i], run.points[(i + 1) % n]) <= pen.step + 1e-9);
+                (void)total;
+            }
+        }
+        // (a box: four strokes, thin at its corners, full in the middle of each side)
+        const std::vector<clean::Shape> box{clean::whole(clean::rounded(clean::Box{100, 100, 500, 400}, 0.0))};
+        clean::Pen pen;
+        pen.width = 8.0;
+        pen.taper = 0.5;
+        const std::vector<clean::PenRun> sides = clean::pen_runs(clean::edge_runs(box), box, pen);
+        QCOMPARE(sides.size(), std::size_t{1});
+        for (std::size_t i = 0; i < sides.front().points.size(); ++i) {
+            const clean::P p = sides.front().points[i];
+            const double r = sides.front().reach[i];
+            const bool corner = (std::fabs(p.x - 100) < 1e-6 || std::fabs(p.x - 500) < 1e-6) && (std::fabs(p.y - 100) < 1e-6 || std::fabs(p.y - 400) < 1e-6);
+            const bool middle = std::fabs(p.x - 300) < 30 || std::fabs(p.y - 250) < 30;
+            if (corner) QVERIFY2(std::fabs(r - 1.2) < 1e-6, qPrintable(QString::number(r)));
+            if (middle) QVERIFY2(std::fabs(r - 8.0) < 1e-9, qPrintable(QString::number(r)));
+        }
+        // (a small bubble — its outline shorter than six widths: not thinned; a thin line: never under a pixel, or its
+        // own width when that is less)
+        const std::vector<clean::Shape> bubble{clean::whole(clean::circle({100, 100}, 6.0))};
+        for (const clean::PenRun& run : clean::pen_runs(clean::edge_runs(bubble), bubble, pen)) {
+            for (const double r : run.reach) QCOMPARE(r, 8.0);
+        }
+        clean::Pen fine;
+        fine.width = 2.0;
+        fine.taper = 1.0;
+        fine.swell = 0.9;
+        for (const clean::PenRun& run : clean::pen_runs(clean::edge_runs(oval), oval, fine)) {
+            for (const double r : run.reach) QVERIFY(r >= 1.0);
+        }
+        fine.width = 0.6;
+        for (const clean::PenRun& run : clean::pen_runs(clean::edge_runs(oval), oval, fine)) {
+            for (const double r : run.reach) QVERIFY(r >= 0.6 - 1e-12);
+        }
+    }
+
+    // A balloon, its tail and the joins between them are one outline, and the pen draws it as one line: one closed run
+    // round the whole group, with one corner — the tail's tip, where the line is thin on both sides. Two joined balloons
+    // with a tail: one line too. A thought and its bubbles: a line each. Dashes are not joined: each its own, swelling
+    // but not thinned.
+    void aBalloonAndItsTailAreOneLine() {
+        const clean::Box box{100, 100, 500, 400};
+        const clean::Contour body = clean::ellipse(box);
+        clean::TailSpec spec;
+        spec.tip = {620, 520};
+        spec.base = 80.0;
+        spec.fillet = 12.0;
+        spec.depth = 40.0;
+        clean::Tail tail = clean::tail(body, body, {300, 250}, spec);
+        QCOMPARE(tail.joins.size(), std::size_t{2});
+        std::vector<clean::Shape> shapes{clean::whole(body), tail.shape};
+        for (const clean::Shape& join : tail.joins) shapes.push_back(join);
+        clean::Pen pen;
+        pen.width = 8.0;
+        pen.swell = 0.4;
+        pen.taper = 0.6;
+        const std::vector<clean::Run> edge = clean::edge_runs(shapes);
+        QVERIFY(edge.size() >= 4);  // (the balloon's, the tail's two sides, the joins': pieces)
+        const std::vector<clean::PenRun> runs = clean::pen_runs(edge, shapes, pen);
+        QCOMPARE(runs.size(), std::size_t{1});
+        const clean::PenRun& line = runs.front();
+        QVERIFY(line.closed);
+        // (it passes the tail's tip, where it is thin, and the far side of the balloon, where it is not)
+        double at_tip = 1e9, tip_reach = 0.0, far_reach = 0.0, far_at = 1e9;
+        for (std::size_t i = 0; i < line.points.size(); ++i) {
+            const double d = clean::distance(line.points[i], spec.tip);
+            if (d < at_tip) at_tip = d, tip_reach = line.reach[i];
+            const double f = clean::distance(line.points[i], {100, 250});
+            if (f < far_at) far_at = f, far_reach = line.reach[i];
+        }
+        QVERIFY2(at_tip < 1e-6, qPrintable(QString::number(at_tip)));
+        QVERIFY2(tip_reach < 8.0 * 0.3, qPrintable(QString::number(tip_reach)));
+        QVERIFY2(far_reach > 8.0 * 0.6, qPrintable(QString::number(far_reach)));
+        // (the union's inside is on the line's right all the way round: it runs clockwise on the page)
+        QVERIFY(clean::shoelace(line.points) > 0);
+        // (two balloons joined, one with a tail)
+        const clean::Contour second = clean::ellipse(clean::Box{380, 280, 740, 560});
+        std::vector<clean::Shape> group{clean::whole(body), clean::whole(second)};
+        for (clean::Shape& join : clean::joins_between(body, second, 30.0)) group.push_back(std::move(join));
+        spec.tip = {60, 520};
+        clean::Tail other = clean::tail(body, body, {300, 250}, spec);
+        group.push_back(other.shape);
+        for (const clean::Shape& join : other.joins) group.push_back(join);
+        const std::vector<clean::PenRun> joined = clean::pen_runs(clean::edge_runs(group), group, pen);
+        QCOMPARE(joined.size(), std::size_t{1});
+        QVERIFY(joined.front().closed);
+        // (a balloon and three bubbles apart from it: four lines)
+        std::vector<clean::Shape> thought{clean::whole(body)};
+        for (clean::Contour& bubble : clean::bubble_trail(body, {300, 250}, {640, 560}, 30.0)) thought.push_back(clean::whole(std::move(bubble)));
+        QCOMPARE(clean::pen_runs(clean::edge_runs(thought), thought, pen).size(), std::size_t{4});
+        // (dashes: as many lines as dashes, none closed, none thinned — the swell alone)
+        const std::vector<clean::Shape> plain{clean::whole(body)};
+        const std::vector<clean::Run> dashes = clean::edge_runs(clean::dashed(plain, 26.0, 16.0));
+        clean::Pen dashed = pen;
+        dashed.chain = false;
+        const std::vector<clean::PenRun> each = clean::pen_runs(dashes, plain, dashed);
+        QCOMPARE(each.size(), dashes.size());
+        double least = 1e9, most = 0.0;
+        for (const clean::PenRun& run : each) {
+            QVERIFY(!run.closed);
+            for (const double r : run.reach) least = std::min(least, r), most = std::max(most, r);
+        }
+        QVERIFY2(std::fabs(least - 8.0 * 0.6) < 0.1 && std::fabs(most - 8.0 * 1.4) < 0.1, qPrintable(QStringLiteral("%1 .. %2").arg(least).arg(most)));
+    }
+
+    // Drawn: a line with the pen's keys has a line that is heavier below and to the right than above and to the left, and
+    // closes round its balloon whatever the kind, the swell, the taper and the strokes — with tails, drips and joined
+    // balloons too, at 150 and at 600 dpi, and made black and white (the monochrome print) as well; a dotted box and a
+    // flash are drawn as without the keys; without them every balloon is the even line it was (the pins above).
+    void thePensLineClosesRoundItsBalloon_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<QString>("style");
+        QTest::addColumn<int>("dpi");
+        const Json styles = Json::array({Json{{"pen_swell", 0.9}}, Json{{"pen_taper", 1.0}}, Json{{"pen_swell", 0.5}, {"pen_taper", 0.6}, {"pen_strokes", 1}},
+                                         Json{{"pen_swell", 0.9}, {"pen_taper", 1.0}, {"pen_strokes", 8}, {"border_mm", 0.2}},
+                                         Json{{"pen_swell", 0.6}, {"pen_taper", 0.7}, {"pen_angle", 200}, {"drip_mm", 7}, {"drip_seed", 4}},
+                                         Json{{"pen_swell", 0.7}, {"pen_taper", 0.5}, {"border_mm", 0.9}, {"double", true}}});
+        for (const char* kind : {"speech", "box", "rounded", "capsule", "polygon", "shout", "cloud", "electric", "heart", "star", "flower", "diamond", "thought"}) {
+            int k = 0;
+            for (const Json& style : styles) {
+                const int dpi = (k++ % 2 == 0) ? 600 : 150;
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2 at %3").arg(kind, QString::fromStdString(style.dump())).arg(dpi))) << QString::fromLatin1(kind) << QString::fromStdString(style.dump()) << dpi;
+            }
+        }
+    }
+    void thePensLineClosesRoundItsBalloon() {
+        QFETCH(QString, kind);
+        QFETCH(QString, style);
+        QFETCH(int, dpi);
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        // (the box 40..90 × 40..86 mm, its tail down and a little to the right — off a box's corner)
+        const Document doc = one_line(kind.toStdString().c_str(), Json{{"h_mm", 46}, {"tail", Json::array({74, 106})}, {"style", Json::parse(style.toStdString())}});
+        const Image drawn = balloon_alone(doc, dpi);
+        QVERIFY2(closed_round(grey_of(drawn), px(65), px(58), 200), "the line is open");
+        QVERIFY2(closed_round(grey_of(genko::render::to_bitonal(drawn)), px(65), px(58)), "the printed line is open");
+    }
+    void thePensLineIsDrawn() {
+        const int dpi = 600;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const auto ink = [&](const Grey& g, int x0, int y0, int x1, int y1) {
+            double dark = 0;
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) dark += (255 - g.at(x, y)) / 255.0;
+            }
+            return dark;
+        };
+        const Grey plain = grey_of(balloon_alone(one_line("speech"), dpi));
+        const Grey swelling = grey_of(balloon_alone(one_line("speech", Json{{"style", Json{{"pen_swell", 0.6}}}}), dpi));
+        // (the box 40..90 × 40..80 mm: its upper left quarter and its lower right)
+        const double light_plain = ink(plain, px(38), px(38), px(65), px(60)), heavy_plain = ink(plain, px(65), px(60), px(92), px(82));
+        const double light = ink(swelling, px(38), px(38), px(65), px(60)), heavy = ink(swelling, px(65), px(60), px(92), px(82));
+        QVERIFY(std::fabs(light_plain - heavy_plain) < light_plain * 0.02);
+        // (the line's mean reach over a quarter turned 45° either side of the heavy way: 1 ± 0.9 × the swell)
+        QVERIFY2(heavy > heavy_plain * 1.4 && heavy < heavy_plain * 1.65, qPrintable(QStringLiteral("%1 of %2").arg(heavy).arg(heavy_plain)));
+        QVERIFY2(light < light_plain * 0.6 && light > light_plain * 0.35, qPrintable(QStringLiteral("%1 of %2").arg(light).arg(light_plain)));
+        // (the same ink in all: the line's mean width is the width it was)
+        const double all_plain = ink(plain, 0, 0, plain.w, plain.h), all = ink(swelling, 0, 0, swelling.w, swelling.h);
+        QVERIFY2(std::fabs(all - all_plain) < all_plain * 0.03, qPrintable(QStringLiteral("%1 of %2").arg(all).arg(all_plain)));
+        // (thinned strokes: less ink than the even line, the more the bigger the taper)
+        const double half = ink(grey_of(balloon_alone(one_line("speech", Json{{"style", Json{{"pen_taper", 0.5}}}}), dpi)), 0, 0, plain.w, plain.h);
+        const double whole = ink(grey_of(balloon_alone(one_line("speech", Json{{"style", Json{{"pen_taper", 1.0}}}}), dpi)), 0, 0, plain.w, plain.h);
+        QVERIFY(whole < half && half < all_plain);
+        // (a dotted box and a flash: as without the keys; a whisper keeps its dashes — as many pieces of line as before)
+        const Json pen{{"pen_swell", 0.7}, {"pen_taper", 0.8}};
+        for (const char* kind : {"dotted_box", "flash"}) {
+            QVERIFY2(balloon_alone(one_line(kind, Json{{"style", pen}}), 300).tobytes() == balloon_alone(one_line(kind), 300).tobytes(), kind);
+        }
+        QVERIFY(balloon_alone(one_line("whisper", Json{{"style", pen}}), 300).tobytes() != balloon_alone(one_line("whisper"), 300).tobytes());
+        // (the same line is the same pixels each time, and wherever it lies — nothing of the pen is left to chance)
+        const auto at_x = [&](double x_mm) {
+            return balloon_alone(one_line("speech", Json{{"x_mm", x_mm}, {"w_mm", 50.8}, {"h_mm", 40.64}, {"tail", Json::array({x_mm + 60, 100})},
+                                                         {"style", Json{{"pen_swell", 0.5}, {"pen_taper", 0.7}}}}), 300, 8.5 * 25.4, 5 * 25.4);
+        };
+        const Image here = at_x(42.333333333333336), there = at_x(67.73333333333333);
+        QVERIFY(here.crop(genko::render::Box{400, 0, 1300, here.height()}).tobytes() == there.crop(genko::render::Box{700, 0, 1600, there.height()}).tobytes());
+        QVERIFY(at_x(42.333333333333336).tobytes() == here.tobytes());
+    }
+
     // A part of the additions' sample is the whole page cut there, every pixel: each page at 600 dpi in tiles, and at 150.
     void aTileOfTheAdditionsIsThePageCutThere_data() {
         QTest::addColumn<int>("dpi");

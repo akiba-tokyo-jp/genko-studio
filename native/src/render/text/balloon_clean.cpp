@@ -1411,6 +1411,7 @@ std::vector<Run> edge_runs(const std::vector<Shape>& shapes) {
             run.points = {lerp(a, b, piece.from), lerp(a, b, piece.to)};
             run.cut_first = piece.from > 0.0;
             run.cut_last = piece.to < 1.0;
+            run.shape = static_cast<int>(si);
             made.push_back(std::move(run));
         }
         if (made.size() == 1 && pieces.size() == n && follows(pieces.back(), pieces.front())) {
@@ -1603,6 +1604,279 @@ Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int he
         if (round_ends && !run.closed) {
             if (run.cut_first) disc(points.front());
             if (run.cut_last) disc(points.back());
+        }
+    }
+    path_raster::Rasterizer raster;
+    raster.add_component(pieces, core::vector::PathOp::Combine, core::vector::FillRule::NonZero);
+    return rendered(raster, width, height);
+}
+
+// --- fukidashi@2: the pen's line -----------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr double kPenJoin = 0.01;       // (two runs whose ends lie this close are one line, px)
+constexpr double kPenCorner = 0.8660254037844387;  // (the cosine of 30°: a sharper turn is a corner, where a stroke ends)
+constexpr double kPenThin = 0.15;       // (a stroke's ends: this share of its width)
+
+double smoothstep(double x) {
+    if (x <= 0) return 0.0;
+    if (x >= 1) return 1.0;
+    return x * x * (3 - 2 * x);
+}
+
+// A chain of runs as one stretch of line: its points in order (the union's inside on its right), closed or not.
+struct Chain {
+    Contour points;
+    bool closed = false;
+    bool cut_first = false;
+    bool cut_last = false;
+};
+
+// The runs joined end to start into the outlines they are pieces of. Each run is first turned so that the group's
+// inside lies on its right (a shape's outline runs clockwise on the page with its inside on the right; a shape that is
+// cut out, or runs the other way, is followed backwards).
+std::vector<Chain> chained(const std::vector<Run>& runs, const std::vector<Shape>& shapes, bool join) {
+    std::vector<Chain> pieces;
+    for (const Run& run : runs) {
+        Chain piece;
+        for (const P& p : run.points) push(piece.points, p);
+        piece.closed = run.closed;
+        piece.cut_first = run.cut_first;
+        piece.cut_last = run.cut_last;
+        if (piece.closed && piece.points.size() > 2 && distance(piece.points.front(), piece.points.back()) < 1e-9) piece.points.pop_back();
+        if (piece.points.size() < 2) continue;
+        bool backwards = false;
+        if (run.shape >= 0 && static_cast<std::size_t>(run.shape) < shapes.size()) {
+            const Shape& shape = shapes[static_cast<std::size_t>(run.shape)];
+            backwards = (shoelace(shape.points) < 0) != shape.cut;
+        }
+        if (backwards) {
+            std::reverse(piece.points.begin(), piece.points.end());
+            std::swap(piece.cut_first, piece.cut_last);
+        }
+        pieces.push_back(std::move(piece));
+    }
+    if (!join) return pieces;
+    // each open piece's end goes on into the piece that begins nearest to it, within kPenJoin
+    const std::size_t n = pieces.size();
+    const std::size_t none = n;
+    std::vector<std::size_t> next(n, none), before(n, none);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (pieces[i].closed) continue;
+        std::size_t best = none;
+        double least = kPenJoin;
+        for (std::size_t j = 0; j < n; ++j) {
+            if (pieces[j].closed || before[j] != none) continue;
+            const double d = distance(pieces[i].points.back(), pieces[j].points.front());
+            if (d <= least) {
+                least = d;
+                best = j;
+            }
+        }
+        if (best != none) {
+            next[i] = best;
+            before[best] = i;
+        }
+    }
+    std::vector<Chain> out;
+    std::vector<char> used(n, 0);
+    const auto follow = [&](std::size_t first) {
+        Chain chain;
+        chain.cut_first = pieces[first].cut_first;
+        std::size_t at = first;
+        while (true) {
+            used[at] = 1;
+            for (const P& p : pieces[at].points) push(chain.points, p);
+            chain.cut_last = pieces[at].cut_last;
+            const std::size_t to = next[at];
+            if (to == none) break;
+            if (to == first) {
+                chain.closed = true;
+                break;
+            }
+            if (used[to]) break;
+            at = to;
+        }
+        if (chain.closed) {
+            if (chain.points.size() > 2 && distance(chain.points.front(), chain.points.back()) < kPenJoin) chain.points.pop_back();
+            chain.cut_first = chain.cut_last = false;
+        }
+        if (chain.points.size() >= 2) out.push_back(std::move(chain));
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+        if (pieces[i].closed) {
+            used[i] = 1;
+            out.push_back(std::move(pieces[i]));
+        }
+    }
+    for (std::size_t i = 0; i < n; ++i) {  // (the lines that begin somewhere, then the ones that close on themselves)
+        if (!used[i] && before[i] == none) follow(i);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!used[i]) follow(i);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::vector<PenRun> pen_runs(const std::vector<Run>& runs, const std::vector<Shape>& shapes, const Pen& pen) {
+    std::vector<PenRun> out;
+    const double least = std::min(1.0, pen.width);  // (the line never opens: a pixel at the least — its width, when it is slimmer)
+    const double step = std::max(2.0, pen.step);
+    for (Chain& chain : chained(runs, shapes, pen.chain)) {
+        Contour& points = chain.points;
+        if (chain.closed) {  // (from its topmost point — the leftmost of them)
+            std::size_t top = 0;
+            for (std::size_t i = 1; i < points.size(); ++i) {
+                if (points[i].y < points[top].y || (points[i].y == points[top].y && points[i].x < points[top].x)) top = i;
+            }
+            std::rotate(points.begin(), points.begin() + static_cast<std::ptrdiff_t>(top), points.end());
+        }
+        // no stretch longer than the step: each cut into equal parts
+        Contour fine;
+        const std::size_t count = points.size();
+        const std::size_t spans = chain.closed ? count : count - 1;
+        for (std::size_t i = 0; i < spans; ++i) {
+            const P a = points[i];
+            const P b = points[(i + 1) % count];
+            const int parts = std::max(1, static_cast<int>(std::ceil(distance(a, b) / step)));
+            for (int k = 0; k < parts; ++k) push(fine, lerp(a, b, static_cast<double>(k) / parts));
+        }
+        if (!chain.closed) push(fine, points.back());
+        if (chain.closed && fine.size() > 2 && distance(fine.front(), fine.back()) < 1e-9) fine.pop_back();
+        const std::size_t n = fine.size();
+        if (n < 2 || (chain.closed && n < 3)) continue;
+        // how far along the line each point lies, the way the line runs at it, and whether it turns a corner there
+        std::vector<double> along(n + 1, 0.0);
+        const std::size_t segments = chain.closed ? n : n - 1;
+        for (std::size_t i = 0; i < segments; ++i) along[i + 1] = along[i] + distance(fine[i], fine[(i + 1) % n]);
+        const double total = along[segments];
+        std::vector<P> outward(n);
+        std::vector<char> corner(n, 0);
+        for (std::size_t i = 0; i < n; ++i) {
+            const bool first = !chain.closed && i == 0;
+            const bool last = !chain.closed && i + 1 == n;
+            const P in = first ? unit(sub(fine[1], fine[0])) : unit(sub(fine[i], fine[(i + n - 1) % n]));
+            const P on = last ? in : unit(sub(fine[(i + 1) % n], fine[i]));
+            const P way = unit(add(in, on));
+            outward[i] = {way.y, -way.x};  // (the inside is on the line's right)
+            corner[i] = (first || last || dot(in, on) < kPenCorner) ? 1 : 0;
+        }
+        // the strokes: where each begins (a place along the line), in order; the last ends where the first begins
+        // (closed) or at the line's end
+        std::vector<double> starts;
+        double turned = 0.0;  // (a closed line is counted from here)
+        if (pen.chain) {
+            for (std::size_t i = 0; i < n; ++i) {
+                if (corner[i]) starts.push_back(along[i]);
+            }
+            if (chain.closed && starts.empty()) {
+                // (no corner: from where the line is lightest — its outward normal most against the heavy way)
+                std::size_t light = 0;
+                double least_dot = 2.0;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double d = dot(outward[i], pen.heavy);
+                    if (d < least_dot - 1e-12) {
+                        least_dot = d;
+                        light = i;
+                    }
+                }
+                const int strokes = std::clamp(pen.strokes, 1, 8);
+                for (int k = 0; k < strokes; ++k) starts.push_back(std::fmod(along[light] + total * k / strokes, total));
+                std::sort(starts.begin(), starts.end());
+            }
+            if (chain.closed && !starts.empty()) turned = starts.front();
+        }
+        PenRun run;
+        run.closed = chain.closed;
+        run.round_first = chain.cut_first;
+        run.round_last = chain.cut_last;
+        run.points = fine;
+        run.reach.assign(n, pen.width);
+        for (std::size_t i = 0; i < n; ++i) {
+            double thin = 1.0;
+            if (pen.chain && pen.taper > 0 && !starts.empty() && total > 0) {
+                // (the stroke the point lies in: from the last start at or before it to the next)
+                double s = along[i] - turned;
+                if (chain.closed && s < 0) s += total;
+                double from = 0.0, to = total;
+                for (std::size_t k = starts.size(); k-- > 0;) {
+                    const double at = starts[k] - turned;
+                    if (at > s + 1e-9) to = at;
+                }
+                for (const double start : starts) {
+                    const double at = start - turned;
+                    if (at <= s + 1e-9 && at < to - 1e-9) from = at;  // (the line's last point ends the stroke before it)
+                }
+                const double length = to - from;
+                if (length >= 6 * pen.width) {
+                    const double end = std::min(s - from, to - s);
+                    thin = kPenThin + (1 - kPenThin) * smoothstep(end / (pen.taper * length / 2));
+                }
+            }
+            const double heavy = 1 + pen.swell * dot(outward[i], pen.heavy);
+            run.reach[i] = std::max(least, pen.width * heavy * thin);
+        }
+        out.push_back(std::move(run));
+    }
+    return out;
+}
+
+Plane pen_plane(const std::vector<PenRun>& runs, int width, int height) {
+    // each stretch between two points its own four-cornered piece — as wide at each end as the line is there —, each
+    // bend's outer side a wedge (a disc where the bend is too sharp for one), all the same way round: their union has
+    // no fold, however tightly the line turns or its width changes
+    std::vector<std::vector<path_raster::XY>> pieces;
+    const std::vector<P> quarter_unit = unit_quarter(4);
+    std::vector<P> quarter;
+    for (const P& u : quarter_unit) quarter.push_back({u.x, -u.y});
+    const Contour ring = four_fold(quarter, 0.0, 0.0);
+    const auto piece = [&](Contour made) {
+        if (std::fabs(shoelace(made)) < 1e-12) return;
+        if (shoelace(made) > 0) std::reverse(made.begin(), made.end());
+        pieces.push_back(as_xy(made));
+    };
+    const auto disc = [&](P at, double reach) {
+        Contour points;
+        for (const P& u : ring) points.push_back({at.x + u.x * reach, at.y + u.y * reach});
+        piece(std::move(points));
+    };
+    for (const PenRun& run : runs) {
+        const Contour& points = run.points;
+        const std::size_t n = points.size();
+        if (n < 2 || run.reach.size() != n) continue;
+        const std::size_t segments = run.closed ? n : n - 1;
+        for (std::size_t i = 0; i < segments; ++i) {
+            const std::size_t j = (i + 1) % n;
+            const P a = points[i];
+            const P b = points[j];
+            if (distance(a, b) < 1e-9) continue;
+            const P across = inward(unit(sub(b, a)));
+            piece({add(a, mul(across, run.reach[i])), add(b, mul(across, run.reach[j])), sub(b, mul(across, run.reach[j])), sub(a, mul(across, run.reach[i]))});
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!run.closed && (i == 0 || i + 1 == n)) continue;
+            const P here = points[i];
+            const double reach = run.reach[i];
+            const P to = unit(sub(points[(i + 1) % n], here));
+            const P n0 = inward(unit(sub(here, points[(i + n - 1) % n])));
+            const P n1 = inward(to);
+            const P sum = add(n0, n1);
+            const double length = hyp(sum.x, sum.y);
+            const double cosine = length > 1e-9 ? dot(mul(sum, 1 / length), n0) : 0.0;
+            if (cosine > 1 - 1e-9) continue;  // (straight on: nothing to fill)
+            if (cosine * kMitre < 1.0) {
+                disc(here, reach);
+                continue;
+            }
+            const double side = dot(n0, to) > 0 ? -1.0 : 1.0;  // (the bend's outer side)
+            piece({here, add(here, mul(n0, side * reach)), add(here, mul(sum, side * reach / (length * cosine))), add(here, mul(n1, side * reach))});
+        }
+        if (!run.closed) {
+            if (run.round_first) disc(points.front(), run.reach.front());
+            if (run.round_last) disc(points.back(), run.reach.back());
         }
     }
     path_raster::Rasterizer raster;

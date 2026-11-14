@@ -750,6 +750,25 @@ double line_width(const Json& st, int dpi) {
     return width >= 1.5 ? std::floor(width + 0.5) : 1.0;
 }
 
+// fukidashi@2: the pen a group's line is drawn with — style.pen_swell (0..0.9) and pen_angle (the way the heavy side
+// faces: 0 to the right, 90 down the page; 45 when not said), pen_taper (0..1) and pen_strokes (1..8; 2 when not said) —,
+// or nothing: an even line. A dotted box and a flash have no line to swell.
+std::optional<clean::Pen> pen_of(const Json& st, std::string_view kind, double width, int dpi) {
+    if (kind == "dotted_box" || kind == "flash") return std::nullopt;
+    const double swell = setting(st, "pen_swell", 0.0, 0.0, 0.9);
+    const double taper = setting(st, "pen_taper", 0.0, 0.0, 1.0);
+    if (!(swell > 0) && !(taper > 0)) return std::nullopt;
+    clean::Pen pen;
+    pen.width = width;
+    pen.swell = swell;
+    pen.taper = taper;
+    const auto a = static_cast<float>(setting(st, "pen_angle", 45.0, 0.0, 360.0) * (core::kPi / 180.0));
+    pen.heavy = {static_cast<double>(libm::cosf(a)), static_cast<double>(libm::sinf(a))};
+    pen.strokes = static_cast<int>(setting(st, "pen_strokes", 2.0, 1.0, 8.0));
+    pen.step = core::py_max(2.0, 0.5 / 25.4 * dpi);
+    return pen;
+}
+
 Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::vector<std::array<std::int64_t, 4>>& boxes,
                   const Tails& tails, const Box& region, int dpi, const Json& st) {
     const std::int64_t rx0 = region.x0, ry0 = region.y0;
@@ -883,7 +902,17 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     std::vector<float> band(count, 0.0f);
     std::vector<float> inner = fill.values;  // (the fill inside the line: kept solid under a fading tail)
     if (width > 0) {
-        band = within(width).values;
+        if (const std::optional<clean::Pen> pen = pen_of(st, kind, width, dpi)) {
+            // (fukidashi@2: the pen's line — its width swelling on one side, its strokes thinning toward their ends; a
+            // dashed outline keeps its dashes and takes the swell alone)
+            clean::Pen with = *pen;
+            with.chain = !dashes;
+            clean::Plane plane = clean::pen_plane(clean::pen_runs(runs, shapes, with), size.width, size.height);
+            for (std::size_t i = 0; i < count; ++i) plane.values[i] *= fill.values[i];
+            band = std::move(plane.values);
+        } else {
+            band = within(width).values;
+        }
         for (std::size_t i = 0; i < count; ++i) inner[i] = fill.values[i] - band[i];
     }
     const auto lighter = [&](const std::vector<float>& more) {

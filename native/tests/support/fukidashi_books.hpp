@@ -412,6 +412,46 @@ inline core::Document additions_book() {
             {"star", 36, 34, "太い線", Json{{"border_mm", 0.8}}, no_tail},
         },
         4, 47.0, 43.0);
+    // --- page 2: the pen's line (強弱・入り抜き) ---
+    const auto pen = [](double swell, double taper, Json more = Json::object()) {
+        Json st = Json::object();
+        if (swell > 0) st["pen_swell"] = swell;
+        if (taper > 0) st["pen_taper"] = taper;
+        for (const auto& [key, value] : more.items()) st[key] = value;
+        return st;
+    };
+    lay(2,
+        {
+            {"speech", 36, 30, "強弱\n0.3", pen(0.3, 0), no_tail},
+            {"speech", 36, 30, "強弱\n0.6", pen(0.6, 0), no_tail},
+            {"speech", 36, 30, "強弱\n0.9", pen(0.9, 0), to(22, 22)},
+            {"speech", 36, 30, "向き\n下", pen(0.6, 0, Json{{"pen_angle", 90}}), no_tail},
+            {"speech", 36, 30, "入り抜き\n0.5", pen(0, 0.5), no_tail},
+            {"speech", 36, 30, "入り抜き\n1", pen(0, 1.0), no_tail},
+            {"speech", 36, 30, "ひと筆", pen(0.45, 0.6, Json{{"pen_strokes", 1}}), no_tail},
+            {"speech", 36, 30, "ふた筆", pen(0.45, 0.6, Json{{"pen_strokes", 2}}), to(-22, 22)},
+            {"speech", 36, 30, "四筆", pen(0.45, 0.6, Json{{"pen_strokes", 4}}), no_tail},
+            {"speech", 36, 30, "Gペン", pen(0.5, 0.7, Json{{"border_mm", 0.5}}), to(-22, 22)},
+            {"speech", 36, 30, "筆", pen(0.8, 0.9, Json{{"border_mm", 0.8}, {"pen_strokes", 1}}), to(22, 22)},
+            {"speech", 36, 30, "細い線", pen(0.6, 0.6, Json{{"border_mm", 0.2}}), to(-22, 22)},
+            {"box", 36, 28, "四角", pen(0.5, 0.6), no_tail},
+            {"box", 36, 28, "四角と\nしっぽ", pen(0.5, 0.6), to(8, 24)},
+            {"rounded", 36, 30, "かどまる", pen(0.5, 0.6), to(-24, 22)},
+            {"polygon", 36, 30, "八角", pen(0.5, 0.7), no_tail},
+            {"shout", 40, 34, "叫び！", pen(0.5, 0.8, Json{{"border_mm", 0.5}}), no_tail},
+            {"shout", 40, 34, "叫びと\nしっぽ", pen(0.6, 0.6), to(26, 22)},
+            {"cloud", 38, 32, "もくもく", pen(0.5, 0.6), no_tail},
+            {"cloud", 38, 32, "もくもく", pen(0.6, 0), to(-24, 22)},
+            {"thought", 36, 30, "かんがえ\nごと", pen(0.5, 0.5), to(24, 24)},
+            {"whisper", 36, 30, "ひそひそ", pen(0.7, 0.6), no_tail},
+            {"heart", 36, 32, "すき", pen(0.5, 0.7), no_tail},
+            {"speech", 36, 30, "二重と\n強弱", pen(0.6, 0.5, Json{{"double", true}}), no_tail},
+            {"speech", 48, 26, "つながる", pen(0.5, 0.6, Json{{"group", "p1"}}), to(-18, 22)},
+            {"speech", 48, 30, "ふたつ", pen(0.5, 0.6, Json{{"group", "p1"}}), no_tail},
+            {"speech", 36, 36, "ホラー", with(pen(0.6, 0.5, Json{{"drip_mm", 7}, {"drip_seed", 3}}), Json::object()), no_tail},
+            {"star", 40, 38, "キラ", pen(0.5, 0.7), no_tail},
+        },
+        4, 47.0, 37.0);
     // --- page 3: the drips (each box its body and, below it, the drips' reach) ---
     const auto drip = [](double mm, Json more = Json::object()) {
         Json st{{"drip_mm", mm}};
