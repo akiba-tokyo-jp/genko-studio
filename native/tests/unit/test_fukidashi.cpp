@@ -2961,6 +2961,111 @@ private slots:
         QCOMPARE(drawn, 8 * 4 * 21);
     }
 
+    // Drawing a base in mends only lines that were open (review 3, P1-1): a tail of a book of before is made point for
+    // point as before, unless its base left the line open — the fill met the paper with no line between, a narrow
+    // outline under a wide tail, a polygon's or a burst's end — and drawn in it is closed. Every old kind × four boxes
+    // (wide, small, square, tall) × the tail's width (as it falls, 6 and 9 mm) × twelve ways round: 1,152 tails, each
+    // either the very points of before or open before and closed now. The review's named tails are among the first:
+    // the electric 30 × 30's to 0°, 120° and 300° and the wavy speech's to 0° and 180°, drawn closed before.
+    void aTailIsMadeAsBeforeUnlessItsLineWasOpen_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<QString>("style");
+        const std::pair<const char*, Json> kinds[] = {{"speech", Json::object()}, {"cloud", Json::object()}, {"shout", Json::object()},
+                                                      {"capsule", Json::object()}, {"electric", Json::object()}, {"polygon", Json::object()},
+                                                      {"rounded", Json::object()}, {"speech", Json{{"wave_mm", 0.4}}}};
+        for (const auto& [kind, style] : kinds) {
+            QTest::newRow(qPrintable(QStringLiteral("%1 %2").arg(QString::fromLatin1(kind), QString::fromStdString(style.dump())))) << QString::fromLatin1(kind)
+                                                                                                                            << QString::fromStdString(style.dump());
+        }
+    }
+    void aTailIsMadeAsBeforeUnlessItsLineWasOpen() {
+        QFETCH(QString, kind);
+        QFETCH(QString, style);
+        const int dpi = 300;
+        // (the fill a pale blue: a pixel mostly of the fill within two of one of the bare paper is the fill meeting the
+        // paper with no line between — away from the edge of what the balloon is drawn over: a tail that runs past it
+        // is cut off there, before as now)
+        const auto open = [&](const Image& picture, int at, double x0, double y0, double x1, double y1) {
+            const double k = at / 25.4;
+            const Image rgb = picture.convert("RGB");
+            const std::string bytes = rgb.tobytes();
+            const int w = rgb.width(), h = rgb.height();
+            const auto px = [&](int x, int y, int c) { return static_cast<int>(static_cast<unsigned char>(bytes[(static_cast<std::size_t>(y) * w + x) * 3 + c])); };
+            const auto paper = [&](int x, int y) { return px(x, y, 0) >= 250 && px(x, y, 1) >= 250 && px(x, y, 2) >= 250; };
+            const auto fill = [&](int x, int y) { return px(x, y, 2) - px(x, y, 0) >= 35; };
+            const int rx0 = static_cast<int>(std::lround((x0 - 4) * k)) + 3, ry0 = static_cast<int>(std::lround((y0 - 4) * k)) + 3;
+            const int rx1 = static_cast<int>(std::lround((x1 + 4) * k)) - 3, ry1 = static_cast<int>(std::lround((y1 + 4) * k)) - 3;
+            for (int y = std::max(2, ry0); y < std::min(h - 2, ry1); ++y) {
+                for (int x = std::max(2, rx0); x < std::min(w - 2, rx1); ++x) {
+                    if (!fill(x, y)) continue;
+                    for (int dy = -2; dy <= 2; ++dy) {
+                        for (int dx = -2; dx <= 2; ++dx) {
+                            if (y + dy >= ry0 && y + dy < ry1 && x + dx >= rx0 && x + dx < rx1 && paper(x + dx, y + dy)) return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+        struct Size {
+            double w, h;
+        };
+        const Size sizes[] = {{40, 12}, {20, 10}, {30, 30}, {12, 40}};
+        const double widths[] = {0, 6, 9};
+        int same = 0, mended = 0;
+        QStringList named;
+        for (const Size& size : sizes) {
+            for (const double width : widths) {
+                for (int degrees = 0; degrees < 360; degrees += 30) {
+                    const double cx = 35, cy = 35;
+                    const double reach = std::max(size.w, size.h) / 2 + 5;
+                    const double tx = std::round((cx + reach * std::cos(degrees * 3.141592653589793 / 180)) * 100) / 100;
+                    const double ty = std::round((cy + reach * std::sin(degrees * 3.141592653589793 / 180)) * 100) / 100;
+                    Json one{{"to", Json::array({tx, ty})}};
+                    if (width > 0) one["width_mm"] = width;
+                    Json st = Json::parse(style.toStdString());
+                    st["fill_rgb"] = Json::array({200, 225, 255});
+                    const Document doc = one_line(kind.toStdString().c_str(), Json{{"x_mm", cx - size.w / 2}, {"y_mm", cy - size.h / 2}, {"w_mm", size.w}, {"h_mm", size.h},
+                                                                                    {"tails", Json::array({one})}, {"style", st}}, "あ");
+                    QVERIFY(!genko::core::uses_fukidashi2(doc));
+                    const std::vector<const genko::core::StoryLine*> group{&doc.story.front()};
+                    std::vector<std::vector<genko::render::text::balloon::Pt>> before;
+                    {
+                        const clean::TailBasesAsBeforeForTest as_before;
+                        before = genko::render::text::balloon::shape_trace(group, dpi);
+                    }
+                    const auto now = genko::render::text::balloon::shape_trace(group, dpi);
+                    QVERIFY(!now.empty());
+                    const QString where = QStringLiteral("%1 × %2, a tail %3 toward %4°").arg(size.w).arg(size.h).arg(width > 0 ? QStringLiteral("of %1 mm").arg(width) : QStringLiteral("as it falls")).arg(degrees);
+                    const bool named_one = (kind == QStringLiteral("electric") && size.w == 30 && width == 0 && (degrees == 0 || degrees == 120 || degrees == 300)) ||
+                                           (style.contains(QStringLiteral("wave_mm")) && size.w == 40 && width == 0 && (degrees == 0 || degrees == 180));
+                    if (now == before) {
+                        ++same;
+                        if (named_one) named << where;
+                        continue;
+                    }
+                    QVERIFY2(!named_one, qPrintable(where + QStringLiteral(": a tail the review named, drawn closed before, is made otherwise")));
+                    // (open before: at 300 dpi, or — a crack a hair wide, the side's square end and the outline's line
+                    // just missing each other — at 1200)
+                    const double x0 = std::min(cx - size.w / 2, tx), y0 = std::min(cy - size.h / 2, ty), x1 = std::max(cx + size.w / 2, tx), y1 = std::max(cy + size.h / 2, ty);
+                    bool was_open = false;
+                    for (const int at : {dpi, 1200}) {
+                        const clean::TailBasesAsBeforeForTest as_before;
+                        was_open = open(balloon_alone(doc, at, 70, 70), at, x0, y0, x1, y1);
+                        if (was_open) break;
+                    }
+                    QVERIFY2(was_open, qPrintable(where + QStringLiteral(": made otherwise, though its line was closed before")));
+                    QVERIFY2(!open(balloon_alone(doc, dpi, 70, 70), dpi, x0, y0, x1, y1), qPrintable(where + QStringLiteral(": made otherwise, and its line is still open")));
+                    ++mended;
+                }
+            }
+        }
+        QCOMPARE(same + mended, 4 * 3 * 12);
+        qInfo("%s: %d tails as before, %d mended", qPrintable(kind + QLatin1Char(' ') + style), same, mended);
+        if (kind == QStringLiteral("electric")) QCOMPARE(named.size(), 3);
+        if (style.contains(QStringLiteral("wave_mm"))) QCOMPARE(named.size(), 2);
+    }
+
     // A part of the additions' sample is the whole page cut there, every pixel: each page at 600 dpi in tiles, and at 150.
     void aTileOfTheAdditionsIsThePageCutThere_data() {
         QTest::addColumn<int>("dpi");

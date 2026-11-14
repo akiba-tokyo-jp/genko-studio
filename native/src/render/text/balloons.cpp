@@ -973,6 +973,8 @@ Built build_shapes(const std::vector<const core::StoryLine*>& lines, const std::
         }
         for (clean::Shape& join : joins) shapes.push_back(std::move(join));
     }
+    // (fukidashi@2: drawn with the pen — the group's line, its first line's style)
+    const bool pen = !lines.empty() && width > 0 && pen_of(style_of(*lines.front()), kind_of(*lines.front()), width, dpi).has_value();
     for (const auto& [line, tail] : tails) {
         const std::size_t index = static_cast<std::size_t>(std::find(lines.begin(), lines.end(), line) - lines.begin());
         const clean::Box& box = locals[index];
@@ -1006,6 +1008,7 @@ Built build_shapes(const std::vector<const core::StoryLine*>& lines, const std::
                                            : std::string_view("wedge");
         spec.depth = core::py_max(base * 0.5, width * 3 + 2);
         spec.line = width;
+        spec.pen = pen;
         if (bent) {  // 折れ線のしっぽ
             for (const Json& v : core::iterate(*vias)) spec.bends.push_back(at_px(v));
         } else {
@@ -1727,6 +1730,22 @@ std::vector<DripTrace> drip_trace(const core::StoryLine& line, int dpi) {
     // (from the body's box — the line's box at this resolution — to the page)
     const double x0 = static_cast<double>(frame.boxes.front()[0]) * mm, y0 = static_cast<double>(frame.boxes.front()[1]) * mm;
     for (const DripDrawn& drip : built.drips) out.push_back(DripTrace{x0 + drip.x_mm, drip.half_mm, y0 + drip.tip_mm});
+    return out;
+}
+
+std::vector<std::vector<Pt>> shape_trace(const std::vector<const core::StoryLine*>& group, int dpi) {
+    std::vector<std::vector<Pt>> out;
+    if (group.empty()) return out;
+    const std::string kind = kind_of(*group.front());
+    if (kind == "sfx" || kind == "none" || kind == "picture") return out;
+    const GroupFrame frame = group_frame(group, dpi, nullptr);
+    const Box region{static_cast<int>(std::max<std::int64_t>(0, frame.x0)), static_cast<int>(std::max<std::int64_t>(0, frame.y0)), static_cast<int>(frame.x1),
+                     static_cast<int>(frame.y1)};
+    const Built built = build_shapes(group, frame.boxes, frame.tails, region, dpi, line_width(style_of(*group.front()), dpi));
+    for (const clean::Shape& shape : built.shapes) {
+        std::vector<Pt>& points = out.emplace_back();
+        for (const P& p : shape.points) points.push_back({p.x, p.y});
+    }
     return out;
 }
 

@@ -117,6 +117,9 @@ struct DripTrace {
     double tip_mm = 0.0;
 };
 std::vector<DripTrace> drip_trace(const core::StoryLine& line, int dpi);
+// (tests) The shapes of a group (its lines in order) as they are made at a resolution — each balloon's outline, the
+// joins, each tail and its joins, the drips — each one's points (px of the group's region), in order.
+std::vector<std::vector<Pt>> shape_trace(const std::vector<const core::StoryLine*>& group, int dpi);
 // The densities of a tone inside a balloon (style.fill_tone) that print on a page made black and white at `dpi`, for a
 // screen of `lpi` lines: lighter than `lightest` its dots (its stripes, `lines`) are under two pixels and drop out,
 // darker than `darkest` the white left between them is (0.9 at the most: the densities a tone takes).

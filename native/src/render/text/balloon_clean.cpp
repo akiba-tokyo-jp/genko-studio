@@ -3,6 +3,7 @@
 #include "render/text/balloon_clean.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 
@@ -1091,9 +1092,9 @@ P point_along(const Contour& line, std::size_t segment, double along, double rea
     return here;
 }
 
-}  // namespace
-
-Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec) {
+// A tail as tail() makes it; `draw_in` false: every base as it falls (the construction of before 2026-11-14), and
+// `foot_out` then says whether an end of its base lies outside the outline.
+Tail made_tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec, bool draw_in, bool* foot_out) {
     Tail out;
     if (outline.size() < 3 || guide.size() < 3) return out;
     const std::vector<double> guide_lengths = lengths_of(guide);
@@ -1213,12 +1214,13 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
         }
         left_side.push_back(spec.tip);
         right_side.push_back(spec.tip);
-        // (its base lies inside the balloon. Beside a corner of a box an end of the base — half the tail's width out from
-        // its middle line, and more — lies outside the box: past the corner the box is not there, and the stretch of the
-        // base outside it would be an edge without a line. Such an end is drawn in toward the middle line, to just inside
-        // the outline: its side then leaves the balloon through the box's other edge, round the corner. A base whose ends
-        // are inside as they are — every tail away from a corner — is made exactly as before.)
-        if (!notch && inside(outline, middle.front())) {
+        // (its base lies inside the balloon. Beside a corner of a box — or where a narrow outline falls away from a
+        // wide tail — an end of the base, half the tail's width out from its middle line and more, lies outside the
+        // outline, and the stretch of the base outside it is an edge without a line. When that leaves the line open
+        // (tail() decides: base_open), such an end is drawn in toward the middle line, to just inside the outline: its
+        // side then leaves the balloon through the outline beyond, round the corner.)
+        if (foot_out != nullptr) *foot_out = !notch && inside(outline, middle.front()) && (!inside(outline, left_side.front()) || !inside(outline, right_side.front()));
+        if (draw_in && !notch && inside(outline, middle.front())) {
             for (Contour* side : {&left_side, &right_side}) {
                 if (inside(outline, side->front())) continue;
                 double in = 0.0, out_of_it = 1.0;
@@ -1290,6 +1292,108 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
     join(left_side, right_side, left, right);
     join(right_side, left_side, right, left);
     return out;
+}
+
+// How far `p` lies from the ribbon `reach` wide either side of a run, as ribbon_plane draws it — round where it turns and
+// at an end cut by another shape, square at an end that is not (a tail's base) —: 0 under it.
+double off_ribbon(const Run& run, P p, double reach) {
+    const std::size_t m = run.points.size();
+    const std::size_t segments = run.closed ? m : (m == 0 ? 0 : m - 1);
+    double least = 1e300;
+    for (std::size_t i = 0; i < segments && least > 0; ++i) {
+        const P a = run.points[i];
+        const P b = run.points[(i + 1) % m];
+        const double span = distance(a, b);
+        if (span < 1e-12) {
+            least = std::min(least, std::max(0.0, distance(p, a) - reach));
+            continue;
+        }
+        const P along = mul(sub(b, a), 1 / span);
+        const double u = dot(sub(p, a), along);
+        const double v = std::fabs(cross(along, sub(p, a)));
+        const bool square_before = !run.closed && i == 0 && !run.cut_first;
+        const bool square_after = !run.closed && i + 1 == segments && !run.cut_last;
+        if ((u < 0 && square_before) || (u > span && square_after)) {
+            least = std::min(least, hyp(u < 0 ? -u : u - span, std::max(0.0, v - reach)));
+        } else {
+            least = std::min(least, std::max(0.0, distance(p, add(a, mul(along, std::clamp(u, 0.0, span)))) - reach));
+        }
+    }
+    return least;
+}
+
+// How far a tail leaves its balloon's line open (in pixels; 0: closed): where an edge of its own that has no line — its
+// base inside the balloon, the sides of a join that lie along the outline and the tail — falls on the group's edge
+// after all (the fill on one side of it only), the farthest it lies from the line drawn there: the ribbon `width` wide
+// inside the fill along the pieces of the outline and the tail's sides on the edge (off_ribbon). Open: the fill meets
+// the paper with no line between — a base end past a box's corner, or past a narrow outline under a wide tail, and the
+// join made where that side runs into the outline; a crack a hair wide where the side's square end and the outline's
+// line just miss each other. A base end in a shallow valley of a burst or a wave's trough lies under the line beside
+// it: closed.
+double line_gap(const Contour& outline, const Tail& made, double width) {
+    if (made.shape.points.size() < 3) return 0.0;
+    double worst = 0.0;
+    std::vector<Shape> shapes{whole(outline), made.shape};
+    for (const Shape& join : made.joins) shapes.push_back(join);
+    const std::vector<Run> runs = edge_runs(shapes);
+    const double step = std::max(0.125, width * 0.05);
+    for (std::size_t si = 1; si < shapes.size(); ++si) {
+        const Shape& shape = shapes[si];
+        const std::size_t n = shape.points.size();
+        if (n < 3) continue;
+        for (std::size_t e = 0; e < n; ++e) {
+            if (shape.stroke[e]) continue;
+            const P from = shape.points[e];
+            const P to = shape.points[(e + 1) % n];
+            const int steps = std::max(1, static_cast<int>(std::ceil(distance(from, to) / step)));
+            const P across = mul(inward(unit(sub(to, from))), std::max(0.01, width * 0.01));
+            for (int k = 0; k < steps; ++k) {
+                const P p = lerp(from, to, (k + 0.5) / steps);
+                // (on the group's edge: the fill on one side of it only — a shape's edge inside the others, or inside
+                // itself where it folds over, is not)
+                const auto filled = [&](P q) {
+                    for (const Shape& other : shapes) {
+                        if (other.points.size() >= 3 && inside(other.points, q)) return true;
+                    }
+                    return false;
+                };
+                bool covered = filled(add(p, across)) && filled(sub(p, across));
+                double gap = covered ? 0.0 : 1e300;
+                for (const Run& run : runs) {
+                    if (!(gap > 0)) break;
+                    gap = std::min(gap, off_ribbon(run, p, width));
+                }
+                worst = std::max(worst, gap);
+            }
+        }
+    }
+    return worst;
+}
+// Open: more than a hundredth of the line's width (in widths, not pixels: a tail is open or closed alike at every
+// resolution; less is the arithmetic's own).
+bool base_open(const Contour& outline, const Tail& made, double width) { return line_gap(outline, made, width) > width * 0.01; }
+
+std::atomic<int> g_bases_as_before{0};  // (tests: every tail's base as it falls, as before 2026-11-14)
+
+}  // namespace
+
+TailBasesAsBeforeForTest::TailBasesAsBeforeForTest() { ++g_bases_as_before; }
+TailBasesAsBeforeForTest::~TailBasesAsBeforeForTest() { --g_bases_as_before; }
+
+// A tail made as before whose line was closed is made as before, point for point: only a tail whose base left the line
+// open (base_open), and whose base drawn in closes it, has the ends of its base drawn in (and a tail of the pen's line,
+// a base end of which lies outside the outline).
+Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec) {
+    bool foot_out = false;
+    Tail before = made_tail(outline, guide, centre, spec, false, &foot_out);
+    if (!foot_out || g_bases_as_before.load() > 0) return before;
+    // (fukidashi@2, the pen's line: its strokes thin toward their ends, a base's among them — such a base end is always
+    // drawn in; no book of before has the pen)
+    if (spec.pen) return made_tail(outline, guide, centre, spec, true, nullptr);
+    if (!(spec.line > 0) || !base_open(outline, before, spec.line)) return before;
+    Tail drawn_in = made_tail(outline, guide, centre, spec, true, nullptr);
+    // (a base drawn in that still leaves the line open — a burst's deep teeth across it — mends nothing: as before)
+    return base_open(outline, drawn_in, spec.line) ? before : drawn_in;
 }
 
 std::vector<Contour> bubble_trail(const Contour& guide, P centre, P tip, double radius) {

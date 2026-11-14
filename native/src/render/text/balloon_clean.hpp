@@ -127,6 +127,7 @@ struct TailSpec {
     double line = 0.0;         // the outline's width (px; 0: not said) — a zigzag stops stepping out where it is slimmer than its line
     std::string_view kind = "wedge";  // wedge | straight | zigzag | fade | inward (bubbles are circles: bubble_trail)
     bool bolt = false;         // (an electric balloon's: a lightning bolt)
+    bool pen = false;          // (fukidashi@2: the line is the pen's — its strokes thin toward their ends)
 };
 // A tail of the balloon whose outline is `outline` (and `guide` the smooth outline it leaves from — the outline itself,
 // or a burst's valleys — whose middle is `centre`). Its root is where the line from the middle to what it points at
@@ -141,7 +142,18 @@ struct Tail {
     std::vector<Shape> joins;
     Contour corners;  // (fukidashi@2: the corners the pen's strokes end at — its tip, its bends, a zigzag's steps)
 };
+// Where an end of its base falls outside the outline and that leaves the line open (a box's corner, a narrow outline
+// under a wide tail), that end is drawn in to just inside the outline when that closes it; every other tail is made as
+// before 2026-11-14, point for point (a pen's line: such an end is always drawn in).
 Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec);
+// (tests) While one lives, every tail's base is made as it falls, as before 2026-11-14 (nothing drawn in).
+class TailBasesAsBeforeForTest {
+public:
+    TailBasesAsBeforeForTest();
+    ~TailBasesAsBeforeForTest();
+    TailBasesAsBeforeForTest(const TailBasesAsBeforeForTest&) = delete;
+    TailBasesAsBeforeForTest& operator=(const TailBasesAsBeforeForTest&) = delete;
+};
 // The three bubbles of a thought toward `tip`, from the outline's edge, the first `radius` big.
 std::vector<Contour> bubble_trail(const Contour& guide, P centre, P tip, double radius);
 // The rounded joins where two outlines cross (joined balloons): a patch in each notch, `reach` along both.
