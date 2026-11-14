@@ -477,11 +477,18 @@ public:
     QStringList faces_not_installed() const;
     void note_fonts_on_open(const std::shared_ptr<Session>& session);
     void show_usual_face();
-    // What is said of the open book's faces: a band above the page (the status line cut such a sentence short), there
-    // until it is closed — fonts_notice() its words, nothing when there is none —; closed, it is not said again.
-    QLabel* fonts_band() const { return fonts_band_; }
+    // What is said of the open book's faces: a band above the page (the status line cut such a sentence short) — its
+    // words wrapped, a button この知らせを閉じる beside them —, there until it is closed: fonts_notice() its words,
+    // nothing when there is none; closed, it is not said again. tell_of_fonts: words for the band now (what a command
+    // left as it was, and why); say_of_fonts: a sentence for the status line, or — when the line is too short to show
+    // it whole — for the band, with a word in the status line that it is there.
+    QWidget* fonts_band() const { return fonts_band_; }
+    QLabel* fonts_band_text() const { return fonts_band_text_; }
+    QPushButton* fonts_band_close() const { return fonts_band_close_; }
     QString fonts_notice() const;
     void close_fonts_notice();
+    void tell_of_fonts(const QString& words);
+    void say_of_fonts(const QString& words, int ms);
     BalloonPalette* balloon_palette() const { return balloon_palette_; }
     QDockWidget* balloon_dock() const { return balloon_dock_; }
     void use_balloon_preset(const QString& key, const QString& how = {});
@@ -1609,7 +1616,10 @@ private:
     // (the books whose faces were looked at when they were opened, with what is said of each — nothing: nothing to say,
     // or the band was closed)
     std::vector<std::pair<std::weak_ptr<Session>, QString>> fonts_told_;
-    QLabel* fonts_band_ = nullptr;
+    QWidget* fonts_band_ = nullptr;
+    QLabel* fonts_band_text_ = nullptr;
+    QPushButton* fonts_band_close_ = nullptr;
+    void show_fonts_band(const QString& words);
     QPointer<StoryEditor> story_editor_;
     QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
     bool lines_later_ = false;

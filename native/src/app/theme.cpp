@@ -336,6 +336,9 @@ QString style_sheet(const Tokens& t, double pt) {
     s += QStringLiteral("QWidget#saveFailure { background: %1; border: 1px solid %2; border-radius: 6px; }\n").arg(t.accent_soft, t.danger);
     s += QStringLiteral("QLabel#unportedBand { background: %1; color: %2; border-bottom: 1px solid %3; padding: 4px 8px; }\n")
              .arg(t.accent_soft, t.text, t.border);
+    // (fonts@1: what is said of the book's faces — the same band, with a button beside its words)
+    s += QStringLiteral("QFrame#fontsBand { background: %1; border-bottom: 1px solid %2; }\n").arg(t.accent_soft, t.border);
+    s += QStringLiteral("QLabel#fontsBandText { background: transparent; color: %1; }\n").arg(t.text);
     s += QStringLiteral("QPushButton#actionCard { background: %1; border: 1px solid %2; border-radius: 12px; padding: 0; text-align: left; }\n")
              .arg(t.panel, t.divider);
     s += QStringLiteral("QPushButton#actionCard:hover { background: %1; border-color: %2; }\n").arg(t.hover, t.border);

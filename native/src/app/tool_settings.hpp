@@ -66,9 +66,12 @@ public:
     // that lets it go (presetCleared) — so that it shows while the palette is closed; an empty name: none, the row hidden.
     void show_preset(const QString& name);
     // 書体 (fonts@1): the 書体 box's first choice says the face a line that names none is drawn in (「いつもの書体（◯◯）」);
-    // the 書体 palette's face for the next line is one more choice of the box, chosen (an empty key: taken away again, the
-    // first choice chosen); ほかの書体… beside the box asks for the palette (moreFonts).
-    void show_usual(const QString& label);
+    // `own`: the book has a usual face of its own — アンチック then has a choice of its own, after the first (a line
+    // placed with it names "antique": the first choice would give the book's face). The 書体 palette's face for the
+    // next line is one more choice of the box, chosen (an empty key: taken away again, the first choice chosen;
+    // "antique": アンチック's own choice, or the first when there is none); ほかの書体… beside the box asks for the
+    // palette (moreFonts).
+    void show_usual(const QString& label, bool own = false);
     void show_face(const QString& key, const QString& label);
 
     QComboBox* make = nullptr;

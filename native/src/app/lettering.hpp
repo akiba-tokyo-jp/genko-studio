@@ -33,13 +33,19 @@ const std::vector<std::pair<QString, QString>>& bundled_fonts();
 // the others in the category the catalogue gives their fonts) and the forty added (core/font_catalog.hpp), by the
 // catalogue's categories in their order —, and a category's name. `mark`: what a person must know before choosing it
 // (「かなだけ（漢字は◯◯）」, 「漢字は一部（残りは◯◯）」; empty: nothing).
+//
+// A face has one name everywhere a person reads it (`label`): an added face's is the catalogue's; the six of before
+// keep the names the text tool has always shown (ゴシック, 明朝, 丸ゴシック, 手書き風, 極太（効果音）, 勢い（効果音）), and
+// アンチック is アンチック. The palette's row (`row`) is that name with, for the six, their font's own name in brackets —
+// ゴシック（ZEN角ゴシック B）, 極太（効果音・デラゴシック）.
 struct FaceRow {
     QString key;       // what a line's style.font takes
     QString label;     // its name
+    QString row;       // the palette's row: the name, and the font's own name for the six of before
     QString category;  // the category's id
     QString use;       // what it is for
     QString mark;
-    QString search;    // (its name, key, family, use and category, lower case: what the palette's search looks through)
+    QString search;    // (its names, key, family, use and category, lower case: what the palette's search looks through)
     bool added = false;
 };
 const std::vector<FaceRow>& catalog_faces();
@@ -47,6 +53,8 @@ const std::vector<std::pair<QString, QString>>& face_categories();  // {id, name
 // A face's name for a person: a bundled face's (bundled_fonts), an added face's (the catalogue's), a font file's name
 // without its folder and extension.
 QString face_label(const QString& font);
+// The same in a sentence: アンチック for the composite of before (its list's name explains it in brackets).
+QString face_name(const QString& font);
 // tategaki.STYLE_TAGS: the marks typed in {…|words} and the style each gives, in Python's order.
 const std::vector<std::pair<QString, core::Json>>& style_tags();
 

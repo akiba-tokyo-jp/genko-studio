@@ -37,7 +37,8 @@ namespace {
 constexpr int kKey = Qt::UserRole + 1;       // a face's key (a heading: empty)
 constexpr int kCategory = Qt::UserRole + 2;  // a heading's category id; a face's
 constexpr int kMissing = Qt::UserRole + 3;   // the face's file is not on this computer
-constexpr int kLabel = Qt::UserRole + 4;     // the row's words without 「ファイルなし」
+constexpr int kLabel = Qt::UserRole + 4;     // the row's words of always: its name, and what to know of the face
+constexpr int kUsual = Qt::UserRole + 6;     // it is the book's usual face
 constexpr int kDrawn = Qt::UserRole + 5;     // its sample has been made
 constexpr int kDpi = 96;
 constexpr int kSampleW = 132, kSampleH = 30;  // (the sample's room: five letters of 4.6 mm at 96 dpi and a little air)
@@ -117,6 +118,15 @@ public:
         painter->restore();
     }
 };
+
+// A row's words: its name, what to know of the face, then what is so now — it is the book's usual face, its file is
+// not on this computer —, each on a line of its own.
+QString words_of(const QListWidgetItem* it) {
+    QString words = it->data(kLabel).toString();
+    if (it->data(kUsual).toBool()) words += QStringLiteral("\nこの本のいつもの書体");
+    if (it->data(kMissing).toBool()) words += QStringLiteral("\nファイルなし");
+    return words;
+}
 
 }  // namespace
 
@@ -224,12 +234,13 @@ FontPalette::FontPalette(QWidget* parent) : QWidget(parent) {
             head->setSizeHint(QSize(0, 26));
             list_->addItem(head);
         }
-        const QString words = face.mark.isEmpty() ? face.label : face.label + QLatin1Char('\n') + face.mark;
+        const QString words = face.mark.isEmpty() ? face.row : face.row + QLatin1Char('\n') + face.mark;
         auto* item = new QListWidgetItem(waiting, words);
         item->setData(kKey, face.key);
         item->setData(kCategory, face.category);
         item->setData(kLabel, words);
         item->setData(kMissing, false);
+        item->setData(kUsual, false);
         item->setData(kDrawn, false);
         list_->addItem(item);
         order_.push_back(item);
@@ -244,11 +255,15 @@ FontPalette::FontPalette(QWidget* parent) : QWidget(parent) {
     timer_ = new QTimer(this);
     timer_->setInterval(0);
     connect(timer_, &QTimer::timeout, this, [this] { step(); });  // (one a turn)
-    warming_ = new QFutureWatcher<void>(this);
-    connect(warming_, &QFutureWatcher<void>::finished, this, [this] {
+    warming_ = new QFutureWatcher<HeldBytes>(this);
+    connect(warming_, &QFutureWatcher<HeldBytes>::finished, this, [this] {
+        // (the bytes the worker read are held here until the sample is set from them: were they let go of in between —
+        // many faces in use —, the screen's thread would be given these, not sent to read the file itself)
+        held_ = warming_->result();
         warmed_.insert(warming_key_);
         if (isVisible() && next_ < static_cast<int>(order_.size()) && !timer_->isActive()) timer_->start();
     });
+    set_usual(QString());
 }
 
 QListWidgetItem* FontPalette::item(const QString& key) const {
@@ -286,7 +301,7 @@ void FontPalette::refresh_files() {
         const bool gone = !there(key);
         if (gone == it->data(kMissing).toBool()) continue;
         it->setData(kMissing, gone);
-        it->setText(gone ? it->data(kLabel).toString() + QStringLiteral("\nファイルなし") : it->data(kLabel).toString());
+        it->setText(words_of(it));
         if (it->data(kDrawn).toBool()) show_sample(it);
     }
     for (QListWidgetItem* it : order_) {
@@ -298,8 +313,8 @@ void FontPalette::refresh_files() {
         if (face == nullptr) continue;
         const bool gone = it->data(kMissing).toBool();
         it->setForeground(gone ? QBrush(QColor(theme::tokens().faint)) : QBrush());
-        it->setToolTip(gone ? QStringLiteral("%1\n%2\nこの書体のファイルが、このパソコンにありません。アプリを入れ直すと使えます").arg(face->label, face->use)
-                            : QStringLiteral("%1\n%2\nクリックで、選んだ台詞がこの書体になります（選んでいなければ、次に置く台詞の書体に）").arg(face->label, face->use));
+        it->setToolTip(gone ? QStringLiteral("%1\n%2\nこの書体のファイルが、このパソコンにありません。アプリを入れ直すと使えます").arg(face->row, face->use)
+                            : QStringLiteral("%1\n%2\nクリックで、選んだ台詞がこの書体になります（選んでいなければ、次に置く台詞の書体に）").arg(face->row, face->use));
     }
 }
 
@@ -313,7 +328,7 @@ void FontPalette::show_sample(QListWidgetItem* it) {
     if (sample.isNull()) {  // (not installed — found out for certain when its file was read: said, as a file that is not there)
         if (!it->data(kMissing).toBool() && core::fonts::added(key.toStdString())) {
             it->setData(kMissing, true);
-            it->setText(it->data(kLabel).toString() + QStringLiteral("\nファイルなし"));
+            it->setText(words_of(it));
             it->setForeground(QBrush(QColor(theme::tokens().faint)));
         }
         return;
@@ -356,12 +371,39 @@ void FontPalette::step() {
         warming_key_ = key;
         timer_->stop();
         warming_->setFuture(QtConcurrent::run([face, partner] {
-            (void)render::font_files::present(face);
-            if (!partner.empty()) (void)render::font_files::present(partner);
+            // (its bytes, not only whether it is installed: a face whose answer is known already — the book drew in it —
+            // may have had its bytes let go, and the sample would read the file on the screen's thread)
+            HeldBytes read;
+            for (const std::string& key : {face, partner}) {
+                if (key.empty()) continue;
+                try {
+                    read.push_back(render::font_files::bytes(key));
+                } catch (const std::exception&) {  // (not installed: its row will say so)
+                }
+            }
+            return read;
         }));
         return;
     }
     draw_some(1);
+    held_.clear();
+}
+
+void FontPalette::set_usual(const QString& key) {
+    const QString usual = key.isEmpty() ? QStringLiteral("antique") : key;
+    for (QListWidgetItem* it : order_) {
+        const bool is = it->data(kKey).toString() == usual;
+        if (is == it->data(kUsual).toBool()) continue;
+        it->setData(kUsual, is);
+        it->setText(words_of(it));
+    }
+}
+
+QString FontPalette::usual() const {
+    for (const QListWidgetItem* it : order_) {
+        if (it->data(kUsual).toBool()) return it->data(kKey).toString();
+    }
+    return {};
 }
 
 void FontPalette::filter(const QString& words) {
@@ -427,8 +469,11 @@ QString FontPalette::marked() const { return list_->property("marked").toString(
 bool FontPalette::event(QEvent* event) {
     // (moved to a screen of another scale: the samples made again at it, one at a time as when first shown)
     if (event->type() == QEvent::DevicePixelRatioChange && list_ != nullptr && next_ > 0) {
+        // (another screen's scale: every sample made again for it, one at a time as the first time — each face's file
+        // read ahead by the worker again, were its bytes let go since: the forty are more than is kept)
         next_ = 0;
-        if (isVisible() && !timer_->isActive()) timer_->start();
+        warmed_.clear();
+        if (isVisible() && !timer_->isActive() && !warming_->isRunning()) timer_->start();
     }
     return QWidget::event(event);
 }

@@ -297,7 +297,9 @@ void MainWindow::resolve_missing_fonts() {
                                           : QStringLiteral("付属の書体「%1」のファイルが、このパソコンにありません。置き換えずに、アプリを入れ直すと元の書体で描けます")
                                                 .arg(absent.join(QStringLiteral("」「")));
     if (missing.empty()) {
-        flash(absent.isEmpty() ? QStringLiteral("見つからないフォントはありません") : told, absent.isEmpty() ? 3000 : 8000);
+        // (the faces' sentence is long: whole in the band above the page, not cut in the status line)
+        if (!absent.isEmpty()) tell_of_fonts(told);
+        flash(QStringLiteral("見つからないフォントはありません"), 3000);
         return;
     }
     MissingFontsDialog dialog(this, missing, told);
@@ -317,12 +319,12 @@ void MainWindow::replace_all_missing_fonts() {
     if (replaced > 0) update_all_type();
     // (fonts@1: Genko's own faces whose files are not here are left in the book as they are, and said)
     const QStringList absent = faces_not_installed();
-    QString said = replaced > 0 ? QStringLiteral("見つからないフォントを、いつもの書体にしました（%1 か所）").arg(replaced) : QStringLiteral("見つからないフォントはありません");
+    // (… in the band above the page: the sentence is long for the status line)
     if (!absent.isEmpty()) {
-        said += QStringLiteral("\n付属の書体「%1」は、ファイルがこのパソコンに無いだけなので、そのままにしました（アプリを入れ直すと元の書体で描けます）")
-                    .arg(absent.join(QStringLiteral("」「")));
+        tell_of_fonts(QStringLiteral("付属の書体「%1」は、ファイルがこのパソコンに無いだけなので、そのままにしました（アプリを入れ直すと元の書体で描けます）")
+                          .arg(absent.join(QStringLiteral("」「"))));
     }
-    flash(said, absent.isEmpty() ? 4000 : 8000);
+    flash(replaced > 0 ? QStringLiteral("見つからないフォントを、いつもの書体にしました（%1 か所）").arg(replaced) : QStringLiteral("見つからないフォントはありません"), 4000);
 }
 
 }  // namespace genko::app

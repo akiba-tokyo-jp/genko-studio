@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QResizeEvent>
@@ -351,12 +352,24 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
         flash(QStringLiteral("復旧用のコピーを書いています（設定フォルダーの recovery）"), 3000);
     });
     // (fonts@1: what is said of the book's faces when it is opened — main_window_fonts.cpp)
-    fonts_band_ = new QLabel;
-    fonts_band_->setObjectName(QStringLiteral("unportedBand"));
-    fonts_band_->setWordWrap(true);
-    fonts_band_->setTextFormat(Qt::RichText);
+    // (its words wrapped, and a button to put it away — reached with the keys as any button, review 2 P3-10)
+    fonts_band_ = new QFrame;
+    fonts_band_->setObjectName(QStringLiteral("fontsBand"));
+    {
+        auto* row = new QHBoxLayout(fonts_band_);
+        row->setContentsMargins(8, 4, 8, 4);
+        row->setSpacing(12);
+        fonts_band_text_ = new QLabel;
+        fonts_band_text_->setObjectName(QStringLiteral("fontsBandText"));
+        fonts_band_text_->setWordWrap(true);
+        fonts_band_text_->setTextFormat(Qt::RichText);
+        fonts_band_close_ = new QPushButton(QStringLiteral("この知らせを閉じる"));
+        fonts_band_close_->setObjectName(QStringLiteral("fontsBandClose"));
+        connect(fonts_band_close_, &QPushButton::clicked, this, [this] { close_fonts_notice(); });
+        row->addWidget(fonts_band_text_, 1);
+        row->addWidget(fonts_band_close_, 0, Qt::AlignTop);
+    }
     fonts_band_->hide();
-    connect(fonts_band_, &QLabel::linkActivated, this, [this](const QString&) { close_fonts_notice(); });
     column->addWidget(unported_);
     column->addWidget(read_only_);
     column->addWidget(fonts_band_);
@@ -875,6 +888,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
     if (closed_) return;
     const core::Document& b = book();
     if (page_index_ >= static_cast<int>(b.pages.size())) page_index_ = std::max(0, static_cast<int>(b.pages.size()) - 1);
+    if (font_palette_ != nullptr) show_usual_face();  // (fonts@1: the book's usual face, as the book now has it)
     if (change.why == BookChange::Why::Undo || change.why == BookChange::Why::Redo) perf::event("undo_shown_model");
     if (change.why == BookChange::Why::Undo) blend_baked_.clear();  // (PC4 E5, review P3-9: lines put back are asked about again)
     if (pages_->count() != static_cast<int>(b.pages.size())) {

@@ -941,6 +941,143 @@ private slots:
         QCOMPARE(about_fonts, 8);
     }
 
+    // The places the first round of this check missed (the second review's P3-2): a face a record's letters take from
+    // one of the book's type styles; a type layer inside the contents of a smart object the page shows; the partner of
+    // the book's usual face. Each is said, once; with the files there nothing is.
+    void theMissingFaceIsSaidThroughStylesContentsAndTheUsualFace() {
+        const auto said_on = [](const Document& doc) {
+            std::vector<std::string> out;
+            for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) {
+                const std::string code = issue.value("code", std::string());
+                if (code.find("font") != std::string::npos) out.push_back(code + " " + issue["message"].get<std::string>());
+            }
+            return out;
+        };
+        const std::string tail = "（アプリを入れ直すと元の書体で描ける）";
+        // (a type style: the record names the style, the style names the face)
+        Document styled = blank_book();
+        styled.type_styles = genko::core::type_text::check_type_styles(
+            Json{{"character", Json::array({Json{{"id", "cs-1"}, {"name", "手紙"}, {"char", Json{{"font", "klee"}}}}})}});
+        {
+            genko::core::StoryLine line = lettering("");
+            line.native_type = genko::core::type_text::check_native_type(Json{{"runs", Json::array({Json{{"start", 0}, {"end", 3}, {"style", "cs-1"}}})}}, line.text);
+            styled.story.push_back(std::move(line));
+        }
+        QCOMPARE(fonts::named(styled), std::vector<std::string>{"klee"});
+        // (a smart object's contents: a type layer made one, its record inside the contents' page)
+        Document nested = blank_book();
+        {
+            genko::core::StoryLine record = lettering("brush_syuku");
+            record.id.clear();
+            genko::core::Layer layer;
+            layer.id = "ly_type";
+            layer.kind = genko::core::LayerKind::Type;
+            layer.title = "文字";
+            layer.type = std::make_shared<const genko::core::StoryLine>(std::move(record));
+            nested.edit_page(0).layers.push_back(std::move(layer));
+        }
+        nested = run_ops(nested, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"id", "ly_type"}, {"new_id", "so1"}}})).doc;
+        {
+            bool on_page = false;
+            for (const genko::core::Layer& layer : nested.page(0).layers) on_page = on_page || layer.type != nullptr;
+            QVERIFY(!on_page);  // (the record is in the contents now, not on the page)
+            QCOMPARE(nested.smart_contents.size(), std::size_t(1));
+            QCOMPARE(fonts::named(nested), std::vector<std::string>{"brush_syuku"});
+        }
+        // (the book's usual face a face without kanji: its partner)
+        Document usual = blank_book();
+        usual.font_path = "cute_daruma";
+        usual.story.push_back(lettering(""));
+        Document usual_kana = blank_book();
+        usual_kana.font_path = "cute_daruma";
+        usual_kana.story.push_back(lettering("", true, "そこはだめ！いくよ"));
+        genko::core::StoryLine own = lettering("gothic");  // (a line with a face of its own is not the usual face's)
+        own.id = "L2";
+        usual_kana.story.push_back(std::move(own));
+
+        for (const Document* doc : {&styled, &nested, &usual, &usual_kana}) QVERIFY(said_on(*doc).empty());  // (every file is there)
+        QTemporaryDir some;
+        QVERIFY(QFile::copy(QString::fromStdString(source_fonts()) + "/DarumadropOne-Regular.ttf", some.path() + "/DarumadropOne-Regular.ttf"));
+        files::set_dir_for_testing(some.path().toStdString());
+        text::clear_layout_cache();
+        const std::vector<std::string> by_style = said_on(styled), in_contents = said_on(nested), partner = said_on(usual), kana = said_on(usual_kana);
+        use_source_fonts();
+        QCOMPARE(by_style, std::vector<std::string>{"font_not_installed 書体「クレー One SB」のファイルがこのパソコンに無いため、代わりにアンチックで描いた" + tail});
+        QCOMPARE(in_contents, std::vector<std::string>{"font_not_installed 書体「佑字 肅」のファイルがこのパソコンに無いため、代わりにアンチックで描いた" + tail});
+        QCOMPARE(partner, std::vector<std::string>{"font_partner_not_installed この本のいつもの書体「だるまどろっぷ」の漢字などを受け持つ書体「モッチーポップ」の"
+                                                   "ファイルがこのパソコンに無いため、その字はゴシックで描いた" + tail});
+        QVERIFY(kana.empty());  // (no line of the usual face has a letter the partner draws)
+    }
+
+    // A file that could not be opened, or is not there, is "not installed" for that asking only — not for the run, as a
+    // file of another content is: put there, or made readable, the face is installed at the next asking, and what was
+    // drawn without it is drawn again (generation() moves each time the answer changes). While it cannot be read the
+    // line is in the default face and the check says so — never another font, never silently.
+    void aFileThatCouldNotBeReadIsAskedForAgain() {
+        QTemporaryDir live;
+        files::set_dir_for_testing(live.path().toStdString());
+        text::clear_layout_cache();
+        [&] {
+            const QString klee = live.path() + "/KleeOne-SemiBold.ttf";
+            const genko::core::StoryLine line = lettering("klee");
+            Document doc = blank_book();
+            doc.story.push_back(line);
+            const std::string plain = text::text_layout(lettering(""), kDpi).image.tobytes();
+            // (not there)
+            QVERIFY(!files::present("klee"));
+            QVERIFY(!files::damaged("klee"));
+            QCOMPARE(text::remembered_layout(line, kDpi, std::nullopt)->image.tobytes(), plain);
+            QCOMPARE(font_issues(doc).size(), std::size_t(1));
+            const std::uint64_t absent = files::generation();
+            // (put there: installed at the next asking, the line set again in it, nothing said)
+            QVERIFY(QFile::copy(QString::fromStdString(source_fonts()) + "/KleeOne-SemiBold.ttf", klee));
+            QVERIFY(files::present("klee"));
+            QVERIFY(files::generation() > absent);
+            const std::string in_klee = text::remembered_layout(line, kDpi, std::nullopt)->image.tobytes();
+            QVERIFY(in_klee != plain);
+            QVERIFY(font_issues(doc).empty());
+#ifdef Q_OS_UNIX
+            // (there, of its size, and not to be opened — the tests run without the right to pass a file's permissions —:
+            // tried twice, not installed this time, said as 「無い」 and not as damaged)
+            const std::uint64_t readable = files::generation();
+            files::clear_cache();
+            QVERIFY(QFile::setPermissions(klee, QFileDevice::Permissions()));
+            QVERIFY(!QFile(klee).open(QIODevice::ReadOnly));
+            QCOMPARE(text::text_layout(lettering("klee", true, "いま読めない"), kDpi).image.tobytes(),
+                     text::text_layout(lettering("gothic", true, "いま読めない"), kDpi).image.tobytes());  // (caught in the middle: the bundled Gothic)
+            QVERIFY(files::generation() > readable);
+            QVERIFY(!files::present("klee"));
+            QVERIFY(files::file_there("klee"));  // (a file of the size is there: not found to be another's)
+            QVERIFY(!files::damaged("klee"));
+            QCOMPARE(text::remembered_layout(line, kDpi, std::nullopt)->image.tobytes(), plain);
+            QCOMPARE(font_issues(doc).size(), std::size_t(1));
+            QVERIFY(font_issues(doc)[0]["message"].get<std::string>().find("のファイルがこのパソコンに無いため") != std::string::npos);
+            // (readable again: installed again, the line in the face again)
+            const std::uint64_t unreadable = files::generation();
+            QVERIFY(QFile::setPermissions(klee, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+            QVERIFY(files::present("klee"));
+            QVERIFY(files::generation() > unreadable);
+            QCOMPARE(text::remembered_layout(line, kDpi, std::nullopt)->image.tobytes(), in_klee);
+            QVERIFY(font_issues(doc).empty());
+#endif
+            // (a file of the size with another content is not asked again: for the run, whatever is put there after)
+            files::clear_cache();
+            QVERIFY(QFile::remove(klee));
+            {
+                QFile zeros(klee);
+                QVERIFY(zeros.open(QIODevice::WriteOnly));
+                zeros.write(QByteArray(static_cast<qsizetype>(fonts::find("klee")->bytes), '\0'));
+            }
+            QVERIFY_THROWS_EXCEPTION(genko::render::NotYetPorted, files::bytes("klee"));
+            QVERIFY(!files::present("klee") && files::damaged("klee"));
+            QVERIFY(QFile::remove(klee));
+            QVERIFY(QFile::copy(QString::fromStdString(source_fonts()) + "/KleeOne-SemiBold.ttf", klee));
+            QVERIFY(!files::present("klee"));
+            QVERIFY(!files::file_there("klee"));
+        }();
+        use_source_fonts();
+    }
+
     // What a person reads about the faces is Japanese in one register, with no run of four Latin letters or more, no
     // key and no word of the program's insides: every face's name and use, every category, and every warning about a
     // missing face, for all forty.
@@ -1009,20 +1146,43 @@ private slots:
         files::set_dir_for_testing(some.path().toStdString());
         text::clear_layout_cache();
         std::vector<std::string> partners;
-        for (const fonts::Entry& e : fonts::entries()) {
-            if (e.fallback.empty()) continue;
+        const auto partner_said = [&](const fonts::Entry& e, const char* words) {
             Document doc = blank_book();
-            doc.story.push_back(lettering(e.key));
+            doc.story.push_back(lettering(e.key, true, words));
+            int n = 0;
             for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) {
                 if (issue.value("code", std::string()) != "font_partner_not_installed") continue;
                 partners.push_back(issue["message"].get<std::string>());
                 messages.push_back(partners.back());
+                ++n;
+            }
+            return n;
+        };
+        // (a kanji the face with only some kanji does not have: looked for in its own cmap)
+        std::string rare;
+        {
+            text::Fonts f;
+            for (const char* kanji : {"鬱", "麤", "驫", "龘"}) {
+                if (rare.empty() && !f.has_glyph("sfx_inline", text::u32(kanji))) rare = kanji;
+            }
+        }
+        QVERIFY(!rare.empty());
+        for (const fonts::Entry& e : fonts::entries()) {
+            if (e.fallback.empty()) continue;
+            // (said only when a letter of the words is the partner's: words of kana alone say nothing — nothing was drawn
+            // otherwise —, and the face with some kanji says it for a kanji it lacks, not for the ones it has)
+            QCOMPARE(partner_said(e, "そこはだめ！いくよ"), 0);
+            if (e.kanji == "partial") {
+                QCOMPARE(partner_said(e, kWords), 0);
+                QCOMPARE(partner_said(e, ("憂" + rare).c_str()), 1);
+            } else {
+                QCOMPARE(partner_said(e, kWords), 1);
             }
         }
         use_source_fonts();
         QCOMPARE(partners.size(), std::size_t(7));
-        QCOMPARE(partners[0], std::string("書体「チェリーボム」に無い字（漢字など）を描く書体「ZEN丸ゴシック Bk」のファイルがこのパソコンに無いため、"
-                                          "その字をゴシックで描いた（アプリを入れ直すと元の書体で描ける）"));
+        QCOMPARE(partners[0], std::string("書体「チェリーボム」の漢字などを受け持つ書体「ZEN丸ゴシック Bk」のファイルがこのパソコンに無いため、"
+                                          "その字はゴシックで描いた（アプリを入れ直すと元の書体で描ける）"));
         QCOMPARE(messages.size(), std::size_t(40 * 3 + 7));
         for (const std::string& message : messages) {
             const QString m = QString::fromStdString(message);
@@ -1069,7 +1229,20 @@ private slots:
                 Document doc = blank_book();
                 doc.story.push_back(lettering(key));
                 QCOMPARE(font_issues(doc).size(), std::size_t(1));
+                // (said as what it is: something is there that is not the face's file — not 「このパソコンに無い」)
+                QVERIFY(files::damaged(key));
+                QCOMPARE(font_issues(doc)[0]["message"].get<std::string>(),
+                         "書体「" + fonts::find(key)->label + "」のファイルが無いか、壊れているため、代わりにアンチックで描いた（アプリを入れ直すと元の書体で描ける）");
             }
+            // (a file of another size is the same; one that is simply not there is 「無い」)
+            {
+                QFile cut(other.path() + "/YujiBoku-Regular.ttf");
+                QVERIFY(cut.open(QIODevice::WriteOnly));
+                cut.write("not a font");
+            }
+            QVERIFY(!files::present("brush_boku") && files::damaged("brush_boku"));
+            QVERIFY(!files::present("brush_syuku") && !files::damaged("brush_syuku"));
+            QVERIFY(!files::damaged("stick") && !files::damaged("gothic") && !files::damaged("no_such_face"));
             QCOMPARE(files::cached_bytes(), std::uint64_t(0));
             QVERIFY(files::present("stick"));
             QVERIFY(drawn(lettering("stick")).image.tobytes() != drawn(lettering("")).image.tobytes());
@@ -1082,6 +1255,8 @@ private slots:
                 } else if (c.key == "stick") {
                     QVERIFY(c.exists && c.size_ok && c.hash_ok.has_value() && *c.hash_ok);
                     ++good;
+                } else if (c.key == "brush_boku") {
+                    QVERIFY(c.exists && !c.size_ok && !c.hash_ok.has_value());
                 } else {
                     QVERIFY2(!c.exists && !c.hash_ok.has_value(), c.key.c_str());
                 }
@@ -1390,14 +1565,22 @@ private slots:
         }
         QCOMPARE(total, std::uint64_t(157549348));
         QVERIFY(files::cached_bytes() > files::kCacheBytes / 2);
-        // (Klee, read first, was let go — this holder keeps its copy — and is read again: other bytes, the same content)
+        // (Klee, read first, was let go — this holder keeps its copy —; asked for again while someone holds it, it is the
+        // holder's bytes that are given and kept again, not the file read once more: what a sample being made holds, a
+        // worker having read it, is there for the screen's thread)
         QCOMPARE(first.use_count(), 1L);
         const std::shared_ptr<const QByteArray> again = files::bytes("klee");
-        QVERIFY(again.get() != first.get());
-        QCOMPARE(*again, *first);
+        QCOMPARE(again.get(), first.get());
+        QCOMPARE(first.use_count(), 3L);  // (first, again, the kept one)
+        // (forgotten here altogether — clear_cache —, it is read again: other bytes, the same content)
+        const QByteArray content = *first;
         files::clear_cache();
         QCOMPARE(files::cached_bytes(), std::uint64_t(0));
-        QCOMPARE(again.use_count(), 1L);
+        QCOMPARE(again.use_count(), 2L);
+        const std::shared_ptr<const QByteArray> fresh = files::bytes("klee");
+        QVERIFY(fresh.get() != again.get());
+        QCOMPARE(*fresh, content);
+        files::clear_cache();
         // (not a face: never bytes)
         QVERIFY_THROWS_EXCEPTION(genko::render::NotYetPorted, files::bytes("gothic"));
         QVERIFY_THROWS_EXCEPTION(genko::render::NotYetPorted, files::bytes("no_such_face"));

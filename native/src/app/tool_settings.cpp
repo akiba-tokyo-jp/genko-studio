@@ -287,17 +287,33 @@ void TextToolSettings::show_preset(const QString& name) {
     static_cast<QFormLayout*>(layout())->setRowVisible(preset_row, !name.isEmpty());
 }
 
-void TextToolSettings::show_usual(const QString& label) { font->setItemText(0, QStringLiteral("いつもの書体（%1）").arg(label)); }
+void TextToolSettings::show_usual(const QString& label, bool own) {
+    font->setItemText(0, QStringLiteral("いつもの書体（%1）").arg(label));
+    // (a book with a usual face of its own: アンチック is no longer what the first choice gives, so it has a choice of
+    // its own — a line placed with it says "antique"; without one the first choice is アンチック, as it always was)
+    const int at = font->findData(QStringLiteral("antique"));
+    if (own && at < 0) {
+        font->insertItem(1, QStringLiteral("アンチック"), QStringLiteral("antique"));
+    } else if (!own && at >= 0) {
+        const bool chosen = font->currentIndex() == at;
+        font->removeItem(at);
+        if (chosen) font->setCurrentIndex(0);
+    }
+}
 
 void TextToolSettings::show_face(const QString& key, const QString& label) {
-    // (one choice for the palette's face, after the seven: the one before it taken away)
-    const int listed = static_cast<int>(lettering::bundled_fonts().size());
-    while (font->count() > listed) font->removeItem(font->count() - 1);
+    // (one choice for the palette's face, after the list's own: the one before it taken away)
+    for (int i = font->count() - 1; i > 0; --i) {
+        const QString data = font->itemData(i).toString();
+        const auto& listed = lettering::bundled_fonts();
+        if (std::none_of(listed.begin(), listed.end(), [&data](const auto& face) { return face.first == data; })) font->removeItem(i);
+    }
     if (key.isEmpty()) {
         font->setCurrentIndex(0);
         return;
     }
     int at = font->findData(key);
+    if (at < 0 && key == QLatin1String("antique")) at = 0;  // (the book has no usual face of its own: the first choice is アンチック)
     if (at < 0) {
         font->addItem(label, key);
         at = font->count() - 1;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QFutureWatcher>
 #include <QImage>
 #include <QSet>
@@ -28,8 +29,8 @@ class QTimer;
 //
 // Nothing is read or drawn until the panel is first shown; then the samples come one at a time between the screen's
 // events, and an added face's file (megabytes, read whole and checked against the catalogue) is read ahead of its sample
-// on a worker thread — one file at a time, the next not before this one's sample is drawn —, so the window is never
-// held: the screen's thread only sets five letters from bytes that are already there. A face whose file is not on this
+// on a worker thread — one file at a time, the next not before this one's sample is drawn, its bytes held until then —,
+// so the window is never held: the screen's thread only sets five letters from bytes that are already there. A face whose file is not on this
 // computer is greyed and says so; it cannot be picked.
 
 namespace genko::app {
@@ -55,6 +56,9 @@ public:
     bool missing(const QString& key) const;
     // The files looked for again (one stat a face: when the panel is shown, and when asked).
     void refresh_files();
+    // The book's usual face (empty: none of its own — アンチック): its row says 「この本のいつもの書体」.
+    void set_usual(const QString& key);
+    QString usual() const;
     // The face marked as the one the next line takes (empty: none).
     void mark(const QString& key);
     QString marked() const;
@@ -92,7 +96,9 @@ private:
     QTimer* timer_ = nullptr;
     std::vector<QListWidgetItem*> order_;  // (the faces' rows, in the list's order)
     int next_ = 0;
-    QFutureWatcher<void>* warming_ = nullptr;  // (the worker reading the next face's file)
+    using HeldBytes = std::vector<std::shared_ptr<const QByteArray>>;
+    QFutureWatcher<HeldBytes>* warming_ = nullptr;  // (the worker reading the next face's file, and its partner's)
+    HeldBytes held_;                                 // (what it read, held until the sample is set from it)
     QString warming_key_;
     QSet<QString> warmed_;  // (the faces whose files a worker has read)
     int slowest_ms_ = 0;

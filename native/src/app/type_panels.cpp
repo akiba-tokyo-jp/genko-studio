@@ -1253,7 +1253,8 @@ void GlyphsPanel::show_font(const QString& file, int face_index) {
     face_ = face_index;
     int at_font = font->findData(file);
     if (at_font < 0) {
-        font->addItem(QFileInfo(file).completeBaseName(), file);
+        // (fonts@1: one of the faces Genko comes with by its name, never its key; a font file by its file's name)
+        font->addItem(lettering::face_label(file), file);
         at_font = font->count() - 1;
     }
     font->setCurrentIndex(at_font);

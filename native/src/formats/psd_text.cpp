@@ -183,6 +183,15 @@ std::string font_name(render::text::Fonts& fonts, const std::string& path) {
     return name;
 }
 
+std::string asked_font(const core::fonts::Entry& face, char32_t letter) {
+    const bool kanji = (letter >= 0x3400 && letter <= 0x4DBF) || (letter >= 0x4E00 && letter <= 0x9FFF) || (letter >= 0xF900 && letter <= 0xFAFF) ||
+                       (letter >= 0x20000 && letter <= 0x3134F);
+    if (kanji && face.kanji == "none" && !face.fallback.empty()) {
+        if (const core::fonts::Entry* partner = core::fonts::find(face.fallback); partner != nullptr && partner->added) return font_token(partner->postscript);
+    }
+    return font_token(face.postscript);
+}
+
 void font_warnings(const core::StoryLine& line, std::int64_t page, const std::optional<std::string>& font_path, render::text::Fonts& fonts,
                    std::vector<std::string>* used, std::vector<Json>& warnings) {
     const auto [face, missing] = render::text::line_face(line, font_path);
@@ -194,8 +203,12 @@ void font_warnings(const core::StoryLine& line, std::int64_t page, const std::op
     const core::fonts::Entry* asked = missing && at(st, "font").is_string() ? core::fonts::find(at(st, "font").get_ref<const std::string&>()) : nullptr;
     if (asked != nullptr && !asked->added) asked = nullptr;
     if (asked != nullptr && used != nullptr) {
-        const std::string name = font_token(asked->postscript);
-        if (std::find(used->begin(), used->end(), name) == used->end()) used->push_back(name);
+        // (its own name, and — for the kanji of a face that has none — its partner's: asked_font)
+        for (const char32_t c : U" " + render::text::u32(line.text)) {
+            if (c == U'\n' || render::text::is_vs(c)) continue;
+            const std::string name = asked_font(*asked, c);
+            if (std::find(used->begin(), used->end(), name) == used->end()) used->push_back(name);
+        }
     }
     const auto note = [&](const std::string& path) {
         if (used == nullptr) return;

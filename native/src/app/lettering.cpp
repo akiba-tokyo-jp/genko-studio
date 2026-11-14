@@ -304,9 +304,13 @@ const std::vector<FaceRow>& catalog_faces() {
             return e != nullptr ? qs(e->label) : qs(key);
         };
         for (const auto& [id, category] : face_categories()) {
-            if (id == QLatin1String("dialogue")) {  // (the face of a line that names none: first of all)
-                FaceRow usual{QStringLiteral("antique"), QStringLiteral("アンチック（いつもの書体）"), id,
-                              QStringLiteral("かなは明朝、漢字はゴシック。まんがの台詞のいつもの書体"), QString(), QString(), false};
+            if (id == QLatin1String("dialogue")) {  // (the face a line takes when no face is said anywhere: first of all)
+                FaceRow usual;
+                usual.key = QStringLiteral("antique");
+                usual.label = QStringLiteral("アンチック");
+                usual.row = usual.label;
+                usual.category = id;
+                usual.use = QStringLiteral("かなは明朝、漢字はゴシック。まんがの台詞のいつもの書体");
                 usual.search = (usual.label + QLatin1Char(' ') + usual.key + QLatin1Char(' ') + usual.use + QLatin1Char(' ') + category).toLower();
                 out.push_back(std::move(usual));
             }
@@ -315,12 +319,20 @@ const std::vector<FaceRow>& catalog_faces() {
                 FaceRow row;
                 row.key = qs(e.key);
                 row.label = qs(e.label);
+                row.row = row.label;
+                if (!e.added) {  // (one of the six of before: the name the text tool shows, the font's own in brackets)
+                    for (const auto& [key, name] : bundled_fonts()) {
+                        if (key == row.key) row.label = name;
+                    }
+                    row.row = row.label.endsWith(QStringLiteral("）")) ? row.label.chopped(1) + QStringLiteral("・") + qs(e.label) + QStringLiteral("）")
+                                                                     : row.label + QStringLiteral("（") + qs(e.label) + QStringLiteral("）");
+                }
                 row.category = id;
                 row.use = qs(e.use);
                 row.added = e.added;
                 if (e.kanji == "none") row.mark = QStringLiteral("かなだけ（漢字は%1）").arg(name_of(e.fallback));
                 else if (e.kanji == "partial") row.mark = QStringLiteral("漢字は一部（残りは%1）").arg(name_of(e.fallback));
-                row.search = (row.label + QLatin1Char(' ') + row.key + QLatin1Char(' ') + qs(e.family) + QLatin1Char(' ') + row.use + QLatin1Char(' ') + category +
+                row.search = (row.row + QLatin1Char(' ') + row.key + QLatin1Char(' ') + qs(e.family) + QLatin1Char(' ') + row.use + QLatin1Char(' ') + category +
                               QLatin1Char(' ') + row.mark)
                                  .toLower();
                 out.push_back(std::move(row));
@@ -338,6 +350,8 @@ QString face_label(const QString& font) {
     if (const core::fonts::Entry* e = core::fonts::find(font.toStdString()); e != nullptr && e->added) return qs(e->label);
     return QFileInfo(font).completeBaseName();
 }
+
+QString face_name(const QString& font) { return font == QLatin1String("antique") ? QStringLiteral("アンチック") : face_label(font); }
 
 const std::vector<std::pair<QString, Json>>& style_tags() {
     static const std::vector<std::pair<QString, Json>> list = {

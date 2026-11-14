@@ -758,13 +758,17 @@ void StoryPanel::set_ruby(const char* key, const Json& value) {
     window_->apply_ops(Json::array({lettering::rubies_op(*l, spans)}));
 }
 
-bool StoryPanel::set_chosen_ruby_font(const QString& key) {
+StoryPanel::RubyFace StoryPanel::set_chosen_ruby_font(const QString& key) {
     const core::StoryLine* l = line();
-    if (l == nullptr) return false;
+    if (l == nullptr) return RubyFace::NoRuby;
+    const std::vector<core::RubySpan> spans = lettering::rubies_of(*l);
     const int row = rubies->currentRow();
-    if (row < 0 || row >= static_cast<int>(lettering::rubies_of(*l).size())) return false;
-    set_ruby("font", key.isEmpty() ? Json() : Json(key.toStdString()));
-    return true;
+    if (row < 0 || row >= static_cast<int>(spans.size())) return RubyFace::NoRuby;
+    const std::optional<std::string> wanted = key.isEmpty() ? std::nullopt : std::optional<std::string>(key.toStdString());
+    if (spans[static_cast<std::size_t>(row)].font == wanted) return RubyFace::Same;
+    const std::size_t before = window_->session().changes_in_memory();
+    set_ruby("font", wanted ? Json(*wanted) : Json());
+    return window_->session().changes_in_memory() != before ? RubyFace::Done : RubyFace::Refused;
 }
 
 void StoryPanel::show_rubies(const core::StoryLine* l) {

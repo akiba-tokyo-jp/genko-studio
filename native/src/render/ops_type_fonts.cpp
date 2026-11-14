@@ -394,6 +394,18 @@ void replace_fonts(core::OpContext& c) {
     Json names = Json::array();
     for (const auto& [font, s] : seen) names.push_back(font);
     c.report = Json{{"missing", names}, {"replaced", replaced}, {"styles", styles_changed}};
+    // (fonts@1: a map that names one of the faces Genko comes with is not followed for it — such a face is never a
+    // missing font, with or without its file here — and the answer says so, by the face, rather than nothing: review 2
+    // P3-16. The key is there only when the map names one)
+    Json kept = Json::array();
+    for (const auto& [from, becomes] : map) {
+        const core::fonts::Entry* face = core::fonts::find(from);
+        if (face == nullptr || !face->added) continue;
+        kept.push_back(Json{{"font", from},
+                            {"label", face->label},
+                            {"why", "a face Genko comes with is never replaced as a missing font (give the lines another font to change it)"}});
+    }
+    if (!kept.empty()) (*c.report)["kept"] = kept;
 }
 
 }  // namespace genko::render::type_ops
