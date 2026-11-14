@@ -459,6 +459,27 @@ private slots:
         }
     }
 
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: a book an agent makes with create_project starts with 源暎アンチック
+    // as its usual face and says fonts@1; an op applied to it (the book read and written again) keeps both, and what the
+    // agent reads of the fonts says the usual face. The tools' input schema is as it was (onlyAnAgentsTools' hash).
+    void aBookMadeThroughMcpStartsInGeneiAntique() {
+        const QString dir = fresh("new-face");
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        QVERIFY(!make_book(mcp, "n.genko").empty());
+        const auto project = [&] { return genko::core::parse_python_json(genko::test::read_bytes(dir + "/root/n.genko/project.json")); };
+        QCOMPARE(project()["font_path"], Json("antique_genei"));
+        QCOMPARE(project()["features"], Json::array({"fonts@1"}));
+        const std::int64_t revision = project()["revision"].get<std::int64_t>();
+        const Json applied = Mcp::text(mcp.call("apply_ops", Json::object({{"project", "n.genko"}, {"commit", true},
+                                                                          {"ops", Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "漢字（かんじ）"},
+                                                                                                    {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 20}, {"h_mm", 40}}})}})));
+        QVERIFY2(applied["ok"] == Json(true), genko::core::dump_python(applied).c_str());
+        QVERIFY(project()["revision"].get<std::int64_t>() > revision);
+        QCOMPARE(project()["font_path"], Json("antique_genei"));
+        QCOMPARE(project()["features"], Json::array({"fonts@1"}));
+    }
+
     // コマ割り K3 (SPEC LAYOUT-01): the tool layout_ideas through MCP — listed, with its arguments' schema and the layout
     // keys in submit_name's words; the same seed gives the same batch, an exact count gives exactly that many panels (a
     // draft plan's own count when none is given), and the book is not changed by it; an idea's plan goes through
@@ -1010,6 +1031,9 @@ private slots:
         const auto post = [port](const std::string& path, const std::string& body) { return http(port, request_text("POST", path, port, "tok-human", body)); };
         QCOMPARE(post("/v1/new", R"({"dest": "b.genko", "pages": 1})").status, 200);
         const auto book = [&] { return genko::core::parse_python_json(genko::test::read_bytes(root + "/b.genko/project.json")); };
+        // (a book made new: 源暎アンチック its usual face from the start — 利用者の決定 2026-11-14)
+        QCOMPARE(book()["font_path"], Json("antique_genei"));
+        QCOMPARE(book()["features"], Json::array({"fonts@1"}));
         const Response keyed = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "antique_genei"}]})");
         QVERIFY2(keyed.status == 200, keyed.body.c_str());
         QCOMPARE(book()["font_path"], Json("antique_genei"));

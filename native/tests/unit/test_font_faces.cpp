@@ -698,6 +698,82 @@ private slots:
         for (const auto& [name, pin] : pins) QVERIFY2(now.at(name) == pin, said.c_str());
     }
 
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: a line that names no face is set in 源暎アンチック in a book made
+    // new, and in アンチック in a book with no usual face — a book of before, its font_path empty or missing — exactly as
+    // a line drawn with no book at all (the pages pixel for pixel); the faces' pictures are those of the same line
+    // naming the face itself.
+    void aNewBookIsInGeneiAntiqueABookOfBeforeInAntique() {
+        const auto book = [](bool made_new) {
+            Document doc = blank_book();
+            doc.edit_page(0).numero = false;
+            if (made_new) fonts::make_new_book(doc);
+            return run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"balloon", "speech"}, {"x_mm", 60.0}, {"y_mm", 60.0},
+                                                  {"w_mm", 30.0}, {"h_mm", 60.0}, {"text", "「ぎゃーっ！？」\nちょっと、待って！\n漢字（かんじ）です。"}}}))
+                .doc;
+        };
+        const auto picture = [](const Document& doc) {
+            text::clear_layout_cache();
+            return genko::render::render_page(doc.page(0), kDpi, {}, &doc).image.tobytes();
+        };
+        const Document before = book(false), made = book(true);
+        QCOMPARE(before.font_path, std::string());
+        QCOMPARE(made.font_path, std::string("antique_genei"));
+        const genko::core::StoryLine& line = before.story.front();
+        QCOMPARE(text::line_face(line, std::optional<std::string>(before.font_path)).first.key, std::string("antique"));
+        QCOMPARE(text::line_face(line, std::nullopt).first.key, std::string("antique"));
+        QCOMPARE(text::line_face(line, std::optional<std::string>(made.font_path)).first.key, std::string("antique_genei"));
+        // (the book of before: what a page with no book drew, and what アンチック named outright draws)
+        Document named_antique = before;
+        named_antique.font_path = "antique";
+        QCOMPARE(picture(before), picture(named_antique));
+        QCOMPARE(text::text_layout(line, kDpi, std::nullopt).image.tobytes(), text::text_layout(line, kDpi, std::optional<std::string>("")).image.tobytes());
+        // (the new book: 源暎アンチック, as the line naming it draws — and not アンチック)
+        QVERIFY(picture(before) != picture(made));
+        genko::core::StoryLine named = line;
+        named.style["font"] = "antique_genei";
+        text::clear_layout_cache();
+        QCOMPARE(text::text_layout(line, kDpi, std::optional<std::string>(made.font_path)).image.tobytes(), text::text_layout(named, kDpi, std::nullopt).image.tobytes());
+        // (nothing said of either: the face's file is here)
+        QVERIFY(font_issues(before).empty());
+        QVERIFY(font_issues(made).empty());
+    }
+
+    // ...and on a computer without 源暎アンチック's file the new book is drawn in アンチック, pixel for pixel the book of
+    // before, and the check says so once, on its first page, by the face's name (the notice of F2: font_not_installed).
+    void aNewBookWithoutItsFaceFileIsInAntiqueAndSaid() {
+        Document before = blank_book(2);
+        Document made = blank_book(2);
+        fonts::make_new_book(made);
+        for (Document* doc : {&before, &made}) {
+            doc->edit_page(0).numero = false;
+            *doc = run_ops(*doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"balloon", "speech"}, {"x_mm", 60.0}, {"y_mm", 60.0},
+                                                   {"w_mm", 30.0}, {"h_mm", 60.0}, {"text", "漢字（かんじ）です。"}}}))
+                       .doc;
+        }
+        QTemporaryDir empty;
+        files::set_dir_for_testing(empty.path().toStdString());
+        text::clear_layout_cache();
+        const std::string drawn_before = genko::render::render_page(before.page(0), kDpi, {}, &before).image.tobytes();
+        text::clear_layout_cache();
+        const std::string drawn_made = genko::render::render_page(made.page(0), kDpi, {}, &made).image.tobytes();
+        const auto [face, missing] = text::line_face(made.story.front(), std::optional<std::string>(made.font_path));
+        const std::vector<Json> said = font_issues(made);
+        std::vector<Json> said_later;
+        for (const Json& issue : genko::formats::checks::page_issues(made, made.page(1))) {
+            if (issue.value("code", std::string()) == "font_not_installed") said_later.push_back(issue);
+        }
+        const std::vector<Json> said_before = font_issues(before);
+        use_source_fonts();
+        QCOMPARE(face.key, std::string("antique"));
+        QVERIFY(!missing);  // (the line names no face of its own: the book's usual face is what is not installed)
+        QCOMPARE(drawn_made, drawn_before);
+        QCOMPARE(said.size(), std::size_t(1));
+        QCOMPARE(said[0]["level"], Json("warning"));
+        QVERIFY2(said[0]["message"].get<std::string>().find("源暎アンチック") != std::string::npos, said[0].dump().c_str());
+        QVERIFY(said_later.empty());
+        QVERIFY(said_before.empty());
+    }
+
     // The lettering of a line down and across in each face: something is drawn, the same when drawn again, not what the
     // default face draws, and every letter in a font of the face (its own, its partner's) but the marks only another has.
     void composedDownAndAcross_data() { added_rows(); }

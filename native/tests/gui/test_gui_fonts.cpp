@@ -17,6 +17,7 @@
 #include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -34,6 +35,7 @@
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
+#include "app/dialogs.hpp"
 #include "app/export_dialog.hpp"
 #include "app/font_palette.hpp"
 #include "app/ime.hpp"
@@ -816,6 +818,96 @@ private slots:
         QCOMPARE(font->itemText(0), QStringLiteral("いつもの書体（書体ファイル）"));
         QCOMPARE(font->count(), 8);
         QCOMPARE(s.palette().usual(), QString());
+    }
+
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: a book made new in the window — 新規… → 漫画の原稿, 新規… → 画像, and
+    // the untitled book a window starts with — has 源暎アンチック as its usual face: the text tool's first choice says so,
+    // アンチック has a choice of its own, the palette's row says whose it is, a line placed is set in it, and nothing is
+    // said of the book's faces. The book made, saved and opened again keeps it. A book of before (no usual face) is as it
+    // was: theTextToolsListStillHoldsTheSeven. On a computer without the face's file, the untitled book says so in the
+    // band (F2's words) and is drawn in アンチック.
+    void aNewBookStartsInGeneiAntique() {
+        QTemporaryDir tmp, config;
+        const QByteArray previous = qgetenv("GENKO_CONFIG_DIR");
+        qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());
+        const auto shows_the_new_face = [](app::MainWindow& window) {
+            QCoreApplication::processEvents();  // (what is said of the book's faces when it is shown)
+            QCOMPARE(window.book().font_path, std::string("antique_genei"));
+            QComboBox* font = window.text_settings()->font;
+            QCOMPARE(font->itemText(0), QStringLiteral("いつもの書体（源暎アンチック）"));
+            QCOMPARE(font->itemData(0).toString(), QString());
+            QCOMPARE(font->count(), 8);
+            QCOMPARE(font->itemData(1).toString(), QStringLiteral("antique"));
+            window.show_dock(QStringLiteral("書体"));
+            QCoreApplication::processEvents();
+            QCOMPARE(window.font_palette()->usual(), QStringLiteral("antique_genei"));
+            QCOMPARE(window.font_palette()->item(QStringLiteral("antique_genei"))->text(), QStringLiteral("源暎アンチック\nこの本のいつもの書体"));
+            QTest::qWait(400);  // (its face's file is read and checked off this thread: nothing comes of it)
+            QVERIFY2(window.fonts_notice().isEmpty(), qPrintable(window.fonts_notice()));
+            QVERIFY(window.fonts_band()->isHidden());
+        };
+        {  // 新規… → 漫画の原稿: written with the face, opened again with it
+            app::NewProjectDialog dialog;
+            dialog.title->setText(QStringLiteral("新しい本"));
+            dialog.folder->setText(tmp.path());
+            QVERIFY(dialog.create());
+            QVERIFY(dialog.created.has_value());
+            const Json project = core::parse_python_json(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(*dialog.created / "project.json"))));
+            QCOMPARE(project["font_path"], Json("antique_genei"));
+            QCOMPARE(project["features"], Json::array({"fonts@1"}));
+            auto session = app::Session::open(*dialog.created, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
+            {
+                app::MainWindow window(session);
+                window.show();
+                shows_the_new_face(window);
+                // (a line placed names no face, and is set in the book's)
+                QVERIFY(window.apply_ops(Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "n1"}, {"text", "漢字（かんじ）"}, {"balloon", "speech"},
+                                                           {"x_mm", 60}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 40}}})));
+                const core::StoryLine* line = window.line_by_id("n1");
+                QVERIFY(line != nullptr);
+                QVERIFY(!(line->style.is_object() && line->style.contains("font")));
+                QCOMPARE(render::text::line_face(*line, std::optional<std::string>(window.book().font_path)).first.key, std::string("antique_genei"));
+                session->save_now();
+                QVERIFY(session->wait_saved(std::chrono::milliseconds(30000)));
+            }
+            const core::Document again = gui_test::read_book(*dialog.created);
+            QCOMPARE(again.font_path, std::string("antique_genei"));
+            QCOMPARE(again.story.size(), std::size_t(1));
+        }
+        {  // 新規… → 画像
+            app::NewProjectDialog dialog;
+            dialog.kind->setCurrentRow(1);
+            dialog.image_name->setText(QStringLiteral("新しい画像"));
+            dialog.image_unit->setCurrentIndex(dialog.image_unit->findData(QStringLiteral("px")));
+            dialog.image_width->setValue(64);
+            dialog.image_height->setValue(48);
+            QVERIFY(dialog.create_image());
+            QVERIFY(dialog.image.has_value());
+            QCOMPARE(dialog.image->doc.font_path, std::string("antique_genei"));
+            QVERIFY(std::find(dialog.image->doc.features.begin(), dialog.image->doc.features.end(), std::string("fonts@1")) != dialog.image->doc.features.end());
+        }
+        {  // the untitled book a window starts with
+            app::MainWindow window;
+            window.show();
+            QVERIFY(!window.session().path());
+            QCOMPARE(window.book().features, std::vector<std::string>{"fonts@1"});
+            shows_the_new_face(window);
+        }
+        {  // without the face's file: said, and drawn in アンチック
+            QTemporaryDir empty;
+            files::set_dir_for_testing(empty.path().toStdString());
+            render::text::clear_layout_cache();
+            app::MainWindow window;
+            window.show();
+            QTRY_VERIFY_WITH_TIMEOUT(!window.fonts_notice().isEmpty(), 10000);
+            QCOMPARE(window.fonts_notice(), QStringLiteral("この本が使っている書体「源暎アンチック」のファイルが、このパソコンにありません。"
+                                                           "その文字は代わりの書体（台詞はアンチック）で描いています（アプリを入れ直すと元の書体に戻ります）"));
+            QVERIFY(!window.fonts_band()->isHidden());
+            core::StoryLine line = a_story_line("u", "");
+            QCOMPARE(render::text::line_face(line, std::optional<std::string>(window.book().font_path)).first.key, std::string("antique"));
+            use_source_fonts();
+        }
+        qputenv("GENKO_CONFIG_DIR", previous);
     }
 
     // The book has a usual face of its own, and アンチック is picked for the next line: the line placed is in アンチック —

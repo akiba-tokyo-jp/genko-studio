@@ -463,6 +463,68 @@ private slots:
         }
     }
 
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: a book made new starts with 源暎アンチック as its usual face and
+    // says fonts@1 at once (in memory: it is no book of before to be told of); written and read again it keeps both, and
+    // written again it is the same bytes. Made new twice, nothing is added twice.
+    void aNewBookStartsInGeneiAntique() {
+        QCOMPARE(std::string(fonts::kNewBookFace), std::string("antique_genei"));
+        QVERIFY(fonts::added(fonts::kNewBookFace));
+        Document doc = blank_book();
+        QCOMPARE(doc.font_path, std::string());  // (a book of the model alone is not a book made new: no face of its own)
+        fonts::make_new_book(doc);
+        fonts::make_new_book(doc);
+        QCOMPARE(doc.font_path, std::string("antique_genei"));
+        QCOMPARE(doc.features, std::vector<std::string>{"fonts@1"});
+        QVERIFY(fonts::named_unannounced(doc).empty());
+        QCOMPARE(fonts::named(doc), std::vector<std::string>{"antique_genei"});
+        const Json payload = payload_of(doc);
+        QCOMPARE(payload["font_path"], Json("antique_genei"));
+        QCOMPARE(payload["features"], Json::array({"fonts@1"}));
+        QTemporaryDir dir;
+        const std::filesystem::path book = genko::core::path_from_utf8(dir.path().toStdString());
+        genko::test::write_project(doc, book / "a");
+        const genko::storage::LoadResult read = genko::storage::load_document(book / "a");
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        QCOMPARE(read.document.font_path, std::string("antique_genei"));
+        QVERIFY(fonts::named_unannounced(read.document).empty());
+        genko::test::write_project(read.document, book / "b");
+        QCOMPARE(genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "b" / "project.json"))),
+                 genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "a" / "project.json"))));
+        // (the other features a new book has are kept, in order)
+        Document other = blank_book();
+        other.features = {"image-grid@1"};
+        fonts::make_new_book(other);
+        QCOMPARE(other.features, (std::vector<std::string>{"fonts@1", "image-grid@1"}));
+    }
+
+    // A book with no usual face — its project.json without font_path, or with it empty — is read with none, written back
+    // with none, and says no fonts@1: its lines that name no face stay in アンチック (render/text: test_font_faces).
+    void aBookWithNoUsualFaceKeepsNone() {
+        Document doc = blank_book();
+        doc.story.push_back(line_of("L1", "漢字とかな"));
+        QTemporaryDir dir;
+        const std::filesystem::path book = genko::core::path_from_utf8(dir.path().toStdString());
+        genko::test::write_project(doc, book / "a");
+        const QString file = QString::fromStdString(genko::core::path_to_utf8(book / "a" / "project.json"));
+        const std::string written = genko::test::read_bytes(file);
+        Json project = genko::core::parse_python_json(written);
+        QCOMPARE(project["font_path"], Json(""));
+        QCOMPARE(project["features"], Json::array());
+        for (const bool without_key : {false, true}) {
+            if (without_key) {
+                project.erase("font_path");
+                genko::test::write_bytes(file, genko::core::dump_python_indent2(project) + "\n");
+            }
+            const genko::storage::LoadResult read = genko::storage::load_document(book / "a");
+            QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+            QCOMPARE(read.document.font_path, std::string());
+            QVERIFY(fonts::named(read.document).empty());
+            genko::test::write_project(read.document, book / "b");
+            QCOMPARE(genko::test::read_bytes(QString::fromStdString(genko::core::path_to_utf8(book / "b" / "project.json"))), written);
+            std::filesystem::remove_all(book / "b");
+        }
+    }
+
     // A book whose face's file is missing opens writable: nothing here has any font file to look at (the folder the
     // files would be in does not exist for this program), every one of the forty is named, and the book is read without a
     // word, saved to the same bytes, and still names them.
