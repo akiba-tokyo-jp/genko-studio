@@ -247,6 +247,13 @@ Drawing (M10, see `docs/TOOLS_PLAN.md`):
 Lettering (M11):
 
 - Faces ship with Genko (SIL OFL, `native/resources/fonts/licenses/`): `antique` (the default for dialogue: kana in Zen Old Mincho, kanji in Zen Kaku Gothic New), `gothic`, `mincho`, `maru`, `hand`, `sfx` (Dela Gothic One, the default for sound effects), `sfx_pop`. A font file path works too. Characters a face lacks fall back to a look-alike or the Gothic.
+- Forty more faces come with Genko as files beside the program (fonts@1: a book that names one says that feature, and an older build opens it read-only). Their keys, with `label`, `category`, `use`, `kanji` (`full`, `partial`, `none`), `fallback` and `available`, are the rows after the first seven of `inspect target=fonts` → `bundled`; `categories` names the eleven categories. By use:
+  - plain dialogue: `antique` (the default), `antique_genei`, `antigothic_bold`; small voices and notes: `gothic_regular`, `antigothic_medium`, `maru_regular`
+  - shouts: `gothic_black`, `gothic_kiwami`, `mincho_black` (heavy), `maru_black` (lively); inner voice and narration: `mincho`, `mincho_shippori`, `mincho_hina`, `klee`
+  - horror: `horror_tegomin`, `horror_chokoku` (kana only); machines and games: `dot16`, `stick`, `dot12`, `dot8`
+  - cute and comic: `pop_mochiy`, `pop_rocknroll`, `cute_hachimaru`; handwriting: `hand`, `hand_kurenaido`, `marker_yusei`; period pieces: `brush_syuku`, `brush_boku`
+  - sound effects: `sfx`, `sfx_pop`, `sfx_outline`, `sfx_inline`, `brush_potta`; margins: `narrow_lubrifont`
+  A face with `kanji` `none` or `partial` draws the kanji it lacks in its `fallback` face, inside the same key. A face with `available: false` has no file on this computer: a line that names it is drawn in the default face, and `check` says `font_not_installed`. For a heavier voice choose a heavier face (`gothic_black`, `gothic_kiwami`, `mincho_black`) rather than `weight: "heavy"`.
 - `edit_line {style}` (and `add_line {style}`): `font`, `size_mm` (null = fit the balloon), `tracking`, `leading` (in em; columns are 0.15 em apart by default), `align` (top / center / bottom; left / center / right for horizontal text), `outline_mm` (white halo), `rgb`, `tcy` (縦中横 for 2-3 digits or letters and !? runs, on by default; full-width digits too), `border_mm`, `fill` (white / none), `group` (balloons with the same group are drawn as one, with one outline). A key set to null goes back to the default.
 - Balloon shapes (`balloon`): speech, capsule, rounded, box, polygon, cloud, thought, shout, electric, flash, whisper, narration, dotted_box, tone_box, fancy_box, sfx, none. The box is the balloon's outside; the text is centred in the space inside it and shrinks to fit unless it has a size. Shape keys of `style`: `corner_mm` 0–50 (rounded, the square kinds, polygon; 0 = square corners), `squircle` (rounded: flat sides, round corners), `sides` 5–12 (polygon, default 8), `wave_mm` 0–3 (a trembling outline), `spike_alt` 0–0.8 (shout: every other spike shorter), `dash_mm` 0.2–10 (a dashed outline), `double`, `border_mm` (0 = no outline). White on black: `fill_rgb` and `line_rgb` black, `rgb` white. Which shape for which voice: the table 「フキダシの形を選ぶ」 in the skill (`native/resources/studio/guide/SKILL.md`).
 - Tails: `tails: [{to: [x, y], via?: [x, y], vias?, width_mm?, kind?, fillet_mm?}]` — several per balloon, curved through `via`. `kind`: wedge (default), straight, zigzag, fade, bubbles, inward (a notch cut into the balloon, `to` inside it: a speaker outside the panel). `fillet_mm` 0–20 rounds the join with the balloon (0 = a corner). `tail` (one straight tail) still works.
@@ -361,7 +368,8 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 - name_plan@1 gains page `spread` and `title`, panel `props`, `bleed`, `slant` (mm, the border to the next panel) and
   `sfx_at` ([x, y] 0..1: sound effects go there). Templates reveal_bleed, reveal_top, finale_bleed, action_slant,
   title_top (with their bleed / slant / title slot; examples to start from, see layout_ideas). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,
-  finale_small, title_missing, author_missing, unknown_font.
+  finale_small, title_missing, author_missing, unknown_font, font_not_installed (a look names one of the forty added faces
+  whose file is not on this computer).
 - fx words (native/src/service/fxwords.hpp): effects, manga marks by the first reported face, rain streaks (layer 効果（仕上げ）),
   or words for the art request. fx and emphasis go into the prompt. Props' references and the previous panel of the
   same place (refs/previous_panel.png) go with the art request. Sheet approval requests carry `written` (the
@@ -563,7 +571,8 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 ### H5 additions
 
 - `inspect` targets: `materials` (id, name, kind, folder — what `stamp_material` takes), `fonts` (the bundled
-  `style.font` keys and the computer's fonts by path), `brushes` (built-in `add_stroke` kinds, the book's own,
+  `style.font` keys — the seven faces compiled in, then the forty installed as files, each with its category, use,
+  kanji, fallback and whether its file is there — and the computer's fonts by path), `brushes` (built-in `add_stroke` kinds, the book's own,
   the person's library).
 - `snapshot` layers carry `title`, `kind`, `opacity`, `blend`, `clip`, `locked`, `mask`, `color`, `parent_id`,
   `reference`, `panel_clip`; lines carry `w_mm`, `h_mm`, `balloon`, `wrap`, `style`; pages list their 3D prims.

@@ -42,7 +42,20 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
     - シリアス・ミステリー: ナレーション `mincho`、心の声 `antique`（台詞と同じ）で静かに。
     - ギャグ・コメディ: 叫び `sfx_pop` か `gothic`、ツッコミも `gothic`、心の声 `maru`、ナレーション `maru`。
     - かわいい・日常・恋愛: 台詞 `maru`、心の声 `hand`、ナレーション `maru`。
-    `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。叫びは太い書体（`gothic`）を選び、`bold` までにする。
+    書体はほかにもある（`inspect` の fonts の `bundled`。`category` と `use` に使い道がある）。場面で選ぶ:
+    - ふつうの台詞: `antique`（既定）・`antique_genei`・`antigothic_bold`
+    - 小声・注記: `gothic_regular`・`antigothic_medium`・`maru_regular`
+    - 叫び: `gothic_black`・`gothic_kiwami`・`mincho_black`（重い）・`maru_black`（元気）
+    - 心の声・語り: `mincho`・`mincho_shippori`・`mincho_hina`・`klee`
+    - ホラー: `horror_tegomin`・`horror_chokoku`（かなだけ）
+    - 機械・ゲーム: `dot16`・`stick`・`dot12`・`dot8`
+    - かわいい・ギャグ: `pop_mochiy`・`pop_rocknroll`・`cute_hachimaru`
+    - 手書き: `hand`・`hand_kurenaido`・`marker_yusei`
+    - 時代もの: `brush_syuku`・`brush_boku`
+    - 効果音: `sfx`・`sfx_pop`・`sfx_outline`・`sfx_inline`・`brush_potta`
+    - 欄外: `narrow_lubrifont`
+    `kanji` が `none`・`partial` の書体は、持っていない漢字を `fallback` の書体で描く。`available` が false の書体は、このパソコンに書体のファイルが無く、アンチックで描かれる。
+    `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。声を重くしたいときは、太い書体（`gothic_black`・`gothic_kiwami`・`mincho_black`）を選び、`weight` は `bold` までにする。
   - 人物の `look.clothes_value`: 服の印刷の仕方（`beta` 黒ベタ・`tone` トーン・`white` 白）。報告した人物の範囲に、どのコマでも同じに効く（黒い服が灰色になったりベタになったりしない）。
   - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
@@ -219,7 +232,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
-- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・capsule・rounded・box・polygon・cloud・thought・shout・electric・flash・whisper・narration・dotted_box・tone_box・fancy_box・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
+- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・capsule・rounded・box・polygon・cloud・thought・shout・electric・flash・whisper・narration・dotted_box・tone_box・fancy_box・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop と、`inspect` の fonts にあるほかの書体、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
 
 ## フキダシの形を選ぶ
 
