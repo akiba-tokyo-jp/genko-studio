@@ -197,6 +197,12 @@ std::vector<Run> edge_runs(const std::vector<Shape>& shapes);
 std::vector<Shape> dashed(const std::vector<Shape>& shapes, double on, double off);
 // What lies within `reach` of the runs (a ribbon `2 × reach` wide along them, mitred at their corners).
 Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int height, bool round_ends = true);
+// Whether ribbon_plane(runs, reach, …, round_ends) covers every pixel where `inside` is not 0 whole: each run is drawn
+// in pieces (it turns tighter than the ribbon is wide; a strip would fold) and has no square end, and every such pixel
+// lies within `reach` of the runs, by a margin (a distance measured along pixels: never less than the true one). A
+// cheap test for a ribbon that would be everywhere inside — a thick double line's second line in a shape thinner
+// than it: none.
+bool ribbon_covers(const std::vector<Run>& runs, double reach, bool round_ends, const Plane& inside);
 // fukidashi@2 (SPEC BALLOON-02) — the pen's line: an outline whose width varies along it, as a pen's or a brush's does
 // (強弱・入り抜き). The group's edge is followed as whole outlines — the balloon, its tails, their joins, its drips, the
 // balloons joined to it: one line where they are one outline —, and drawn in strokes: an outline with corners from

@@ -76,6 +76,7 @@ private:
     bool comp_inside(std::size_t comp, int w) const;
     void render_into(const PixelBox& box, float* out) const;
     void band(double a, double b, int x0, RowState& st, unsigned depth) const;
+    void sort_band(RowState& st) const;
 
     std::vector<Edge> edges_;  // (sorted by y0)
     std::vector<Component> comps_;

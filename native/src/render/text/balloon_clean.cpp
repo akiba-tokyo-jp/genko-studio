@@ -1864,6 +1864,80 @@ Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int he
     return rendered(raster, width, height);
 }
 
+bool ribbon_covers(const std::vector<Run>& runs, double reach, bool round_ends, const Plane& inside) {
+    if (!(reach > 0) || runs.empty() || inside.width <= 0 || inside.height <= 0) return false;
+    // (drawn in pieces, ribbon_plane covers all that lies within `reach` of a run — each segment's box, each bend's
+    // wedge or disc, a disc at each cut end — but for its discs' chords: a strip is not so sure where it turns in)
+    std::vector<Contour> lines;
+    for (const Run& run : runs) {
+        Contour points;
+        for (const P& p : run.points) push(points, p);
+        if (run.closed && points.size() > 2 && distance(points.front(), points.back()) < 1e-9) points.pop_back();
+        if (points.size() < 2) continue;
+        if (!run.closed && !(round_ends && run.cut_first && run.cut_last)) return false;
+        if (!folds(points, run.closed, reach)) return false;
+        if (run.closed) points.push_back(points.front());
+        lines.push_back(std::move(points));
+    }
+    if (lines.empty()) return false;
+    // (a run's point within half a diagonal of the middle of the pixel it marks, a pixel's corners within half a diagonal
+    // of its middle, a disc's chords within their sagitta of its circle — and a little more)
+    constexpr float kDiagonal = 1.41421356f;
+    const double angle = (kPi / 2) / static_cast<double>(1 << std::max(3, quarter_depth(reach)));
+    const double most = reach - (kDiagonal + reach * angle * angle / 8 + 0.5);
+    if (!(most > 0)) return false;
+    // (the distance of each pixel's middle from the pixels the runs pass through, along steps of one pixel and of a
+    // diagonal — never less than the straight distance —, in two sweeps; each pixel's own known at the second's)
+    const std::size_t w = static_cast<std::size_t>(inside.width), h = static_cast<std::size_t>(inside.height);
+    std::vector<float> plane(w * h, 1e30f);
+    float* const d = plane.data();
+    for (const Contour& line : lines) {
+        for (std::size_t i = 0; i + 1 < line.size(); ++i) {
+            const P a = line[i], b = line[i + 1];
+            const int steps = std::max(1, static_cast<int>(std::ceil(distance(a, b) * 2)));
+            for (int k = 0; k <= steps; ++k) {
+                const P p = lerp(a, b, static_cast<double>(k) / steps);
+                const double fx = std::floor(p.x), fy = std::floor(p.y);
+                if (fx >= 0 && fy >= 0 && fx < static_cast<double>(w) && fy < static_cast<double>(h)) {
+                    d[static_cast<std::size_t>(fy) * w + static_cast<std::size_t>(fx)] = 0.0f;
+                }
+            }
+        }
+    }
+    const auto least = [](float v, float other) { return other < v ? other : v; };
+    for (std::size_t y = 0; y < h; ++y) {
+        float* const row = d + y * w;
+        const float* const above = y > 0 ? row - w : nullptr;
+        for (std::size_t x = 0; x < w; ++x) {
+            float v = row[x];
+            if (x > 0) v = least(v, row[x - 1] + 1.0f);
+            if (above != nullptr) {
+                v = least(v, above[x] + 1.0f);
+                if (x > 0) v = least(v, above[x - 1] + kDiagonal);
+                if (x + 1 < w) v = least(v, above[x + 1] + kDiagonal);
+            }
+            row[x] = v;
+        }
+    }
+    const float* const covered = inside.values.data();
+    for (std::size_t y = h; y-- > 0;) {
+        float* const row = d + y * w;
+        const float* const below = y + 1 < h ? row + w : nullptr;
+        for (std::size_t x = w; x-- > 0;) {
+            float v = row[x];
+            if (x + 1 < w) v = least(v, row[x + 1] + 1.0f);
+            if (below != nullptr) {
+                v = least(v, below[x] + 1.0f);
+                if (x + 1 < w) v = least(v, below[x + 1] + kDiagonal);
+                if (x > 0) v = least(v, below[x - 1] + kDiagonal);
+            }
+            row[x] = v;
+            if (covered[y * w + x] > 0.0f && !(static_cast<double>(v) <= most)) return false;
+        }
+    }
+    return true;
+}
+
 // --- fukidashi@2: the pen's line -----------------------------------------------------------------------------------------
 
 namespace {

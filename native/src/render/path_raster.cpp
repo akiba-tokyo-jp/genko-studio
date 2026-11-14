@@ -267,27 +267,26 @@ void stroke_one(const Polyline& pl, const StrokeStyle& style, double tol, std::v
 
 // --- the rasterizer's accumulation -------------------------------------------------------------------------------
 
-void add_full(std::vector<float>& acc, double h) { acc[0] += static_cast<float>(h); }
-
 // Adds w × the area right of the segment (xa, ya) → (xb, yb) (ya < yb, within one pixel row) to the cells whose cell 0
-// is column x0.
-void draw(std::vector<float>& acc, int x0, double xa, double ya, double xb, double yb, double w) {
-    const double width = static_cast<double>(acc.size() - 1);
+// is column x0. (`acc` has `cells` cells: one per column and one more. Written without calls — the loop of every band
+// drawn, it is most of the time an unoptimized build takes for a ribbon in thousands of pieces.)
+void draw(float* acc, std::size_t cells, int x0, double xa, double ya, double xb, double yb, double w) {
+    const double width = static_cast<double>(cells - 1);
     const double left = static_cast<double>(x0);
     double ua = xa - left, ub = xb - left;
     const double dy = yb - ya;
     if (dy <= 0.0) return;
     if (ua > ub) std::swap(ua, ub);
     const double dx = ub - ua;
-    const auto h_of = [&](double u0, double u1) { return dx > 1e-12 ? dy * (u1 - u0) / dx : dy; };
+    const bool slanted = dx > 1e-12;  // (the share of dy over u0..u1: dy × (u1 − u0) / dx, or dy upright)
     if (ua < 0.0) {  // (the part left of the box: full coverage of every column)
-        const double cut = std::min(ub, 0.0);
-        acc[0] += static_cast<float>(w * h_of(ua, cut));
+        const double cut = 0.0 < ub ? 0.0 : ub;
+        acc[0] += static_cast<float>(w * (slanted ? dy * (cut - ua) / dx : dy));
         if (ub <= 0.0) return;
         ua = 0.0;
     }
     if (ua >= width) return;
-    const double end = std::min(ub, width);
+    const double end = width < ub ? width : ub;
     if (dx <= 1e-12) {
         const double c = std::floor(ua);
         const double f = ua - c;
@@ -299,8 +298,8 @@ void draw(std::vector<float>& acc, int x0, double xa, double ya, double xb, doub
     double u = ua;
     while (u < end) {
         const double c = std::floor(u);
-        const double v = std::min(c + 1.0, end);
-        const double h = h_of(u, v);
+        const double v = end < c + 1.0 ? end : c + 1.0;
+        const double h = dy * (v - u) / dx;
         const double m = 0.5 * (u + v) - c;
         const std::size_t ci = static_cast<std::size_t>(c);
         acc[ci] += static_cast<float>(w * h * (1.0 - m));
@@ -349,10 +348,16 @@ std::vector<Polyline> flatten_path(const Path& p, double tol) {
 struct Rasterizer::RowState {
     std::vector<std::size_t> active;
     std::vector<double> cuts;
-    std::vector<BandEdge> band;
+    // (the active edges that reach the sub-band between two cuts — every band inside it takes its edges from these —,
+    // each marked with the sub-band's number; and the edges a band has taken, marked with the band's)
+    std::vector<std::size_t> span;
+    std::vector<std::uint64_t> in_span, taken;
+    std::uint64_t span_mark = 0, band_mark = 0;
+    std::vector<BandEdge> band, next;
     std::vector<int> wind;
     std::vector<float> acc;  // (width + 1 cells: the last takes what spills over)
-    RowState(std::size_t comps, std::size_t width) : wind(std::max<std::size_t>(comps, 1), 0), acc(width + 1, 0.0f) {}
+    RowState(std::size_t comps, std::size_t width, std::size_t edges)
+        : in_span(edges, 0), taken(edges, 0), wind(std::max<std::size_t>(comps, 1), 0), acc(width + 1, 0.0f) {}
 };
 
 void Rasterizer::add_component(const std::vector<std::vector<XY>>& polys, PathOp op, FillRule rule) {
@@ -423,7 +428,7 @@ std::vector<float> Rasterizer::render(const PixelBox& box) const {
 
 void Rasterizer::render_into(const PixelBox& box, float* out) const {
     const std::size_t w = static_cast<std::size_t>(box.width());
-    RowState st(comps_.size(), w);
+    RowState st(comps_.size(), w, edges_.size());
     const double top = static_cast<double>(box.y0);
     std::size_t next = static_cast<std::size_t>(
         std::partition_point(edges_.begin(), edges_.end(), [top](const Edge& e) { return e.y0 < top; }) - edges_.begin());
@@ -453,8 +458,27 @@ void Rasterizer::render_into(const PixelBox& box, float* out) const {
         }
         std::sort(st.cuts.begin(), st.cuts.end());
         st.cuts.erase(std::unique(st.cuts.begin(), st.cuts.end()), st.cuts.end());
-        const std::vector<double> cuts = st.cuts;
-        for (std::size_t k = 0; k + 1 < cuts.size(); ++k) band(cuts[k], cuts[k + 1], box.x0, st, 0);
+        for (std::size_t k = 0; k + 1 < st.cuts.size(); ++k) {
+            // (no edge ends between two cuts: the edges any band between them reaches are among those reaching both)
+            const double from = st.cuts[k], to = st.cuts[k + 1];
+            const std::uint64_t mark = ++st.span_mark;
+            const std::size_t* const active = st.active.data();
+            const std::size_t count = st.active.size();
+            st.span.resize(count);
+            std::size_t* const span = st.span.data();
+            std::uint64_t* const in_span = st.in_span.data();
+            const Edge* const edges = edges_.data();
+            std::size_t n = 0;
+            for (std::size_t m = 0; m < count; ++m) {
+                const std::size_t i = active[m];
+                if (edges[i].y0 <= to && edges[i].y1 >= from) {
+                    span[n++] = i;
+                    in_span[i] = mark;
+                }
+            }
+            st.span.resize(n);
+            band(from, to, box.x0, st, 0);
+        }
         float sum = 0.0f;
         for (std::size_t x = 0; x < w; ++x) {
             sum += st.acc[x];
@@ -465,24 +489,51 @@ void Rasterizer::render_into(const PixelBox& box, float* out) const {
 
 void Rasterizer::band(double a, double b, int x0, RowState& st, unsigned depth) const {
     if (b - a <= 1e-12) return;
-    st.band.clear();
     const double mid = 0.5 * (a + b);
-    for (const std::size_t i : st.active) {
-        const Edge& e = edges_[i];
-        if (e.y0 <= mid && e.y1 >= mid) {
-            const double xa = e.x_at(a), xb = e.x_at(b);
-            st.band.push_back(BandEdge{xa, xb, 0.5 * (xa + xb), static_cast<std::uint32_t>(i)});
+    // (the band's edges: those of the sub-band that reach its middle — taken in the order of the band before, which is
+    // nearly theirs here, the rest after —, then sorted along the band. Plain loops: see draw)
+    const Edge* const edges = edges_.data();
+    const std::uint64_t mark = ++st.band_mark, span_mark = st.span_mark;
+    const std::uint64_t* const in_span = st.in_span.data();
+    std::uint64_t* const taken = st.taken.data();
+    const std::size_t* const span = st.span.data();
+    const std::size_t spanned = st.span.size();
+    st.next.resize(spanned);
+    BandEdge* const out = st.next.data();
+    std::size_t n = 0;
+    {
+        const BandEdge* const before = st.band.data();
+        const std::size_t had = st.band.size();
+        for (std::size_t k = 0; k < had; ++k) {
+            const std::uint32_t i = before[k].idx;
+            if (in_span[i] != span_mark) continue;
+            const Edge& e = edges[i];
+            if (!(e.y0 <= mid && e.y1 >= mid)) continue;
+            const double xa = e.x0 + (a - e.y0) * e.dxdy, xb = e.x0 + (b - e.y0) * e.dxdy;  // (Edge::x_at)
+            out[n++] = BandEdge{xa, xb, 0.5 * (xa + xb), i};
+            taken[i] = mark;
         }
     }
-    if (st.band.empty()) {
-        if (inverted_) add_full(st.acc, b - a);
+    for (std::size_t k = 0; k < spanned; ++k) {
+        const std::size_t i = span[k];
+        if (taken[i] == mark) continue;
+        const Edge& e = edges[i];
+        if (!(e.y0 <= mid && e.y1 >= mid)) continue;
+        const double xa = e.x0 + (a - e.y0) * e.dxdy, xb = e.x0 + (b - e.y0) * e.dxdy;
+        out[n++] = BandEdge{xa, xb, 0.5 * (xa + xb), static_cast<std::uint32_t>(i)};
+    }
+    st.next.resize(n);
+    std::swap(st.band, st.next);
+    if (n == 0) {
+        if (inverted_) st.acc[0] += static_cast<float>(b - a);
         return;
     }
-    std::stable_sort(st.band.begin(), st.band.end(), [](const BandEdge& p, const BandEdge& q) { return p.xm < q.xm; });
+    sort_band(st);
+    const BandEdge* const list = st.band.data();
     // (two edges crossing inside the band: split there, so the order is the same in every piece)
     if (depth < 24) {
-        for (std::size_t k = 1; k < st.band.size(); ++k) {
-            const BandEdge p = st.band[k - 1], q = st.band[k];
+        for (std::size_t k = 1; k < n; ++k) {
+            const BandEdge p = list[k - 1], q = list[k];
             const double top = p.xa - q.xa, bot = p.xb - q.xb;
             if (top > 1e-9 || bot > 1e-9) {
                 const double t = std::fabs(top - bot) > 1e-15 ? top / (top - bot) : 0.5;
@@ -494,26 +545,67 @@ void Rasterizer::band(double a, double b, int x0, RowState& st, unsigned depth) 
             }
         }
     }
-    std::fill(st.wind.begin(), st.wind.end(), 0);
+    int* const wind = st.wind.data();
+    for (std::size_t c = 0; c < st.wind.size(); ++c) wind[c] = 0;
+    float* const acc = st.acc.data();
+    const std::size_t cells = st.acc.size();
+    const Component* const comps = comps_.data();
     int union_count = 0;
     bool in = inverted_;
-    if (in) add_full(st.acc, b - a);
-    const std::vector<BandEdge> list = st.band;
-    for (const BandEdge& be : list) {
-        const Edge& e = edges_[be.idx];
+    if (in) acc[0] += static_cast<float>(b - a);
+    for (std::size_t k = 0; k < n; ++k) {
+        const BandEdge& be = list[k];
+        const Edge& e = edges[be.idx];
         const std::size_t c = e.comp;
-        if (union_only_) {
-            const bool was = comp_inside(c, st.wind[c]);
-            st.wind[c] += e.dir;
-            const bool now = comp_inside(c, st.wind[c]);
-            union_count += static_cast<int>(now) - static_cast<int>(was);
+        bool now;
+        if (union_only_) {  // (comp_inside and inside, written out)
+            const bool even_odd = comps[c].rule != FillRule::NonZero;
+            const bool was = even_odd ? (wind[c] & 1) != 0 : wind[c] != 0;
+            wind[c] += e.dir;
+            const bool is = even_odd ? (wind[c] & 1) != 0 : wind[c] != 0;
+            union_count += static_cast<int>(is) - static_cast<int>(was);
+            now = (union_count > 0) != inverted_;
         } else {
-            st.wind[c] += e.dir;
+            wind[c] += e.dir;
+            now = inside(st.wind, union_count);
         }
-        const bool now = inside(st.wind, union_count);
         if (now != in) {
-            draw(st.acc, x0, be.xa, a, be.xb, b, now ? 1.0 : -1.0);
+            draw(acc, cells, x0, be.xa, a, be.xb, b, now ? 1.0 : -1.0);
             in = now;
+        }
+    }
+}
+
+// The band's edges along it: by their middles, and of two with the same middle the one added first (the lower number)
+// first — the order a stable sort by their middles gives them in the order the active edges are kept (by number). That
+// order is one whatever order they come in, so the band before's, nearly sorted, is sorted by moving a few; a band that
+// moves many is sorted outright. (A middle that is not a number: sorted as before, stably from the edges' own order.)
+void Rasterizer::sort_band(RowState& st) const {
+    BandEdge* const v = st.band.data();
+    const std::size_t n = st.band.size();
+    for (std::size_t k = 0; k < n; ++k) {
+        if (std::isnan(v[k].xm)) {
+            std::sort(st.band.begin(), st.band.end(), [](const BandEdge& p, const BandEdge& q) { return p.idx < q.idx; });
+            std::stable_sort(st.band.begin(), st.band.end(), [](const BandEdge& p, const BandEdge& q) { return p.xm < q.xm; });
+            return;
+        }
+    }
+    std::size_t moves = 0;
+    const std::size_t budget = 16 * n + 64;
+    for (std::size_t k = 1; k < n; ++k) {
+        const BandEdge item = v[k];
+        std::size_t j = k;
+        // (v[j − 1] after item: a larger middle, or the same and a larger number)
+        while (j > 0 && (item.xm < v[j - 1].xm || (item.xm == v[j - 1].xm && item.idx < v[j - 1].idx))) {
+            v[j] = v[j - 1];
+            --j;
+        }
+        if (j == k) continue;
+        v[j] = item;
+        moves += k - j;
+        if (moves > budget) {
+            std::sort(st.band.begin(), st.band.end(), [](const BandEdge& p, const BandEdge& q) { return p.xm < q.xm || (p.xm == q.xm && p.idx < q.idx); });
+            return;
         }
     }
 }

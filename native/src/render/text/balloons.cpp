@@ -1122,12 +1122,17 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         for (std::size_t i = 0; i < count; ++i) band[i] = std::max(band[i], more[i]);
     };
     if (width > 0 && (core::py_truthy(at(st, "double")) || kind == "fancy_box")) {
-        // a second line inside the first: two widths in, one width wide
-        const clean::Plane outer = within_body(width * 4, !dashes);
-        const clean::Plane closer = within_body(width * 3, !dashes);
-        std::vector<float> second(count);
-        for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
-        lighter(second);
+        // a second line inside the first: two widths in, one width wide — none in a shape that is everywhere within
+        // three widths of its edge (a thick line round a slim heart or cloud: the two ribbons, each in thousands of
+        // pieces, would both cover all of it)
+        const bool none = clean::ribbon_covers(dripping ? body_runs : runs, width * 3, !dashes, dripping ? body_fill : fill);
+        if (!none) {
+            const clean::Plane outer = within_body(width * 4, !dashes);
+            const clean::Plane closer = within_body(width * 3, !dashes);
+            std::vector<float> second(count);
+            for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
+            lighter(second);
+        }
     }
     std::vector<float> cover = fill.values;
     if (!fades.empty()) {  // 消えるしっぽ: its outline and fill thin away toward the tip
