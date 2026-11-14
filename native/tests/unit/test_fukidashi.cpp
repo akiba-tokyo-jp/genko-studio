@@ -1443,8 +1443,20 @@ private slots:
         QVERIFY(names(payload_of(read.document), second));
         QCOMPARE(read.document.story.front().balloon, std::string("star"));
         QCOMPARE(read.document.story.front().style["points"], Json(4));
-        // (a type layer's record counts as a line does: any_line — a symbol there names it too. And a feature this build
-        // does not know: read-only, with the reason)
+        // (a type layer's record counts as a line does: a symbol there, or one of the keys, names the feature too)
+        for (const Json& more : {Json{{"balloon", "heart"}}, Json{{"balloon", "speech"}, {"style", Json{{"size_mm", 8}, {"pen_swell", 0.5}}}}}) {
+            Json op{{"op", "add_type_layer"}, {"page", 1}, {"text", "すき"}, {"box", Json::array({20, 20, 40, 36})}, {"new_id", "t1"}};
+            for (const auto& [key, value] : more.items()) op[key] = value;
+            const Document typed = run_ops(blank_book(), Json::array({op}));
+            QVERIFY(typed.story.empty());
+            QVERIFY2(names(payload_of(typed), second), more.dump().c_str());
+        }
+        {
+            const Document typed = run_ops(blank_book(), Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "すき"}, {"box", Json::array({20, 20, 40, 36})},
+                                                                        {"new_id", "t1"}, {"balloon", "speech"}}}));
+            QVERIFY(!names(payload_of(typed), second));
+        }
+        // (a feature this build does not know: read-only, with the reason)
         Json payload = Json::parse(genko::test::read_bytes(QString::fromStdString((path / "project.json").string())));
         payload["features"].push_back("fukidashi@3");
         genko::storage::write_atomic(path / "project.json", payload.dump(2));
