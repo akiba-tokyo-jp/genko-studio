@@ -94,25 +94,14 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(m['linux-release']['suite'], 'full')
         self.assertEqual(m['linux-asan']['suite'], 'related')
         self.assertNotIn('linux-debug', m)
-        asan = set(m['linux-asan']['tests'])
-        self.assertIn('test_raster_ops', asan)
+        self.assertNotIn('test_contract_psd', m['linux-asan']['tests'])
+        self.assertIn('test_raster_ops', m['linux-asan']['tests'])
+        # (raster_ops' own branch: the selection's and the masks' tests, which no other drawing file's change brings)
         for name in ('test_contract_select', 'test_contract_masks', 'test_masks'):
-            self.assertIn(name, asan)
-        # (changed 2026-11-14 with the names' guesses replaced by the source closure: test_contract_psd holds
-        # raster_ops.cpp — it draws pages — and runs genko, which holds it too; the old rule left it out by its name)
-        self.assertIn('test_contract_psd', asan)
-        # (and the tests the old rule took by name — pynum, pyrandom, the strokes' geometry — hold no drawing code and run
-        # no genko: a change of raster_ops.cpp cannot reach them)
-        tree = policy.source_tree(ROOT)
-        for name in ('test_pynum', 'test_pyrandom', 'test_stroke_geom', 'test_strokes'):
-            self.assertNotIn(name, asan)
-            self.assertNotIn('native/src/render/raster_ops.cpp', tree.closure(tree.tests[name]))
-            self.assertEqual(tree.programs_of()[name], set())
-        # (changed 2026-11-14: tones.cpp is in the selection's and the masks' tests too — they draw pages —, which the
-        # old rule's names did not say)
+            self.assertIn(name, m['linux-asan']['tests'])
         other = {r['preset']: r for r in self.plan(['native/src/render/tones.cpp'], 'integration')['matrix']['include']}
-        for name in ('test_contract_select', 'test_contract_masks', 'test_masks', 'test_tones_effects'):
-            self.assertIn(name, other['linux-asan']['tests'])
+        for name in ('test_contract_select', 'test_contract_masks', 'test_masks'):
+            self.assertNotIn(name, other['linux-asan']['tests'])
 
     def test_safety_tests_are_registered(self):
         # (every test the plans always take is one CMake registers: a test removed or renamed is not dropped unseen)
@@ -136,7 +125,7 @@ class PolicyTests(unittest.TestCase):
         for name in ('test_fx_lens', 'test_smart_filters', 'test_precision_merge_controls', 'test_gui_canvas', 'test_contract_psd'):
             self.assertIn(name, asan)
         # a diff of shared code that does reach every test is the whole suite everywhere, with the reason it had
-        p = self.plan(['native/src/core/model.hpp', 'native/src/app/material_preview_cache.cpp'], 'integration')
+        p = self.plan(['native/src/core/model.hpp', 'native/tests/unit/test_material_preview_cache.cpp'], 'integration')
         self.assertEqual(p['tier'], 'full')
         self.assertTrue(all(r['suite'] == 'full' for r in p['matrix']['include']))
         self.assertIn('共通モデル・保存・権限・oracle境界', p['reasons'])
@@ -757,6 +746,175 @@ class StageExitTests(MadeUpTree):
         self.assertIn('native/src/core/new.hpp', second.text)
 
 
+def selection_of_2026_11_13(paths, phase, inv):
+    """What the policy of da6acebd (2026-11-13) selected: configuration → tests. Its rules written out here, by folder and by
+    name, so the comparison does not depend on the code it is compared with."""
+    everything = inv['normal'] | inv['contract']
+    related = set(policy.SAFETY)
+    broad = not paths
+    infrastructure = native_change = False
+    for path in sorted(set(paths)):
+        if path.startswith('docs/') or path.endswith('.md'):
+            continue
+        if path == '.github/workflows/native.yml' or path.startswith('tools/ci/'):
+            infrastructure = True
+        elif path.startswith(('native/cmake/', 'native/vendor/', 'native/third_party/', 'native/packaging/')) or path in (
+                'native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpkg.json', 'native/tests/CMakeLists.txt', '.gitattributes'):
+            broad = native_change = True
+        elif path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/', 'tools/migration/', 'tools/acceptance/')):
+            broad = native_change = True
+        elif path.startswith('native/src/render/'):
+            native_change = True
+            name = path.rsplit('/', 1)[-1].rsplit('.', 1)[0]
+            related |= {n for n in inv['normal'] if any(k in n for k in ('image', 'png', 'render', 'stroke', 'raster', 'ops', 'pynum', 'pyrandom'))}
+            if name in ('raster_ops', 'selection'):
+                related |= {n for n in everything if any(k in n for k in ('raster', 'select', 'mask'))}
+            elif any(k in name for k in ('tone', 'effect', 'ruler')):
+                related |= {n for n in everything if any(k in n for k in ('tone', 'ruler'))}
+            elif any(k in name for k in ('3d', 'mannequin')):
+                related |= {n for n in everything if '3d' in n}
+            else:
+                broad = True
+        elif path.startswith('native/src/app/'):
+            native_change = True
+            related |= {n for n in everything if n.startswith('test_gui_') or n in ('test_session', 'test_ops_e2e')}
+        elif path.startswith('native/tests/'):
+            native_change = True
+            name = path.rsplit('/', 1)[-1].rsplit('.', 1)[0]
+            if name in everything:
+                related.add(name)
+            elif name not in inv['perf']:
+                broad = True
+        else:
+            broad = native_change = True
+    if phase == 'milestone':
+        broad = native_change = True
+    if not (broad or native_change or infrastructure):
+        return {}
+    if broad:
+        presets = ['linux-release', 'linux-asan', 'windows-debug', 'windows-release'] + (['linux-debug'] if phase == 'milestone' else [])
+    elif infrastructure:
+        presets = ['linux-release', 'linux-asan', 'windows-debug', 'windows-release'] + (['linux-debug'] if native_change and phase == 'development' else [])
+    else:
+        presets = ['linux-debug', 'linux-asan', 'windows-debug'] if phase == 'development' else ['linux-release', 'linux-asan', 'windows-debug', 'windows-release']
+    rows = {}
+    for preset in presets:
+        full = broad or (phase == 'integration' and preset == 'linux-release' and native_change)
+        chosen = set(everything if full else (inv['normal'] | (related if native_change else set())) if infrastructure else related)
+        if preset.startswith('windows'):
+            chosen -= inv['contract']
+        rows[preset] = chosen & everything
+    return rows
+
+
+class NeverMoreThanBeforeTests(unittest.TestCase):
+    # (the owner's aim is fewer tests in a run: for the same diff and phase, no configuration is added and no
+    # configuration runs a test the policy of 2026-11-13 did not run — but for the three cases below, where that policy
+    # left out a test the changed file is built into or read by)
+    AREAS = [
+        'native/src/core/pynum.cpp', 'native/src/core/model.hpp', 'native/src/core/data/ops_schema.json', 'native/src/core/CMakeLists.txt',
+        'native/src/storage/lock.cpp', 'native/src/storage/reader.cpp',
+        'native/src/render/raster_ops.cpp', 'native/src/render/selection.cpp', 'native/src/render/tones.cpp', 'native/src/render/ops_effects.cpp',
+        'native/src/render/ops_3d.cpp', 'native/src/render/page.cpp', 'native/src/render/text/balloons.cpp', 'native/src/render/draw.hpp',
+        'native/src/render/CMakeLists.txt',
+        'native/src/app/canvas.cpp', 'native/src/app/main_window.hpp', 'native/src/app/CMakeLists.txt',
+        'native/src/service/letter.cpp', 'native/src/service/wording.cpp', 'native/src/api/cli.cpp', 'native/src/api/mcp_tools.cpp',
+        'native/src/formats/pdf.cpp', 'native/src/studio/files.cpp',
+        'native/resources/studio/layouts.json', 'native/resources/genko_materials.qrc', 'native/resources/fonts/Yomogi-Regular.ttf',
+        'native/tests/support/testsupport.cpp', 'native/tests/support/testsupport.hpp', 'native/tests/gui/gui_support.hpp',
+        'native/tests/unit/test_strokes.cpp', 'native/tests/unit/k1_probe.inc', 'native/tests/perf/test_perf_render.cpp',
+        'native/tests/data/type/plain_lines.json', 'native/tests/e2e/refusal_cases.json', 'native/tests/CMakeLists.txt',
+        'native/CMakeLists.txt', 'native/cmake/GenkoFlags.cmake', 'native/wasm-host/src/main.rs', 'native/package/install.sh',
+        'tools/ci/validation_run.py', 'tools/migration/pyref_tools.py', '.github/workflows/native.yml',
+        'docs/cpp-migration/PLAN.md', 'integrations/hermes/config.example.yaml', 'README.md',
+    ]
+    DIFFS = [
+        ['native/src/app/canvas.cpp', 'native/src/render/raster_ops.cpp'],
+        ['native/src/app/canvas.cpp', 'native/src/service/letter.cpp'],
+        ['native/src/render/tones.cpp', 'native/src/render/ops_3d.cpp', 'native/tests/unit/test_strokes.cpp'],
+        ['native/src/api/cli.cpp', 'tools/ci/validation_run.py'],
+        ['native/src/core/model.hpp', 'native/src/storage/reader.cpp', 'native/src/app/canvas.cpp', 'native/tests/CMakeLists.txt'],
+        ['docs/cpp-migration/PLAN.md', 'native/src/app/canvas.cpp'],
+        [],
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.inv = policy.inventory(ROOT)
+
+    def compare(self, paths, phase):
+        before = selection_of_2026_11_13(paths, 'milestone' if phase == 'final' else phase, self.inv)
+        now = {r['preset']: set(r['tests']) for r in policy.make_plan(paths, phase, ROOT)['matrix']['include']}
+        # every configuration both plans have: no test the old one did not run there (ASan is in every plan of both)
+        self.assertEqual('linux-asan' in now, 'linux-asan' in before, (paths, phase))
+        for preset, tests in now.items():
+            if preset in before:
+                self.assertLessEqual(tests, before[preset], (paths, phase, preset, sorted(tests - before[preset])[:8]))
+        # and over all configurations, not more runs of tests. (A development diff the old policy sent to every test ran
+        # Release, ASan and the two Windows builds in full; decided by the closure it is V1's Debug, ASan and Windows
+        # Debug on the related tests — a configuration the old plan did not have, fewer runs in all.)
+        self.assertLessEqual(sum(map(len, now.values())), sum(map(len, before.values())), (paths, phase))
+        if phase != 'development':
+            self.assertLessEqual(set(now), set(before), (paths, phase, 'a configuration the old policy did not run'))
+        return before, now
+
+    def test_one_changed_file_of_each_area(self):
+        for path in self.AREAS:
+            for phase in ('development', 'integration'):
+                with self.subTest(path=path, phase=phase):
+                    self.compare([path], phase)
+
+    def test_diffs_of_several_areas(self):
+        for paths in self.DIFFS:
+            for phase in ('development', 'integration'):
+                with self.subTest(paths=paths, phase=phase):
+                    self.compare(paths, phase)
+
+    def test_a_stage_exit_is_never_more_than_the_old_stage_exit_and_the_final_candidate_is_the_same(self):
+        everything = self.inv['normal'] | self.inv['contract']
+        for paths in [[p] for p in self.AREAS] + self.DIFFS:
+            with self.subTest(paths=paths):
+                before, now = self.compare(paths, 'milestone')
+                self.assertNotIn('linux-debug', now)
+                self.assertEqual(now['linux-release'], everything)
+                final_before, final_now = self.compare(paths, 'final')
+                self.assertEqual(final_now, final_before)
+
+    def test_the_rules_by_names_are_exactly_the_old_ones(self):
+        for path in ('native/src/app/canvas.cpp', 'native/src/app/CMakeLists.txt', 'native/src/render/raster_ops.cpp', 'native/src/render/selection.cpp',
+                     'native/src/render/tones.cpp', 'native/src/render/ops_effects.cpp', 'native/src/render/ops_rulers.cpp', 'native/src/render/ops_3d.cpp',
+                     'native/src/render/mannequin_draw.cpp'):
+            for phase in ('development', 'integration'):
+                before, now = self.compare([path], phase)
+                self.assertEqual(now, before, (path, phase))
+            plan = policy.make_plan([path], 'integration', ROOT)
+            self.assertTrue(plan['classification'][path].startswith('related: 名前の規則（2026-11-13 までのまま）: '), plan['classification'][path])
+        # (and where the closure decides, the plan says so)
+        plan = policy.make_plan(['native/src/service/letter.cpp', 'native/src/render/page.cpp'], 'integration', ROOT)
+        self.assertTrue(all(v.startswith('related: ソースの閉包（') for v in plan['classification'].values()), plan['classification'])
+
+    def test_where_the_old_policy_left_out_a_test_the_file_reaches(self):
+        # The three cases where more is selected than on 2026-11-13, each a test the old rule missed:
+        def asan(path):
+            before = selection_of_2026_11_13([path], 'integration', self.inv).get('linux-asan', set())
+            rows = {r['preset']: set(r['tests']) for r in policy.make_plan([path], 'integration', ROOT)['matrix']['include']}
+            return before, rows.get('linux-asan', set())
+        # 1. the guides and tables of resources/studio are built into the service (studio_data.cpp); by their .md the
+        #    old policy took a change of the guide for a document and built nothing
+        before, now = asan('native/resources/studio/guide/SKILL.md')
+        self.assertEqual(before, set())
+        self.assertTrue({'test_service', 'test_ledger_service_b', 'test_mcp_api_e2e'} <= now)
+        # 2. a document a test reads and compares: that test (the old policy: nothing)
+        for path, test in (('docs/ops.schema.json', 'test_ledger_service_a'), ('docs/PSD_TEXT_SUPPORT.md', 'test_psd_text'),
+                           ('docs/cpp-migration/THIRD_PARTY.md', 'test_package'), ('integrations/hermes/genko-manga/SKILL.md', 'test_ledger_service_b')):
+            before, now = asan(path)
+            self.assertEqual(before, set(), path)
+            self.assertEqual(now - policy.SAFETY, {test}, path)
+        # 3. one source that two tests are built from: both (the old policy took the one of the file's name)
+        before, now = asan('native/tests/contract/test_contract_plugins.cpp')
+        self.assertEqual(now - before, {'test_contract_wasm_plugins'})
+
+
 class RealTreeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -820,12 +978,20 @@ class RealTreeTests(unittest.TestCase):
     def test_known_files_stay_sane(self):
         gui = {n for n in self.everything if n.startswith('test_gui_')}
         heavy = {'test_fx_lens', 'test_fx', 'test_fx_d2', 'test_smart_filters', 'test_smart_stack', 'test_precision_merge_controls'}
-        # the app: every window test, the tests that run genko; not the filters' unit tests
-        kind, tests, _ = self.reached('native/src/app/canvas.cpp')
-        self.assertEqual(kind, 'related')
-        self.assertLessEqual(gui | {'test_session', 'test_ops_e2e', 'test_cli_e2e', 'test_app_e2e'}, tests)   # (all the old rule took)
-        self.assertFalse(heavy & tests)
-        self.assertLess(len(tests), len(self.everything) * 0.6)
+        # the app and the drawing files with a family in their names: the rule by names, as it was (not the closure, which
+        # would take more: every test that runs genko, every test that draws)
+        for path in ('native/src/app/canvas.cpp', 'native/src/app/main_window.hpp', 'native/src/app/CMakeLists.txt'):
+            kind, tests, reason = self.reached(path)
+            self.assertEqual((kind, tests), ('related', gui | {'test_session', 'test_ops_e2e'}), path)
+            self.assertTrue(reason.startswith('名前の規則（2026-11-13 までのまま）: app'), reason)
+        kind, tests, reason = self.reached('native/src/render/raster_ops.cpp')
+        self.assertTrue(reason.startswith('名前の規則（2026-11-13 までのまま）: render の raster_ops'), reason)
+        self.assertLessEqual({'test_raster_ops', 'test_contract_select', 'test_masks', 'test_image', 'test_pynum'}, tests)
+        self.assertFalse((heavy | {'test_contract_psd'}) & tests)
+        self.assertLess(len(tests), 60)
+        self.assertTrue(self.reached('native/src/render/ops_3d.cpp')[2].endswith('render の 3d・mannequin'))
+        self.assertTrue(self.reached('native/src/render/ops_tones.cpp')[2].endswith('render の tone・effect・ruler'))
+        self.assertEqual(self.reached('native/src/render/text/balloons.cpp')[2], 'ソースの閉包')
         # the service, the formats, the command line: narrower than the drawing code
         for path, inside, outside in (
                 ('native/src/service/letter.cpp', {'test_service', 'test_fukidashi_service', 'test_gui_studio', 'test_cli_e2e'}, heavy | {'test_raster_ops'}),
@@ -900,6 +1066,41 @@ class RealTreeTests(unittest.TestCase):
                                  'native/tests/data/type/plain_lines.json', 'native/resources/studio/guide/SKILL.md'], 'milestone', ROOT)
         self.assertLess(time.monotonic() - started, 20)
         self.assertEqual(json.dumps(plan, sort_keys=True), json.dumps(policy.make_plan(plan['paths'], 'milestone', ROOT), sort_keys=True))
+
+    def test_the_real_tree_reads_the_same_from_a_windows_checkout(self):
+        # (every source, CMake file and .qrc of the real tree written again with CRLF, as git writes them on Windows with
+        # core.autocrlf: the same registration, the same closure of every test and program, the same programs run, the
+        # same readers of the data; and the changed paths given with backslashes: the same plan)
+        with tempfile.TemporaryDirectory() as folder:
+            copy = Path(folder)
+            for top in policy.CODE_ROOTS + ('native/resources',):
+                for file in sorted((ROOT / top).rglob('*')):
+                    if file.is_file() and (file.name.endswith(policy.CODE_SUFFIXES + ('.in', '.qrc')) or file.name == 'CMakeLists.txt'):
+                        target = copy / file.relative_to(ROOT)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(file.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+            other = policy.SourceTree(copy)
+            here = self.tree
+            self.assertIn(b'\r\n', (copy / 'native/tests/CMakeLists.txt').read_bytes())
+            self.assertEqual(sorted(other.text), sorted(here.text))
+            self.assertEqual((other.tests, other.programs, other.macros, other.depends), (here.tests, here.programs, here.macros, here.depends))
+            self.assertEqual(other.forward, here.forward)
+            self.assertEqual(other.unresolved, here.unresolved)
+            self.assertEqual(other.programs_of(), here.programs_of())
+            self.assertEqual(other.carriers, here.carriers)
+            self.assertEqual(other.resources(), here.resources())
+            for template in sorted(p for p in here.present if p.endswith('.in')):
+                self.assertEqual(other.consumers_of_template(template), here.consumers_of_template(template), template)
+            for path in ('native/src/core/data/ops_schema.json', 'native/resources/studio/guide/SKILL.md', 'native/resources/genko_spell.qrc'):
+                self.assertEqual(other.embedded(path), here.embedded(path), path)
+            for path in ('native/tests/data/type/plain_lines.json', 'native/tests/data/legacy/book-v3.genko/project.json', 'docs/ops.schema.json',
+                         'native/src/api/cli.cpp', 'native/tests/fixtures/studio/demo4/bible.json'):
+                self.assertEqual(other.tests_naming(path), here.tests_naming(path), path)
+            for path in ('native/src/core/model.hpp', 'native/src/service/letter.cpp', 'native/src/render/page.cpp', 'native/tests/support/testsupport.cpp'):
+                self.assertEqual(other.tests_reaching(path), here.tests_reaching(path), path)
+        paths = ['native/src/service/letter.cpp', 'native/src/app/canvas.cpp', 'native/tests/unit/test_strokes.cpp', 'native/src/core/data/commands.json']
+        self.assertEqual(json.dumps(policy.make_plan([p.replace('/', '\\') for p in paths], 'milestone', ROOT), sort_keys=True),
+                         json.dumps(policy.make_plan(paths, 'milestone', ROOT), sort_keys=True))
 
     def test_the_closure_checker_refuses_a_build_it_cannot_judge(self):
         spec = importlib.util.spec_from_file_location('validation_closure_check', ROOT / 'tools/ci/validation_closure_check.py')

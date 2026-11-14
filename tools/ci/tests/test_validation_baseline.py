@@ -63,21 +63,24 @@ class BaselineTests(unittest.TestCase):
 
 
     def test_a_head_that_is_not_checked_out_is_not_classified_from_this_tree(self):
-        # (the classification reads the sources of the tree it stands in: for another commit's diff it widens to everything)
-        def planned(head):
+        # (the closure reads the sources of the tree it stands in: for another commit's diff, what the closure would decide
+        # goes to everything, as it did before the closure; the rules by names need no tree)
+        def planned(head, path):
             with tempfile.TemporaryDirectory() as folder:
                 output = Path(folder) / 'plan.json'
                 args = ['validation_policy.py', '--base', 'b' * 40, '--head', head, '--phase', 'integration', '--output', str(output)]
-                with mock.patch('sys.argv', args), mock.patch.object(policy, 'changed_paths', return_value=['native/src/app/canvas.cpp']), contextlib.redirect_stdout(io.StringIO()):
+                with mock.patch('sys.argv', args), mock.patch.object(policy, 'changed_paths', return_value=[path]), contextlib.redirect_stdout(io.StringIO()):
                     policy.main()
                 return json.loads(output.read_text())
-        here = planned('HEAD')
+        here = planned('HEAD', 'native/src/service/letter.cpp')
         self.assertEqual(here['tier'], 'integration')
         self.assertEqual({r['preset']: r['suite'] for r in here['matrix']['include']}['linux-asan'], 'related')
-        other = planned('HEAD~1')
+        other = planned('HEAD~1', 'native/src/service/letter.cpp')
         self.assertEqual(other['tier'], 'full')
         self.assertTrue(all(r['suite'] == 'full' for r in other['matrix']['include']))
-        self.assertIn('--head が checkout している版と違う（分類は今の木を読む）: 全体へ拡大', other['reasons'])
+        self.assertIn('--head が checkout している版と違う（閉包は今の木を読む）: 全体へ拡大', other['reasons'])
+        for path in ('native/src/app/canvas.cpp', 'native/tests/unit/test_strokes.cpp', 'docs/cpp-migration/PLAN.md'):
+            self.assertEqual(planned('HEAD~1', path)['matrix'], planned('HEAD', path)['matrix'], path)
 
     def test_full_milestone_pr_can_be_reused_with_identical_controls(self):
         row = self.row(event='pull_request', head_branch='native/milestone/example')

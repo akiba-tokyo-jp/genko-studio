@@ -163,7 +163,7 @@ def check(build, root=None, jobs=4):
     report = {'build': str(build), 'source_root': str(root), 'targets_in_cmake': len(targets), 'binaries_checked': 0,
               'binaries_missing': sorted(set(targets) - set(places)), 'binaries_unreadable': [], 'objects': len(objects),
               'objects_unreadable': unreadable_objects, 'objects_without_a_unique_symbol': unjudged,
-              'binaries_older_than_their_objects': [],
+              'binaries_older_than_their_objects': [], 'binaries_up_to_date': 0, 'misses_in_binaries_up_to_date': 0,
               'partly_present': 0, 'partly_present_examples': [], 'linked': 0, 'in_closure': 0, 'extra': 0, 'misses': [], 'not_in_this_tree': [], 'by_library': {}}
     code_files = sorted(p for p in tree.text if p.startswith('native/src/') and p.endswith(policy.IMPLEMENTATION_SUFFIXES))
     for name in sorted(places):
@@ -187,6 +187,9 @@ def check(build, root=None, jobs=4):
         stale = any(made_at[key] > linked_at for key in hits)
         if stale:
             report['binaries_older_than_their_objects'].append(name)
+        else:
+            report['binaries_up_to_date'] += 1
+        misses_before = len(report['misses'])
         for key, found in sorted(hits.items()):
             if found < unique[key] and made_from[key] == 1 and not stale:
                 report['partly_present'] += 1
@@ -200,6 +203,8 @@ def check(build, root=None, jobs=4):
                     continue
             if kind != 'object' and not covered(kind, value, closure):
                 report['misses'].append([name, kind, value])
+        if not stale:
+            report['misses_in_binaries_up_to_date'] += len(report['misses']) - misses_before
         product = {p for p in linked if p.startswith('native/src/')}
         inside = {p for p in closure if p.startswith('native/src/') and p.endswith(policy.IMPLEMENTATION_SUFFIXES)}
         report['linked'] += len(product)

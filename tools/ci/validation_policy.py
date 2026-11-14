@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """変更範囲と工程境界から検証計画を作る。未知の範囲は全体へ拡大する。
 
-分類はソースの木から機械的に決める（利用者決定 2026-11-14）。試験の「ソースの閉包」（SOURCES から #include をたどり、
-ヘッダーが宣言したものを定義する .cpp を足す）に入る変更だけを、その試験に関係するとみなす。子プロセスとして動かす
-実行物（genko・補助）はその実行物の閉包も足す。説明できない変更は全体へ拡大する。規則と確かめ方は
+フォルダーごとに全体へ送っていた変更（core・storage・service・api・formats・studio・試験の補助とデータ・埋め込みデータ・
+名前に系統の無い render）は、ソースの木から機械的に決める（利用者決定 2026-11-14）。試験の「ソースの閉包」（SOURCES から
+#include をたどり、ヘッダーが宣言したものを定義する .cpp を足す）に入る変更だけを、その試験に関係するとみなす。子プロセス
+として動かす実行物（genko・補助）はその実行物の閉包も足す。説明できない変更は全体へ拡大する。名前の規則（render の系統、
+app）は 2026-11-13 までのまま。同じ差分で、前の方針より多くの試験を選ばない。規則と確かめ方は
 docs/cpp-migration/VALIDATION.md §2a、Release のビルドとの突き合わせは tools/ci/validation_closure_check.py。
 """
 import argparse
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 from typing import Any
@@ -584,6 +586,34 @@ BUILD_FILES = ('native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpk
 SHARED_REASON = '共通モデル・保存・権限・oracle境界'
 
 
+NAME_RULE = '名前の規則（2026-11-13 までのまま）: '
+
+
+def name_rule(path, inv):
+    """2026-11-13 までの名前の規則が当たるパスなら (試験の集合, 理由)。当たらなければ None。
+
+    render の、名前に系統のあるファイル（raster_ops・selection、tone・effect・ruler、3d・mannequin）と native/src/app/。
+    この規則は前から受け入れられている（工程出口では Release が全試験を流す）。閉包は、フォルダーごとに全体へ送っていた
+    変更にだけ使う（閉包で置き換えると、ここは前より多く選ぶことになる）。
+    """
+    if path.endswith('.md'):
+        return None
+    all_tests = inv['normal'] | inv['contract']
+    if path.startswith('native/src/app/'):
+        return {n for n in all_tests if n.startswith('test_gui_') or n in ('test_session', 'test_ops_e2e')}, NAME_RULE + 'app は test_gui_*・test_session・test_ops_e2e'
+    if path.startswith('native/src/render/'):
+        name = PurePosixPath(path).stem
+        family = {n for n in inv['normal'] if any(k in n for k in ('image', 'png', 'render', 'stroke', 'raster', 'ops', 'pynum', 'pyrandom'))}
+        if name in ('raster_ops', 'selection'):
+            # (the selection's and the masks' tests too: they draw through raster_ops and selection)
+            return family | {n for n in all_tests if any(k in n for k in ('raster', 'select', 'mask'))}, NAME_RULE + 'render の raster_ops・selection'
+        if any(k in name for k in ('tone', 'effect', 'ruler')):
+            return family | {n for n in all_tests if any(k in n for k in ('tone', 'ruler'))}, NAME_RULE + 'render の tone・effect・ruler'
+        if any(k in name for k in ('3d', 'mannequin')):
+            return family | {n for n in all_tests if '3d' in n}, NAME_RULE + 'render の 3d・mannequin'
+    return None
+
+
 def classify(path, tree, inv, before=None):
     """一つの変更パスの扱い。返すのは (種類, 関係する試験, 理由)。種類は skip / infrastructure / broad / related。
 
@@ -605,6 +635,9 @@ def classify(path, tree, inv, before=None):
         return 'broad', set(), 'ビルド・依存・配布・登録の共通境界'
     if path.startswith(('tools/migration/', 'tools/acceptance/')):
         return 'broad', set(), SHARED_REASON
+    named = name_rule(path, inv)
+    if named:
+        return 'related', named[0], named[1]
     if path == 'native/tests/CMakeLists.txt':
         old = before(path) if before else None
         if old is None or path not in tree().cmake:
@@ -694,10 +727,15 @@ def classify(path, tree, inv, before=None):
     return 'broad', set(), '未分類変更'
 
 
-def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False):
+class TreeIsNotTheHead(Exception):
+    pass
+
+
+def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_is_head=True):
     """paths は基点からの変更パス。before(path) は基点でのファイルの文字を返す関数（無ければ、CMake の変更は全体へ）。
 
     all_tests: 分類の結果によらず、計画の全構成で全通常試験にする（分類を当てにできないとき。構成は増やさない）。
+    tree_is_head: False なら、今の木は差分の head ではない。木を読んで決める分類（閉包・データ）は使わず全体へ送る。
     """
     if phase not in PHASES:
         raise ValueError('不明な検証段階')
@@ -717,15 +755,30 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False):
     infrastructure = False
     native_change = False
     shared = set()
+    narrowed = False
     holder = []
 
     def tree():
+        if not tree_is_head:
+            raise TreeIsNotTheHead
         if not holder:
             holder.append(source_tree(root))
         return holder[0]
 
     for path in paths:
-        kind, tests, reason = classify(path, tree, inv, before)
+        try:
+            kind, tests, reason = classify(path, tree, inv, before)
+        except TreeIsNotTheHead:
+            # (as before the closure: a document starts nothing, a test's own source is that test, anything else is everything)
+            stem = PurePosixPath(path).stem
+            if path.startswith('docs/') or path.endswith('.md'):
+                kind, tests, reason = 'skip', set(), ''
+            elif path.startswith('native/tests/') and not path.startswith('native/tests/support/') and stem in all_tests | inv['perf']:
+                kind, tests, reason = 'related', {stem}, '試験自身のソース（名前から。--head が checkout と違う）'
+                if stem in inv['perf']:
+                    reasons.append('性能試験変更: 別の性能gateを必須')
+            else:
+                kind, tests, reason = 'broad', set(), '--head が checkout している版と違う（閉包は今の木を読む）: 全体へ拡大'
         classification[path] = kind + ('' if kind in ('skip', 'infrastructure') else f': {reason}' + (f'（{len(tests)} 試験）' if kind == 'related' else ''))
         if kind == 'skip':
             continue
@@ -739,11 +792,16 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False):
             reasons.append(reason)
             continue
         related |= tests & all_tests
+        # (a path the policy of 2026-11-13 sent to every test — now decided by the closure —, or one it had a rule for:
+        # the rules by names, a test's own source)
+        if not (reason.startswith(NAME_RULE) or path.startswith('native/tests/') and not path.startswith('native/tests/support/')
+                and PurePosixPath(path).stem in all_tests | inv['perf']):
+            narrowed = True
         if path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/')):
             shared.add(SHARED_REASON)
         elif path.startswith('native/src/render/'):
             shared.add('共有描画経路')
-        if path.startswith('native/tests/') and any(path in tree().tests.get(name, ()) for name in inv['perf']):
+        if path.startswith('native/tests/') and reason == 'ソースの閉包' and any(path in tree().tests.get(name, ()) for name in inv['perf']):
             reasons.append('性能試験変更: 別の性能gateを必須')
     if not broad and native_change and all_tests <= related:
         broad = True
@@ -770,7 +828,9 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False):
         elif infrastructure:
             tier = 'infrastructure' if not native_change else 'related'
             presets = ['linux-release', 'linux-asan', 'windows-debug', 'windows-release']
-            if native_change and phase == 'development':
+            # (with a CI change the plan keeps the four builds; Debug is added for a development diff the rules by names
+            # decide, as before — not for one the closure narrowed from "every test", which never had it)
+            if native_change and phase == 'development' and not narrowed:
                 presets.insert(0, 'linux-debug')
         else:
             tier = 'related' if phase == 'development' else 'integration'
@@ -857,7 +917,7 @@ def last_successful_push(root, repository, branch, head):
 
 
 def head_is_checked_out(root, head):
-    """分類は今の木のソースを読む。head が checkout している版でなければ、当てにしない。"""
+    """閉包は今の木のソースを読む。head が checkout している版でなければ、木を読む分類は使わない。"""
     def commit(ref):
         done = subprocess.run(['git', 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return done.stdout.decode('ascii', 'replace').strip() if done.returncode == 0 else None
@@ -912,9 +972,7 @@ def main():
             shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
         plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None,
-                         all_tests=args.all_tests or not head_is_checked_out(root, args.head))
-        if not args.all_tests and not head_is_checked_out(root, args.head):
-            plan['reasons'].append('--head が checkout している版と違う（分類は今の木を読む）: 全体へ拡大')
+                         all_tests=args.all_tests, tree_is_head=head_is_checked_out(root, args.head))
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:
