@@ -29,6 +29,8 @@
 #include <QStandardItemModel>
 #include <QTemporaryDir>
 #include <QTextDocumentFragment>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QtTest>
 
 #include <functional>
@@ -1101,6 +1103,33 @@ private slots:
             QVERIFY(close->isVisible() && close->isEnabled());
             QVERIFY((close->focusPolicy() & Qt::TabFocus) != 0);
             QVERIFY(band->mapTo(window.get(), QPoint(0, 0)).y() < window->canvas()->mapTo(window.get(), QPoint(0, 0)).y());
+            // (its words reached with the keys too — Tab, never on their own when shown —, and scrolled with them where
+            // the band is short: review 3, P3-6)
+            {
+                auto* words = window->findChild<QScrollArea*>(QStringLiteral("fontsBandWords"));
+                QVERIFY(words != nullptr);
+                QCOMPARE(words->focusPolicy(), Qt::TabFocus);
+                QVERIFY(!words->hasFocus());
+                QVERIFY(QApplication::focusWidget() != words);
+                QVERIFY(!words->accessibleName().isEmpty());
+                const QString was = window->fonts_band_text()->text();
+                window->fonts_band_text()->setText(was.repeated(6));
+                words->setFixedHeight(2 * window->fonts_band_text()->fontMetrics().lineSpacing());
+                QTRY_VERIFY(words->verticalScrollBar()->maximum() > 0);
+                words->setFocus(Qt::TabFocusReason);
+                QTest::keyClick(words, Qt::Key_PageDown);
+                const int paged = words->verticalScrollBar()->value();
+                QVERIFY(paged > 0);
+                QTest::keyClick(words, Qt::Key_Up);
+                QVERIFY(words->verticalScrollBar()->value() < paged);
+                QTest::keyClick(words, Qt::Key_Down);
+                QCOMPARE(words->verticalScrollBar()->value(), paged);
+                QTest::keyClick(words, Qt::Key_PageUp);
+                QCOMPARE(words->verticalScrollBar()->value(), 0);
+                words->setMinimumHeight(0);
+                words->setMaximumHeight(QWIDGETSIZE_MAX);
+                window->fonts_band_text()->setText(was);
+            }
             // (another book opened beside it has nothing said of it; come back to, this one's band is there again)
             {
                 const auto other = gui_test::path_of(tmp.path() + "/other");

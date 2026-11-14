@@ -101,15 +101,17 @@ QString qpath(const fs::path& path) { return QString::fromStdString(core::path_t
 // fonts@1: the words of the band above the page, in a scrolling box as tall as they are wrapped at its width — and, in a
 // window too short or too narrow for them and the page (a small screen with its docks: a book made new whose face's file is not on the
 // computer), no taller than the room it is given, two lines at the least, the rest scrolled to (never pushing the page
-// out of the window).
+// out of the window). Reached with Tab — never taking the keys when it is shown, nor when clicked —, its words scroll
+// with the arrow keys and PageUp/PageDown (review 3, P3-6).
 class BandWords : public QScrollArea {
 public:
     explicit BandWords(QLabel* words) : words_(words) {
         setObjectName(QStringLiteral("fontsBandWords"));
+        setAccessibleName(QStringLiteral("書体の知らせの文"));
         setFrameShape(QFrame::NoFrame);
         setWidgetResizable(true);
         setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        setFocusPolicy(Qt::NoFocus);
+        setFocusPolicy(Qt::TabFocus);
         setWidget(words);
         viewport()->setAutoFillBackground(false);
         words->setAutoFillBackground(false);
