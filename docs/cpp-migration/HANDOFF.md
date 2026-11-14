@@ -102,7 +102,7 @@
 - `formats/checks.cpp`: `font_not_installed`（警告）。追加のキーを名指しした台詞の書体ファイルが無いとき、「台詞「…」の書体「（日本語名）」のファイルがこのパソコンに見つからないため、いつもの書体で描いた（Genko を入れ直すと直ります）」。追加の 40 キーだけ。
 - `native/src/api/CMakeLists.txt`: `genko` をビルドした後、ビルドの木に `<genko のフォルダー>/../share/genko-studio/fonts` を作る（Unix は `native/resources/fonts` へのリンク、Windows はコピー）。
 - 文書: `docs/cpp-migration/schema-v4.md` の §3 の表に `fonts@1`、末尾に「書体」の節。
-- 試験: `native/tests/unit/test_font_catalog.cpp`（95 項目）、`native/tests/unit/test_font_faces.cpp`（453 項目。40 書体それぞれ）、`test_psd_text.cpp` に 3 項目。固定した値は `native/tests/fixtures/render/font-faces-f2.json`（書体ごとに、字のマスクの箱・大きさ・進み幅・SHA-256 と、縦・横・「ルビ＋ふちどり＋極太」の文字組の SHA-256。`GENKO_FONT_FACES_PIN=<ファイル>` で書き直せる）。漢字の数え方の表は `native/tests/data/fonts/kanji-sets.json`（JIS 第 1・第 2 水準と常用漢字。`tools/migration/font_kanji_sets.py` が EUC-JP の表と Unihan 17.0.0 の kJoyoKanji から作る。符号位置の表だけで、描画の基準ではない）。どちらも MANIFEST に sha256 を足した。
+- 試験: `native/tests/unit/test_font_catalog.cpp`（95 項目）、`native/tests/unit/test_font_faces.cpp`（452 項目。40 書体それぞれ）、`test_psd_text.cpp` に 3 項目。固定した値は `native/tests/fixtures/render/font-faces-f2.json`（書体ごとに、字のマスクの箱・大きさ・進み幅・SHA-256 と、縦・横・「ルビ＋ふちどり＋極太」の文字組の SHA-256。`GENKO_FONT_FACES_PIN=<ファイル>` で書き直せる）。漢字の数え方の表は `native/tests/data/fonts/kanji-sets.json`（JIS 第 1・第 2 水準と常用漢字。`tools/migration/font_kanji_sets.py` が EUC-JP の表と Unihan 17.0.0 の kJoyoKanji から作る。符号位置の表だけで、描画の基準ではない）。どちらも MANIFEST に sha256 を足した。
 
 #### 群 2・群 3 が使えるもの
 - 書体の一覧と区分: `core::fonts::entries()`・`categories()`・`find()`。画面に出す名前は `Entry::label`、使い道は `use`、区分は `category`、漢字は `kanji`（full／partial／none）、相方は `fallback`。前からの 7 つは今までの一覧（`lettering::bundled_fonts()`・`lint::bundled_fonts()`）のまま。
@@ -139,10 +139,10 @@
 - `test_psd_text.cpp` には項目を足しただけ。
 
 #### 確かめたこと（Linux Release。関係する試験だけ。全体は流していない）
-- 新しい試験: test_font_catalog 95／95、test_font_faces 453／453、test_psd_text の新しい 3 項目。
+- 新しい試験: test_font_catalog 95／95、test_font_faces 452／452、test_psd_text の新しい 3 項目。
 - 関係する既存の試験（どれも合格）: test_storage、test_model、test_command_bus、test_render_page（font-glyphs・ノンブルの絵・MANIFEST）、test_ruby、test_ruby_render、test_psd_text、test_fukidashi、test_fukidashi_service、test_type_text、test_type_styles、test_shaping、test_material_stamp、test_pcraft、test_service、test_ledger_service_a・b・c、test_contract_type・opentype・type_styles・type_fonts・storage・render_cli・psd_text・psd・pcraft・pipeline・export・materials、test_cli_e2e、test_save_e2e、test_migrate_e2e、test_ops_e2e、test_gui_lines、test_gui_ruby、test_gui_type、test_gui_type_panels、test_gui_fukidashi、test_gui_book、test_gui_ledger_a、test_perf_render、test_package。
 - SKIP: 自分の試験には無い。前からあるもの: test_save_e2e の 16 項目と test_migrate_e2e の 1 項目（Release に故障の注入が無い）、test_perf_render の 1 項目（`GENKO_PERF_GROUPS_PSD` が無い）。
-- 見本の絵（コミットしない）: 作業用の `fonts-f2/`。47 書体（前からの 7 つと追加の 40）を、フキダシの中の縦書き・ルビ付き・ふちどりの 3 通りで 150 dpi の紙面に（各 3 枚）、8 書体を 600 dpi で、書体ファイルが 1 つも無いパソコンでの同じ紙面を 3 枚。`GENKO_FONTS_OUT=<フォルダー>` を付けて test_font_faces を流すと書き直せる。
+- 見本の絵（コミットしない）: 作業用の `fonts-f2/`。47 書体（前からの 7 つと追加の 40）を、縦書きの台詞をフキダシの中・ルビ付き・ふちどりの 3 通りで 150 dpi の紙面に（各 3 枚）、8 書体を 600 dpi で、書体ファイルが 1 つも無いパソコンでの同じ紙面を 3 枚。`GENKO_FONTS_OUT=<フォルダー>` を付けて test_font_faces を流すと書き直せる。
 
 #### 残り・気を付けること
 - かなだけの 3 書体（cute_daruma・hand_slackside・techno_monomaniac）は、かなが小さめ・細めに作られていて、相方の漢字のほうが大きく見える。書体ごとの大きさの合わせは入れていない（見本を見て決めること）。
