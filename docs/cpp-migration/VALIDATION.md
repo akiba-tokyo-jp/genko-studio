@@ -68,6 +68,11 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 - Python pytestはsrc/tests/依存設定/公開op schema/Python workflow変更時だけLinux/Windowsで実行する。C++専用変更のたびにPython全pytestを実行しない。ただし必要なPython参照契約はnative試験に残す。
 - CTestをverboseで一度実行し、Windowsでは同じCTest登録から`-o file,txt`で全選択QtTestのrawログも出す。その一回のrawログでQt Totals/FAIL/SKIPを検査する。ログ取得のための再実行と、失敗後の全exe再実行を廃止する。
 - 0試験、欠落/重複Totals、未完走、未知SKIP、sanitizer診断、構成artifact欠落を成功にしない。Releaseの既知SKIPだけを許可し、Debug/ASan側の同slot PASSを総合auditで要求する。
+- 途中で止まった回・落ちた回は `--resume` で続きから走らせる（利用者決定 2026-11-14。機械の再起動で数時間の全体実行を失うのを止める）。同じ出力先に残った前回の `result.json` と、計画・ソース・実行物・構成が全部一致するときだけ、合格済みの試験を引き継ぎ、残りと落ちた試験だけを走らせる。一つでも違えば引き継がずに最初から走らせ、理由を `resume.reason` に残す。コードを直せばソースが変わるので、全部走らせ直しになる。
+  - 引き継ぐのは、CTestの結果行がPassedで、その試験自身の行にQt失敗・sanitizer診断・未知SKIPがなく、Totalsが一つだけの試験。結果行の無い試験（走っている途中で止まったもの）は走らせ直す。
+  - 各回のrawログは消さない（1回目 `ctest-output.log`、続きの回 `ctest-output.attempt-N.log`）。`result.json` は各回の時刻・並列数・機械・落ちた試験・終わらなかった試験を `attempts` に持ち、`--pair` は全部の回のログを読み直して照合する。
+  - 前の回で落ちて後の回で合格した試験は `audit.rerun_after_failure` に落ちた回と理由が残る。原因（機械のメモリ不足など、コードの外にあるもの）を調べてHANDOFFに書く。原因を書けない落ち方を、走らせ直しの合格で済ませない。
+  - Windows構成は続きから走らせない（QtTestのファイル記録を回ごとに残していない）。CIのjobは機械ごと作り直すので、続きからは手元の実行だけ。
 - CIは自動で実行中候補をcancelしない。手動V3は通常push/PRとconcurrencyを分離する。不要になった同じ検査対象の候補のみ、理由とログを保存して明示的に停止する。cancelは未受入であり成功に数えない。ローカルの意図的停止は理由・元ログ・状態を保存する。
 
 ## 4. 実行入口
@@ -86,6 +91,12 @@ Python参照の契約試験は、参照Pythonを環境変数で渡して実行�
 
 ```sh
 python3 tools/ci/validation_run.py --plan build/validation-plan.json --preset linux-debug --build build/linux-debug --output build/validation/linux-debug
+```
+
+止まった回・落ちた回の続きから走らせるときは、同じ `--output` のまま `--resume` を付ける（前回の記録が無ければ普通に走る。出力先を消さない）:
+
+```sh
+python3 tools/ci/validation_run.py --plan build/validation-plan.json --preset linux-asan --build build/linux-asan --output build/validation/linux-asan --resume
 ```
 
 全構成の `result.json` を同じディレクトリへ集めた後:
