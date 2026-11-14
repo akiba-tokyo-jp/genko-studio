@@ -330,7 +330,8 @@ private slots:
         }
     }
 
-#ifndef _WIN32
+    // (these two are not in the block of what only a Linux folder has: the Windows zip holds the same folder of fonts,
+    // found the same way — beside the program. Nothing in them is of one system; they have been run on Linux only)
     // 書体の追加 F2: the forty added lettering faces are in share/genko-studio/fonts as they were fetched — exactly the
     // files the catalogue lists, each of its size and SHA-256, under its own name (case and all), with the catalogue
     // itself byte for byte, and nothing else there; every one is named in the SBOM, in the package of its licence.
@@ -395,9 +396,11 @@ private slots:
     }
 
     // The installed program finds every one of them, with a bare environment and whatever folder it is run from: the
-    // doctor reads all forty and finds no problem; an agent's list of the faces says each is there; a line in an added
-    // face is drawn in it (not as the same line with no face is). A file taken away, or swapped for another of its size,
-    // is the doctor's problem, by the face's key and file.
+    // doctor finds no problem; an agent's list of the faces says each is there; a line in an added face is drawn in it
+    // (not as the same line with no face is). A file taken away, or swapped for another of its size: for a book that
+    // names the face it is the doctor's problem — the book is drawn otherwise here —, by the face's key and file; for a
+    // book that names none of the forty the book is as well as it was (the doctor looks for the forty files, and reads
+    // only the ones the book names), and a file that is not there is said apart, under "installation".
     void theInstalledProgramFindsEveryFace() {
         const QProcessEnvironment env = bare(home_);
         const QString program = prefix_ + QLatin1Char('/') + kProgram;
@@ -433,24 +436,64 @@ private slots:
         const std::string kiwami = rendered("kiwami", Json{{"size_mm", 6}, {"font", "gothic_kiwami"}});
         QVERIFY(!plain.empty() && !kiwami.empty());
         QVERIFY(kiwami != plain);
-        // a file taken away, and one swapped for zeros of its size: the doctor's problems (and put back)
+        QVERIFY(!well.contains("installation"));
+        // (a book that names two of the faces)
+        const QString named = home_ + QStringLiteral("/books/named.genko");
+        {
+            const QString ops = scratch_.filePath(QStringLiteral("named.json"));
+            Json lines = Json::array();
+            double x = 30;
+            for (const char* font : {"klee", "stick"}) {
+                lines.push_back(Json{{"op", "add_line"}, {"page", 1}, {"id", font}, {"balloon", "none"}, {"x_mm", x}, {"y_mm", 40}, {"w_mm", 30}, {"h_mm", 60},
+                                     {"text", "かなと漢字！"}, {"style", Json{{"size_mm", 6}, {"font", font}}}});
+                x += 40;
+            }
+            gt::write_bytes(ops, genko::core::dump_python(lines));
+            QVERIFY(gt::run(program, {QStringLiteral("new"), named, QStringLiteral("--pages"), QStringLiteral("1")}, env, 120000).exit_code == 0);
+            QVERIFY(gt::run(program, {QStringLiteral("apply"), named, ops}, env, 120000).exit_code == 0);
+        }
+        const auto doctor_of = [&](const QString& which) {
+            const gt::Run run = gt::run(program, {QStringLiteral("doctor"), which}, env, 300000, {}, scratch_.path());
+            Json said = gt::one_line(run.out);
+            said["exit"] = run.exit_code;
+            return said;
+        };
+        const Json named_well = doctor_of(named);
+        QVERIFY2(named_well["ok"] == Json(true) && named_well["problems"].empty() && !named_well.contains("installation") && named_well["exit"] == Json(0),
+                 named_well.dump().c_str());
+        // a file taken away, and one swapped for zeros of its size (and put back)
         const QString folder = prefix_ + QStringLiteral("/share/genko-studio/fonts/");
         QVERIFY(QFile::rename(folder + QStringLiteral("KleeOne-SemiBold.ttf"), folder + QStringLiteral("away.bin")));
         const std::string stick = gt::read_bytes(folder + QStringLiteral("Stick-Regular.ttf"));
         gt::write_bytes(folder + QStringLiteral("Stick-Regular.ttf"), std::string(stick.size(), '\0'));
-        const Json unwell = doctor(program);
+        const Json unwell = doctor_of(named);
+        const Json of_before = doctor_of(book);
         QVERIFY(QFile::rename(folder + QStringLiteral("away.bin"), folder + QStringLiteral("KleeOne-SemiBold.ttf")));
         gt::write_bytes(folder + QStringLiteral("Stick-Regular.ttf"), stick);
+        // (the book that names them: not well, by each face)
         QCOMPARE(unwell["ok"], Json(false));
+        QCOMPARE(unwell["exit"], Json(1));
         QStringList problems;
         for (const Json& problem : unwell["problems"]) problems << QString::fromStdString(problem.get<std::string>());
         QCOMPARE(problems.size(), 2);
         QVERIFY2(problems[0].startsWith(QStringLiteral("lettering font missing: klee (KleeOne-SemiBold.ttf) in ")), qPrintable(problems[0]));
         QVERIFY2(problems[0].endsWith(QStringLiteral("/share/genko-studio/fonts")), qPrintable(problems[0]));
         QVERIFY2(problems[1].startsWith(QStringLiteral("lettering font changed: stick (Stick-Regular.ttf) in ")), qPrintable(problems[1]));
-        QCOMPARE(doctor(program)["problems"], Json::array());
+        QVERIFY2(!unwell.contains("installation"), unwell.dump().c_str());  // (each said once, where it matters)
+        // (the book that names none: as well as it was — and told, apart, of the file that is not there; the file of the
+        // right size is not read for a book that does not use it)
+        QCOMPARE(of_before["ok"], Json(true));
+        QCOMPARE(of_before["exit"], Json(0));
+        QCOMPARE(of_before["problems"], Json::array());
+        QCOMPARE(of_before["installation"].size(), std::size_t(1));
+        QVERIFY2(QString::fromStdString(of_before["installation"][0].get<std::string>()).startsWith(QStringLiteral("lettering font missing: klee (KleeOne-SemiBold.ttf) in ")),
+                 of_before.dump().c_str());
+        const Json again = doctor_of(named);
+        QCOMPARE(again["problems"], Json::array());
+        QVERIFY(!again.contains("installation"));
     }
 
+#ifndef _WIN32
     void installAndUninstallForThePersonAlone() {
         const QString home = scratch_.filePath(QStringLiteral("person"));
         QVERIFY(QDir().mkpath(home));

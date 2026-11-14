@@ -986,7 +986,8 @@ private slots:
         QVERIFY(QString::fromStdString(book()["font_path"].get<std::string>()).endsWith(QStringLiteral("/root/Antique_Genei")));
         // (in for_pages too, as the other files' paths are looked at there)
         const Response nested = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "for_pages", "pages": "all", "ops": [{"op": "set_meta", "font_path": "klee"}]}]})");
-        if (nested.status == 200) QCOMPARE(book()["font_path"], Json("klee"));
+        QVERIFY2(nested.status == 200, nested.body.c_str());
+        QCOMPARE(book()["font_path"], Json("klee"));
     }
 
     // The HTTP API's own lines: no route for a person's approvals and no way for an agent's token to approve, unlock,
