@@ -2,6 +2,7 @@
 
 #include "app/font_palette.hpp"
 
+#include <QApplication>
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QLabel>
@@ -11,6 +12,7 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QSignalBlocker>
+#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -44,6 +46,75 @@ bool there(const QString& key) {
     const std::string k = key.toStdString();
     return !core::fonts::added(k) || render::font_files::file_there(k);
 }
+
+// A face's row: its name on a line of its own (the dock is narrow: beside the sample a name was cut to its first
+// letters), under it what there is to know of it — かなだけ…, ファイルなし —, then its sample. A heading is drawn as the
+// list draws any row.
+class FaceRow : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    static constexpr int kPad = 8, kTop = 5, kGap = 2, kBottom = 6;
+
+    static QFont small(const QFont& font) {
+        QFont out = font;
+        out.setBold(false);
+        if (out.pointSizeF() > 0) out.setPointSizeF(out.pointSizeF() * 0.86);
+        return out;
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        if (index.data(kKey).toString().isEmpty()) return QStyledItemDelegate::sizeHint(option, index);
+        const QStringList lines = index.data(Qt::DisplayRole).toString().split(QLatin1Char('\n'));
+        const QFont font = index.data(Qt::FontRole).isValid() ? qvariant_cast<QFont>(index.data(Qt::FontRole)) : option.font;
+        const int more = static_cast<int>(lines.size()) - 1;
+        return QSize(kSampleW + 2 * kPad,
+                     kTop + QFontMetrics(font).height() + more * QFontMetrics(small(font)).height() + kGap + kSampleH + kBottom);
+    }
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        if (index.data(kKey).toString().isEmpty()) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        // (the row's words as they are kept: the style's own copy has its line breaks turned into separators)
+        const QStringList lines = index.data(Qt::DisplayRole).toString().split(QLatin1Char('\n'));
+        const QIcon icon = opt.icon;
+        // (the row's ground as the look draws it — hover, the chosen row, the marked face's colour —, with no words or
+        // picture of the style's own placing)
+        opt.text.clear();
+        opt.icon = QIcon();
+        opt.features &= ~(QStyleOptionViewItem::HasDisplay | QStyleOptionViewItem::HasDecoration);
+        QStyle* style = opt.widget != nullptr ? opt.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        painter->save();
+        const bool gone = index.data(kMissing).toBool();
+        const QPalette& colours = opt.widget != nullptr ? opt.widget->palette() : opt.palette;
+        const QColor ink = gone ? QColor(theme::tokens().faint) : colours.color(QPalette::Active, QPalette::Text);
+        const QRect room = option.rect.adjusted(kPad, kTop, -kPad, -kBottom);
+        int y = room.top();
+        painter->setFont(opt.font);
+        painter->setPen(ink);
+        const QFontMetrics name(opt.font);
+        painter->drawText(QRect(room.left(), y, room.width(), name.height()), Qt::AlignLeft | Qt::AlignVCenter,
+                          name.elidedText(lines.value(0), Qt::ElideRight, room.width()));
+        y += name.height();
+        const QFont lesser = small(opt.font);
+        const QFontMetrics note(lesser);
+        painter->setFont(lesser);
+        painter->setPen(gone ? ink : QColor(theme::tokens().muted));
+        for (qsizetype i = 1; i < lines.size(); ++i) {
+            painter->drawText(QRect(room.left(), y, room.width(), note.height()), Qt::AlignLeft | Qt::AlignVCenter,
+                              note.elidedText(lines[i], Qt::ElideRight, room.width()));
+            y += note.height();
+        }
+        y += kGap;
+        if (!icon.isNull()) icon.paint(painter, QRect(room.left(), y, kSampleW, kSampleH), Qt::AlignLeft | Qt::AlignVCenter);
+        painter->restore();
+    }
+};
 
 }  // namespace
 
@@ -129,6 +200,7 @@ FontPalette::FontPalette(QWidget* parent) : QWidget(parent) {
     list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     list_->setWordWrap(true);
     list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    list_->setItemDelegate(new FaceRow(list_));
     // (until its sample is made each face shows an empty one of the same size: nothing jumps when the samples come)
     QPixmap blank(face_sample_size());
     blank.fill(Qt::transparent);
@@ -157,7 +229,6 @@ FontPalette::FontPalette(QWidget* parent) : QWidget(parent) {
         item->setData(kLabel, words);
         item->setData(kMissing, false);
         item->setData(kDrawn, false);
-        item->setSizeHint(QSize(0, kSampleH + 10));
         list_->addItem(item);
         order_.push_back(item);
     }
@@ -219,7 +290,7 @@ void FontPalette::refresh_files() {
         }
         if (face == nullptr) continue;
         const bool gone = it->data(kMissing).toBool();
-        it->setForeground(gone ? QBrush(palette().color(QPalette::Disabled, QPalette::Text)) : QBrush());
+        it->setForeground(gone ? QBrush(QColor(theme::tokens().faint)) : QBrush());
         it->setToolTip(gone ? QStringLiteral("%1\n%2\nこの書体のファイルが、このパソコンにありません。アプリを入れ直すと使えます").arg(face->label, face->use)
                             : QStringLiteral("%1\n%2\nクリックで、選んだ台詞がこの書体になります（選んでいなければ、次に置く台詞の書体に）").arg(face->label, face->use));
     }
@@ -233,14 +304,14 @@ void FontPalette::show_sample(QListWidgetItem* it) {
         if (!it->data(kMissing).toBool() && core::fonts::added(key.toStdString())) {
             it->setData(kMissing, true);
             it->setText(it->data(kLabel).toString() + QStringLiteral("\nファイルなし"));
-            it->setForeground(QBrush(palette().color(QPalette::Disabled, QPalette::Text)));
+            it->setForeground(QBrush(QColor(theme::tokens().faint)));
         }
         return;
     }
     // the letters in the list's own text colour (light on a dark look), fainter for a face that cannot be picked
     QPainter painter(&sample);
     painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-    painter.fillRect(sample.rect(), palette().color(it->data(kMissing).toBool() ? QPalette::Disabled : QPalette::Active, QPalette::Text));
+    painter.fillRect(sample.rect(), it->data(kMissing).toBool() ? QColor(theme::tokens().faint) : palette().color(QPalette::Active, QPalette::Text));
     painter.end();
     QIcon icon;
     const QPixmap pixmap = QPixmap::fromImage(sample);
@@ -331,7 +402,7 @@ void FontPalette::changeEvent(QEvent* event) {
     if ((event->type() == QEvent::StyleChange || event->type() == QEvent::PaletteChange) && list_ != nullptr) {
         for (int i = 0; i < next_ && i < static_cast<int>(order_.size()); ++i) show_sample(order_[static_cast<std::size_t>(i)]);
         for (QListWidgetItem* it : order_) {
-            if (it->data(kMissing).toBool()) it->setForeground(QBrush(palette().color(QPalette::Disabled, QPalette::Text)));
+            if (it->data(kMissing).toBool()) it->setForeground(QBrush(QColor(theme::tokens().faint)));
         }
         if (!marked().isEmpty()) mark(marked());
     }

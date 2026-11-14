@@ -26,6 +26,7 @@
 #include <QRegularExpression>
 #include <QStandardItemModel>
 #include <QTemporaryDir>
+#include <QTextDocumentFragment>
 #include <QtTest>
 
 #include <functional>
@@ -71,7 +72,8 @@ struct Studio {
     std::unique_ptr<app::MainWindow> window;
     std::vector<Json> ops;  // every op applied, in order
     // (edit: the book as it is on disk before it opens)
-    explicit Studio(const std::function<void(core::Document&)>& edit = {}) {
+    // (announced false: the book as a build of before 書体の追加 wrote it — its features without fonts@1)
+    explicit Studio(const std::function<void(core::Document&)>& edit = {}, bool announced = true) {
         (void)gui_test::config_folder();
         previous_config = qgetenv("GENKO_CONFIG_DIR");
         qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());
@@ -79,6 +81,12 @@ struct Studio {
         core::Document doc = gui_test::new_doc(2);
         if (edit) edit(doc);
         gui_test::write_book(path, doc);
+        if (!announced) {
+            const QString file = tmp.path() + QStringLiteral("/book/project.json");
+            Json project = core::parse_python_json(genko::test::read_bytes(file));
+            project["features"] = Json::array();
+            genko::test::write_bytes(file, core::dump_python_indent2(project) + "\n");
+        }
         session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
         window = std::make_unique<app::MainWindow>(session);
         window->resize(1300, 900);
@@ -268,6 +276,21 @@ private slots:
         for (const auto& f : faces) keys.insert(f.key);
         QCOMPARE(keys.size(), 47);
         for (const core::fonts::Entry& e : core::fonts::entries()) QVERIFY2(keys.contains(QString::fromStdString(e.key)), e.key.c_str());
+        // a row: the name on a line of its own above the sample, and under the name what there is to know of the face —
+        // whole, not cut, in the dock as it opens; the row as tall as both
+        const int room = list->viewport()->width() - 16;
+        for (const auto& f : faces) {
+            QListWidgetItem* item = s.palette().item(f.key);
+            QFont bold = item->font();
+            bold.setBold(true);
+            QFont lesser = item->font();
+            lesser.setPointSizeF(lesser.pointSizeF() * 0.86);
+            QVERIFY2(QFontMetrics(bold).horizontalAdvance(f.label) <= room, qPrintable(f.label));
+            QVERIFY2(QFontMetrics(lesser).horizontalAdvance(f.mark) <= room, qPrintable(f.mark));
+            const int lines = f.mark.isEmpty() ? 1 : 2;
+            QVERIFY2(list->visualItemRect(item).height() >= QFontMetrics(item->font()).height() * lines + app::face_sample_size().height(), qPrintable(f.label));
+            QVERIFY(list->visualItemRect(item).width() >= app::face_sample_size().width() + 16);
+        }
         // reached with the keys: Enter on a row picks it
         QCOMPARE(s.palette().focusProxy(), static_cast<QWidget*>(list));
         QSignalSpy picked(&s.palette(), &app::FontPalette::picked);
@@ -525,7 +548,9 @@ private slots:
             Studio s;
             const std::string id = s.a_line();
             s.open_palette();
-            const QColor grey = s.palette().palette().color(QPalette::Disabled, QPalette::Text);
+            // (fainter than a row that can be picked: the look's own faint colour, not the words' colour)
+            const QColor grey(app::theme::tokens().faint);
+            QVERIFY(grey != s.palette().palette().color(QPalette::Active, QPalette::Text));
             int gone = 0;
             for (const auto& face : app::lettering::catalog_faces()) {
                 const bool expected = face.added && face.key != QLatin1String("klee") && face.key != QLatin1String("stick") && face.key != QLatin1String("dot16");
@@ -745,6 +770,8 @@ private slots:
     void whatIsSaidWhenABookIsOpened() {
         {  // (nothing to say)
             Studio s([](core::Document& doc) { doc.story.push_back(a_story_line("a", "gothic")); });
+            QVERIFY2(s.window->fonts_notice().isEmpty(), qPrintable(s.window->fonts_notice()));
+            QVERIFY(s.window->fonts_band()->isHidden());
             QVERIFY2(!s.window->last_notice().contains(QStringLiteral("書体")), qPrintable(s.window->last_notice()));
         }
         {  // (a book of now, its files here)
@@ -753,6 +780,8 @@ private slots:
                 doc.features.emplace_back(core::fonts::kFontsFeature);
             });
             QVERIFY(s.window->book().features == std::vector<std::string>{"fonts@1"});
+            QVERIFY2(s.window->fonts_notice().isEmpty(), qPrintable(s.window->fonts_notice()));
+            QVERIFY(s.window->fonts_band()->isHidden());
             QVERIFY2(!s.window->last_notice().contains(QStringLiteral("書体")), qPrintable(s.window->last_notice()));
         }
         {  // (a book of before F2 that wrote "gothic_black" and "dot16" as fonts' names: no fonts@1 in it)
@@ -773,14 +802,39 @@ private slots:
             auto session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
             auto window = std::make_unique<app::MainWindow>(session);
             window->show();
-            QTRY_VERIFY_WITH_TIMEOUT(window->last_notice().contains(QStringLiteral("この版から付属の書体で描きます")), 10000);
-            QCOMPARE(window->last_notice(),
+            QTRY_VERIFY_WITH_TIMEOUT(window->fonts_notice().contains(QStringLiteral("この版から付属の書体で描きます")), 10000);
+            QCOMPARE(window->fonts_notice(),
                      QStringLiteral("この原稿に名前で書いてあった書体「ドットゴシック16」「ZEN角ゴシック Bk」は、この版から付属の書体で描きます。"
                                     "前の版ではアンチックで描いていたので、見た目が変わります"));
-            // (once: come back to, nothing is said again)
-            window->flash(QStringLiteral("ほかの知らせ"), 1000);
+            // (in a band above the page — the whole sentence, wrapped, not the status line's one row —, there until closed)
+            QLabel* band = window->fonts_band();
+            QVERIFY(band->isVisible() && band->wordWrap());
+            const QString shown = QTextDocumentFragment::fromHtml(band->text()).toPlainText();
+            QVERIFY2(shown.startsWith(window->fonts_notice()) && shown.endsWith(QStringLiteral("この知らせを閉じる")), qPrintable(shown));
+            QCOMPARE(shown.size(), window->fonts_notice().size() + 1 + QStringLiteral("この知らせを閉じる").size());
+            QVERIFY(band->text().contains(QStringLiteral("<a href=\"close\">この知らせを閉じる</a>")));
+            QVERIFY(band->mapTo(window.get(), QPoint(0, 0)).y() < window->canvas()->mapTo(window.get(), QPoint(0, 0)).y());
+            // (another book opened beside it has nothing said of it; come back to, this one's band is there again)
+            {
+                const auto other = gui_test::path_of(tmp.path() + "/other");
+                gui_test::write_book(other, gui_test::new_doc(1));
+                window->open_path(other);
+                QTRY_VERIFY_WITH_TIMEOUT(&window->session() != session.get(), 10000);
+                QCoreApplication::processEvents();
+                QVERIFY(band->isHidden());
+                QVERIFY(window->fonts_notice().isEmpty());
+                window->switch_document(0);
+                QTRY_VERIFY_WITH_TIMEOUT(&window->session() == session.get(), 10000);
+                QTRY_VERIFY_WITH_TIMEOUT(band->isVisible(), 10000);
+                QVERIFY(window->fonts_notice().contains(QStringLiteral("この版から付属の書体で描きます")));
+            }
+            // (closed by its own words: gone, and not said again for this book)
+            emit band->linkActivated(QStringLiteral("close"));
+            QVERIFY(band->isHidden());
+            QVERIFY(window->fonts_notice().isEmpty());
             window->note_fonts_on_open(session);
-            QCOMPARE(window->last_notice(), QStringLiteral("ほかの知らせ"));
+            QCoreApplication::processEvents();
+            QVERIFY(band->isHidden());
             window.reset();
             qputenv("GENKO_CONFIG_DIR", previous);
         }
@@ -801,11 +855,11 @@ private slots:
                     doc.font_path = "antique_genei";
                     doc.features.emplace_back(core::fonts::kFontsFeature);
                 });
-                QTRY_VERIFY_WITH_TIMEOUT(s.window->last_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
-                QCOMPARE(s.window->last_notice(),
-                         QStringLiteral("この原稿が使っている書体「源暎アンチック」「筆の楷書」「クレー One SB」のファイルが、このパソコンにありません。"
-                                        "その文字はいつもの書体で描いています（アプリを入れ直すと元の書体に戻ります）")
-                             .replace(QStringLiteral("筆の楷書"), QStringLiteral("佑字 肅")));
+                QTRY_VERIFY_WITH_TIMEOUT(s.window->fonts_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
+                QCOMPARE(s.window->fonts_notice(),
+                         QStringLiteral("この原稿が使っている書体「源暎アンチック」「佑字 肅」「クレー One SB」のファイルが、このパソコンにありません。"
+                                        "その文字はいつもの書体で描いています（アプリを入れ直すと元の書体に戻ります）"));
+                QVERIFY(s.window->fonts_band()->isVisible());
                 QCOMPARE(s.window->faces_not_installed(), (QStringList{QStringLiteral("源暎アンチック"), QStringLiteral("佑字 肅"), QStringLiteral("クレー One SB")}));
                 // (the text tool's first choice still names the book's usual face)
                 QCOMPARE(s.window->text_settings()->font->itemText(0), QStringLiteral("いつもの書体（源暎アンチック）"));
@@ -930,8 +984,9 @@ private slots:
                 doc.story.push_back(a_story_line("b", "/no/such/font.otf", 80));
                 doc.features.emplace_back(core::fonts::kFontsFeature);
             });
-            QTRY_VERIFY_WITH_TIMEOUT(s.window->last_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
-            said << s.window->last_notice();
+            QTRY_VERIFY_WITH_TIMEOUT(s.window->fonts_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
+            said << s.window->fonts_notice();
+            words << QTextDocumentFragment::fromHtml(s.window->fonts_band()->text()).toPlainText();
             s.open_palette();
             for (int i = 0; i < s.palette().list()->count(); ++i) {
                 words << s.palette().list()->item(i)->text();
@@ -955,6 +1010,11 @@ private slots:
             }
         }
         use_source_fonts();
+        {  // (a book of before whose words are a face's key of today)
+            Studio s([](core::Document& doc) { doc.story.push_back(a_story_line("a", "gothic_black")); }, false);
+            QTRY_VERIFY_WITH_TIMEOUT(s.window->fonts_notice().contains(QStringLiteral("この版から")), 10000);
+            said << s.window->fonts_notice();
+        }
         QVERIFY(words.size() > 250);
         QVERIFY(said.size() > 55);
         for (const QString& text : words + said) {
@@ -1003,11 +1063,12 @@ private:
                 QVERIFY(s.window->grab().save(dir + QStringLiteral("/gui-fonts-window%1.png").arg(shade)));
                 // (the palette alone, tall enough for a good part of the list; and searched)
                 s.window->font_dock()->setFloating(true);
-                s.window->font_dock()->resize(330, 1040);
-                QTest::qWait(200);
-                s.window->arm_font_face(QStringLiteral("horror_tegomin"));
+                s.window->font_dock()->resize(300, 1040);
                 QTest::qWait(200);
                 QVERIFY(s.window->font_dock()->grab().save(dir + QStringLiteral("/gui-fonts-palette%1.png").arg(shade)));
+                s.window->arm_font_face(QStringLiteral("horror_tegomin"));
+                QTest::qWait(200);
+                QVERIFY(s.window->font_dock()->grab().save(dir + QStringLiteral("/gui-fonts-palette-marked%1.png").arg(shade)));
                 s.palette().list()->scrollToBottom();
                 QTest::qWait(200);
                 QVERIFY(s.window->font_dock()->grab().save(dir + QStringLiteral("/gui-fonts-palette-end%1.png").arg(shade)));
@@ -1028,14 +1089,15 @@ private:
                     doc.story.push_back(a_story_line("b", "klee", 80));
                     doc.features.emplace_back(core::fonts::kFontsFeature);
                 });
+                app::settings()->setValue(QStringLiteral("ui/theme"), QString::fromLatin1(mode));
                 app::theme::apply(qApp);
-                QTRY_VERIFY_WITH_TIMEOUT(s.window->last_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
+                QTRY_VERIFY_WITH_TIMEOUT(s.window->fonts_notice().contains(QStringLiteral("このパソコンにありません")), 10000);
                 QTest::qWait(300);
                 QVERIFY(s.window->grab().save(dir + QStringLiteral("/gui-fonts-notice-no-file%1.png").arg(shade)));
                 s.open_palette();
                 QTRY_VERIFY_WITH_TIMEOUT(s.palette().samples_drawn(), 60000);
                 s.window->font_dock()->setFloating(true);
-                s.window->font_dock()->resize(330, 1040);
+                s.window->font_dock()->resize(300, 1040);
                 QTest::qWait(300);
                 QVERIFY(s.window->font_dock()->grab().save(dir + QStringLiteral("/gui-fonts-no-file%1.png").arg(shade)));
             }
@@ -1052,9 +1114,11 @@ private:
                 genko::test::write_bytes(file, core::dump_python_indent2(project) + "\n");
                 auto session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
                 auto window = std::make_unique<app::MainWindow>(session);
+                app::settings()->setValue(QStringLiteral("ui/theme"), QString::fromLatin1(mode));
+                app::theme::apply(qApp);
                 window->resize(1300, 900);
                 window->show();
-                QTRY_VERIFY_WITH_TIMEOUT(window->last_notice().contains(QStringLiteral("この版から")), 10000);
+                QTRY_VERIFY_WITH_TIMEOUT(window->fonts_notice().contains(QStringLiteral("この版から")), 10000);
                 QTest::qWait(300);
                 QVERIFY(window->grab().save(dir + QStringLiteral("/gui-fonts-notice-book-of-before%1.png").arg(shade)));
             }

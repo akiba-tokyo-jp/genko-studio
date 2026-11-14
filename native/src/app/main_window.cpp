@@ -350,8 +350,16 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
         session_->write_recovery_copy();
         flash(QStringLiteral("復旧用のコピーを書いています（設定フォルダーの recovery）"), 3000);
     });
+    // (fonts@1: what is said of the book's faces when it is opened — main_window_fonts.cpp)
+    fonts_band_ = new QLabel;
+    fonts_band_->setObjectName(QStringLiteral("unportedBand"));
+    fonts_band_->setWordWrap(true);
+    fonts_band_->setTextFormat(Qt::RichText);
+    fonts_band_->hide();
+    connect(fonts_band_, &QLabel::linkActivated, this, [this](const QString&) { close_fonts_notice(); });
     column->addWidget(unported_);
     column->addWidget(read_only_);
+    column->addWidget(fonts_band_);
     column->addWidget(failure_bar_);
     // (PC5 H-c: the canvas alone in the middle — the tabs' way, as before — or the cells of ウィンドウ → アレンジ around it)
     doc_area_ = new DocArea(canvas_);
@@ -710,7 +718,9 @@ void MainWindow::connect_session() {
     session_links_.push_back(connect(s, &Session::notice, this, [this](const QString& message, bool error) {
         flash(wording::error(message), 6000, error);
     }));
-    // (fonts@1: what is said of the book's faces when it is opened — once a book, after the window has shown it)
+    // (fonts@1: what is said of the book's faces when it is opened — looked at once a book, after the window has shown
+    // it; another book's band is not this one's)
+    if (fonts_band_ != nullptr) fonts_band_->hide();
     QTimer::singleShot(0, this, [this, weak = std::weak_ptr<Session>(session_)] {
         if (const auto opened = weak.lock(); opened && !closed_) note_fonts_on_open(opened);
     });

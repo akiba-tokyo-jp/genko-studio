@@ -10,6 +10,7 @@
 
 #include <QComboBox>
 #include <QDockWidget>
+#include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPointer>
@@ -55,6 +56,13 @@ QString named(const QStringList& labels) {
     for (qsizetype i = 0; i < labels.size() && i < 3; ++i) out += QStringLiteral("「%1」").arg(labels[i]);
     if (labels.size() > 3) out += QStringLiteral("ほか %1 つ").arg(labels.size() - 3);
     return out;
+}
+
+// The band's words: each sentence on a line of its own, then the way to put the band away.
+QString band_text(const QString& words) {
+    QStringList lines;
+    for (const QString& line : words.split(QLatin1Char('\n'))) lines << line.toHtmlEscaped();
+    return lines.join(QStringLiteral("<br>")) + QStringLiteral("　<a href=\"close\">この知らせを閉じる</a>");
 }
 
 }  // namespace
@@ -192,12 +200,16 @@ void MainWindow::note_fonts_on_open(const std::shared_ptr<Session>& session) {
         });
         return;
     }
-    // (once a book: a tab come back to says nothing again)
-    for (const std::weak_ptr<Session>& told : fonts_told_) {
-        if (told.lock() == session) return;
+    // (looked at once a book: a tab come back to shows what was said of it, unless that was closed)
+    for (const auto& [told, words] : fonts_told_) {
+        if (told.lock() != session) continue;
+        fonts_band_->setVisible(!words.isEmpty());
+        if (!words.isEmpty()) fonts_band_->setText(band_text(words));
+        show_usual_face();
+        return;
     }
-    fonts_told_.push_back(session);
-    std::erase_if(fonts_told_, [](const std::weak_ptr<Session>& s) { return s.expired(); });
+    std::erase_if(fonts_told_, [](const auto& s) { return s.first.expired(); });
+    fonts_told_.emplace_back(session, QString());
     const DocPtr doc = session->snapshot();
     if (!doc) return;
     QStringList absent, changed;
@@ -216,8 +228,26 @@ void MainWindow::note_fonts_on_open(const std::shared_ptr<Session>& session) {
         lines << QStringLiteral("この原稿に名前で書いてあった書体%1は、この版から付属の書体で描きます。前の版ではアンチックで描いていたので、見た目が変わります")
                      .arg(named(changed));
     }
-    if (!lines.isEmpty()) flash(lines.join(QLatin1Char('\n')), 12000);
+    const QString words = lines.join(QLatin1Char('\n'));
+    fonts_told_.back().second = words;
+    fonts_band_->setVisible(!words.isEmpty());
+    if (!words.isEmpty()) fonts_band_->setText(band_text(words));
     show_usual_face();
+}
+
+QString MainWindow::fonts_notice() const {
+    if (fonts_band_ == nullptr || fonts_band_->isHidden()) return {};
+    for (const auto& [told, words] : fonts_told_) {
+        if (told.lock() == session_) return words;
+    }
+    return {};
+}
+
+void MainWindow::close_fonts_notice() {
+    for (auto& [told, words] : fonts_told_) {
+        if (told.lock() == session_) words.clear();
+    }
+    if (fonts_band_ != nullptr) fonts_band_->hide();
 }
 
 }  // namespace genko::app

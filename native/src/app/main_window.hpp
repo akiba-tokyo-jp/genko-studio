@@ -477,6 +477,11 @@ public:
     QStringList faces_not_installed() const;
     void note_fonts_on_open(const std::shared_ptr<Session>& session);
     void show_usual_face();
+    // What is said of the open book's faces: a band above the page (the status line cut such a sentence short), there
+    // until it is closed — fonts_notice() its words, nothing when there is none —; closed, it is not said again.
+    QLabel* fonts_band() const { return fonts_band_; }
+    QString fonts_notice() const;
+    void close_fonts_notice();
     BalloonPalette* balloon_palette() const { return balloon_palette_; }
     QDockWidget* balloon_dock() const { return balloon_dock_; }
     void use_balloon_preset(const QString& key, const QString& how = {});
@@ -1601,7 +1606,10 @@ private:
     FontPalette* font_palette_ = nullptr;
     QDockWidget* font_dock_ = nullptr;
     QString armed_face_;  // (the 書体 palette's face the next line placed takes; empty: the text tool's own choice)
-    std::vector<std::weak_ptr<Session>> fonts_told_;  // (the books whose faces were spoken of when they were opened)
+    // (the books whose faces were looked at when they were opened, with what is said of each — nothing: nothing to say,
+    // or the band was closed)
+    std::vector<std::pair<std::weak_ptr<Session>, QString>> fonts_told_;
+    QLabel* fonts_band_ = nullptr;
     QPointer<StoryEditor> story_editor_;
     QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
     bool lines_later_ = false;
