@@ -10,9 +10,15 @@
 //     grown so that the letters keep the size they had (tests/data/fukidashi: the book main 5cf6551a wrote and the size
 //     of its letters there) —, saved and read again without growing twice; a book of now saved and read back the same.
 //
+//   - fukidashi@2 (SPEC BALLOON-02) leaves what was there alone: every page of the two sample books (the book of before and
+//     the sample of now, tests/support/fukidashi_books.hpp) at 150 and 600 dpi, and each as it is saved, are what the build
+//     of before the additions drew and wrote (tests/data/fukidashi/pins, recorded from main da6acebd plus the fonts).
+//
 // GENKO_FUKIDASHI_OUT=<folder> also writes the sample sheets there (the pictures a person looks at).
 
 #include <QtTest>
+
+#include <QCryptographicHash>
 
 #include <QTemporaryDir>
 
@@ -114,6 +120,45 @@ std::array<int, 2> ink_size(const Image& image) {
         }
     }
     return {std::max(0, x1 - x0), std::max(0, y1 - y0)};
+}
+
+
+// --- the pins of before fukidashi@2 (tests/data/fukidashi/pins) -------------------------------------------------------------
+
+std::string sha256_of(std::string_view bytes) {
+    return QCryptographicHash::hash(QByteArrayView(bytes.data(), static_cast<qsizetype>(bytes.size())), QCryptographicHash::Sha256).toHex().toStdString();
+}
+
+// A picture's mode, size and pixels as one sha256.
+std::string picture_sha(const Image& image) {
+    return sha256_of(std::string(image.mode()) + "|" + std::to_string(image.width()) + "x" + std::to_string(image.height()) + "|" + image.tobytes());
+}
+
+// The sample of now with ids that are the same each time (its lines' are already: C1, C2, …), so that it is saved as
+// the same bytes.
+Document pinned_clean_book() {
+    Document doc = genko::test::clean_book();
+    doc.book_id = "fedcba9876543210fedcba9876543210";
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        genko::core::Page& page = doc.edit_page(i);
+        page.id = "pg" + std::to_string(i + 1);
+        for (std::size_t k = 0; k < page.layers.size(); ++k) page.layers[k].id = "ly" + std::to_string(i + 1) + "_" + std::to_string(k);
+        for (std::size_t k = 0; k < page.frames.size(); ++k) page.frames[k].id = "fr" + std::to_string(i + 1) + "_" + std::to_string(k);
+    }
+    return doc;
+}
+
+Document pinned_book(const std::string& name) {
+    return name == "classic" ? genko::test::classic_book(genko::core::PageSpec::a4_mono()) : pinned_clean_book();
+}
+
+// The book as it is saved (project.json's text), but for the version of the build that wrote it.
+std::string saved_text(const Document& doc) {
+    QTemporaryDir dir;
+    genko::storage::AssetStore store(std::filesystem::path(dir.path().toStdString()));
+    Json payload = genko::storage::project_payload_v4(doc, store);
+    payload["writer"]["version"] = "pinned";
+    return genko::core::dump_python_indent2(payload);
 }
 
 }  // namespace
@@ -1213,6 +1258,48 @@ private slots:
         QVERIFY(shape_gauge("capsule", 45, 195, 50, 200) > 1.0);
     }
 
+    // --- what fukidashi@2 leaves alone ----------------------------------------------------------------------------------
+
+    // The additions (the pen's line, the drips, the symbols, the tone and the blend inside any outline: SPEC BALLOON-02)
+    // change nothing of a book that uses none of them: every page of the book of before and of the sample of now, at 150
+    // and at 600 dpi, is the picture the build before the additions drew (its sha256: tests/data/fukidashi/pins/pages.json).
+    void aBookWithoutTheAdditionsIsDrawnAsBefore_data() {
+        QTest::addColumn<QString>("book");
+        QTest::addColumn<int>("dpi");
+        for (const char* book : {"classic", "clean"}) {
+            for (const int dpi : {150, 600}) QTest::newRow(qPrintable(QStringLiteral("%1 at %2").arg(book).arg(dpi))) << QString::fromLatin1(book) << dpi;
+        }
+    }
+    void aBookWithoutTheAdditionsIsDrawnAsBefore() {
+        QFETCH(QString, book);
+        QFETCH(int, dpi);
+        const Json pins = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/pins/pages.json"))));
+        const Json& held = pins[book.toStdString()][std::to_string(dpi)];
+        const Document doc = pinned_book(book.toStdString());
+        QCOMPARE(held.size(), doc.pages.size());
+        for (std::size_t page = 0; page < doc.pages.size(); ++page) {
+            const std::string drawn = picture_sha(page_picture(doc, dpi, page));
+            QVERIFY2(drawn == held[page].get<std::string>(), qPrintable(QStringLiteral("page %1: %2").arg(page + 1).arg(QString::fromStdString(drawn))));
+        }
+    }
+
+    // … and it is saved as the same bytes, naming the same features (tests/data/fukidashi/pins/<book>_project.json: the
+    // book as that build wrote it).
+    void aBookWithoutTheAdditionsIsSavedAsBefore_data() {
+        QTest::addColumn<QString>("book");
+        QTest::newRow("classic") << QStringLiteral("classic");
+        QTest::newRow("clean") << QStringLiteral("clean");
+    }
+    void aBookWithoutTheAdditionsIsSavedAsBefore() {
+        QFETCH(QString, book);
+        const std::string held = genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/pins/%1_project.json").arg(book)));
+        const std::string saved = saved_text(pinned_book(book.toStdString()));
+        QVERIFY(!held.empty());
+        QVERIFY2(saved == held, "the saved book is not the bytes of before");
+        QVERIFY(saved.find("fukidashi@2") == std::string::npos);
+    }
+
+
     // --- the sample sheets (written when asked: GENKO_FUKIDASHI_OUT) -------------------------------------------------------
     // (not a test of their own, and never a SKIP: the audit of a stage's run refuses every skipped slot. As the screenshots
     // of test_gui_color, they are written at the end of a run that names a folder)
@@ -1224,10 +1311,23 @@ private slots:
 private:
     static void write_sample_sheets(const QByteArray& out) {
         const std::filesystem::path dir(out.toStdString());
-        std::filesystem::create_directories(dir);
+        std::filesystem::create_directories(dir / "pins-drawn");
         const auto write = [&](const std::string& name, const Image& image) {
             genko::storage::write_atomic(dir / name, genko::formats::png_bytes(image.convert("RGB")));
         };
+        {  // (what this build draws and writes of the two sample books: beside tests/data/fukidashi/pins)
+            Json pages = Json::object();
+            for (const char* book : {"classic", "clean"}) {
+                const Document pinned = pinned_book(book);
+                for (const int dpi : {150, 600}) {
+                    Json list = Json::array();
+                    for (std::size_t page = 0; page < pinned.pages.size(); ++page) list.push_back(picture_sha(page_picture(pinned, dpi, page)));
+                    pages[book][std::to_string(dpi)] = std::move(list);
+                }
+                genko::storage::write_atomic(dir / "pins-drawn" / (std::string(book) + "_project.json"), saved_text(pinned));
+            }
+            genko::storage::write_atomic(dir / "pins-drawn" / "pages.json", pages.dump(2) + "\n");
+        }
         const Document doc = genko::test::clean_book();
         write("clean-150-kinds.png", page_picture(doc, 150, 0));
         write("clean-150-tails.png", page_picture(doc, 150, 1));
