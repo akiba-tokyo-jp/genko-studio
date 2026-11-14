@@ -242,6 +242,7 @@
 - 新しい試験 `native/tests/gui/test_gui_fonts.cpp`（18 項目）: 一覧と見出し・行の作り、見せるまで何も読まない・作らない（別のスレッドで 40 個を読むこと）、見本が紙面の描き方と同じ画素、検索、選んだ台詞に 1 回で、次の台詞に、かなだけの印、ファイルが無い書体（大きさだけ同じ別物も）、前からの一覧、文字パネルが Qt に書体を足さない、本のいつもの書体、ルビ、配置、開いたときの知らせ（何も言わない本・D2・ファイルなし・別の本との行き来・閉じる）、読んでいる途中の本、見つからないフォント、明るい・暗い、読む言葉が全部日本語（英字 4 字以上の続き・キー無し、です・ます）。
 - `GENKO_FONTS_GUI_OUT=<フォルダー>` を付けて流すと、画面の絵を書く（明るい・暗いそれぞれ: 窓、パレット、印の付いた行、一覧の終わり、検索、文字ツールの設定、ファイルが無いときの知らせとパレット、前の本の知らせ）。作業用の `fonts-f2/gui/` に 18 枚。紙面の見本 36 枚（`fonts-f2/`）も最後のビルドで書き直した（前からの `sfx`・`hand` のかっこの不具合が出ている 1 枚目もそのまま）。
 - **確かめたこと（最後のビルド。Linux Release、2 本ずつ）**: 関係する試験 35 本が合格（1,334 項目。失敗 0、SKIP 0）: test_gui_fonts・test_gui_actions・test_gui_prefs・test_gui_lines・test_gui_type_panels・test_gui_type・test_gui_ruby・test_gui_fukidashi・test_gui_book・test_gui_layout・test_gui_workspace・test_gui_look・test_gui_studio・test_gui_view・test_gui_ledger_a・b・c・test_gui_output・test_gui_file・test_gui_smart・test_gui_tool_presets・test_gui_styles・test_cli_e2e・test_control_channel・test_font_faces（505）・test_font_catalog（96）・test_font_service・test_psd_text・test_contract_prefs・test_mcp_api_e2e・test_service・test_ledger_service_a・b・c・test_package。1 回目に落ちたのは test_gui_lines のメニューの並び 1 つ（上の「変えた期待値」）。
+- 同じ最後のビルドで、描画・保存・Python との照らし合わせの 17 本も流した（612 項目。失敗 0、SKIP 0）: test_render_page・test_storage・test_model・test_command_bus・test_type_text・test_type_styles・test_ruby_render・test_pcraft、test_contract_psd_text・psd・type・type_fonts・export・pcraft・storage・render_cli・pipeline。
 
 #### 残り・確かめていないもの
 - Windows・MSVC・macOS のビルドと配布物、ASan、Debug。Windows のビルドの木では書体をコピーする（157 MB）。
