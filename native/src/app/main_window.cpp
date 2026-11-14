@@ -98,6 +98,41 @@ namespace {
 
 QString qpath(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
 
+// fonts@1: the words of the band above the page, in a scrolling box as tall as they are wrapped at its width — and, in a
+// window too short or too narrow for them and the page (a small screen with its docks: a book made new whose face's file is not on the
+// computer), no taller than the room it is given, two lines at the least, the rest scrolled to (never pushing the page
+// out of the window).
+class BandWords : public QScrollArea {
+public:
+    explicit BandWords(QLabel* words) : words_(words) {
+        setObjectName(QStringLiteral("fontsBandWords"));
+        setFrameShape(QFrame::NoFrame);
+        setWidgetResizable(true);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setFocusPolicy(Qt::NoFocus);
+        setWidget(words);
+        viewport()->setAutoFillBackground(false);
+        words->setAutoFillBackground(false);
+    }
+    QSize sizeHint() const override {
+        const int w = viewport()->width();  // (before it is laid out: the words' own wrapping)
+        return QSize(QScrollArea::sizeHint().width(), (w > 40 ? words_->heightForWidth(w) : words_->sizeHint().height()) + 2 * frameWidth());
+    }
+    QSize minimumSizeHint() const override {
+        return QSize(4 * words_->fontMetrics().horizontalAdvance(QChar(0x3042)),
+                     std::min(sizeHint().height(), 2 * words_->fontMetrics().lineSpacing() + 2 * frameWidth()));
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QScrollArea::resizeEvent(event);
+        if (event->size().width() != event->oldSize().width()) updateGeometry();  // (wrapped again: another height)
+    }
+
+private:
+    QLabel* words_;
+};
+
 // A book opened in a window: its first page read and shown first, the other pages read meanwhile (SPEC PERF-01).
 Session::Options opening_options() {
     Session::Options options;
@@ -373,9 +408,13 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
         fonts_band_close_ = new QPushButton(QStringLiteral("この知らせを閉じる"));
         fonts_band_close_->setObjectName(QStringLiteral("fontsBandClose"));
         connect(fonts_band_close_, &QPushButton::clicked, this, [this] { close_fonts_notice(); });
-        row->addWidget(fonts_band_text_, 1);
+        fonts_band_words_ = new BandWords(fonts_band_text_);
+        row->addWidget(fonts_band_words_, 1);
         row->addWidget(fonts_band_close_, 0, Qt::AlignTop);
     }
+    // (nor wider: the band takes the page's width, whatever its words and button would ask — a narrow window is not made
+    // wider than its screen by it)
+    fonts_band_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     fonts_band_->hide();
     column->addWidget(unported_);
     column->addWidget(read_only_);

@@ -38,6 +38,7 @@
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
+#include "testsupport.hpp"
 #include "studio/schemas.hpp"
 #include "regex_timing.hpp"
 
@@ -733,6 +734,11 @@ private slots:
     void submitNameSavesAsBeforeK1() {
         QTemporaryDir root;
         const auto [sha, hashes] = k1_probe(root.path().toStdString());
+        {  // (the book the probe made is one made new: its usual face 源暎アンチック, which the probe puts back as 8362d5fc wrote it)
+            const Json made = genko::core::parse_python_json(genko::test::read_bytes(root.path() + QStringLiteral("/demo.genko/project.json")));
+            QCOMPARE(made["font_path"], Json("antique_genei"));
+            QCOMPARE(made["features"], Json::array({"fonts@1"}));
+        }
         QCOMPARE(QString::fromStdString(hashes), QStringLiteral("ok ok ok ok sha256:9238450ccae65d3552a809acb132124bebff257ffd829d70b1d159baf285bcd0 sha256:a5df9f572363c47d1ecf212eebaec7fc2b4f7a7a0f9d557401536e6ec39f63d2 sha256:118132feb18e7ebd98e0c56bb5b1c04ce1d142329ad6f22bebe72d9e6c18cf49 sha256:90ebed411f37d33dea3e1aa3b902140b5a964ed9841ae314263651390af245e4 "));
         QCOMPARE(QString::fromStdString(sha), QStringLiteral("bf8114d52015a8b437e610ee8aa6c9a324df51faff4ddda36e157d8372ee678a"));
     }

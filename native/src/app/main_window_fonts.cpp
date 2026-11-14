@@ -277,6 +277,7 @@ void MainWindow::show_fonts_band(const QString& words) {
     QStringList lines;
     for (const QString& line : words.split(QLatin1Char('\n'))) lines << line.toHtmlEscaped();
     fonts_band_text_->setText(lines.join(QStringLiteral("<br>")));
+    if (fonts_band_words_ != nullptr) fonts_band_words_->updateGeometry();  // (as tall as the words wrapped now)
 }
 
 void MainWindow::note_fonts_on_open(const std::shared_ptr<Session>& session) {

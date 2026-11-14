@@ -123,7 +123,7 @@ private slots:
              QStringLiteral("--agent"), QStringLiteral("human:test")},
             &exit);
         QVERIFY2(exit == 0 && painted.value("ok", false), painted.dump().c_str());
-        QVERIFY(!project(book).contains("features") || project(book)["features"].empty());
+        QCOMPARE(project(book)["features"], Json::array({"fonts@1"}));  // (fonts@1: a book `genko new` makes names 源暎アンチック as its usual face — 2026-11-14)
         // the modes: grey 32, Display P3 16, sRGB 32
         const Json modes = genko({QStringLiteral("apply"), book,
                                   write_ops(QStringLiteral("modes.json"),
@@ -136,7 +136,7 @@ private slots:
         const std::string sgray = genko::core::builtin_profile("sgray")->ref();
         const std::string p3 = genko::core::builtin_profile("display-p3")->ref();
         const auto check_modes = [&](const Json& saved) {
-            QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1"}), saved["features"].dump().c_str());
+            QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1", "fonts@1"}), saved["features"].dump().c_str());
             QCOMPARE(saved["pages"][0]["color"].dump(), (Json{{"mode", "gray"}, {"depth", 32}, {"profile", sgray}, {"intent", "relative"}, {"inks", Json::array()}}.dump()));
             QCOMPARE(saved["pages"][1]["color"].dump(), (Json{{"mode", "rgb"}, {"depth", 16}, {"profile", p3}, {"intent", "relative"}}.dump()));
             QCOMPARE(saved["pages"][2]["color"].dump(), (Json{{"mode", "rgb"}, {"depth", 32}, {"intent", "relative"}}.dump()));
@@ -153,7 +153,7 @@ private slots:
         {
             const Json saved = project(book);
             for (const Json& page : saved["pages"]) QVERIFY(!page.contains("color"));
-            QVERIFY(!saved.contains("features") || saved["features"].empty());
+            QCOMPARE(saved["features"], Json::array({"fonts@1"}));  // (fonts@1: a book `genko new` makes names 源暎アンチック as its usual face — 2026-11-14)
         }
         const Json redone = genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, redone.dump().c_str());
@@ -339,7 +339,7 @@ private slots:
                                  &exit);
         QVERIFY2(exit == 0 && modes.value("ok", false), modes.dump().c_str());
         const auto check_modes = [&](const Json& saved) {
-            QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1"}), saved["features"].dump().c_str());
+            QVERIFY2(saved["features"] == Json::array({"color-mode@1", "color-model@1", "fonts@1"}), saved["features"].dump().c_str());
             const Json& indexed = saved["pages"][0]["color"];
             QCOMPARE(indexed["mode"], Json("indexed"));
             QVERIFY2(indexed["table"]["colors"].size() >= 4 && indexed["table"]["colors"].size() <= 8, indexed.dump().c_str());

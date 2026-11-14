@@ -256,6 +256,12 @@ class TestPsdText : public QObject {
         const QString book = tmp_.path() + "/cli.genko";
         auto ran = genko::test::run_genko({"new", book, "--pages", "4", "--title", "PSD文字", "--plain"});
         QCOMPARE(ran.exit_code, 0);
+        // (the book the image way's pins were drawn from has no usual face of its own — アンチック —; a book made new
+        // starts in 源暎アンチック since the user's decision of 2026-11-14, so it is set back to none first)
+        const QString usual = tmp_.path() + "/usual.json";
+        genko::test::write_bytes(usual, R"([{"op": "set_meta", "font_path": ""}])");
+        ran = genko::test::run_genko({"apply", book, usual});
+        QVERIFY2(ran.exit_code == 0, ran.out.constData());
         ran = genko::test::run_genko({"apply", book, genko::test::test_data("psd_text_book.json")});
         QVERIFY2(ran.exit_code == 0, ran.out.constData());
         cli_book_ = book;

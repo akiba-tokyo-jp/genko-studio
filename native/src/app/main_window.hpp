@@ -1628,6 +1628,7 @@ private:
     bool fonts_refitting_ = false;
     bool status_fits(const QString& words) const;
     QLabel* fonts_band_text_ = nullptr;
+    QWidget* fonts_band_words_ = nullptr;  // (the scrolling box the words are in: main_window.cpp's BandWords)
     QPushButton* fonts_band_close_ = nullptr;
     void show_fonts_band(const QString& words);
     QPointer<StoryEditor> story_editor_;

@@ -21,6 +21,16 @@ inline std::pair<std::string, std::string> k1_probe(const std::string& root) {
     if (!file.open(QIODevice::ReadOnly)) return {"no project.json", hashes};
     genko::core::Json project = genko::core::Json::parse(file.readAll().toStdString());
     project["book_id"] = std::string(32, '0');
+    // (a book made new names 源暎アンチック as its usual face since the user's decision of 2026-11-14 — font_path and its
+    // fonts@1 —, which 8362d5fc's did not: the two keys put back as that build wrote them, the rest compared as it was.
+    // A no-op in that build. test_layout_ideas checks the book did name the face.)
+    if (project.value("font_path", std::string()) == "antique_genei") project["font_path"] = "";
+    if (project.contains("features") && project["features"].is_array()) {
+        genko::core::Json kept = genko::core::Json::array();
+        for (const auto& f : project["features"])
+            if (f != genko::core::Json("fonts@1")) kept.push_back(f);
+        project["features"] = kept;
+    }
     for (const auto& page : project["pages"]) hashes += page["plan"]["input_hash"].get<std::string>() + " ";
     const std::string text = project.dump();
     const std::string sha = QCryptographicHash::hash(QByteArray::fromStdString(text), QCryptographicHash::Sha256).toHex().toStdString();

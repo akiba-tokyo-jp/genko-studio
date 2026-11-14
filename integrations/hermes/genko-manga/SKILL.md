@@ -39,11 +39,11 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
   - `lettering`: 作品に合う文字の設定。種類（speech・thought・shout・whisper・narration・sfx・title）ごとに `font`（`inspect` の fonts の key）・`scale`（大きさの倍率）・`weight`。
     ジャンルと雰囲気で選ぶ。空なら台詞と同じ書体。叫びは 1.3 倍・太字、ささやきは 0.8 倍が既定。例:
     - 少年・青年・アクション: 叫び `gothic`、心の声 `maru`、ナレーション `mincho`。
-    - シリアス・ミステリー: ナレーション `mincho`、心の声 `antique`（台詞と同じ）で静かに。
+    - シリアス・ミステリー: ナレーション `mincho`、心の声は書かずに台詞と同じ書体で静かに。
     - ギャグ・コメディ: 叫び `sfx_pop` か `gothic`、ツッコミも `gothic`、心の声 `maru`、ナレーション `maru`。
     - かわいい・日常・恋愛: 台詞 `maru`、心の声 `hand`、ナレーション `maru`。
     書体はほかにもある（`inspect` の fonts の `bundled`。`category` と `use` に使い道がある）。場面で選ぶ:
-    - ふつうの台詞: `antique`（既定）・`antique_genei`・`antigothic_bold`
+    - ふつうの台詞: `antique_genei`（新しく作る本のいつもの書体）・`antique`（前からの本のいつもの書体）・`antigothic_bold`
     - 小声・注記: `gothic_regular`・`antigothic_medium`・`maru_regular`
     - 叫び: `gothic_black`・`gothic_kiwami`・`mincho_black`（重い）・`maru_black`（元気）
     - 心の声・語り: `mincho`・`mincho_shippori`・`mincho_hina`・`klee`
@@ -55,6 +55,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
     - 効果音: `sfx`・`sfx_pop`・`sfx_outline`・`sfx_inline`・`brush_potta`
     - 欄外: `narrow_lubrifont`
     `kanji` が `none`・`partial` の書体は、持っていない漢字を `fallback` の書体で描く。`available` が false の書体は、このパソコンに書体のファイルが無く、アンチックで描かれる。
+    `create_project` で作った本のいつもの書体（`font` を決めていない台詞の書体）は `antique_genei`（源暎アンチック）。前からの本はアンチックのまま。
     `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。声を重くしたいときは、太い書体（`gothic_black`・`gothic_kiwami`・`mincho_black`）を選び、`weight` は `bold` までにする。
   - 人物の `look.clothes_value`: 服の印刷の仕方（`beta` 黒ベタ・`tone` トーン・`white` 白）。報告した人物の範囲に、どのコマでも同じに効く（黒い服が灰色になったりベタになったりしない）。
   - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
