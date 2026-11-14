@@ -14,6 +14,7 @@
 
 #include <QComboBox>
 #include <QDockWidget>
+#include <QElapsedTimer>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
 #include <QLabel>
@@ -317,7 +318,26 @@ private slots:
         QCoreApplication::processEvents();
         const int after_one_turn = s.palette().samples_made();
         QVERIFY2(after_one_turn >= 1 && after_one_turn < 47, qPrintable(QString::number(after_one_turn)));
-        QTRY_VERIFY_WITH_TIMEOUT(s.palette().samples_drawn(), 60000);
+        // (never the list in a turn; each of the forty's files read ahead of its sample by a worker, not by the screen's
+        // thread — which only sets the letters from the bytes that are there)
+        QCOMPARE(s.palette().files_read_ahead(), 0);
+        QElapsedTimer all, turn;
+        all.start();
+        qint64 slowest = 0;
+        int most = 0, turns = 0;
+        while (!s.palette().samples_drawn() && all.elapsed() < 60000) {
+            const int before_turn = s.palette().samples_made();
+            turn.restart();
+            QTest::qWait(2);
+            slowest = std::max(slowest, turn.elapsed());
+            most = std::max(most, s.palette().samples_made() - before_turn);
+            ++turns;
+        }
+        qInfo("the samples: %lld ms in all, %d turns, the slowest turn %lld ms, %d samples at the most in a turn, the slowest sample %d ms",
+              static_cast<long long>(all.elapsed()), turns, static_cast<long long>(slowest), most, s.palette().slowest_sample_ms());
+        QVERIFY2(most < 47, qPrintable(QString::number(most)));
+        QCOMPARE(s.palette().files_read_ahead(), 40);
+        QVERIFY(s.palette().samples_drawn());
         QCOMPARE(s.palette().samples_made(), 47);
         QVERIFY(files::cached_bytes() > 0 && files::cached_bytes() <= files::kCacheBytes);
         for (const auto& face : app::lettering::catalog_faces()) QVERIFY2(!s.palette().item(face.key)->icon().isNull(), qPrintable(face.key));

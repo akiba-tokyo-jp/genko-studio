@@ -1,10 +1,13 @@
 #pragma once
 
+#include <QFutureWatcher>
 #include <QImage>
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
 #include <memory>
+#include <vector>
 
 class QLabel;
 class QLineEdit;
@@ -24,8 +27,10 @@ class QTimer;
 // main_window_fonts.cpp).
 //
 // Nothing is read or drawn until the panel is first shown; then the samples come one at a time between the screen's
-// events (a face's file is read and checked the first time it is drawn: one file a turn, never all at once), so the
-// window is never held. A face whose file is not on this computer is greyed and says so; it cannot be picked.
+// events, and an added face's file (megabytes, read whole and checked against the catalogue) is read ahead of its sample
+// on a worker thread — one file at a time, the next not before this one's sample is drawn —, so the window is never
+// held: the screen's thread only sets five letters from bytes that are already there. A face whose file is not on this
+// computer is greyed and says so; it cannot be picked.
 
 namespace genko::app {
 
@@ -57,6 +62,10 @@ public:
     void draw_samples();
     bool samples_drawn() const { return next_ >= static_cast<int>(order_.size()); }
     int samples_made() const { return next_; }
+    // How many faces' files were read ahead of their samples off the screen's thread, and the longest the screen's
+    // thread was held by one sample (milliseconds) — what the tests and a measurement look at.
+    int files_read_ahead() const { return static_cast<int>(warmed_.size()); }
+    int slowest_sample_ms() const { return slowest_ms_; }
     // A face's own menu (the right click, the menu key; not shown): 選んだ台詞をこの書体にする ("line"), 次に置く台詞を
     // この書体にする ("next"), 選んだルビをこの書体にする ("ruby"), この本のいつもの書体にする ("book").
     std::unique_ptr<QMenu> item_menu(const QString& key);
@@ -73,6 +82,7 @@ protected:
 
 private:
     void draw_some(int most);
+    void step();
     void show_sample(QListWidgetItem* item);
     void filter(const QString& words);
 
@@ -82,6 +92,10 @@ private:
     QTimer* timer_ = nullptr;
     std::vector<QListWidgetItem*> order_;  // (the faces' rows, in the list's order)
     int next_ = 0;
+    QFutureWatcher<void>* warming_ = nullptr;  // (the worker reading the next face's file)
+    QString warming_key_;
+    QSet<QString> warmed_;  // (the faces whose files a worker has read)
+    int slowest_ms_ = 0;
 };
 
 }  // namespace genko::app

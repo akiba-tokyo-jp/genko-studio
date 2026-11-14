@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -15,6 +16,7 @@
 #include <QStyledItemDelegate>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QtConcurrent>
 
 #include <cmath>
 #include <map>
@@ -241,7 +243,12 @@ FontPalette::FontPalette(QWidget* parent) : QWidget(parent) {
     list_->installEventFilter(this);
     timer_ = new QTimer(this);
     timer_->setInterval(0);
-    connect(timer_, &QTimer::timeout, this, [this] { draw_some(1); });  // (one a turn: a face's file is read for its first sample)
+    connect(timer_, &QTimer::timeout, this, [this] { step(); });  // (one a turn)
+    warming_ = new QFutureWatcher<void>(this);
+    connect(warming_, &QFutureWatcher<void>::finished, this, [this] {
+        warmed_.insert(warming_key_);
+        if (isVisible() && next_ < static_cast<int>(order_.size()) && !timer_->isActive()) timer_->start();
+    });
 }
 
 QListWidgetItem* FontPalette::item(const QString& key) const {
@@ -298,7 +305,10 @@ void FontPalette::refresh_files() {
 
 void FontPalette::show_sample(QListWidgetItem* it) {
     const QString key = it->data(kKey).toString();
+    QElapsedTimer held;
+    held.start();
     QImage sample = face_sample(key, devicePixelRatioF());
+    slowest_ms_ = std::max(slowest_ms_, static_cast<int>(held.elapsed()));
     it->setData(kDrawn, true);
     if (sample.isNull()) {  // (not installed — found out for certain when its file was read: said, as a file that is not there)
         if (!it->data(kMissing).toBool() && core::fonts::added(key.toStdString())) {
@@ -326,6 +336,33 @@ void FontPalette::draw_some(int most) {
 }
 
 void FontPalette::draw_samples() { draw_some(static_cast<int>(order_.size())); }
+
+void FontPalette::step() {
+    if (next_ >= static_cast<int>(order_.size())) {
+        timer_->stop();
+        return;
+    }
+    if (warming_->isRunning()) {  // (its file is being read: the sample when that is done)
+        timer_->stop();
+        return;
+    }
+    // an added face's file — and its partner's, for the kanji of the sample — is read and checked on a worker first:
+    // only then is its sample set here (render::font_files is safe to ask from any thread, and keeps what it read)
+    const QString key = order_[static_cast<std::size_t>(next_)]->data(kKey).toString();
+    const std::string face = key.toStdString();
+    if (core::fonts::added(face) && !warmed_.contains(key)) {
+        const core::fonts::Entry* entry = core::fonts::find(face);
+        const std::string partner = entry != nullptr ? entry->fallback : std::string();
+        warming_key_ = key;
+        timer_->stop();
+        warming_->setFuture(QtConcurrent::run([face, partner] {
+            (void)render::font_files::present(face);
+            if (!partner.empty()) (void)render::font_files::present(partner);
+        }));
+        return;
+    }
+    draw_some(1);
+}
 
 void FontPalette::filter(const QString& words) {
     const QStringList parts = words.toLower().split(QRegularExpression(QStringLiteral("[\\s　]+")), Qt::SkipEmptyParts);
@@ -411,7 +448,7 @@ void FontPalette::changeEvent(QEvent* event) {
 void FontPalette::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     refresh_files();  // (forty stats: which files are there now)
-    if (next_ < static_cast<int>(order_.size()) && !timer_->isActive()) timer_->start();
+    if (next_ < static_cast<int>(order_.size()) && !timer_->isActive() && !warming_->isRunning()) timer_->start();
 }
 
 bool FontPalette::eventFilter(QObject* watched, QEvent* event) {
