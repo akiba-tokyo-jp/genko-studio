@@ -14,7 +14,6 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-from typing import Any
 
 PHASES = ('development', 'integration', 'milestone', 'final')
 SAFETY = {
@@ -180,6 +179,11 @@ _DEFINED_OPERATOR = re.compile(r'^(?=[A-Za-z_])' + _NOT_A_DEFINITION + r'[^\n;{}
 _DEFINED_VALUE = re.compile(r'^(?=[A-Za-z_])' + _NOT_A_DEFINITION + r'[^\n;(){}=]*?(?<![A-Za-z0-9_])'
                             r'((?:[A-Za-z_]\w*[ \t]*::[ \t]*)*)([A-Za-z_]\w*)[ \t]*(?:\[[^\]\n]*\][ \t]*)?(?:=|\{|;)', re.M)
 _CALLED = re.compile(r'([A-Za-z_]\w*)[ \t]*\(')
+# (a name a header declares, whatever the form of its declaration: after a type — `int f(`, `Type<int(int)> f(`,
+# `decltype(auto) f(`, `int (*f(`, `template <> int f<int>(` — or first on its line — a constructor)
+_DECLARED = re.compile(r'(?:(?<=[\w>&*\])])[ \t]+|(?<=[*&])|^[ \t]*(?:(?:explicit|virtual|static|inline|constexpr|friend)[ \t]+)*)~?([A-Za-z_]\w*)[ \t]*(?:<[^;(){}\n]*>)?[ \t]*\(', re.M)
+_NOT_NAMES = frozenset('if for while switch return sizeof alignof decltype catch new delete throw case else do static_cast const_cast '
+                       'dynamic_cast reinterpret_cast noexcept alignas typeid operator defined assert requires co_return co_await co_yield'.split())
 _SCOPE = re.compile(r'\b(?:class|struct|union|namespace)\b([^;{}()]*)\{')
 _MOC = re.compile(r'\bQ_(?:OBJECT|GADGET|NAMESPACE)\b')
 _LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
@@ -416,6 +420,14 @@ class SourceTree:
             for match in _DEFINED_VALUE.finditer(text):
                 qualifiers = _IDENT.findall(match.group(1))
                 defined.setdefault((library, '=' + match.group(2)), set()).add((path, qualifiers[-1] if qualifiers else None))
+        # (the words of each implementation file, and who includes a header directly, for the second way below)
+        words = {}
+        includers = {}
+        for path, text in self.text.items():
+            if path.endswith(IMPLEMENTATION_SUFFIXES) and path not in self.executable_sources:
+                words[path] = set(_IDENT.findall(text))
+                for header in self.includes[path]:
+                    includers.setdefault(header, set()).add(path)
         self.implements = {}
         moc = {}
         for path, text in self.text.items():
@@ -432,6 +444,13 @@ class SourceTree:
                 for implementation, qualifier in defined.get((library, name), ()):
                     if qualifier is None or qualifier in scopes:
                         found.add(implementation)
+            # 二つ目の道（レビュー P2-4）: 行頭の定義として読めない書き方（[[nodiscard]]・字下げ・マクロ・template<>・
+            # 関数を返す関数 など）でも漏らさないよう、そのヘッダーを直接インクルードし、ヘッダーが宣言した名前のどれかを
+            # どこかに書いている同じライブラリの実装ファイルも連れて来る（使うだけのファイルも入る: 広めに倒す）。
+            declared_names = set(_DECLARED.findall(text)) - _NOT_NAMES
+            for implementation in includers.get(path, ()):
+                if library_of(implementation) == library and declared_names & words[implementation]:
+                    found.add(implementation)
             self.implements[path] = found
             # AUTOMOC: 一つのライブラリの Q_OBJECT のヘッダーは、一つの生成物（mocs_compilation）にまとまって結ばれる。
             if path.startswith('native/src/') and _MOC.search(text):
@@ -1153,50 +1172,31 @@ def choose_baseline(runs, branch, is_ancestor):
     return None
 
 
-# 再利用するPRは工程出口の全構成だけ。通常PRの関連試験は基点にしない。
-REUSE_CONTROLS = ('.github/workflows/native.yml', 'tools/ci', 'native/cmake',
-                  'native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpkg.json')
-
-
-def choose_milestone_baseline(runs, is_ancestor, same_controls) -> dict[str, Any] | None:
-    for row in runs:
-        sha = row.get('head_sha', '')
-        if (row.get('event') == 'pull_request' and row.get('status') == 'completed'
-                and row.get('conclusion') == 'success'
-                and row.get('head_branch', '').startswith('native/milestone/')
-                and re.fullmatch(r'[0-9a-f]{40}', sha)
-                and is_ancestor(sha) and same_controls(sha)):
-            return dict(row, _verified_full_milestone=True)
-    return None
-
-
 def last_successful_push(root, repository, branch, head):
-    # 公開リポジトリのmetadataだけ。認証/permission追加なし。取得不能は全体へ。
+    """同じ branch の、前に合格した push の run（差分の基点）。公開リポジトリのmetadataだけ。認証/permission追加なし。取得不能は全体へ。
+
+    工程出口（native/milestone/* の PR）の合格は、基点にも「全部流した証跡」にも使わない: 工程出口が ASan と Windows で流すのは
+    その PR 自身の差分に関係する試験だけで、Debug は流さない（2026-11-14 から）。全試験を全構成で流したと言えるのは最終配布候補
+    （--phase final）の run だけで、それは run の一覧からは見分けられない。見分けられないものは使い回さない。
+    """
     import urllib.parse
     import urllib.request
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
         raise ValueError('repository識別子が不正')
     resolved = subprocess.check_output(['git', 'rev-parse', '--verify', '--end-of-options', head + '^{commit}'], cwd=root).decode('ascii').strip()
-    def fetch(event, event_branch=None):
-        query = {'event': event, 'status': 'success', 'per_page': 20}
-        if event_branch is not None:
-            query['branch'] = event_branch
-        url = f'https://api.github.com/repos/{repository}/actions/workflows/native.yml/runs?' + urllib.parse.urlencode(query)
-        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'genko-validation-policy'}), timeout=15) as response:
-            return json.load(response)['workflow_runs']
+
     def ancestor(sha):
         return subprocess.run(['git', 'merge-base', '--is-ancestor', sha, resolved], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
-    def controls(sha):
-        return subprocess.run(['git', 'diff', '--quiet', sha, resolved, '--', *REUSE_CONTROLS], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
-    push = choose_baseline(fetch('push', branch), branch, ancestor)
-    try:
-        full_pr = choose_milestone_baseline(fetch('pull_request'), ancestor, controls)
-    except (OSError, ValueError, KeyError):
-        # 照合できるpush基点があればそれを使い、照合不能なPRを合格扱いにしない。
-        return push
-    if full_pr and (not push or subprocess.run(['git', 'merge-base', '--is-ancestor', push['head_sha'], full_pr['head_sha']], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0):
-        return full_pr
-    return push
+    return choose_baseline(fetch_runs(repository, 'push', branch), branch, ancestor)
+
+
+def fetch_runs(repository, event, branch):
+    import urllib.parse
+    import urllib.request
+    query = {'event': event, 'status': 'success', 'per_page': 20, 'branch': branch}
+    url = f'https://api.github.com/repos/{repository}/actions/workflows/native.yml/runs?' + urllib.parse.urlencode(query)
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'genko-validation-policy'}), timeout=15) as response:
+        return json.load(response)['workflow_runs']
 
 
 def head_is_checked_out(root, head):
@@ -1243,20 +1243,14 @@ def main():
             base = None
             baseline_error = str(error)
     paths = changed_paths(root, base, args.head) if base else []
-    if (evidence and evidence.get('event') == 'pull_request'
-            and evidence.get('_verified_full_milestone') and not paths
-            and args.phase == 'integration'):
-        plan = {'schema': 1, 'phase': args.phase, 'paths': [], 'tier': 'reused-full-milestone',
-                'has_native': False, 'matrix': {'include': []},
-                'performance_required': False,
-                'reasons': ['全構成合格PRと全tree・検証制御が同一。証跡を再使用し再buildしない']}
-    else:
-        def before(path):
-            # (the file as it was at the base: None when it was not there)
-            shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
-        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None,
-                         all_tests=args.all_tests, tree_is_head=head_is_checked_out(root, args.head))
+    def before(path):
+        # (the file as it was at the base: None when it was not there)
+        shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
+    # (no plan is taken over from another run: a tree that is the same as the last passed push's has no diff, and no diff
+    # is everything)
+    plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None,
+                     all_tests=args.all_tests, tree_is_head=head_is_checked_out(root, args.head))
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:

@@ -82,20 +82,27 @@ class BaselineTests(unittest.TestCase):
         for path in ('native/src/app/canvas.cpp', 'native/tests/unit/test_strokes.cpp', 'docs/cpp-migration/PLAN.md'):
             self.assertEqual(planned('HEAD~1', path)['matrix'], planned('HEAD', path)['matrix'], path)
 
-    def test_full_milestone_pr_can_be_reused_with_identical_controls(self):
-        row = self.row(event='pull_request', head_branch='native/milestone/example')
-        result = policy.choose_milestone_baseline([row], lambda s: True, lambda s: True)
-        self.assertEqual(result['head_sha'], 'a' * 40)
-        self.assertTrue(result['_verified_full_milestone'])
+    def test_a_stage_exits_pass_is_neither_a_base_nor_everything_passed(self):
+        # (review P2-3, changed 2026-11-14: a passed PR of native/milestone/* used to be taken as "every test passed in
+        # every configuration" — as the diff's base, and with the same tree as a plan with nothing to build. A stage exit
+        # now runs ASan and Windows on what its own diff reaches, without Debug: its pass says nothing of the tests it did
+        # not select. What ran everything is a run of the final phase, which the list of runs does not tell: no reuse.)
+        self.assertFalse(hasattr(policy, 'choose_milestone_baseline'))
+        push = self.row('c' * 40)
+        milestone = self.row('d' * 40, event='pull_request', head_branch='native/milestone/example')
+        asked = []
 
-    def test_plain_pr_and_changed_controls_are_not_reused(self):
-        plain = self.row(event='pull_request', head_branch='native/ordinary')
-        full = self.row(event='pull_request', head_branch='native/milestone/example')
-        self.assertIsNone(policy.choose_milestone_baseline([plain], lambda s: True, lambda s: True))
-        self.assertIsNone(policy.choose_milestone_baseline([full], lambda s: True, lambda s: False))
-        self.assertIsNone(policy.choose_milestone_baseline([full], lambda s: False, lambda s: True))
+        def fetch(repository, event, branch):
+            asked.append((event, branch))
+            return [milestone, push] if event == 'push' else [milestone]
+        with mock.patch.object(policy, 'fetch_runs', fetch), mock.patch.object(policy.subprocess, 'check_output', return_value=b'e' * 40), \
+                mock.patch.object(policy.subprocess, 'run', return_value=mock.Mock(returncode=0)):
+            chosen = policy.last_successful_push(ROOT, 'example/repo', 'native/integration', 'HEAD')
+        self.assertEqual(chosen['head_sha'], 'c' * 40)
+        self.assertEqual(asked, [('push', 'native/integration')])   # (the pull requests' runs are not even read)
 
-    def test_same_tree_of_full_milestone_pr_reuses_evidence_not_empty_tests(self):
+    def test_the_same_tree_as_the_last_pass_is_planned_and_built(self):
+        # (was: a plan of tier reused-full-milestone with nothing in it, schema 1)
         row = self.row(event='pull_request', head_branch='native/milestone/example', _verified_full_milestone=True)
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / 'plan.json'
@@ -103,9 +110,10 @@ class BaselineTests(unittest.TestCase):
             with mock.patch('sys.argv', args), mock.patch.object(policy, 'last_successful_push', return_value=row), mock.patch.object(policy, 'changed_paths', return_value=[]), contextlib.redirect_stdout(io.StringIO()):
                 policy.main()
             plan = json.loads(output.read_text())
-            self.assertEqual(plan['tier'], 'reused-full-milestone')
-            self.assertFalse(plan['has_native'])
-            self.assertEqual(plan['matrix']['include'], [])
+            self.assertEqual((plan['tier'], plan['schema'], plan['has_native']), ('full', 2, True))
+            self.assertTrue(plan['matrix']['include'])
+            self.assertTrue(all(r['suite'] == 'full' for r in plan['matrix']['include']))
+            self.assertIn('差分なし・基点不明: 全体へ拡大', plan['reasons'])
 
 
 if __name__ == '__main__':

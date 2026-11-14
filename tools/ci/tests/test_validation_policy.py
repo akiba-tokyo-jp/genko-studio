@@ -134,11 +134,11 @@ class PolicyTests(unittest.TestCase):
         for name in ('test_precision_merge_controls', 'test_gui_canvas', 'test_contract_psd', 'test_fukidashi'):
             self.assertIn(name, asan)
         # a diff of shared code that does reach every test is the whole suite everywhere, with the reason it had
-        p = self.plan(['native/src/core/model.hpp', 'native/tests/unit/test_material_preview_cache.cpp'], 'integration')
+        p = self.plan(['native/src/core/model.hpp'], 'integration')
         self.assertEqual(p['tier'], 'full')
         self.assertTrue(all(r['suite'] == 'full' for r in p['matrix']['include']))
         self.assertIn('共通モデル・保存・権限・oracle境界', p['reasons'])
-        self.assertIn('関係する試験が全試験に及ぶ', p['reasons'])
+        self.assertTrue(p['classification']['native/src/core/model.hpp'].startswith('related: ソースの閉包（'))
 
     def test_unknown_native_file_escalates(self):
         p = self.plan(['native/src/future/new.cpp'])
@@ -340,6 +340,50 @@ class ClosureRuleTests(MadeUpTree):
         for name in ('native/src/core/window.cpp', 'native/src/core/window_part.cpp', 'native/src/render/draw.cpp', 'native/src/api/cli.cpp',
                      'native/src/core/lonely.cpp', 'native/tests/support/testsupport.cpp'):
             self.assertNotIn(name, got, name)
+
+    def test_definitions_that_do_not_read_as_one_at_the_start_of_a_line(self):
+        # (review P2-4: x.cpp defines pa(), declared in p.hpp, and qb, declared in q.hpp. Written in a form the rule of
+        # the line's start does not read, qb left x.cpp "explained" by p.hpp alone, and a change of x.cpp did not reach
+        # the test that includes q.hpp. A header now also brings every file of its library that includes it and says one
+        # of the names it declares.)
+        forms = {
+            'attribute': ('[[nodiscard]] int qb();', '[[nodiscard]] int qb() { return 1; }'),
+            'indented': ('int qb();', 'namespace genko {\n    int qb() { return 1; }\n}'),
+            'macro': ('int qb();', '#define DEFINE_INT(name) int name() { return 1; }\nDEFINE_INT(qb)'),
+            'function type': ('std::function<int(int)> qb();', 'std::function<int(int)> qb() { return {}; }'),
+            'specialisation': ('template <class T> int qb();\ntemplate <> int qb<int>();', 'template <> int qb<int>() { return 1; }'),
+            'decltype': ('decltype(auto) qb();', 'decltype(auto) qb() { return 1; }'),
+            'function pointer': ('int (*qb())(int);', 'int (*qb())(int) { return nullptr; }'),
+            'trailing': ('auto qb() -> int;', 'auto\n  qb() -> int { return 1; }'),
+        }
+        for name, (declaration, definition) in forms.items():
+            files = dict(MADE_UP)
+            files['native/src/core/p.hpp'] = 'int pa();\n'
+            files['native/src/core/q.hpp'] = '#include <functional>\n' + declaration + '\n'
+            files['native/src/core/x.cpp'] = '#include "core/p.hpp"\n#include "core/q.hpp"\nint pa() { return 0; }\n' + definition + '\n'
+            files['native/tests/unit/test_alpha.cpp'] = '#include "core/p.hpp"\nvoid t() { pa(); }\n'
+            files['native/tests/unit/test_beta.cpp'] = '#include "core/q.hpp"\nvoid t() { qb(); }\n'
+            with tempfile.TemporaryDirectory() as folder:
+                root = write_tree(folder, files)
+                tree = policy.SourceTree(root)
+                self.assertIn('native/src/core/x.cpp', tree.closure(tree.tests['test_beta']), name)
+                self.assertEqual(tree.tests_reaching('native/src/core/x.cpp'), {'test_alpha', 'test_beta'}, name)
+                rows = {r['preset']: r['tests'] for r in policy.make_plan(['native/src/core/x.cpp'], 'integration', root)['matrix']['include']}
+                self.assertIn('test_beta', rows['linux-asan'], name)
+        # (the second way takes what includes the header and says a name of it: a file that includes it and says none, and
+        # a file of another library, are not brought)
+        files = dict(MADE_UP)
+        files['native/src/core/q.hpp'] = 'int qb();\n'
+        files['native/src/core/silent.cpp'] = '#include "core/q.hpp"\nint other_thing() { return 2; }\n'
+        files['native/src/core/silent.hpp'] = 'int other_thing();\n'
+        files['native/src/render/user.cpp'] = '#include "core/q.hpp"\n#include "render/user.hpp"\nint use() { return qb(); }\n'
+        files['native/src/render/user.hpp'] = 'int use();\n'
+        files['native/tests/unit/test_beta.cpp'] = '#include "core/q.hpp"\nvoid t() { qb(); }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            tree = policy.SourceTree(write_tree(folder, files))
+            got = tree.closure(tree.tests['test_beta'])
+            self.assertNotIn('native/src/core/silent.cpp', got)
+            self.assertNotIn('native/src/render/user.cpp', got)
 
     def test_a_class_declared_ahead_does_not_bring_its_files(self):
         # (a.hpp says `class Later;`: later.cpp defines Later::paint, which a.hpp does not declare — and a static alpha)
