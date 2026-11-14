@@ -29,6 +29,7 @@
 #include <QMenu>
 #include <QScreen>
 #include <QScrollBar>
+#include <QKeyEvent>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -129,6 +130,18 @@ protected:
     void resizeEvent(QResizeEvent* event) override {
         QScrollArea::resizeEvent(event);
         if (event->size().width() != event->oldSize().width()) updateGeometry();  // (wrapped again: another height)
+    }
+    bool event(QEvent* event) override {
+        // (the keys it scrolls with are its own while it has them — not the window's next page or the canvas's nudges)
+        if (event->type() == QEvent::ShortcutOverride) {
+            const auto* key = static_cast<QKeyEvent*>(event);
+            if (key->modifiers() == Qt::NoModifier && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down || key->key() == Qt::Key_PageUp ||
+                                                       key->key() == Qt::Key_PageDown)) {
+                event->accept();
+                return true;
+            }
+        }
+        return QScrollArea::event(event);
     }
 
 private:
