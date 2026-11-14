@@ -491,6 +491,26 @@ class SourceTree:
         return result
 
 
+_TREES = {}
+
+
+def source_tree(root):
+    """root の SourceTree。木（ファイルの名前・大きさ・時刻）が同じあいだは、同じプロセスの中で読み直さない。"""
+    root = Path(root).resolve()
+    seen = []
+    for top in CODE_ROOTS + ('native/resources',):
+        for folder, folders, names in os.walk(root / top):
+            folders.sort()
+            for name in sorted(names):
+                status = os.stat(os.path.join(folder, name))
+                seen.append((folder, name, status.st_size, status.st_mtime_ns))
+    signature = hash(tuple(seen))
+    cached = _TREES.get(str(root))
+    if cached is None or cached[0] != signature:
+        cached = _TREES[str(root)] = (signature, SourceTree(root))
+    return cached[1]
+
+
 def suite_statements(code, names):
     """native/tests/CMakeLists.txt を、試験ごとの文と、それ以外（共通の部分）に分ける。"""
     own = {}
@@ -671,11 +691,12 @@ def make_plan(paths, phase, root, gpu=False, before=None):
         reasons.append('差分なし・基点不明: 全体へ拡大')
     infrastructure = False
     native_change = False
+    shared = set()
     holder = []
 
     def tree():
         if not holder:
-            holder.append(SourceTree(root))
+            holder.append(source_tree(root))
         return holder[0]
 
     for path in paths:
@@ -693,11 +714,16 @@ def make_plan(paths, phase, root, gpu=False, before=None):
             reasons.append(reason)
             continue
         related |= tests & all_tests
+        if path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/')):
+            shared.add(SHARED_REASON)
+        elif path.startswith('native/src/render/'):
+            shared.add('共有描画経路')
         if path.startswith('native/tests/') and any(path in tree().tests.get(name, ()) for name in inv['perf']):
             reasons.append('性能試験変更: 別の性能gateを必須')
     if not broad and native_change and all_tests <= related:
         broad = True
         reasons.append('関係する試験が全試験に及ぶ')
+        reasons += sorted(shared)
     exit_phase = phase in ('milestone', 'final')
     if phase == 'final':
         broad = True
@@ -846,7 +872,11 @@ def main():
                 'performance_required': False,
                 'reasons': ['全構成合格PRと全tree・検証制御が同一。証跡を再使用し再buildしない']}
     else:
-        plan = make_plan(paths, args.phase, root, gpu=args.gpu)
+        def before(path):
+            # (the file as it was at the base: None when it was not there)
+            shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
+        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None)
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:
