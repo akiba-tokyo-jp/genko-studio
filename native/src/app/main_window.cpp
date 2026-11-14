@@ -73,6 +73,7 @@
 #include "app/workspace.hpp"
 #include "app/colours.hpp"
 #include "service/wording.hpp"
+#include "core/font_catalog.hpp"
 #include "core/video.hpp"
 #include "service/control.hpp"
 #include "core/actor.hpp"
@@ -169,13 +170,19 @@ QString Document::title() const {
                                          QString::fromStdString(book.episode.repr()));
 }
 
+core::Document untitled_book() {
+    core::Document doc = core::new_episode("無題", core::Num(std::int64_t{1}), 8, core::PageSpec::a4_mono());
+    core::fonts::make_new_book(doc);
+    return doc;
+}
+
 // --- the window ------------------------------------------------------------------------------------------------------
 
 MainWindow::MainWindow(std::shared_ptr<Session> session) {
     setWindowTitle(QStringLiteral("Genko Studio"));
     look::fit_to_screen(this, QSize(1280, 800), false);  // (a small screen, or a large display scaling: within the screen)
     session_ = session ? std::move(session)
-                       : std::make_shared<Session>(core::new_episode("無題", core::Num(1), 8, core::PageSpec::a4_mono()), std::nullopt);
+                       : std::make_shared<Session>(untitled_book(), std::nullopt);
     documents_.push_back(Document{session_});
     connect(session_.get(), &Session::statusChanged, this, &MainWindow::maybe_backup);  // (each book's saves: バックアップ)
     documents::add(this);

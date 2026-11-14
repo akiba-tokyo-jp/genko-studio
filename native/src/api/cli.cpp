@@ -1647,6 +1647,7 @@ int new_book_of(const Arguments& a, bool ascii) {
         image.background = a.value("--background").value_or(QStringLiteral("white")).toLower().toStdString();
         image.profile = a.value("--profile").value_or(QString()).toStdString();
         made = formats::new_image(image);
+        core::fonts::make_new_book(made.doc);  // (a new image is a book made new; a file opened with --from is not)
     }
     storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
     lock.try_acquire();
@@ -1729,6 +1730,7 @@ int new_book(const QStringList& args, bool ascii) {
     const auto page_count = static_cast<int>(std::clamp<std::int64_t>(*pages, -1, 100000));
     core::Document doc = core::new_episode(a.value("--title").value_or(QStringLiteral("無題")).toStdString(),
                                            core::Num(*episode), page_count, spec);
+    core::fonts::make_new_book(doc);  // (a book made new: 源暎アンチック its usual face — 利用者の決定 2026-11-14)
     storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
     lock.try_acquire();
     if (fs::exists(dest / "project.json", ec)) {

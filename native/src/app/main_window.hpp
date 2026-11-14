@@ -67,6 +67,10 @@ struct WriteGuard;
 
 namespace genko::app {
 
+// The untitled book a window shows when it has none (8 pages, A4, in memory): a book made new, its usual face
+// 源暎アンチック (core::fonts::make_new_book; 利用者の決定 2026-11-14).
+core::Document untitled_book();
+
 class BrushPanel;
 class SourceChoice;  // (PC5 I-e: app/automate_dialogs.hpp)
 class ChannelPanel;

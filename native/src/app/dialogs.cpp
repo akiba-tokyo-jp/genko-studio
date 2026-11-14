@@ -45,6 +45,7 @@
 #include "service/wording.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/font_catalog.hpp"
 #include "core/ids.hpp"
 #include "core/color_model.hpp"
 #include "formats/export.hpp"
@@ -685,6 +686,7 @@ bool NewProjectDialog::create_image() {
         const formats::NewImage made = chosen_image();
         const formats::OpenOptions options = file_open_options();
         image = off_ui([made, options] { return formats::new_image(made, options); });
+        core::fonts::make_new_book(image->doc);  // (a new image is a book made new too)
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), QStringLiteral("画像を作れませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
         return false;
@@ -734,6 +736,7 @@ bool NewProjectDialog::create() {
     core::Document doc = core::new_episode(title->text().trimmed().isEmpty() ? std::string("無題") : title->text().trimmed().toStdString(),
                                            core::Num(static_cast<std::int64_t>(episode->value())), pages->value(), chosen_spec(),
                                            binding->currentData().toString() == QLatin1String("left") ? core::Binding::Left : core::Binding::Right);
+    core::fonts::make_new_book(doc);  // (源暎アンチック its usual face: 利用者の決定 2026-11-14)
     const std::string actor = default_actor();
     // (written on a worker thread: the window keeps answering)
     QFutureWatcher<QString> watcher;

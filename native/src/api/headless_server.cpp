@@ -664,6 +664,7 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
             throw core::Error("exists", "a book is there already: " + core::path_to_utf8(dest / "project.json") + " (/v1/new never writes over a book)");
         }
         core::Document doc = core::new_episode(title, core::Num(episode), static_cast<int>(std::clamp<std::int64_t>(pages, -1, 100000)), spec);
+        core::fonts::make_new_book(doc);  // (源暎アンチック: 利用者の決定 2026-11-14)
         storage::ProjectLock lock(dest, actor);
         lock.try_acquire();
         if (exists()) throw core::Error("exists", "a book is there already: " + core::path_to_utf8(dest / "project.json"));

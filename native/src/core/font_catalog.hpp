@@ -80,4 +80,16 @@ bool uses_feature(const Document& doc);
 // that said the feature when it was read.
 std::vector<std::string> named_unannounced(const Document& doc);
 
+// 新しい本のいつもの書体（利用者の決定 2026-11-14）: a book made new from now on starts with 源暎アンチック as its usual
+// face (font_path), the face of its lines that name none. Only a book being made: a book of before — one with no
+// font_path among them — keeps what it has and is drawn and saved as it was (no font_path: アンチック, as always). On a
+// computer without the face's file the book is drawn in アンチック and the person is told, as for any added face.
+inline constexpr std::string_view kNewBookFace = "antique_genei";
+// Makes a book being made new one of today: kNewBookFace its usual face, and fonts@1 among its features (as its first
+// save will say; a book not yet saved is no book of before whose words happen to name a face). Every way a person
+// makes a book calls it — the 新規 dialog (漫画 and 画像), the window's untitled book, `genko new` (and --image),
+// HTTP /v1/new, MCP create_project and `genko studio init` —; a book opened from a file, a copy, a smart object's
+// contents, an action's or a merge's result do not.
+void make_new_book(Document& doc);
+
 }  // namespace genko::core::fonts

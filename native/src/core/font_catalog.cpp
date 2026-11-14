@@ -189,6 +189,14 @@ std::vector<std::string> named(const Document& doc) {
 
 bool uses_feature(const Document& doc) { return !named(doc).empty(); }
 
+void make_new_book(Document& doc) {
+    doc.font_path = std::string(kNewBookFace);
+    if (std::find(doc.features.begin(), doc.features.end(), std::string(kFontsFeature)) == doc.features.end()) {
+        doc.features.emplace_back(kFontsFeature);
+        std::sort(doc.features.begin(), doc.features.end());
+    }
+}
+
 std::vector<std::string> named_unannounced(const Document& doc) {
     if (std::find(doc.features.begin(), doc.features.end(), std::string(kFontsFeature)) != doc.features.end()) return {};
     return named(doc);
