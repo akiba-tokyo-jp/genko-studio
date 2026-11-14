@@ -623,7 +623,11 @@ private slots:
                 QCOMPARE(set.set.rows[r].chars.size(), of_gothic.set.rows[r].chars.size());
                 for (std::size_t k = 0; k < set.set.rows[r].chars.size(); ++k) {
                     const text::SetChar& c = set.set.rows[r].chars[k];
-                    if (c.text.size() != 1 || lacking[key].find(c.text[0]) == std::u32string::npos) continue;
+                    // (the font each cell is drawn in, as a PSD's editable text names it — the Gothic for those brackets
+                    // alone: review 3, P3-7)
+                    const bool gothic_drawn = c.text.size() == 1 && lacking[key].find(c.text[0]) != std::u32string::npos;
+                    QCOMPARE(c.font, gothic_drawn ? std::string("gothic") : f.path_for(text::face_of(Json(key)), c.text));
+                    if (!gothic_drawn) continue;
                     ++found;
                     const genko::render::BoxF& at = c.box;
                     QCOMPARE(at.x0, of_gothic.set.rows[r].chars[k].box.x0);

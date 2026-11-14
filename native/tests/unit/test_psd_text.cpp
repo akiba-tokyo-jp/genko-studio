@@ -924,6 +924,33 @@ private slots:
         QCOMPARE(report.to_json()["warnings"][0]["kind"], Json("font_missing"));
     }
 
+    // A bracket set down in the effects face, whose font has no vertical form of it, is drawn in the Gothic (括弧の四角を
+    // 直す, 2026-11-14): its editable text names the Gothic for that bracket alone — edited in Photoshop, it is drawn as a
+    // bracket, not the effects font's "no glyph" box (review 3, P3-7). The brackets the font has the form of (「」), and
+    // every other letter, name the effects font; across, every letter does.
+    void aBracketDrawnInTheGothicIsNamedSo() {
+        Document doc = genko::core::new_episode("括弧", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "d", "text": "「あ」『い』（う）", "x_mm": 140, "y_mm": 20, "w_mm": 30, "h_mm": 80, "wrap": "vertical",
+             "balloon": "none", "style": {"font": "sfx"}},
+            {"op": "add_line", "page": 1, "id": "a", "text": "『い』（う）", "x_mm": 40, "y_mm": 20, "w_mm": 60, "h_mm": 20, "wrap": "horizontal",
+             "balloon": "none", "style": {"font": "sfx"}}])"));
+        genko::formats::PsdTextReport report;
+        const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("brackets")), kDpi, genko::formats::PsdText{true, false}, &report);
+        const Read r = read_psd(genko::core::path_to_utf8(written.front()));
+        const psd::TextLayer down = text_of(r, "本文 #d");
+        QVERIFY(down.text == u"「あ」『い』（う）");
+        std::u16string in_gothic, in_sfx;
+        std::size_t at = 0;
+        for (const auto& run : down.runs) {
+            for (std::size_t i = 0; i < run.length && at < down.text.size(); ++i, ++at) (run.style.font == kGothic ? in_gothic : in_sfx).push_back(down.text[at]);
+            QVERIFY(run.style.font == kGothic || run.style.font == kSfx);
+        }
+        QVERIFY(in_gothic == u"『』（）");
+        QVERIFY(in_sfx == u"「あ」いう");
+        QCOMPARE(fonts_of(text_of(r, "本文 #a")), std::string(kSfx));
+    }
+
     // fonts@1 (書体の追加 F2): the forty added faces are named in a PSD by their fonts' own PostScript names, held in the
     // catalogue (core/font_catalog.hpp) — every one of them, with nothing warned of; the text layer of a line set in one
     // names it for every letter, and the layer of a line in a face without kanji names the face and its partner.

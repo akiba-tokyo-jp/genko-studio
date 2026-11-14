@@ -117,14 +117,20 @@ const Json& style_get(const Json& style, const char* key) {
 // Gothic draws it, as a Gothic column draws it (its vertical form, in the same em). Every other letter, every other
 // font of before (they have every vertical form), every added face (strict cmap: their brackets are turned, as before)
 // and every font file keep their font.
-const TrueTypeFont& column_font(Fonts& fonts, const Face& face, std::u32string_view cell, std::int64_t size) {
-    const std::string path = fonts.path_for(face, cell);
-    const TrueTypeFont& font = fonts.truetype(path, size);
+// (the font file it is: a bundled font's name or a file's path — "gothic" for such a bracket. A PSD's editable text names
+// it, so that the bracket edited in Photoshop is drawn as it is here: review 3, P3-7)
+std::string column_path(Fonts& fonts, const Face& face, std::u32string_view cell, std::int64_t size) {
+    std::string path = fonts.path_for(face, cell);
     const auto form = vertical_form(cell);
-    if (!form || font.strict_cmap() || font.glyph_index(*form) != 0) return font;
+    if (!form) return path;
+    const TrueTypeFont& font = fonts.truetype(path, size);
+    if (font.strict_cmap() || font.glyph_index(*form) != 0) return path;
     static constexpr std::array<std::string_view, 6> kOfBefore{"gothic", "mincho", "maru", "hand", "sfx", "sfx_pop"};
-    if (std::find(kOfBefore.begin(), kOfBefore.end(), path) == kOfBefore.end()) return font;
-    return fonts.truetype("gothic", size);
+    if (std::find(kOfBefore.begin(), kOfBefore.end(), path) == kOfBefore.end()) return path;
+    return "gothic";
+}
+const TrueTypeFont& column_font(Fonts& fonts, const Face& face, std::u32string_view cell, std::int64_t size) {
+    return fonts.truetype(column_path(fonts, face, cell, size), size);
 }
 
 }  // namespace
@@ -1048,7 +1054,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
                 set.size = size;
                 set.weight = weight_level(style_get(style, "bold"));
                 set.rgb = rgb;
-                set.font = fonts.path_for(face, sideways ? std::u32string_view(U"A") : across ? std::u32string_view(U"0") : std::u32string_view(cell));
+                set.font = sideways ? fonts.path_for(face, U"A") : across ? fonts.path_for(face, U"0") : column_path(fonts, face, cell, size);
                 set.tcy = across;
                 set.sideways = sideways;
                 const double w = sideways ? turned.at(i).width() : static_cast<double>(size);
@@ -1114,7 +1120,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             }
             where.reading += letter;
             where.letters.push_back(PointD{static_cast<double>(rx), static_cast<double>(top + i * step)});
-            where.fonts.push_back(used);
+            where.fonts.push_back(column_path(fonts, set.face, letter, std::max<std::int64_t>(8, size)));  // (the font it is drawn in)
         }
         where.spacing = static_cast<double>(step - size);
         where.fill = args.fill;
