@@ -25,6 +25,126 @@ SAFETY = {
 }
 
 
+# 写真加工の試験（利用者の決定 2026-11-14:「写真加工のコードを触った工程でだけ ASan にかけるで良いです」）。
+# 写真加工のためにある機能の試験で、漫画のページを作るのには使わないもの。差分が PHOTO_PATHS に触れていないとき、final
+# 以外の段階の linux-asan の行から外す（Release では毎回流す。規則は make_plan、説明は VALIDATION.md §2b）。
+# 迷う試験は入れない: 入れるのは、その試験自身のソースが下の領域だけを確かめているもの。
+PHOTO_TESTS = {
+    # フィルター（render/fx*: エンジン・種類の表・ギャラリー・変形・レンズと消点・Camera Raw フィルター・描画、窓、コマンドライン）
+    'test_fx', 'test_filter_kinds', 'test_fx_gallery', 'test_fx_d2', 'test_fx_lens', 'test_fx_camera_raw', 'test_fx_render',
+    'test_contract_filters_pc4', 'test_gui_filters',
+    # スマートオブジェクト（中身とリンク・スマートフィルター・スタックモード・上の変形・PSD の置かれた層）
+    'test_smart', 'test_smart_decode', 'test_smart_render', 'test_smart_contents', 'test_smart_filters', 'test_psd_smart',
+    'test_smart_stack', 'test_smart_warp', 'test_contract_smart', 'test_contract_psd_smart', 'test_contract_smart_links',
+    'test_gui_smart', 'test_gui_smart_contents',
+    # 色調補正（補正の土台・色の補正・3D LUT・局所の補正・画像の演算）
+    'test_adjust', 'test_adjust_color', 'test_lut3d', 'test_tone_ops', 'test_image_calc', 'test_contract_adjust',
+    'test_contract_adjust_color', 'test_contract_image_ops', 'test_gui_adjust', 'test_gui_adjust_color', 'test_gui_image_ops',
+    # 修復・コンテンツに応じた塗り・マッティング・マジック消しゴム・賢い選択（領域の切り分け）
+    'test_inpaint', 'test_retouch', 'test_segment', 'test_matting', 'test_magic_erase', 'test_contract_retouch',
+    'test_gui_retouch', 'test_gui_select_mask',
+    # カメラ RAW・HDR 統合・パノラマ・自動整列・スキャンの切り抜き
+    'test_raw', 'test_contract_raw', 'test_gui_camera_raw', 'test_hdr_merge', 'test_scancrop', 'test_contract_hdr',
+    'test_features', 'test_panorama', 'test_contract_auto_align',
+    # ビデオの素材とアニメーション
+    'test_footage', 'test_contract_video', 'test_contract_anim', 'test_gui_anim',
+    # 制作の補助（レイヤーカンプ・スライス・変数とデータセット・自動処理・計測・アートボード）
+    'test_layer_comps', 'test_contract_layer_comps', 'test_gui_layer_comps', 'test_slices', 'test_contract_slices',
+    'test_gui_slices', 'test_variables', 'test_contract_variables', 'test_gui_variables', 'test_automate',
+    'test_contract_automate', 'test_gui_automate', 'test_measure', 'test_measure_features', 'test_contract_measure',
+    'test_gui_measure', 'test_contract_artboards', 'test_gui_artboards',
+    # プラグイン（Python・native・WebAssembly、プラグインのホスト）
+    'test_contract_plugins', 'test_contract_wasm_plugins', 'test_native_plugins', 'test_wasm_plugins',
+    # .pcraft の形式
+    'test_pcraft', 'test_contract_pcraft',
+}
+# 写真加工のコード（パスの先頭の一致。「.」で終わる項は、その名前のファイルだけ）。上の領域のためにある製品のソースと、
+# PHOTO_TESTS の試験自身のソース・補助・データ。ここに触れた差分では、写真加工の試験を ASan から外さない。
+PHOTO_PATHS = (
+    # core
+    'native/src/core/adjust', 'native/src/core/color_adjust.', 'native/src/core/filter_kinds.', 'native/src/core/filter_upstream.',
+    'native/src/core/filters.', 'native/src/core/gallery_kinds.', 'native/src/core/lens.', 'native/src/core/vanishing.',
+    'native/src/core/exif.', 'native/src/core/lut3d.', 'native/src/core/exposure.', 'native/src/core/raw_develop.',
+    'native/src/core/smart.', 'native/src/core/anim.', 'native/src/core/ops_anim.', 'native/src/core/video.',
+    'native/src/core/layer_comps.', 'native/src/core/slices.', 'native/src/core/slice_layout.', 'native/src/core/variables.',
+    'native/src/core/measure.', 'native/src/core/artboards.', 'native/src/core/image_assets.', 'native/src/core/production_json.',
+    # render: フィルター
+    'native/src/render/fx', 'native/src/render/filters.', 'native/src/render/render_picture.', 'native/src/render/vanishing.',
+    'native/src/render/ops_filters.', 'native/src/render/psd_filters.',
+    # render: スマートオブジェクト
+    'native/src/render/smart', 'native/src/render/ops_smart', 'native/src/render/psd_smart.', 'native/src/render/stack.',
+    # render: 色調補正
+    'native/src/render/adjust', 'native/src/render/ops_adjust.', 'native/src/render/ops_calc.', 'native/src/render/ops_fade.',
+    'native/src/render/tone_ops.', 'native/src/render/trap.', 'native/src/render/psd_adjust',
+    # render: 修復・マッティング・賢い選択
+    'native/src/render/inpaint.', 'native/src/render/poisson.', 'native/src/render/content_aware.', 'native/src/render/matting.',
+    'native/src/render/ops_matting.', 'native/src/render/ops_retouch.', 'native/src/render/retouch_dabs.',
+    'native/src/render/erase_magic.', 'native/src/render/segment/', 'native/src/render/select_smart.',
+    # render: RAW・HDR・パノラマ・自動整列・スキャン
+    'native/src/render/raw.', 'native/src/render/ops_camera_raw.', 'native/src/render/hdr_merge.', 'native/src/render/hdr_preview.',
+    'native/src/render/panorama.', 'native/src/render/pyramid.', 'native/src/render/features.', 'native/src/render/scancrop.',
+    'native/src/render/ops_align.',
+    # render: ビデオ・アニメーション
+    'native/src/render/footage.', 'native/src/render/ops_video.', 'native/src/render/anim.', 'native/src/render/movie.',
+    'native/src/render/timelapse.',
+    # render: 制作の補助
+    'native/src/render/ops_layer_comps.', 'native/src/render/ops_slices.', 'native/src/render/ops_variables.',
+    'native/src/render/ops_measure.', 'native/src/render/measure_features.', 'native/src/render/ops_artboards.',
+    'native/src/render/ops_production.', 'native/src/render/psd_artboards.', 'native/src/render/psd_comps.',
+    'native/src/render/psd_slices.', 'native/src/render/psd_production.',
+    # render: プラグイン・.pcraft
+    'native/src/render/plugins.', 'native/src/render/plugin_bands.', 'native/src/render/pcraft', 'native/src/render/blake3.',
+    'native/src/render/zstd.',
+    # formats・service
+    'native/src/formats/artboards.', 'native/src/formats/datasets.', 'native/src/formats/psd_adjust.', 'native/src/formats/pcraft_write.',
+    'native/src/formats/image_assets.', 'native/src/formats/smart_files.',
+    'native/src/service/actions.', 'native/src/service/automate', 'native/src/service/script_events.',
+    # app: 上の領域の窓・パネル・メニュー
+    'native/src/app/adjust_forms', 'native/src/app/adjust_panels.', 'native/src/app/image_dialogs.', 'native/src/app/main_window_adjust.',
+    'native/src/app/filter_forms', 'native/src/app/filter_gallery_window.', 'native/src/app/filter_menu.', 'native/src/app/blur_gallery_tool.',
+    'native/src/app/lens_window.', 'native/src/app/lighting_window.', 'native/src/app/vanishing_window.',
+    'native/src/app/smart_panel.', 'native/src/app/layer_panel_smart_filters.', 'native/src/app/main_window_smart.',
+    'native/src/app/main_window_smart_select.', 'native/src/app/select_mask_window.', 'native/src/app/retouch_tools.',
+    'native/src/app/clone_source_panel.', 'native/src/app/content_aware_window.',
+    'native/src/app/camera_raw', 'native/src/app/main_window_raw.', 'native/src/app/hdr_dialog.', 'native/src/app/photomerge_dialog.',
+    'native/src/app/main_window_photomerge.', 'native/src/app/auto_align_dialog.',
+    'native/src/app/timeline.', 'native/src/app/main_window_anim.', 'native/src/app/main_window_video.',
+    'native/src/app/layer_comps_panel.', 'native/src/app/main_window_layer_comps.', 'native/src/app/canvas_slices.',
+    'native/src/app/main_window_slices.', 'native/src/app/variables_dialog.', 'native/src/app/main_window_variables.',
+    'native/src/app/automate_dialogs.', 'native/src/app/main_window_automate.', 'native/src/app/canvas_measure.',
+    'native/src/app/main_window_measure.', 'native/src/app/measurement_log', 'native/src/app/artboard_dialog.',
+    'native/src/app/main_window_artboards.', 'native/src/app/main_window_production.', 'native/src/app/plugins_dialog.',
+    # プラグインのホスト
+    'native/wasm-host/',
+    # 写真加工の試験自身のソース・補助・データ
+    'native/tests/unit/test_fx', 'native/tests/unit/test_filter_kinds.', 'native/tests/contract/test_contract_filters_pc4.',
+    'native/tests/gui/test_gui_filters.',
+    'native/tests/unit/test_smart', 'native/tests/unit/test_psd_smart.', 'native/tests/contract/test_contract_smart',
+    'native/tests/contract/test_contract_psd_smart.', 'native/tests/gui/test_gui_smart',
+    'native/tests/unit/test_adjust', 'native/tests/unit/test_lut3d.', 'native/tests/unit/test_tone_ops.', 'native/tests/unit/test_image_calc.',
+    'native/tests/contract/test_contract_adjust', 'native/tests/contract/test_contract_image_ops.', 'native/tests/gui/test_gui_adjust',
+    'native/tests/gui/test_gui_image_ops.',
+    'native/tests/unit/test_inpaint.', 'native/tests/unit/test_retouch.', 'native/tests/unit/test_segment.', 'native/tests/unit/test_matting.',
+    'native/tests/unit/test_magic_erase.', 'native/tests/contract/test_contract_retouch.', 'native/tests/gui/test_gui_retouch.',
+    'native/tests/gui/test_gui_select_mask.',
+    'native/tests/unit/test_raw.', 'native/tests/contract/test_contract_raw.', 'native/tests/gui/test_gui_camera_raw.',
+    'native/tests/unit/test_hdr_merge.', 'native/tests/unit/test_scancrop.', 'native/tests/contract/test_contract_hdr.',
+    'native/tests/unit/test_features.', 'native/tests/unit/test_panorama.', 'native/tests/contract/test_contract_auto_align.',
+    'native/tests/unit/test_footage.', 'native/tests/contract/test_contract_video.', 'native/tests/contract/test_contract_anim.',
+    'native/tests/contract/anim_cases.json', 'native/tests/gui/test_gui_anim.',
+    'native/tests/unit/test_layer_comps.', 'native/tests/contract/test_contract_layer_comps.', 'native/tests/gui/test_gui_layer_comps.',
+    'native/tests/unit/test_slices.', 'native/tests/contract/test_contract_slices.', 'native/tests/gui/test_gui_slices.',
+    'native/tests/unit/test_variables.', 'native/tests/contract/test_contract_variables.', 'native/tests/gui/test_gui_variables.',
+    'native/tests/unit/test_automate.', 'native/tests/contract/test_contract_automate.', 'native/tests/gui/test_gui_automate.',
+    'native/tests/unit/test_measure', 'native/tests/contract/test_contract_measure.', 'native/tests/gui/test_gui_measure.',
+    'native/tests/contract/test_contract_artboards.', 'native/tests/gui/test_gui_artboards.',
+    'native/tests/contract/test_contract_plugins.', 'native/tests/unit/test_native_plugins.', 'native/tests/unit/test_wasm_plugins.',
+    'native/tests/support/native_test_plugin.', 'native/tests/data/plugins/',
+    'native/tests/unit/test_pcraft.', 'native/tests/contract/test_contract_pcraft.', 'native/tests/data/pcraft/',
+    'native/tests/support/raw_testgen.', 'native/tests/support/psd_build.', 'native/tests/support/comma_locale.',
+)
+
+
 def inventory(root):
     text = (Path(root) / 'native/tests/CMakeLists.txt').read_text(encoding='utf-8')
     result = {'normal': set(), 'contract': set(), 'perf': set(), 'gpu': set()}
@@ -776,11 +896,10 @@ def classify(path, tree, inv, before=None):
     all_tests = inv['normal'] | inv['contract']
     known = all_tests | inv['perf']
 
-    def related(tests, reason, shared=None):
-        tests = set(tests)
-        if all_tests <= tests:
-            return 'broad', tests & all_tests, shared or reason + '（全試験に届く）'
-        return 'related', tests & known, reason
+    def related(tests, reason):
+        # (a path that reaches every test stays "related" here: make_plan widens the plan for it, and knows it was
+        # classified — which a path the rules could not read is not)
+        return 'related', set(tests) & known, reason
 
     if path.startswith('docs/') or path.endswith('.md'):
         # 文書はどこにあっても先に見る（2026-11-13 までと同じ順）。ビルドが埋め込む手引きはその閉包、試験が読んで比べる
@@ -831,7 +950,7 @@ def classify(path, tree, inv, before=None):
             if tree().unexplained(source):
                 return 'broad', set(), '閉包で説明できないソース（どのヘッダーも連れて来ない）'
             tests |= tree().tests_reaching(source)
-        return related(tests, 'ライブラリのソースの並びだけの変更: 足されたソースの閉包', SHARED_REASON)
+        return related(tests, 'ライブラリのソースの並びだけの変更: 足されたソースの閉包')
     if path.startswith(CODE_ROOTS) and path.endswith(CODE_SUFFIXES):
         source = tree()
         if path not in source.text:
@@ -842,8 +961,7 @@ def classify(path, tree, inv, before=None):
         tests = source.tests_reaching(path) | source.tests_naming(path, by_name=False)
         if not tests:
             return 'broad', set(), 'どの試験の閉包にも入らないソース'
-        shared = '共有描画経路' if path.startswith('native/src/render/') else SHARED_REASON if path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/')) else None
-        return related(tests, 'ソースの閉包', shared)
+        return related(tests, 'ソースの閉包')
     if path.startswith('native/') and not path.startswith(('native/src/', 'native/tests/', 'native/resources/')):
         return 'broad', set(), '未分類native変更を安全側で全体へ拡大'
     if path.startswith(('native/src/', 'native/resources/')):
@@ -893,6 +1011,9 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
     if widen:
         broad = True
         reasons.append('指定（--all-tests）: 分類によらず全体へ拡大')
+    # 分類できなかった変更があるか（差分なし・--all-tests・全体へ送ったパス・CI 自身の変更）。写真加工の試験を ASan から
+    # 外すのは、これが無いときだけ。「共有のコードが全試験に届く」は分類できた結果なので、ここには数えない。
+    unsure = ['差分なし' if not paths else '--all-tests'] if broad else []
     infrastructure = False
     native_change = False
     shared = set()
@@ -926,13 +1047,19 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
         if kind == 'infrastructure':
             infrastructure = True
             reasons.append(reason)
+            unsure.append(path)
             continue
         native_change = True
         if kind == 'broad':
             broad = True
             reasons.append(reason)
+            unsure.append(path)
             continue
         related |= tests & all_tests
+        if all_tests <= tests:
+            broad = True
+            reasons.append(SHARED_REASON if path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/'))
+                           else '共有描画経路' if path.startswith('native/src/render/') else reason + '（全試験に届く）')
         # (a path the policy of 2026-11-13 sent to every test — now decided by the closure —, or one it had a rule for:
         # the rules by names, a test's own source)
         if not (reason.startswith(NAME_RULE) or path.startswith('native/tests/') and not path.startswith('native/tests/support/')
@@ -957,6 +1084,8 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
         native_change = True
         reasons.append('工程出口: linux-release は全通常試験、linux-asan と Windows は差分に関係する試験（全体へ拡大した差分は全試験）。Debug は最終配布の前に一度（--phase final）')
     rows = []
+    touched_photo = [p for p in paths if p.startswith(PHOTO_PATHS)]
+    without_photo = []
     if broad or native_change or infrastructure:
         if broad:
             tier = 'full'
@@ -987,18 +1116,31 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
             # (PC5 H-a: the graphics card's way on Xvfb, asked for, on Linux, with the app's tests)
             if gpu and preset.startswith('linux') and (full or any(n.startswith('test_gui_') for n in selected)):
                 selected |= inv['gpu']
+            if preset == 'linux-asan' and phase != 'final' and not unsure and not touched_photo:
+                # 利用者の決定 2026-11-14: 写真加工のコードに触れていない差分では、写真加工の試験を ASan にかけない。
+                without_photo = sorted(selected & PHOTO_TESTS)
+                selected -= PHOTO_TESTS
             if not selected:
                 raise ValueError('native試験の選択が空です')
             why = ('全通常試験: ' + ('最終配布候補' if phase == 'final' else '差分を全体へ拡大' if broad else '工程出口の安全網' if phase == 'milestone' else '統合候補の全契約'
                    ) if full else 'CI自身の変更: 非契約全試験と関係する契約' if infrastructure else '差分に関係する試験と常時保護の対照')
-            reasons.append(f'{preset}: {why}（{len(selected)} 試験）')
+            reasons.append(f'{preset}: {why}（{len(selected)} 試験' + ('、写真加工の試験を除く' if preset == 'linux-asan' and without_photo else '') + '）')
             rows.append({'preset': preset, 'suite': 'full' if full else 'related',
                          'tests': sorted(selected), 'excluded_contracts': excluded})
+        if without_photo:
+            reasons.append(f'写真加工の試験 {len(without_photo)} 本は ASan から外した（利用者の決定 2026-11-14: 写真加工のコードに触れていない。Release では流す）')
+        elif phase == 'final':
+            reasons.append('写真加工の試験は ASan でも流す: 最終配布候補')
+        elif touched_photo:
+            reasons.append('写真加工の試験は ASan に残した: 写真加工のコードに触れている（' + '、'.join(touched_photo[:3]) + (f' ほか {len(touched_photo) - 3}' if len(touched_photo) > 3 else '') + '）')
+        elif unsure:
+            reasons.append('写真加工の試験は ASan に残した: 分類できない変更がある（' + '、'.join(unsure[:3]) + (f' ほか {len(unsure) - 3}' if len(unsure) > 3 else '') + '）')
     else:
         tier = 'documents'
         reasons.append('文書だけの変更: nativeビルドなし')
     return {'schema': 2, 'phase': phase, 'tier': tier, 'paths': paths,
-            'reasons': sorted(set(reasons)), 'classification': classification, 'matrix': {'include': rows},
+            'reasons': sorted(set(reasons)), 'classification': classification, 'asan_without_photo': without_photo,
+            'matrix': {'include': rows},
             'has_native': bool(rows), 'performance_separate': True,
             'performance_required': exit_phase or any('/perf/' in p for p in paths)}
 

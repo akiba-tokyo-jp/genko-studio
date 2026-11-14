@@ -68,10 +68,14 @@ class PolicyTests(unittest.TestCase):
         self.assertLessEqual(policy.SAFETY, asan)
         self.assertIn('test_gui_canvas', asan)
         self.assertNotIn('test_fx_lens', asan)
+        # (canvas.cpp is not photo-editing code: the photo-editing tests the rule by names took are left out of ASan alone)
+        removed = set(p['asan_without_photo'])
+        self.assertTrue({'test_gui_filters', 'test_gui_smart'} <= removed <= policy.PHOTO_TESTS)
+        self.assertFalse(removed & asan)
         for name in ('windows-debug', 'windows-release'):
             self.assertEqual(m[name]['suite'], 'related')
-            self.assertEqual(set(m[name]['tests']), asan - inv['contract'])
-            self.assertEqual(set(m[name]['excluded_contracts']), asan & inv['contract'])
+            self.assertEqual(set(m[name]['tests']), (asan | removed) - inv['contract'])
+            self.assertEqual(set(m[name]['excluded_contracts']), (asan | removed) & inv['contract'])
         self.assertEqual(p['tier'], 'milestone')
         self.assertTrue(p['performance_required'])
         # (why each configuration got its scope)
@@ -121,9 +125,13 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(m['linux-release']['suite'], 'full')
         asan = set(m['linux-asan']['tests'])
         holding = {n for n in everything if 'native/src/core/pynum.cpp' in tree.closure(tree.tests[n]) or 'genko' in tree.programs_of()[n]}
-        self.assertEqual(asan, holding | policy.SAFETY)
-        self.assertGreaterEqual(len(asan), len(everything) - 5)
-        for name in ('test_fx_lens', 'test_smart_filters', 'test_precision_merge_controls', 'test_gui_canvas', 'test_contract_psd'):
+        # (the owner's decision 2026-11-14: pynum.cpp is not photo-editing code, so the photo-editing tests — which hold it
+        # too — are not run under ASan; Release runs them)
+        self.assertEqual(asan, (holding | policy.SAFETY) - policy.PHOTO_TESTS)
+        self.assertEqual(set(p['asan_without_photo']), holding & policy.PHOTO_TESTS)
+        self.assertEqual(set(m['linux-release']['tests']), everything)
+        self.assertEqual(set(m['windows-debug']['tests']), (holding | policy.SAFETY) - inv['contract'])
+        for name in ('test_precision_merge_controls', 'test_gui_canvas', 'test_contract_psd', 'test_fukidashi'):
             self.assertIn(name, asan)
         # a diff of shared code that does reach every test is the whole suite everywhere, with the reason it had
         p = self.plan(['native/src/core/model.hpp', 'native/tests/unit/test_material_preview_cache.cpp'], 'integration')
@@ -183,8 +191,9 @@ class PolicyTests(unittest.TestCase):
             chosen = set(row['tests'])
             for name in inv['normal'] | inv['contract']:
                 uses = 'native/tests/support/testsupport.hpp' in tree.closure(tree.tests[name])
-                self.assertEqual(name in chosen, uses or name in policy.SAFETY, name)
-            self.assertGreater(len(chosen), 150)
+                asan_only_left_out = row['preset'] == 'linux-asan' and name in policy.PHOTO_TESTS
+                self.assertEqual(name in chosen, (uses or name in policy.SAFETY) and not asan_only_left_out, name)
+            self.assertGreater(len(chosen), 150 if row['preset'] != 'linux-asan' else 110)
             self.assertIn('test_contract_psd', chosen)
             self.assertNotIn('test_buildinfo', chosen)
         # a file of the support folder no source names: unknown, everything
@@ -793,6 +802,201 @@ class CMakeChangeTests(MadeUpTree):
         self.assertIsNone(policy.changed_sources_of_library(text, moved))
 
 
+PHOTO_SUITE = SUITE + """
+genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_core LABELS unit)
+genko_test(test_contract_adjust SOURCES contract/test_contract_adjust.cpp DEPS genko_test_support LABELS contract)
+"""
+PHOTO_TREE = dict(MADE_UP)
+PHOTO_TREE.update({
+    'native/tests/CMakeLists.txt': PHOTO_SUITE,
+    'native/tests/unit/test_fx.cpp': '#include "core/a.hpp"\n#include "render/fx.hpp"\nvoid t() { genko::alpha(); genko::blur(); }\n',
+    'native/tests/contract/test_contract_adjust.cpp': '#include "testsupport.hpp"\n#include "core/b.hpp"\nvoid t() { genko::test::run_genko({"apply"}); }\n',
+    'native/src/render/fx.hpp': 'namespace genko { int blur(); }\n',
+    'native/src/render/fx_blur.cpp': '#include "render/fx.hpp"\nnamespace genko {\nint blur() { return 1; }\n}\n',
+    'native/tests/data/pcraft/one.pcraft': 'x',
+})
+
+
+class PhotoRuleTests(MadeUpTree):
+    # (the owner's decision 2026-11-14:「写真加工のコードを触った工程でだけ ASan にかけるで良いです」)
+    files = PHOTO_TREE
+    PHOTO = ['test_contract_adjust', 'test_fx']
+
+    def rows(self, paths, phase='integration', **more):
+        plan = policy.make_plan(paths, phase, self.root, **more)
+        return plan, {r['preset']: set(r['tests']) for r in plan['matrix']['include']}
+
+    def test_shared_code_does_not_bring_the_photo_tests_to_asan(self):
+        # (a.hpp is in test_fx's closure, and genko — which test_contract_adjust runs — holds it: both are selected, and
+        # both are taken out of the ASan row alone)
+        for phase in ('development', 'integration', 'milestone'):
+            plan, rows = self.rows(['native/src/core/a.cpp'], phase)
+            self.assertEqual(plan['asan_without_photo'], self.PHOTO, phase)
+            self.assertEqual(rows['linux-asan'], {'test_alpha', 'test_cli', 'test_contract_gamma', 'test_json'}, phase)
+            for preset, tests in rows.items():
+                if preset != 'linux-asan':
+                    self.assertIn('test_fx', tests, (phase, preset))
+                    self.assertEqual('test_contract_adjust' in tests, preset.startswith('linux'), (phase, preset))
+            self.assertIn('写真加工の試験 2 本は ASan から外した（利用者の決定 2026-11-14: 写真加工のコードに触れていない。Release では流す）', plan['reasons'])
+            self.assertTrue(any(r.startswith('linux-asan: ') and '写真加工の試験を除く' in r for r in plan['reasons']), plan['reasons'])
+        # (shared code that reaches every test — the case the owner accepted —: the plan is "everything", ASan still without them)
+        plan, rows = self.rows(['native/src/core/b.hpp'], 'milestone')
+        self.assertEqual(plan['tier'], 'full')
+        self.assertEqual(plan['asan_without_photo'], self.PHOTO)
+        self.assertEqual(rows['linux-release'] - rows['linux-asan'], set(self.PHOTO))
+        self.assertEqual(rows['windows-debug'], rows['linux-release'] - {'test_contract_gamma', 'test_contract_adjust'})
+
+    def test_photo_code_or_a_photo_tests_own_file_keeps_them(self):
+        for path in ('native/src/render/fx_blur.cpp', 'native/src/render/fx.hpp', 'native/tests/unit/test_fx.cpp',
+                     'native/tests/contract/test_contract_adjust.cpp', 'native/tests/data/pcraft/one.pcraft'):
+            self.assertTrue(path.startswith(policy.PHOTO_PATHS), path)
+        plan, rows = self.rows(['native/src/render/fx_blur.cpp'])
+        self.assertEqual(plan['asan_without_photo'], [])
+        self.assertEqual(rows['linux-asan'], {'test_fx', 'test_json'})
+        self.assertIn('写真加工の試験は ASan に残した: 写真加工のコードに触れている（native/src/render/fx_blur.cpp）', plan['reasons'])
+        plan, rows = self.rows(['native/tests/unit/test_fx.cpp'], 'development')
+        self.assertTrue(all('test_fx' in tests for tests in rows.values()))
+        # a diff of both: the whole selection stays
+        plan, rows = self.rows(['native/src/core/a.cpp', 'native/src/render/fx.hpp'], 'milestone')
+        self.assertEqual(plan['asan_without_photo'], [])
+        self.assertLessEqual({'test_fx', 'test_contract_adjust', 'test_alpha'}, rows['linux-asan'])
+
+    def test_a_diff_the_rules_could_not_classify_keeps_them(self):
+        cases = {
+            'build control': (['native/src/core/a.cpp', 'native/CMakeLists.txt'], {}),
+            'unclassified': (['native/src/core/a.cpp', 'native/package/install.sh'], {}),
+            'gone': (['native/src/core/a.cpp', 'native/src/core/gone.cpp'], {}),
+            'cmake not read': (['native/src/core/a.cpp', 'native/src/core/CMakeLists.txt'], {}),
+            'data nobody names': (['native/src/core/a.cpp', 'native/tests/data/nobody.bin'], {}),
+            'ci': (['native/src/core/a.cpp', 'tools/ci/validation_run.py'], {}),
+            'no diff': ([], {}),
+            'all tests': (['native/src/core/a.cpp'], {'all_tests': True}),
+            'not the head': (['native/src/core/a.cpp'], {'tree_is_head': False}),
+        }
+        for name, (paths, more) in cases.items():
+            for phase in ('development', 'integration', 'milestone'):
+                plan, rows = self.rows(paths, phase, **more)
+                self.assertEqual(plan['asan_without_photo'], [], (name, phase))
+                self.assertLessEqual(set(self.PHOTO), rows['linux-asan'], (name, phase))
+                self.assertTrue(any(r.startswith('写真加工の試験は ASan に残した: 分類できない変更がある') for r in plan['reasons']), (name, plan['reasons']))
+
+    def test_what_is_classified_takes_them_out(self):
+        # (a document, a test's own source, a rule by names, the closure, test data a test names)
+        files = dict(PHOTO_TREE)
+        files['docs/NOTE.md'] = 'note'
+        files['native/src/app/canvas.cpp'] = 'void canvas() {}\n'
+        files['native/tests/CMakeLists.txt'] += 'genko_test(test_gui_filters SOURCES gui/test_gui_filters.cpp LABELS gui)\ngenko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp LABELS gui)\n'
+        files['native/tests/gui/test_gui_filters.cpp'] = 'void t() {}\n'
+        files['native/tests/gui/test_gui_canvas.cpp'] = 'void t() { read(test_data("tables/first.json")); }\n'
+        files['native/tests/data/tables/first.json'] = '{}'
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+            for paths, kept in ((['docs/NOTE.md', 'native/src/core/a.cpp'], {'test_alpha'}),
+                                (['native/tests/unit/test_alpha.cpp'], {'test_alpha'}),
+                                (['native/src/app/canvas.cpp'], {'test_gui_canvas'}),                 # (the rule by names: test_gui_*)
+                                (['native/tests/data/tables/first.json'], {'test_gui_canvas'}),
+                                (['native/src/app/canvas.cpp', 'native/src/core/a.cpp', 'native/tests/data/tables/first.json'], {'test_gui_canvas', 'test_alpha'})):
+                plan = policy.make_plan(paths, 'milestone', root)
+                rows = {r['preset']: set(r['tests']) for r in plan['matrix']['include']}
+                self.assertFalse(rows['linux-asan'] & policy.PHOTO_TESTS, paths)
+                self.assertLessEqual(kept, rows['linux-asan'], paths)
+                self.assertLessEqual({'test_fx', 'test_gui_filters'}, rows['linux-release'], paths)
+            plan = policy.make_plan(['native/src/app/canvas.cpp'], 'integration', root)
+            self.assertEqual(plan['asan_without_photo'], ['test_gui_filters'])
+            self.assertIn('test_gui_filters', {r['preset']: r['tests'] for r in plan['matrix']['include']}['windows-debug'])
+
+    def test_the_final_candidate_runs_them_everywhere(self):
+        for paths in (['native/src/core/a.cpp'], ['docs/x.md'], []):
+            plan, rows = self.rows(paths, 'final')
+            self.assertEqual(plan['asan_without_photo'], [])
+            self.assertEqual(sorted(rows), ['linux-asan', 'linux-debug', 'linux-release', 'windows-debug', 'windows-release'])
+            for preset, tests in rows.items():
+                self.assertIn('test_fx', tests, preset)
+            self.assertEqual(rows['linux-asan'], rows['linux-release'])
+            self.assertIn('写真加工の試験は ASan でも流す: 最終配布候補', plan['reasons'])
+
+    def test_a_plan_without_them_selected_says_nothing_removed(self):
+        plan, rows = self.rows(['native/src/render/draw.cpp'])   # (reaches test_contract_gamma only)
+        self.assertEqual(plan['asan_without_photo'], [])
+        self.assertEqual(rows['linux-asan'], {'test_contract_gamma', 'test_json'})
+
+
+class PhotoListTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tree = policy.source_tree(ROOT)
+        cls.inv = policy.inventory(ROOT)
+        cls.everything = cls.inv['normal'] | cls.inv['contract']
+        cls.tracked = [p for p in subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf-8').split('\0') if p]
+
+    def test_every_photo_test_is_registered_and_none_is_always_run(self):
+        self.assertLessEqual(policy.PHOTO_TESTS, self.everything)
+        self.assertFalse(policy.PHOTO_TESTS & policy.SAFETY)
+        self.assertEqual(len(policy.PHOTO_TESTS), 78)
+        # (no end-to-end test, and none of the tests Release skips slots of — their PASS is asked of the ASan run)
+        self.assertFalse({n for n in policy.PHOTO_TESTS if n.endswith('_e2e')})
+        skipping = {name for name, sources in self.tree.tests.items() if any('fault injection' in self.tree.text[s] for s in sources)}
+        self.assertFalse(skipping & policy.PHOTO_TESTS)
+
+    def test_every_photo_path_names_something_and_no_other_tests_own_source(self):
+        self.assertEqual(len(policy.PHOTO_PATHS), len(set(policy.PHOTO_PATHS)))
+        for prefix in policy.PHOTO_PATHS:
+            self.assertTrue(any(p.startswith(prefix) for p in self.tracked), prefix)
+        owners = {}
+        for name, sources in self.tree.tests.items():
+            for source in sources:
+                owners.setdefault(source, set()).add(name)
+        for path in self.tracked:
+            if path.startswith(policy.PHOTO_PATHS) and path in owners:
+                self.assertLessEqual(owners[path], policy.PHOTO_TESTS, path)
+        for name in sorted(policy.PHOTO_TESTS):
+            for source in self.tree.tests[name]:
+                self.assertTrue(source.startswith(policy.PHOTO_PATHS), (name, source))
+
+    def test_what_only_photo_tests_include_is_photo_code(self):
+        # The mechanical cross-check: a product header that, of all the tests' own sources (following headers only), only
+        # photo-editing tests include is photo-editing code — it and the file of its name that implements it must be in
+        # PHOTO_PATHS. (No exception today: all 69 headers the tree gives are in the list.)
+        includers = {}
+        for name in self.everything:
+            seen = set()
+            stack = list(self.tree.tests[name])
+            while stack:
+                for header in self.tree.includes.get(stack.pop(), ()):
+                    if header not in seen:
+                        seen.add(header)
+                        stack.append(header)
+            for header in seen:
+                if header.startswith('native/src/'):
+                    includers.setdefault(header, set()).add(name)
+        found = sorted(h for h, tests in includers.items() if tests <= policy.PHOTO_TESTS)
+        self.assertEqual(len(found), 69, found)
+        stated_exceptions = set()
+        for header in found:
+            if header in stated_exceptions:
+                continue
+            self.assertTrue(header.startswith(policy.PHOTO_PATHS), header)
+            twin = header.rsplit('.', 1)[0] + '.cpp'
+            if twin in self.tree.text:
+                self.assertTrue(twin.startswith(policy.PHOTO_PATHS), twin)
+
+    def test_the_photo_tests_leave_asan_on_the_real_tree(self):
+        for paths in (['native/src/core/model.hpp', 'native/src/storage/reader.cpp', 'native/src/render/text/balloons.cpp'],
+                      ['native/src/service/letter.cpp'], ['native/src/app/canvas.cpp', 'native/src/render/raster_ops.cpp']):
+            plan = policy.make_plan(paths, 'milestone', ROOT)
+            rows = {r['preset']: set(r['tests']) for r in plan['matrix']['include']}
+            self.assertFalse(rows['linux-asan'] & policy.PHOTO_TESTS, paths)
+            self.assertEqual(rows['linux-release'], self.everything)
+            self.assertTrue(plan['asan_without_photo'], paths)
+            self.assertLessEqual(policy.SAFETY, rows['linux-asan'])
+        for path in ('native/src/render/fx_lens.cpp', 'native/src/core/adjust.hpp', 'native/src/app/filter_menu.cpp', 'native/tests/unit/test_smart.cpp',
+                     'native/src/render/segment/grabcut.cpp', 'native/src/service/automate.cpp'):
+            plan = policy.make_plan(['native/src/core/model.hpp', path], 'milestone', ROOT)
+            rows = {r['preset']: set(r['tests']) for r in plan['matrix']['include']}
+            self.assertEqual(plan['asan_without_photo'], [], path)
+            self.assertGreater(len(rows['linux-asan'] & policy.PHOTO_TESTS), 60, path)
+
+
 class RenameTests(unittest.TestCase):
     def test_a_renamed_file_is_its_old_path_gone(self):
         # (review P1-2: git's rename detection listed only the new name, so "a path that is gone → everything" never fired:
@@ -1044,6 +1248,8 @@ class NeverMoreThanBeforeTests(unittest.TestCase):
                      'native/src/render/mannequin_draw.cpp'):
             for phase in ('development', 'integration'):
                 before, now = self.compare([path], phase)
+                # (but for the photo-editing tests under ASan, when the file is not photo-editing code)
+                before['linux-asan'] -= policy.PHOTO_TESTS
                 self.assertEqual(now, before, (path, phase))
             plan = policy.make_plan([path], 'integration', ROOT)
             self.assertTrue(plan['classification'][path].startswith('related: 名前の規則（2026-11-13 までのまま）: '), plan['classification'][path])
