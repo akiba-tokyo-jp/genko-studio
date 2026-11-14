@@ -80,6 +80,8 @@
 
 ### F2 群 1（F2-A: 解決と描画。ブランチ `native/fonts-f2`、main da6acebd に F1 の 2 コミットを載せた上）— 2026-11-14
 
+（この節は群 1 を終えたときの記録。その後のレビューの直しで変わった所は、下の「F2 群 1 のレビューの直し」が正しい。ここでは、変わった行に〔直し〕と書いて直してある。）
+
 #### 決めたこと（リードの決定 D1〜D12。利用者の言葉は「フォント追加は、任せます 使えるものであれば可能な限り追加してください」）
 - 前からの 6 書体はプログラムに組み込んだまま（.qrc は触らない）。追加の 40 書体はファイルで置き、`FONTS.json` を一覧として `genko_core` に組み込む。
 - キーは F1 の案のまま。本に新しい鍵は足さない。追加の書体を使っているあいだだけ `fonts@1` を名乗る。
@@ -93,20 +95,20 @@
 #### 作ったもの
 - `native/resources/fonts/FONTS.json`: `status` を `storage`（`embedded`／`file`）と `feature`（null／`fonts@1`）に替え、`fallback`（相方のキー）、`lookalike`（「！？」の置き換え。3 書体だけ）、`vertical.presentation_forms`（縦のかっこの字形を全部持つか。試験で測った値）を足した。`composite_suggestions` は `fallback` に畳んで消した。`counts` の `existing`・`new`・`bytes_new` は `embedded`・`file`・`bytes_file` に替えた。
 - `native/src/core/font_catalog.{hpp,cpp}`（＋ `font_catalog_data.cpp.in`、`core/CMakeLists.txt`）: 一覧を 1 バイトも変えずに組み込む。`core::fonts::` の `entries()`（46）・`categories()`（11）・`find(key)`・`added(key)`・`by_postscript(name)`・`named(doc)`・`uses_feature(doc)`・`named_unannounced(doc)`・`catalog()`・`catalog_text()`・`kFontsFeature`。
-- `native/src/render/font_files.{hpp,cpp}`: 追加の書体のファイル。見る場所は `<プログラムのあるフォルダー>/../share/genko-studio/fonts` の 1 か所だけ（環境変数なし）。`dir()`・`set_dir_for_testing()`・`path(key)`・`present(key)`（普通のファイルで、大きさが一覧と同じ。答えはプロセスの間ずっと同じ）・`bytes(key)`（読み切って閉じる。共有。最近使った順に 64 MB まで）・`missing()`・`verify(hashes)`・`cached_bytes()`・`clear_cache()`。
-- `render/text/fonts.{hpp,cpp}`: `Face` に `fallback` と `own(font)`。`face_of`・`face_exists` は「前からのキー → 追加のキー（ファイルがあるとき）→ ファイルのパス → 既定」。追加のキーはパスとしては決して読まない。`path_for` は「その書体 → もう半分 → 相方 → gothic → sfx」。`normalize` は書体ごとの置き換えも見る。`has_glyph` は追加の書体では cmap。
+- `native/src/render/font_files.{hpp,cpp}`: 追加の書体のファイル。見る場所は `<プログラムのあるフォルダー>/../share/genko-studio/fonts` の 1 か所だけ（環境変数なし）。`dir()`・`set_dir_for_testing()`・`path(key)`・`present(key)`（〔直し〕入っているか: 普通のファイルで、大きさと SHA-256 が一覧と同じ。最初の 1 回がファイルを読む。答えはプロセスの間ずっと同じ）・`file_there(key)`（〔直し〕大きさの合うファイルがあるか。stat 1 回）・`bytes(key)`（読み切って閉じる。共有。最近使った順に 64 MB まで）・`missing()`・`verify(hashes)`・`cached_bytes()`・`clear_cache()`。
+- `render/text/fonts.{hpp,cpp}`: `Face` に `fallback` と `own(font)`。`face_of`・`face_exists` は「前からのキー → 追加のキー（入っているとき）→ ファイルのパス → 既定」。追加のキーはパスとしては決して読まない。`path_for` は「その書体 → もう半分 → 相方 → gothic → sfx」。`normalize` は書体ごとの置き換えも見る。`has_glyph` は追加の書体では cmap。
 - `render/draw.{hpp,cpp}`: `TrueTypeFont::strict_cmap()`。`TrueTypeFonts`・`font_bytes` は追加のキーを `font_files::bytes` から開く（`with_text_font`・`text_font`＝ノンブルの道は触っていない）。
 - `render/text/tategaki.cpp`: 縦のかっこの字形は、追加の書体では cmap にあるときだけ使う（無ければかっこを回す）。相方で描いたルビの字は `font_fallback` にしない。
 - `formats/psd_text.cpp`・`render/psd_type.{hpp,cpp}`: 追加の書体は一覧の PostScript 名で書き出し、読み込みではその名前をキーに戻す（書体ファイルは読まない）。相方の字は `font_fallback` にしない。
 - `storage/writer.cpp`・`reader.cpp`: `fonts@1`（使っているあいだだけ。読み手は知っている拡張として読む）。
-- `formats/checks.cpp`: `font_not_installed`（警告）。追加のキーを名指しした台詞の書体ファイルが無いとき、「台詞「…」の書体「（日本語名）」のファイルがこのパソコンに見つからないため、いつもの書体で描いた（Genko を入れ直すと直ります）」。追加の 40 キーだけ。
+- `formats/checks.cpp`: `font_not_installed`（警告）。〔直し〕文と、見る場所（台詞のほかに文字の属性・ルビ・文字レイヤー・本のいつもの書体）は下の「レビューの直し」のとおり。追加の 40 キーだけ。
 - `native/src/api/CMakeLists.txt`: `genko` をビルドした後、ビルドの木に `<genko のフォルダー>/../share/genko-studio/fonts` を作る（Unix は `native/resources/fonts` へのリンク、Windows はコピー）。
 - 文書: `docs/cpp-migration/schema-v4.md` の §3 の表に `fonts@1`、末尾に「書体」の節。
 - 試験: `native/tests/unit/test_font_catalog.cpp`（95 項目）、`native/tests/unit/test_font_faces.cpp`（452 項目。40 書体それぞれ）、`test_psd_text.cpp` に 3 項目。固定した値は `native/tests/fixtures/render/font-faces-f2.json`（書体ごとに、字のマスクの箱・大きさ・進み幅・SHA-256 と、縦・横・「ルビ＋ふちどり＋極太」の文字組の SHA-256。`GENKO_FONT_FACES_PIN=<ファイル>` で書き直せる）。漢字の数え方の表は `native/tests/data/fonts/kanji-sets.json`（JIS 第 1・第 2 水準と常用漢字。`tools/migration/font_kanji_sets.py` が EUC-JP の表と Unihan 17.0.0 の kJoyoKanji から作る。符号位置の表だけで、描画の基準ではない）。どちらも MANIFEST に sha256 を足した。
 
 #### 群 2・群 3 が使えるもの
 - 書体の一覧と区分: `core::fonts::entries()`・`categories()`・`find()`。画面に出す名前は `Entry::label`、使い道は `use`、区分は `category`、漢字は `kanji`（full／partial／none）、相方は `fallback`。前からの 7 つは今までの一覧（`lettering::bundled_fonts()`・`lint::bundled_fonts()`）のまま。
-- ファイルがあるか: `render::font_files::present(key)`・`missing()`。doctor と配布物の試験には `verify(true)`（40 個の有無・大きさ・sha256）。
+- ファイルがあるか: 〔直し〕下の「レビューの直し」の「いつ何を呼んでよいか」を見ること（画面のスレッドでは `file_there`。`present` は 1 書体を読む。`missing()`・`verify(true)` は 40 個を読むので、画面のスレッドと起動では呼ばない）。
 - 試験は `render::font_files::set_dir_for_testing(GENKO_REPO_ROOT "/native/resources/fonts")` を呼ぶ（呼ばない試験の実行物では 40 書体とも「無い」）。フォルダーを替えたら `render::text::clear_layout_cache()` も呼ぶ。
 - 見本の絵は、台詞（`style.font` にキー）を `render::text::text_layout`・`render_page` に渡せば、紙面と同じに描ける（相方の漢字も出る）。
 - 前の本がたまたま追加のキーを名指ししているか: `core::fonts::named_unannounced(doc)`（開いた直後に呼ぶ）。
@@ -146,8 +148,8 @@
 
 #### 残り・気を付けること
 - かなだけの 3 書体（cute_daruma・hand_slackside・techno_monomaniac）は、かなが小さめ・細めに作られていて、相方の漢字のほうが大きく見える。書体ごとの大きさの合わせは入れていない（見本を見て決めること）。
-- 書体ファイルが同じ大きさの別物に差し替わっていたら、`present` は「ある」と答え、FreeType が開けなければ Pillow の既定の書体で描く（読めない書体ファイルの今までの扱い）。sha256 まで見るのは `verify(true)`（doctor・配布物の試験）。
-- `docs/cpp-migration/SPEC.md` に書体の節は足していない（台帳との結び付きがあるので、リードの判断で）。
+- 〔直し〕書体ファイルが同じ大きさの別物に差し替わっていたら、「入っていない」として扱う（レビューの直しで SHA-256 まで見るようにした）。
+- 〔直し〕`docs/cpp-migration/SPEC.md` の書体の節は群 2・3 の終わりに足した（FONT-01）。
 - Windows のビルドの木では書体をコピーする（157 MB）。
 
 ## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合

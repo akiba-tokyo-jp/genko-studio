@@ -868,6 +868,46 @@ private slots:
         }
     }
 
+    // A long book opened with only its first page read: nothing is said until the rest is — then the band names the face
+    // of a type layer on a page read later (the look at the book waits for its pages; it is not lost).
+    void aBookStillBeingReadIsToldOfWhenItIsRead() {
+        QTemporaryDir empty, tmp, config;
+        files::set_dir_for_testing(empty.path().toStdString());
+        render::text::clear_layout_cache();
+        const QByteArray previous = qgetenv("GENKO_CONFIG_DIR");
+        qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());
+        {
+            const auto path = gui_test::path_of(tmp.path() + "/book");
+            core::Document doc = gui_test::new_doc(6);
+            core::Layer layer;
+            layer.id = "ly_type";
+            layer.kind = core::LayerKind::Type;
+            layer.title = "文字";
+            layer.type = std::make_shared<const core::StoryLine>(a_story_line("", "brush_syuku"));
+            doc.edit_page(4).layers.push_back(std::move(layer));
+            doc.features.emplace_back(core::fonts::kFontsFeature);
+            gui_test::write_book(path, doc);
+            app::Session::Options options = gui_test::quick(gui_test::path_of(tmp.path() + "/recovery"));
+            options.defer_pages = true;
+            options.read_rest_now = false;
+            auto session = app::Session::from(app::Session::read(path, options), path, options);
+            QVERIFY(session->loading());
+            app::MainWindow window(session);
+            window.show();
+            QCoreApplication::processEvents();
+            QTest::qWait(50);
+            QVERIFY(window.fonts_band()->isHidden());  // (its fifth page is not read: nothing known of its faces yet)
+            QVERIFY(window.fonts_notice().isEmpty());
+            session->read_rest();
+            QVERIFY(gui_test::wait_for([&] { return !session->loading(); }));
+            QTRY_VERIFY_WITH_TIMEOUT(window.fonts_band()->isVisible(), 10000);
+            QCOMPARE(window.fonts_notice(), QStringLiteral("この原稿が使っている書体「佑字 肅」のファイルが、このパソコンにありません。"
+                                                           "その文字はいつもの書体で描いています（アプリを入れ直すと元の書体に戻ります）"));
+        }
+        qputenv("GENKO_CONFIG_DIR", previous);
+        use_source_fonts();
+    }
+
     // すべての見つからないフォントを置換 on a computer without Genko's font files: the font file that is not there is
     // replaced; the faces Genko comes with stay in the book, and that is said. 見つからないフォントを解決… with only those
     // says so and asks nothing.

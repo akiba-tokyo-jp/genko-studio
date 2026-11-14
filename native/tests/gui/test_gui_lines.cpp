@@ -281,9 +281,10 @@ private slots:
         QVERIFY(lines != nullptr);
         QStringList order;
         for (QAction* a : lines->actions()) order << (a->isSeparator() ? QStringLiteral("|") : a->text());
-        // (fukidashi@1: フキダシのパレットを開く after フキダシを手で描く — test_gui_fukidashi)
+        // (fukidashi@1: フキダシのパレットを開く after フキダシを手で描く — test_gui_fukidashi; fonts@1: 書体のパレットを開く
+        // after it — test_gui_fonts)
         QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("フキダシのパレットを開く"),
-                                     QStringLiteral("|"),
+                                     QStringLiteral("書体のパレットを開く"), QStringLiteral("|"),
                                      QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("ワープテキスト…"),
                                      QStringLiteral("フキダシの形"), QStringLiteral("選んだ台詞を消す"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
                                      QStringLiteral("シェイプに変換")}));
