@@ -1407,9 +1407,32 @@ def selection_of_2026_11_13(paths, phase, inv):
 
 
 class NeverMoreThanBeforeTests(unittest.TestCase):
-    # (the owner's aim is fewer tests in a run: for the same diff and phase, no configuration is added and no
-    # configuration runs a test the policy of 2026-11-13 did not run — but for the three cases below, where that policy
-    # left out a test the changed file is built into or read by)
+    # (the owner's aim is fewer tests in a run: for the same diff and phase, no configuration runs a test the policy of
+    # 2026-11-13 did not run, and the plan does not run more tests in all — but for the fourteen files of MORE below,
+    # where that policy left out a test the changed file is built into or read by. Every tracked file is compared, in
+    # every phase.)
+    MORE = {
+        # the guides an agent reads are built into the service (studio_data.cpp); by their .md the old policy took a
+        # change of them for a document and built nothing. Now: the tests whose closure holds service/data.cpp
+        'native/resources/studio/guide/SKILL.md': 'built in',
+        'native/resources/studio/guide/drawing.md': 'built in',
+        'native/resources/studio/guide/manga_rules.md': 'built in',
+        # a document a test reads and compares (old: nothing was run): that test, in ASan with the always-run set, not
+        # Release's whole suite
+        'docs/PSD_TEXT_SUPPORT.md': {'test_psd_text'},
+        'docs/cpp-migration/THIRD_PARTY.md': {'test_package'},
+        'docs/ops.schema.json': {'test_ledger_service_a'},
+        'integrations/claude-code/skills/genko-manga/SKILL.md': {'test_ledger_service_b'},
+        'integrations/claude-code/skills/genko-manga/drawing.md': {'test_ledger_service_b'},
+        'integrations/hermes/genko-manga/SKILL.md': {'test_ledger_service_b'},
+        'integrations/hermes/genko-manga/drawing.md': {'test_ledger_service_b'},
+        # the notes the package installs, which test_package looks for by their names
+        'native/package/README-ja.md': {'test_package'},
+        'native/package/QT-LGPL-ja.md': {'test_package'},
+        'native/package/LIBRAW-LGPL-ja.md': {'test_package'},
+        # one source two tests are built from: both (old: the one of the file's name)
+        'native/tests/contract/test_contract_plugins.cpp': {'test_contract_wasm_plugins'},
+    }
     AREAS = [
         'native/src/core/pynum.cpp', 'native/src/core/model.hpp', 'native/src/core/data/ops_schema.json', 'native/src/core/CMakeLists.txt',
         'native/src/storage/lock.cpp', 'native/src/storage/reader.cpp',
@@ -1440,10 +1463,53 @@ class NeverMoreThanBeforeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.inv = policy.inventory(ROOT)
+        cls.tree = policy.source_tree(ROOT)
+
+    def plans(self, paths, phase):
+        before = selection_of_2026_11_13(paths, 'milestone' if phase == 'final' else phase, self.inv)
+        now = {r['preset']: set(r['tests']) for r in policy.make_plan(paths, phase, ROOT, source=self.tree)['matrix']['include']}
+        return before, now
+
+    @staticmethod
+    def more_than(before, now, phase):
+        """What the new plan has more than the old: tests in a configuration both have (or in any, when the old plan
+        built nothing), configurations (but in development, see compare), and whether it runs more tests in all."""
+        tests = set()
+        for preset, chosen in now.items():
+            if preset in before or not before:
+                tests |= chosen - before.get(preset, set())
+        added = set(now) - set(before) if phase != 'development' or not before else set()
+        return tests, added, sum(map(len, now.values())) > sum(map(len, before.values()))
+
+    def test_no_tracked_file_selects_more_than_before(self):
+        # (review P2-1: forty-six files by hand missed ten that did select more. Every file git tracks, each phase.)
+        tracked = [p for p in subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf-8').split('\0') if p]
+        self.assertGreater(len(tracked), 2000)
+        found = {}
+        for path in tracked:
+            for phase in policy.PHASES:
+                before, now = self.plans([path], phase)
+                tests, added, larger = self.more_than(before, now, phase)
+                if tests or added or larger:
+                    found.setdefault(path, {})[phase] = (before, now, tests)
+        self.assertEqual(sorted(found), sorted(self.MORE))
+        for path, why in self.MORE.items():
+            # (never at a stage exit or for the final candidate, where the old plan ran everything)
+            self.assertEqual(sorted(found[path]), ['development', 'integration'], path)
+            for phase, (before, now, tests) in found[path].items():
+                if why == 'built in':
+                    self.assertEqual(before, {}, path)
+                    self.assertLessEqual({'test_service', 'test_ledger_service_b', 'test_mcp_api_e2e', 'test_cli_e2e'}, now['linux-asan'], path)
+                    self.assertFalse(now['linux-asan'] & policy.PHOTO_TESTS, path)
+                elif path.endswith('.cpp'):
+                    self.assertEqual(tests, why, (path, phase))
+                else:
+                    self.assertEqual(before, {}, path)
+                    for preset, chosen in now.items():   # (the readers and the always-run set in each build, nothing else)
+                        self.assertEqual(chosen | (why & self.inv['contract']), policy.SAFETY | why, (path, phase, preset))
 
     def compare(self, paths, phase):
-        before = selection_of_2026_11_13(paths, 'milestone' if phase == 'final' else phase, self.inv)
-        now = {r['preset']: set(r['tests']) for r in policy.make_plan(paths, phase, ROOT)['matrix']['include']}
+        before, now = self.plans(paths, phase)
         # every configuration both plans have: no test the old one did not run there (ASan is in every plan of both)
         self.assertEqual('linux-asan' in now, 'linux-asan' in before, (paths, phase))
         for preset, tests in now.items():
@@ -1456,12 +1522,6 @@ class NeverMoreThanBeforeTests(unittest.TestCase):
         if phase != 'development':
             self.assertLessEqual(set(now), set(before), (paths, phase, 'a configuration the old policy did not run'))
         return before, now
-
-    def test_one_changed_file_of_each_area(self):
-        for path in self.AREAS:
-            for phase in ('development', 'integration'):
-                with self.subTest(path=path, phase=phase):
-                    self.compare([path], phase)
 
     def test_diffs_of_several_areas(self):
         for paths in self.DIFFS:
@@ -1494,26 +1554,25 @@ class NeverMoreThanBeforeTests(unittest.TestCase):
         plan = policy.make_plan(['native/src/service/letter.cpp', 'native/src/render/page.cpp'], 'integration', ROOT)
         self.assertTrue(all(v.startswith('related: ソースの閉包（') for v in plan['classification'].values()), plan['classification'])
 
-    def test_where_the_old_policy_left_out_a_test_the_file_reaches(self):
-        # The three cases where more is selected than on 2026-11-13, each a test the old rule missed:
-        def asan(path):
-            before = selection_of_2026_11_13([path], 'integration', self.inv).get('linux-asan', set())
-            rows = {r['preset']: set(r['tests']) for r in policy.make_plan([path], 'integration', ROOT)['matrix']['include']}
-            return before, rows.get('linux-asan', set())
-        # 1. the guides and tables of resources/studio are built into the service (studio_data.cpp); by their .md the
-        #    old policy took a change of the guide for a document and built nothing
-        before, now = asan('native/resources/studio/guide/SKILL.md')
-        self.assertEqual(before, set())
-        self.assertTrue({'test_service', 'test_ledger_service_b', 'test_mcp_api_e2e'} <= now)
-        # 2. a document a test reads and compares: that test (the old policy: nothing)
-        for path, test in (('docs/ops.schema.json', 'test_ledger_service_a'), ('docs/PSD_TEXT_SUPPORT.md', 'test_psd_text'),
-                           ('docs/cpp-migration/THIRD_PARTY.md', 'test_package'), ('integrations/hermes/genko-manga/SKILL.md', 'test_ledger_service_b')):
-            before, now = asan(path)
-            self.assertEqual(before, set(), path)
-            self.assertEqual(now - policy.SAFETY, {test}, path)
-        # 3. one source that two tests are built from: both (the old policy took the one of the file's name)
-        before, now = asan('native/tests/contract/test_contract_plugins.cpp')
-        self.assertEqual(now - before, {'test_contract_wasm_plugins'})
+    def test_a_document_a_test_reads_runs_its_reader_not_the_whole_suite(self):
+        # (review P2-1: documents under native/package, native/third_party, tools/ went to the whole matrix because the
+        # checks by folder came before the check for a document)
+        for path in ('native/third_party/pillow/README.md', 'native/third_party/photocraft/NOTICE.md', 'native/package/licenses/README.md',
+                     'tools/ci/NOTES.md', 'native/cmake/README.md', 'docs/cpp-migration/HANDOFF.md', 'README.md'):
+            for phase in ('development', 'integration'):
+                plan = policy.make_plan([path], phase, ROOT, source=self.tree)
+                self.assertEqual((plan['tier'], plan['matrix']['include']), ('documents', []), (path, phase))
+        plan = policy.make_plan(['native/package/README-ja.md'], 'integration', ROOT, source=self.tree)
+        rows = {r['preset']: r for r in plan['matrix']['include']}
+        self.assertEqual(plan['classification']['native/package/README-ja.md'], 'related: 試験が名指しで読む文書（1 試験）')
+        self.assertEqual(set(rows['linux-release']['tests']), policy.SAFETY | {'test_package'})
+        self.assertEqual(rows['linux-release']['suite'], 'related')
+        # (with a change of the product beside it: Release's whole suite, as for any integration candidate)
+        plan = policy.make_plan(['native/package/README-ja.md', 'native/src/service/letter.cpp'], 'integration', ROOT, source=self.tree)
+        self.assertEqual({r['preset']: r['suite'] for r in plan['matrix']['include']}['linux-release'], 'full')
+        # (a test's own source is not named by a word of another test: "/package" in test_gui_smart_contents)
+        kind, tests, _ = policy.classify('native/tests/package/test_package.cpp', lambda: self.tree, self.inv)
+        self.assertEqual(tests, {'test_package'})
 
 
 class RealTreeTests(unittest.TestCase):

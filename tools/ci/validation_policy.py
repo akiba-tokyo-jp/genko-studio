@@ -144,8 +144,21 @@ PHOTO_PATHS = (
 )
 
 
+_INVENTORIES = {}
+
+
 def inventory(root):
-    text = (Path(root) / 'native/tests/CMakeLists.txt').read_text(encoding='utf-8')
+    file = Path(root) / 'native/tests/CMakeLists.txt'
+    status = file.stat()
+    key = (str(file), status.st_size, status.st_mtime_ns)
+    if key not in _INVENTORIES:
+        _INVENTORIES.clear()
+        _INVENTORIES[key] = read_inventory(file)
+    return {kind: set(names) for kind, names in _INVENTORIES[key].items()}
+
+
+def read_inventory(file):
+    text = Path(file).read_text(encoding='utf-8')
     result = {'normal': set(), 'contract': set(), 'perf': set(), 'gpu': set()}
     for name, body in re.findall(r'genko_test\((test_\w+)\s+(.*?)\)', text, re.S):
         kind = 'perf' if re.search(r'LABELS\s+perf\b', body) else 'contract' if re.search(r'LABELS\s+contract\b', body) else 'normal'
@@ -353,6 +366,7 @@ class SourceTree:
         self._reach = {}
         self._literals = None
         self._programs_of = None
+        self.classified = {}
 
     def read(self, path):
         # (bytes, then LF: a checkout with CRLF reads the same)
@@ -696,13 +710,8 @@ class SourceTree:
         return self.tests_holding(files), sure
 
     def document_readers(self, path):
-        """文書を読んで比べる試験: 二つ以上の部品の部分パスで名指しするか、ファイル名と、すぐ上のフォルダーの名前の両方を書いているソース。"""
-        names, singles, _, _ = self.literal_index()
-        files = self.files_naming(path, by_name=False)
-        if '/' in path:
-            folder, name = path.rsplit('/', 1)
-            files |= names.get(name, set()) & singles.get(folder.rsplit('/', 1)[-1], set())
-        return self.tests_holding(files)
+        """文書を読んで比べる試験: 部分パスかファイル名で名指しするソースを持つ試験（配布物に入る文書を確かめる test_package など）。"""
+        return self.tests_holding(self.files_naming(path, by_name=True))
 
 
 _TREES = {}
@@ -850,6 +859,7 @@ def changed_sources_of_library(before, after):
 BUILD_CONTROL = ('native/cmake/', 'native/vendor/', 'native/third_party/', 'native/packaging/')
 BUILD_FILES = ('native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpkg.json', '.gitattributes')
 SHARED_REASON = '共通モデル・保存・権限・oracle境界'
+READ_DOCUMENT = '試験が名指しで読む文書'
 NAME_RULE = '名前の規則（2026-11-13 までのまま）: '
 
 
@@ -935,7 +945,7 @@ def classify(path, tree, inv, before=None):
             if tests:
                 return related(tests | source.document_readers(path), '埋め込みデータ・resource: 読むソースの閉包')
         tests = source.document_readers(path)
-        return related(tests, '試験が名指しで読む文書') if tests else ('skip', set(), '')
+        return related(tests, READ_DOCUMENT) if tests else ('skip', set(), '')
     if path in ('.github/workflows/native.yml', '.github/disabled-workflows/native.yml') or path.startswith('tools/ci/'):
         return 'infrastructure', set(), 'CI自身の変更: 実ビルド・非契約全試験・両OSで確認'
     if path.startswith(BUILD_CONTROL) or path in BUILD_FILES:
@@ -1009,11 +1019,12 @@ class TreeIsNotTheHead(Exception):
     pass
 
 
-def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_is_head=True):
+def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_is_head=True, source=None):
     """paths は基点からの変更パス。before(path) は基点でのファイルの文字を返す関数（無ければ、CMake の変更は全体へ）。
 
     all_tests: 分類の結果によらず、計画の全構成で全通常試験にする（分類を当てにできないとき。構成は増やさない）。
     tree_is_head: False なら、今の木は差分の head ではない。木を読んで決める分類（閉包・データ）は使わず全体へ送る。
+    source: 読んである SourceTree（同じ木で計画をたくさん作るとき。省けば root から読む）。
     """
     if phase not in PHASES:
         raise ValueError('不明な検証段階')
@@ -1035,6 +1046,7 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
     unsure = ['差分なし' if not paths else '--all-tests'] if broad else []
     infrastructure = False
     native_change = False
+    built_change = False   # (anything but documents a test reads: those run their readers, not Release's whole suite)
     shared = set()
     narrowed = False
     holder = []
@@ -1043,12 +1055,17 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
         if not tree_is_head:
             raise TreeIsNotTheHead
         if not holder:
-            holder.append(source_tree(root))
+            holder.append(source if source is not None else source_tree(root))
         return holder[0]
 
     for path in paths:
         try:
-            kind, tests, reason = classify(path, tree, inv, before)
+            # (what a path is does not depend on the phase: kept with the tree it was read from, but for the CMake files,
+            # which are compared with the base)
+            known = source.classified.get(path) if source is not None and before is None else None
+            kind, tests, reason = known or classify(path, tree, inv, before)
+            if source is not None and before is None:
+                source.classified[path] = (kind, tests, reason)
         except TreeIsNotTheHead:
             # (as before the closure: a document starts nothing, a test's own source is that test, anything else is everything)
             stem = PurePosixPath(path).stem
@@ -1069,6 +1086,8 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
             unsure.append(path)
             continue
         native_change = True
+        if not (kind == 'related' and reason == READ_DOCUMENT):
+            built_change = True
         if kind == 'broad':
             broad = True
             reasons.append(reason)
@@ -1125,7 +1144,7 @@ def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False, tree_
             tier = 'related' if phase == 'development' else 'integration'
             presets = ['linux-debug', 'linux-asan', 'windows-debug'] if phase == 'development' else ['linux-release', 'linux-asan', 'windows-debug', 'windows-release']
         for preset in presets:
-            full = broad or (phase in ('integration', 'milestone') and preset == 'linux-release' and native_change)
+            full = broad or (phase in ('integration', 'milestone') and preset == 'linux-release' and native_change and (built_change or phase == 'milestone'))
             selected = set(all_tests if full else (inv['normal'] | (related if native_change else set())) if infrastructure else related)
             # WindowsにPython oracleは従来どおり置かない。未実施を成功と呼ばない。
             excluded = sorted(selected & inv['contract']) if preset.startswith('windows') else []
