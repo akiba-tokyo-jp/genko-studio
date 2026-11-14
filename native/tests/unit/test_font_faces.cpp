@@ -69,6 +69,8 @@ constexpr int kDpi = 150;
 // A line that has what goes wrong first in a face: brackets, a long vowel mark, small kana, ！？ together and alone, a
 // comma and a full stop, kanji.
 const char* const kWords = "「ぎゃーっ！？」\nちょっと、待って！\n漢字です。";
+// Every bracket set down with a vertical form (tategaki's VERTICAL_FORMS), between letters.
+const char* const kBracketWords = "「（漢字）」『です』\n【あ】［い］\n〈う〉《え》(お)";
 
 std::string source_fonts() { return (genko::test::repo_root() + QStringLiteral("/native/resources/fonts")).toStdString(); }
 
@@ -562,6 +564,138 @@ private slots:
                 QVERIFY(set.tobytes() != upright.tobytes());
             }
         }
+    }
+
+    // 括弧の四角を直す（利用者の決定 2026-11-14）. Two fonts of before lack vertical forms in their cmap — the effects face's
+    // デラゴシック those of 『』（）()【】［］〈〉《》, the hand face's よもぎ those of ［］; the other four have all sixteen — and
+    // set down drew their "no glyph" box (Pillow's look at a letter takes the box for a letter). Those brackets, and only
+    // they, are now the bundled Gothic's vertical form, as a Gothic column draws it: every other cell of the column is the
+    // same picture, and across nothing changes (each font has the brackets themselves, and draws them).
+    void bracketsOfBeforeTheFontLacksDownAreTheGothics() {
+        const std::pair<char32_t, char32_t> forms[] = {{U'「', U'﹁'}, {U'」', U'﹂'}, {U'『', U'﹃'}, {U'』', U'﹄'}, {U'（', U'︵'}, {U'）', U'︶'},
+                                                        {U'(', U'︵'},  {U')', U'︶'},  {U'【', U'︻'}, {U'】', U'︼'}, {U'［', U'﹇'}, {U'］', U'﹈'},
+                                                        {U'〈', U'︿'}, {U'〉', U'﹀'}, {U'《', U'︽'}, {U'》', U'︾'}};
+        text::Fonts f;
+        std::map<std::string, std::u32string> lacking;
+        for (const char* font : {"gothic", "mincho", "maru", "hand", "sfx", "sfx_pop"}) {
+            const genko::render::TrueTypeFont& own = f.truetype(font, 48);
+            QVERIFY(!own.strict_cmap());
+            for (const auto& [bracket, form] : forms) {
+                QVERIFY(own.glyph_index(bracket) != 0);  // (each has the bracket itself: across is its own)
+                if (own.glyph_index(form) == 0) lacking[font].push_back(bracket);
+            }
+        }
+        QCOMPARE(lacking["sfx"], std::u32string(U"『』（）()【】［］〈〉《》"));
+        QCOMPARE(lacking["hand"], std::u32string(U"［］"));
+        QCOMPARE(lacking.size(), std::size_t(2));
+        const text::Rgb black{0, 0, 0};
+        for (const char* key : {"sfx", "hand"}) {
+            // (the line with every bracket, and the same line with each bracket the font lacks the form of written 「 or
+            // 」 — the font's own form, the same cells: an opening for an opening, a closing for a closing)
+            std::u32string words = text::u32(kBracketWords);
+            std::u32string twin = words;
+            for (char32_t& c : twin) {
+                if (lacking[key].find(c) == std::u32string::npos) continue;
+                c = std::u32string_view(U"『（(【［〈《").find(c) != std::u32string_view::npos ? U'「' : U'」';
+            }
+            QVERIFY(twin != words);
+            const genko::core::StoryLine line = lettering(key, true, kBracketWords);
+            const genko::core::StoryLine plain = lettering(key, true, text::utf8(twin).c_str());
+            const genko::core::StoryLine gothic = lettering("gothic", true, kBracketWords);
+            text::clear_layout_cache();
+            const text::SetLayout set = text::set_layout(line, kDpi, std::nullopt, text::LetterParts{});
+            const text::SetLayout other = text::set_layout(plain, kDpi, std::nullopt, text::LetterParts{});
+            const text::SetLayout of_gothic = text::set_layout(gothic, kDpi, std::nullopt, text::LetterParts{});
+            const Image& a = set.layout.image;
+            const Image& b = other.layout.image;
+            const Image& g = of_gothic.layout.image;
+            QCOMPARE(a.size(), b.size());
+            QCOMPARE(a.size(), g.size());
+            QCOMPARE(set.set.em, other.set.em);
+            QCOMPARE(set.set.em, of_gothic.set.em);
+            QCOMPARE(set.set.to_image, (std::array<double, 6>{1.0, 0.0, 0.0, 1.0, 0.0, 0.0}));
+            // (the cells of the brackets the font lacks the form of: each the Gothic column's own cell, never the font's
+            // "no glyph" box nor what was drawn before)
+            std::vector<genko::render::Box> changed;
+            std::size_t found = 0;
+            QCOMPARE(set.set.rows.size(), of_gothic.set.rows.size());
+            for (std::size_t r = 0; r < set.set.rows.size(); ++r) {
+                QCOMPARE(set.set.rows[r].chars.size(), of_gothic.set.rows[r].chars.size());
+                for (std::size_t k = 0; k < set.set.rows[r].chars.size(); ++k) {
+                    const text::SetChar& c = set.set.rows[r].chars[k];
+                    if (c.text.size() != 1 || lacking[key].find(c.text[0]) == std::u32string::npos) continue;
+                    ++found;
+                    const genko::render::BoxF& at = c.box;
+                    QCOMPARE(at.x0, of_gothic.set.rows[r].chars[k].box.x0);
+                    QCOMPARE(at.y0, of_gothic.set.rows[r].chars[k].box.y0);
+                    const genko::render::Box box{static_cast<int>(std::floor(at.x0)), static_cast<int>(std::floor(at.y0)), static_cast<int>(std::ceil(at.x1)),
+                                                 static_cast<int>(std::ceil(at.y1))};
+                    changed.push_back(box);
+                    const Image cell = a.crop(box);
+                    QVERIFY(has_ink(cell));
+                    QCOMPARE(cell.tobytes(), g.crop(box).tobytes());
+                    const genko::render::TrueTypeFont& own = f.truetype(key, c.size);
+                    const Image before = text::glyph(c.text, own, c.size, black);
+                    const Image now = text::glyph(c.text, f.truetype("gothic", c.size), c.size, black);
+                    QVERIFY(before.tobytes() != now.tobytes());
+                    QVERIFY(text::glyph(std::u32string(1, char32_t{0xFFFF}), own, c.size, black).getbbox() == before.getbbox());  // (what was drawn: the box)
+                }
+            }
+            QCOMPARE(found, lacking[key].size());
+            // (every other pixel is the line's with the font's own brackets)
+            QVERIFY(a.tobytes() != b.tobytes());
+            const std::string pa = a.tobytes(), pb = b.tobytes();
+            const std::size_t bands = static_cast<std::size_t>(a.bands());
+            for (int y = 0; y < a.height(); ++y) {
+                for (int x = 0; x < a.width(); ++x) {
+                    const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(a.width()) + static_cast<std::size_t>(x)) * bands;
+                    if (pa.compare(i, bands, pb, i, bands) == 0) continue;
+                    const bool inside = std::any_of(changed.begin(), changed.end(), [&](const genko::render::Box& c) { return x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1; });
+                    QVERIFY2(inside, qPrintable(QStringLiteral("%1 (%2, %3)").arg(QString::fromLatin1(key)).arg(x).arg(y)));
+                }
+            }
+            // across: each bracket in the face's own font, a real bracket (not its "no glyph" box)
+            const text::Face face = text::face_of(Json(key));
+            for (const auto& [bracket, form] : forms) {
+                const std::u32string one(1, bracket);
+                QCOMPARE(f.path_for(face, one), std::string(key));
+                QVERIFY(f.has_glyph(key, one));
+            }
+        }
+    }
+
+    // ...and the pictures of these faces are what they were before that change, but those cells: the lettering of the
+    // lines of the faces (down and across, and with a reading, an outline and the heavy weight) and the brackets across,
+    // as the build before it drew them.
+    void theFacesOfBeforeDrawWhatTheyDrew() {
+        const std::map<std::string, std::string> pins = {
+            {"hand across", "{\"size\":[270,138],\"em\":30,\"corner\":[-135.0,-69.0],\"sha256\":\"e22e2169d61e6a11594c2cfb3cdfac8108634543c1166ea8b42b02bcf544c77e\"}"},
+            {"hand brackets across", "{\"size\":[255,138],\"em\":30,\"corner\":[-127.5,-69.0],\"sha256\":\"94f5cd3c692ad2e5b4bd55c050ce1898e08947f3573a01d62583f9809273ff42\"}"},
+            {"hand brackets plain down", "{\"size\":[114,300],\"em\":30,\"corner\":[-57.0,-150.0],\"sha256\":\"cd5721a9d681489476e35520379e42de298b91571b18586108ec52c8fda6699b\"}"},
+            {"hand down", "{\"size\":[114,270],\"em\":30,\"corner\":[-57.0,-135.0],\"sha256\":\"5807fd38be3a6393198b3f72af7fb96278d25b340f690ce4b7f4b57556daf88f\"}"},
+            {"hand dressed", "{\"size\":[169,280],\"em\":30,\"corner\":[-84.5,-140.0],\"sha256\":\"a09d216cb5938ac95c06bff773aa4282ec1bdfc8c95d34c1485ea4e9bdaa356f\"}"},
+            {"sfx across", "{\"size\":[252,138],\"em\":30,\"corner\":[-126.0,-69.0],\"sha256\":\"6d207dec74db3f03ff24d38a6eb6425d3f4a5f6a694e914581d01471acb1fc33\"}"},
+            {"sfx brackets across", "{\"size\":[191,138],\"em\":30,\"corner\":[-95.5,-69.0],\"sha256\":\"77996134d4eca5c0a7ccb5cb004148f8b4b00be5ef5aa4662e540e7af0cb4f1f\"}"},
+            {"sfx down", "{\"size\":[114,270],\"em\":30,\"corner\":[-57.0,-135.0],\"sha256\":\"9855d5e190df0f8addb05fd6946f0adce60863deb09f05616e47cc39c56c7f28\"}"},
+            {"sfx dressed", "{\"size\":[169,280],\"em\":30,\"corner\":[-84.5,-140.0],\"sha256\":\"c9a6dd9b82e0160b3223900f053da77fc38a9c8276313bc8118d8c4ce3210433\"}"},
+            {"sfx line down", "{\"size\":[38,248],\"em\":30,\"corner\":[-19.0,-124.0],\"sha256\":\"26d340af15ed917f0e3e6ba109ae28524d138e7eb5a7b4dff3df9db971e9ab8a\"}"},
+        };
+        std::map<std::string, std::string> now;
+        for (const char* key : {"sfx", "hand"}) {
+            const std::string k(key);
+            now[k + " down"] = layout_pin(drawn(lettering(key))).dump();
+            now[k + " across"] = layout_pin(drawn(lettering(key, false))).dump();
+            now[k + " dressed"] = layout_pin(drawn(dressed(key))).dump();
+            now[k + " brackets across"] = layout_pin(drawn(lettering(key, false, kBracketWords))).dump();
+        }
+        // (a sound effect — the effects face by its kind — down, and the hand face's line of brackets it has the forms of)
+        genko::core::StoryLine effect = lettering("", true, "ドドド「ゴゴゴ」");
+        effect.balloon = "sfx";
+        now["sfx line down"] = layout_pin(drawn(effect)).dump();
+        now["hand brackets plain down"] = layout_pin(drawn(lettering("hand", true, "「（漢字）」『です』\n【あ】〈う〉《え》(お)"))).dump();
+        std::string said;
+        for (const auto& [name, pin] : now) said += "{\"" + name + "\", " + genko::core::dump_python(Json(pin)) + "},\n";
+        for (const auto& [name, pin] : pins) QVERIFY2(now.at(name) == pin, said.c_str());
     }
 
     // The lettering of a line down and across in each face: something is drawn, the same when drawn again, not what the
@@ -1807,6 +1941,17 @@ private:
         const auto write = [&](const std::string& name, const Image& image) {
             genko::storage::write_atomic(dir / name, genko::formats::png_bytes(image.convert("RGB")));
         };
+        // (括弧の四角: the line of every bracket in the effects and hand faces, down and across, at 300 dpi on white — and the
+        // same line in the Gothic, whose forms those brackets the two fonts lack are drawn in)
+        for (const char* key : {"sfx", "hand", "gothic"}) {
+            for (const bool down : {true, false}) {
+                text::clear_layout_cache();
+                const Image letters = text::text_layout(lettering(key, down, kBracketWords), 300).image;
+                Image sheet = Image::create("RGBA", genko::render::Size{letters.width() + 40, letters.height() + 40}, genko::render::Ink{255, 255, 255, 255});
+                sheet.alpha_composite(letters, genko::render::Point{20, 20});
+                write(std::string("brackets-") + key + (down ? "-down" : "-across") + ".png", sheet);
+            }
+        }
         std::vector<std::string> keys = {"antique", "gothic", "mincho", "maru", "hand", "sfx", "sfx_pop"};
         for (const fonts::Entry& e : fonts::entries()) {
             if (e.added) keys.push_back(e.key);
