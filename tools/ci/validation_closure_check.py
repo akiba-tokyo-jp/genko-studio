@@ -8,7 +8,8 @@
 入っているかの判定: オブジェクト自身が定義する外部の強い記号のうち、ビルドの中でそのオブジェクトだけが定義するもの
 （一意な記号）が、実行物の記号表に一つでもあれば「入っている」。一意な記号を持たないオブジェクトは判定できないので
 数と名前を出す。入っているオブジェクトの一意な記号が全部はそろっていない場合（strip・--gc-sections・LTO のビルド）も
-数を出す。その場合、この突き合わせは当てにならない。
+数を出す。その場合、この突き合わせは当てにならない。実行物より新しいオブジェクトがある場合（ビルドの途中・リンクし直す前）は、
+その実行物の名前を出して不合格にする（漏れの有無は、リンクし直してから見る）。
 
 使い方（工程出口で Release のビルドがあるとき）:
   python3 tools/ci/validation_closure_check.py --build build/linux-release
@@ -98,8 +99,17 @@ def check(build, root=None, jobs=4):
     kinds = {obj: source_of(obj) for obj in objects}
     keys = {obj: kinds[obj] if kinds[obj][0] != 'other' else ('object', obj) for obj in objects}
 
+    def modified(path):
+        try:
+            return Path(path).stat().st_mtime_ns
+        except OSError:
+            return 0
+
     def nm_object(item):
         return item, symbols(item)
+    made_at = {}
+    for obj, key in keys.items():   # (the newest object of each source)
+        made_at[key] = max(made_at.get(key, 0), modified(obj))
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
         tables = dict(pool.map(nm_object, sorted(objects)))
     unreadable_objects = sorted(o for o, rows in tables.items() if rows is None)
@@ -153,7 +163,8 @@ def check(build, root=None, jobs=4):
     report = {'build': str(build), 'source_root': str(root), 'targets_in_cmake': len(targets), 'binaries_checked': 0,
               'binaries_missing': sorted(set(targets) - set(places)), 'binaries_unreadable': [], 'objects': len(objects),
               'objects_unreadable': unreadable_objects, 'objects_without_a_unique_symbol': unjudged,
-              'partly_present': 0, 'linked': 0, 'in_closure': 0, 'extra': 0, 'misses': [], 'not_in_this_tree': [], 'by_library': {}}
+              'binaries_older_than_their_objects': [],
+              'partly_present': 0, 'partly_present_examples': [], 'linked': 0, 'in_closure': 0, 'extra': 0, 'misses': [], 'not_in_this_tree': [], 'by_library': {}}
     code_files = sorted(p for p in tree.text if p.startswith('native/src/') and p.endswith(policy.IMPLEMENTATION_SUFFIXES))
     for name in sorted(places):
         rows = binaries[name]
@@ -172,9 +183,15 @@ def check(build, root=None, jobs=4):
             continue
         report['binaries_checked'] += 1
         linked = set()
+        linked_at = modified(places[name])
+        stale = any(made_at[key] > linked_at for key in hits)
+        if stale:
+            report['binaries_older_than_their_objects'].append(name)
         for key, found in sorted(hits.items()):
-            if found < unique[key] and made_from[key] == 1:
+            if found < unique[key] and made_from[key] == 1 and not stale:
                 report['partly_present'] += 1
+                if len(report['partly_present_examples']) < 20:
+                    report['partly_present_examples'].append([name, str(key[1]), found, unique[key]])
             kind, value = key
             if kind == 'code':
                 linked.add(value)
@@ -193,7 +210,8 @@ def check(build, root=None, jobs=4):
             row = report['by_library'].setdefault(library, {'linked': 0, 'in_closure': 0})
             row['linked'] += path in product
             row['in_closure'] += path in inside
-    report['passed'] = not report['misses'] and report['binaries_checked'] > 0 and not report['partly_present']
+    report['passed'] = (not report['misses'] and report['binaries_checked'] > 0 and not report['partly_present']
+                        and not report['binaries_older_than_their_objects'] and not report['binaries_unreadable'])
     return report
 
 
@@ -211,7 +229,9 @@ def main():
         return 1
     if args.output:
         Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    shown = dict(report, misses=report['misses'][:50], not_in_this_tree=report['not_in_this_tree'][:20])
+    older = report['binaries_older_than_their_objects']
+    shown = dict(report, misses=report['misses'][:50], not_in_this_tree=report['not_in_this_tree'][:20],
+                 binaries_older_than_their_objects=older[:10] + ([f'… ほか {len(older) - 10}'] if len(older) > 10 else []))
     print(json.dumps(shown, ensure_ascii=False, indent=2))
     return 0 if report['passed'] else 1
 

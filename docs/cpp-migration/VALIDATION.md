@@ -84,7 +84,7 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 - **CMake の変更**（基点の中身と比べられるときだけ。比べられなければ全体）: `native/tests/CMakeLists.txt` は、試験ごとの文（`genko_test(...)`、その試験を第 1 引数に取る文）だけが変わったなら、その試験。共通の部分（補助の実行物・定義・関数・if・foreach）が変わったら全体。`native/src/<名前>/CMakeLists.txt` は、ソースの並び（`*.cpp` の語）だけが変わったなら、足されたソースの閉包。ほかが変わったら全体。
 - **全体へ拡大するもの**（従来どおり）: `native/cmake/`・`native/third_party/`・`native/CMakeLists.txt`・`CMakePresets.json`・`vcpkg.json`・`.gitattributes`、`tools/migration/`・`tools/acceptance/`、`native/wasm-host/`・`native/package/` などの分類の無い native の変更、消えた・名前の変わったソース、native の外の分類の無い変更、差分なし・基点不明。`tools/ci/`・`native.yml` は「CI自身の変更」（非契約の全試験）。関係する試験が全試験に及ぶ差分も全体として扱う。
 - 2026-11-13 までの名前による規則（render のファイル名から `image`・`raster`・`tone`・`3d` などの名前の試験を選ぶ、app は `test_gui_*`、core・storage・tests/support は全体）は、この規則に置き換えた。render は、名前の規則が外していた試験（例: `raster_ops.cpp` に対する `test_contract_psd`）も入る。逆に外れるのは、そのコードを持たず `genko` も動かさない試験だけ（例: render の変更に対する `test_pynum`・`test_pyrandom`・`test_strokes`・`test_stroke_geom`）。
-- **確かめ方**: `tools/ci/validation_closure_check.py --build build/linux-release`（手で走らせる。計画を作るのには要らない）。静的ライブラリの Release のビルドでは、実行物に入るのは参照が届くオブジェクトだけなので、実行物ごとに nm の記号で「入っているオブジェクト」を調べ、そのソースが全部その試験の閉包にあること（閉包 ⊇ リンクされたもの）を確かめる。生成物（埋め込みデータ・qrc・moc）は、上の規則が説明できることを確かめる。漏れが 1 つでもあれば不合格。**工程出口で Release のビルドができたら走らせ、合格を HANDOFF に書く。不合格なら、規則を直すまで計画に `--all-tests` を付け、ASan も全通常試験で流す（構成は増えない）。**
+- **確かめ方**: `tools/ci/validation_closure_check.py --build build/linux-release`（手で走らせる。計画を作るのには要らない）。静的ライブラリの Release のビルドでは、実行物に入るのは参照が届くオブジェクトだけなので、実行物ごとに nm の記号で「入っているオブジェクト」を調べ、そのソースが全部その試験の閉包にあること（閉包 ⊇ リンクされたもの）を確かめる。生成物（埋め込みデータ・qrc・moc）は、上の規則が説明できることを確かめる。漏れが 1 つでもあれば不合格。実行物より新しいオブジェクトがあるビルド（作り直しの途中）も不合格にする。**工程出口で Release のビルドができたら走らせ、合格を HANDOFF に書く。不合格なら、規則を直すまで計画に `--all-tests` を付け、ASan も全通常試験で流す（構成は増えない）。**
   - 2026-11-14 の実測（main da6acebd に書体の作業中を足した Release のビルド）: 試験 273 本と実行物 5 本の 278 本、漏れ 0。リンクされた製品のソース 延べ 110,761 に対し閉包 延べ 120,934（余分 9.2%）。ライブラリの単位では閉包とリンクがほぼ同じ集合になる。
 - **どれだけ減るか**（2026-11-14、ASan の 1 本ごとの秒は凍結 a72bd1e8 の出口の記録、全 267 本で 17,927 秒）: 代表の 1 ファイルの変更で ASan に入るのは、app 141 本・8,240 秒、service 160 本・8,434 秒、studio 161 本・8,434 秒、api 85 本・5,859 秒、formats 181 本・13,714 秒、tests/support 175 本・14,909 秒、render 256 本・17,801 秒、storage 263 本、core 266 本。**機能の工程の差分はどれも共通モデル（`core/model.hpp`）・本の読み書き（`storage/reader.cpp`・`writer.cpp`）・描画のコードに触れるので、ASan も全通常試験になる**（フキダシ・ネーム・コマ割り・書体の 4 つの差分で確かめた）。減るのは、app だけ・service だけ・api だけのような狭い差分。重いフィルター・スマートオブジェクト・高精度の試験は描画と本の読み書きのコードを丸ごと持つので、リンクの関係からは外せない。外すには、試験ごとに実際に通ったコードの記録（カバレッジ）が要る（未着手。利用者に相談する）。
 - **残る危険**（どれも、Release は毎回全試験を流すので、見落とすのは「選ばれなかった試験が ASan でだけ落ちる」場合に限られる）: 部品から組み立てたパスで読むデータ（文字列に名前も `/` も出ない）、CMake の書き方が変わって埋め込み先を取り違える場合、行頭に無い定義・マクロで作った定義・ヘッダー無しの `extern` 宣言（突き合わせの道具が見つける）、ASan の共有ライブラリだけで走る静的初期化（そのライブラリを読む選ばれた試験と常時保護の対照が同じ初期化を通る）。
@@ -108,7 +108,7 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 
 ## 4. 実行入口
 
-計画を作る（baseは依存境界を固定した実コミット。head の木を checkout した所で作る。数秒）:
+計画を作る（baseは依存境界を固定した実コミット。分類は今の木のソースを読むので、head を checkout した所で作る。`--head` が checkout と違えば全体へ拡大する。数秒）:
 
 ```sh
 python3 tools/ci/validation_policy.py --base <基点SHA> --phase development --output build/validation-plan.json

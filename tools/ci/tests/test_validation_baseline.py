@@ -62,6 +62,23 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(plan['tier'], 'full')
 
 
+    def test_a_head_that_is_not_checked_out_is_not_classified_from_this_tree(self):
+        # (the classification reads the sources of the tree it stands in: for another commit's diff it widens to everything)
+        def planned(head):
+            with tempfile.TemporaryDirectory() as folder:
+                output = Path(folder) / 'plan.json'
+                args = ['validation_policy.py', '--base', 'b' * 40, '--head', head, '--phase', 'integration', '--output', str(output)]
+                with mock.patch('sys.argv', args), mock.patch.object(policy, 'changed_paths', return_value=['native/src/app/canvas.cpp']), contextlib.redirect_stdout(io.StringIO()):
+                    policy.main()
+                return json.loads(output.read_text())
+        here = planned('HEAD')
+        self.assertEqual(here['tier'], 'integration')
+        self.assertEqual({r['preset']: r['suite'] for r in here['matrix']['include']}['linux-asan'], 'related')
+        other = planned('HEAD~1')
+        self.assertEqual(other['tier'], 'full')
+        self.assertTrue(all(r['suite'] == 'full' for r in other['matrix']['include']))
+        self.assertIn('--head が checkout している版と違う（分類は今の木を読む）: 全体へ拡大', other['reasons'])
+
     def test_full_milestone_pr_can_be_reused_with_identical_controls(self):
         row = self.row(event='pull_request', head_branch='native/milestone/example')
         result = policy.choose_milestone_baseline([row], lambda s: True, lambda s: True)

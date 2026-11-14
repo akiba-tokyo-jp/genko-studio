@@ -844,6 +844,14 @@ def last_successful_push(root, repository, branch, head):
     return push
 
 
+def head_is_checked_out(root, head):
+    """分類は今の木のソースを読む。head が checkout している版でなければ、当てにしない。"""
+    def commit(ref):
+        done = subprocess.run(['git', 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return done.stdout.decode('ascii', 'replace').strip() if done.returncode == 0 else None
+    return commit(head) is not None and commit(head) == commit('HEAD')
+
+
 def changed_paths(root, base, head):
     # diff失敗は例外で停止。差分なしはmake_plan側で全体へ拡大する。
     for ref in (base, head):
@@ -891,7 +899,10 @@ def main():
             # (the file as it was at the base: None when it was not there)
             shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
-        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None, all_tests=args.all_tests)
+        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None,
+                         all_tests=args.all_tests or not head_is_checked_out(root, args.head))
+        if not args.all_tests and not head_is_checked_out(root, args.head):
+            plan['reasons'].append('--head が checkout している版と違う（分類は今の木を読む）: 全体へ拡大')
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:
