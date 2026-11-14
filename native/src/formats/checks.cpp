@@ -34,6 +34,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/text/balloons.hpp"
 #include "render/psd_image.hpp"
 #include "render/selection.hpp"
 #include "render/text/fonts.hpp"
@@ -645,6 +646,43 @@ void usual_face_issues(const core::Document& episode, const core::Page& page, Js
     }
 }
 
+// fukidashi@2 (SPEC BALLOON-02): the tone inside a line's balloon (style.fill_tone) on a monochrome page, at the page's
+// own resolution — too light where its dots (its stripes) would be under two pixels, which drop out when the page is
+// made black and white; too dark where the white left between them would be. A tone that grows from one density to
+// another is judged at both its ends (one that begins at nothing passes through dots of every small size).
+void tone_print_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
+    if (!line.style.is_object()) return;
+    const auto tone = line.style.find("fill_tone");
+    if (tone == line.style.end() || !tone->is_object()) return;
+    const auto number = [&](const char* key, double fallback, double least, double most) {
+        const auto found = tone->find(key);
+        if (found == tone->end() || !found->is_number()) return fallback;
+        return core::py_max(least, core::py_min(most, core::to_float(*found)));
+    };
+    const double density = number("density", 0.0, 0.0, 0.9);
+    const bool graded = tone->contains("to") && (*tone)["to"].is_number();
+    const double to = graded ? number("to", density, 0.0, 0.9) : density;
+    const double lightest = core::py_min(density, to), darkest = core::py_max(density, to);
+    if (!(darkest > 0)) return;  // (nothing is drawn)
+    const bool stripes = tone->contains("pattern") && (*tone)["pattern"] == Json("line");
+    const double dpi = page.spec.dpi.value() > 0 ? page.spec.dpi.value() : 600.0;
+    const render::text::balloon::TonePrint safe = render::text::balloon::tone_print_range(dpi, number("lpi", 60.0, 20.0, 85.0), stripes);
+    const auto percent = [](double share, bool up) { return std::to_string(static_cast<int>(up ? std::ceil(share * 100 - 1e-9) : std::floor(share * 100 + 1e-9))); };
+    const std::string what = stripes ? "線" : "点";
+    if (lightest < safe.lightest - 1e-12 && (lightest > 0 || graded)) {
+        out.push_back(issue("warning", "balloon_tone_light", page,
+                            "台詞「" + short_text + "」のフキダシの中のトーンが薄すぎる（" + what + "が 2 画素より細くなり、白黒の印刷で飛ぶ。この線数なら" +
+                                (graded ? "薄い側の濃さを " : "濃さを ") + percent(safe.lightest, true) + "% 以上にする）",
+                            box, "line", line.id));
+    }
+    if (darkest > safe.darkest + 1e-12) {
+        out.push_back(issue("warning", "balloon_tone_dark", page,
+                            "台詞「" + short_text + "」のフキダシの中のトーンが濃すぎる（" + what + "のあいだの白が 2 画素より細くなり、白黒の印刷でつぶれる。この線数なら" +
+                                (graded ? "濃い側の濃さを " : "濃さを ") + percent(safe.darkest, false) + "% 以下にする）",
+                            box, "line", line.id));
+    }
+}
+
 }  // namespace
 
 Json page_issues(const core::Document& episode, const core::Page& page) {
@@ -657,6 +695,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
     std::vector<std::pair<const core::StoryLine*, std::array<double, 4>>> placed;
     std::vector<LostFace> lost;  // (fonts@1: the faces this page names that are not installed, in the order met)
     const Json* styles = episode.type_styles ? &*episode.type_styles : nullptr;
+    std::vector<Json> toned_groups;  // (fukidashi@2: the joined groups whose tone has been looked at — a group's is its first line's)
     for (const core::StoryLine* line : lines) {
         std::string text = line->text;
         std::erase(text, '\n');
@@ -698,6 +737,18 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
                 out.push_back(issue("warning", "tail_hidden", page,
                                     "台詞「" + short_text + "」の尾がフキダシの中に埋もれている（誰の台詞か分からない）。move_line の tail で先を外に出す",
                                     box_json(std::vector<double>(box.begin(), box.end())), "line", line->id));
+            }
+        }
+        {  // (fukidashi@2, SPEC BALLOON-02: a tone inside the balloon that will not print on a monochrome page)
+            bool first_of_group = true;
+            if (line->style.is_object()) {
+                if (const auto group = line->style.find("group"); group != line->style.end() && core::py_truthy(*group)) {
+                    first_of_group = std::find(toned_groups.begin(), toned_groups.end(), *group) == toned_groups.end();
+                    if (first_of_group) toned_groups.push_back(*group);
+                }
+            }
+            if (first_of_group && page.spec.expression != "color" && kind != "sfx" && kind != "none" && kind != "picture") {
+                tone_print_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
             }
         }
         if (line->ruby_spans) {

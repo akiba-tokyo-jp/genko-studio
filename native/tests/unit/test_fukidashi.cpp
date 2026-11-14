@@ -19,6 +19,8 @@
 #include <QtTest>
 
 #include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QRegularExpression>
 
 #include <QTemporaryDir>
 
@@ -26,6 +28,8 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <thread>
+#include <tuple>
 #include <vector>
 
 #include "core/fukidashi.hpp"
@@ -1945,11 +1949,15 @@ private slots:
                 (void)total;
             }
         }
-        // (a box: four strokes, thin at its corners, full in the middle of each side)
-        const std::vector<clean::Shape> box{clean::whole(clean::rounded(clean::Box{100, 100, 500, 400}, 0.0))};
+        // (a box: four strokes, thin at its corners — the corners its builder says are its own —, full in the middle of
+        // each side)
+        clean::Contour box_corners;
+        const std::vector<clean::Shape> box{clean::whole(clean::rounded(clean::Box{100, 100, 500, 400}, 0.0, &box_corners))};
+        QCOMPARE(box_corners.size(), std::size_t{4});
         clean::Pen pen;
         pen.width = 8.0;
         pen.taper = 0.5;
+        pen.corners = box_corners;
         const std::vector<clean::PenRun> sides = clean::pen_runs(clean::edge_runs(box), box, pen);
         QCOMPARE(sides.size(), std::size_t{1});
         for (std::size_t i = 0; i < sides.front().points.size(); ++i) {
@@ -1959,7 +1967,15 @@ private slots:
             const bool middle = std::fabs(p.x - 300) < 30 || std::fabs(p.y - 250) < 30;
             if (corner) QVERIFY2(std::fabs(r - 1.2) < 1e-6, qPrintable(QString::number(r)));
             if (middle) QVERIFY2(std::fabs(r - 8.0) < 1e-9, qPrintable(QString::number(r)));
+            QCOMPARE(sides.front().stroke_start[i] != 0, corner);
         }
+        // (without its corners said, the same box is one smooth line: two strokes, as an oval)
+        clean::Pen smooth = pen;
+        smooth.corners.clear();
+        int starts = 0;
+        const std::vector<clean::PenRun> as_smooth = clean::pen_runs(clean::edge_runs(box), box, smooth);
+        for (const unsigned char start : as_smooth.front().stroke_start) starts += start;
+        QCOMPARE(starts, 2);
         // (a small bubble — its outline shorter than six widths: not thinned; a thin line: never under a pixel, or its
         // own width when that is less)
         const std::vector<clean::Shape> bubble{clean::whole(clean::circle({100, 100}, 6.0))};
@@ -1999,6 +2015,8 @@ private slots:
         pen.width = 8.0;
         pen.swell = 0.4;
         pen.taper = 0.6;
+        pen.corners = tail.corners;  // (the tail's tip)
+        QCOMPARE(tail.corners.size(), std::size_t{1});
         const std::vector<clean::Run> edge = clean::edge_runs(shapes);
         QVERIFY(edge.size() >= 4);  // (the balloon's, the tail's two sides, the joins': pieces)
         const std::vector<clean::PenRun> runs = clean::pen_runs(edge, shapes, pen);
@@ -2119,6 +2137,756 @@ private slots:
         const Image here = at_x(42.333333333333336), there = at_x(67.73333333333333);
         QVERIFY(here.crop(genko::render::Box{400, 0, 1300, here.height()}).tobytes() == there.crop(genko::render::Box{700, 0, 1600, there.height()}).tobytes());
         QVERIFY(at_x(42.333333333333336).tobytes() == here.tobytes());
+    }
+
+    // --- fukidashi@2, the review's fix round: the same line at every resolution -------------------------------------------------
+
+    // The pen's strokes are the line's own, not the resolution's: the same balloon drawn at 150, 600 and 1200 dpi has the
+    // same pieces of line, each with as many strokes, beginning at the same places (within a third of a millimetre) and
+    // as heavy along each stroke (within an eighth of the line's width — at 150 dpi the thinnest line is a whole pixel).
+    // Every kind, with a tail; rounded corners and sharp ones (the review's P2-1: a rounded corner cut into few points at
+    // one resolution and many at another was a corner at one and none at the other).
+    void thePensStrokesAreTheSameAtEveryResolution_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<QString>("style");
+        QTest::addColumn<bool>("tail");
+        const Json pen{{"pen_taper", 1.0}, {"pen_swell", 0.5}, {"border_mm", 0.6}};
+        const auto with = [&pen](Json more) {
+            Json st = pen;
+            for (const auto& [key, value] : more.items()) st[key] = value;
+            return QString::fromStdString(st.dump());
+        };
+        const std::pair<const char*, Json> cases[] = {
+            {"speech", Json::object()}, {"rounded", Json::object()}, {"rounded", Json{{"corner_mm", 1.0}}}, {"rounded", Json{{"corner_mm", 5.0}}},
+            {"rounded", Json{{"squircle", true}}}, {"box", Json::object()}, {"box", Json{{"corner_mm", 1.5}}}, {"box", Json{{"corner_mm", 4.0}}},
+            {"capsule", Json::object()}, {"polygon", Json::object()}, {"polygon", Json{{"sides", 5}, {"corner_mm", 3.0}}}, {"polygon", Json{{"sides", 12}, {"corner_mm", 0}}},
+            {"cloud", Json::object()}, {"shout", Json::object()}, {"shout", Json{{"spikes", 9}, {"spike_depth", 0.05}}}, {"electric", Json::object()},
+            {"thought", Json::object()}, {"heart", Json::object()}, {"heart", Json{{"corner_mm", 3.0}}}, {"star", Json::object()},
+            {"star", Json{{"points", 4}, {"spike_depth", 0.6}}}, {"star", Json{{"points", 12}, {"corner_mm", 0}}}, {"star", Json{{"points", 7}, {"corner_mm", 2.5}}},
+            {"flower", Json::object()}, {"diamond", Json::object()}, {"diamond", Json{{"corner_mm", 0}}}, {"diamond", Json{{"corner_mm", 4.0}}},
+            {"speech", Json{{"wave_mm", 0.4}}}, {"heart", Json{{"wave_mm", 0.3}}}, {"speech", Json{{"pen_strokes", 5}, {"pen_angle", 200}}},
+            {"speech", Json{{"drip_mm", 6}, {"drip_seed", 3}}}, {"shout", Json{{"drip_mm", 6}, {"drip_seed", 1}}},
+        };
+        for (const auto& [kind, more] : cases) {
+            for (const bool tail : {false, true}) {
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2%3").arg(kind, QString::fromStdString(more.dump()), tail ? " with a tail" : ""))) << QString::fromLatin1(kind) << with(more) << tail;
+            }
+        }
+    }
+    void thePensStrokesAreTheSameAtEveryResolution() {
+        QFETCH(QString, kind);
+        QFETCH(QString, style);
+        QFETCH(bool, tail);
+        namespace balloon = genko::render::text::balloon;
+        // (the reviewer's size, 24 × 22 mm, and a bigger one. A burst that drips is held at the bigger alone: on a burst of
+        // 24 mm a drip's side leaves the outline about a line's width from a point of it — the two are one corner or two
+        // by a hair's breadth of where the pixels put them, which is the balloon's shape and not how its curves are cut)
+        const bool small_too = !(kind == "shout" && style.contains(QStringLiteral("drip_mm")));
+        for (const auto& [w, h] : {std::pair{24.0, 22.0}, std::pair{46.0, 38.0}}) {
+            if (w < 30 && !small_too) continue;
+            Json more{{"w_mm", w}, {"h_mm", h}, {"style", Json::parse(style.toStdString())}};
+            // (a tail straight down, a little to the right: between a star's two lower points, off a box's corner)
+            if (tail) more["tails"] = Json::array({Json{{"to", Json::array({40 + w * 0.53, 40 + h + 9})}}});
+            const Document doc = one_line(kind.toStdString().c_str(), more);
+            const std::vector<const genko::core::StoryLine*> group{&doc.story.front()};
+            // (each stretch of line as its strokes: where each begins, and how heavy it is at tenths of its length)
+            struct Stroke {
+                balloon::Pt at;
+                std::array<double, 9> weight;
+            };
+            const auto strokes_of = [&](int dpi) {
+                std::vector<std::vector<Stroke>> out;
+                for (const balloon::PenTrace& trace : balloon::pen_trace(group, dpi)) {
+                    const std::size_t n = trace.points_mm.size();
+                    std::vector<double> along(n + 1, 0.0);
+                    for (std::size_t i = 0; i < n; ++i) {
+                        const balloon::Pt a = trace.points_mm[i], b = trace.points_mm[(i + 1) % n];
+                        along[i + 1] = along[i] + ((trace.closed || i + 1 < n) ? std::hypot(b[0] - a[0], b[1] - a[1]) : 0.0);
+                    }
+                    const double total = along[n];
+                    const auto weight_at = [&](double s) {
+                        s = trace.closed ? std::fmod(std::fmod(s, total) + total, total) : std::clamp(s, 0.0, along[n - 1]);
+                        std::size_t k = static_cast<std::size_t>(std::upper_bound(along.begin(), along.end(), s) - along.begin());
+                        k = std::min(n - 1, k == 0 ? 0 : k - 1);
+                        const double span = along[k + 1] - along[k];
+                        const double t = span > 0 ? (s - along[k]) / span : 0.0;
+                        return trace.weight[k] + (trace.weight[(k + 1) % n] - trace.weight[k]) * t;
+                    };
+                    std::vector<std::size_t> starts;
+                    for (std::size_t i = 0; i < n; ++i) {
+                        if (trace.stroke_start[i]) starts.push_back(i);
+                    }
+                    std::vector<Stroke> list;
+                    for (std::size_t k = 0; k < starts.size(); ++k) {
+                        const double from = along[starts[k]];
+                        double to = k + 1 < starts.size() ? along[starts[k + 1]] : (trace.closed ? along[starts.front()] + total : from);
+                        Stroke stroke;
+                        stroke.at = trace.points_mm[starts[k]];
+                        for (std::size_t j = 0; j < 9; ++j) stroke.weight[j] = weight_at(from + (to - from) * (static_cast<double>(j) + 1) / 10);
+                        list.push_back(stroke);
+                    }
+                    out.push_back(std::move(list));
+                }
+                return out;
+            };
+            const auto coarse = strokes_of(150), fine = strokes_of(600), finest = strokes_of(1200);
+            QVERIFY(!fine.empty());
+            for (const auto* other : {&coarse, &finest}) {
+                const QString which = QStringLiteral("%1 × %2, %3 dpi").arg(w).arg(h).arg(other == &coarse ? 150 : 1200);
+                QVERIFY2(other->size() == fine.size(), qPrintable(QStringLiteral("%1: %2 pieces of line for %3").arg(which).arg(other->size()).arg(fine.size())));
+                for (std::size_t r = 0; r < fine.size(); ++r) {
+                    QVERIFY2((*other)[r].size() == fine[r].size(),
+                             qPrintable(QStringLiteral("%1: piece %2 has %3 strokes for %4").arg(which).arg(r).arg((*other)[r].size()).arg(fine[r].size())));
+                    for (std::size_t k = 0; k < fine[r].size(); ++k) {
+                        const Stroke& a = fine[r][k];
+                        const Stroke& b = (*other)[r][k];
+                        const double apart = std::hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]);
+                        QVERIFY2(apart <= 0.34, qPrintable(QStringLiteral("%1: stroke %2 begins %3 mm away").arg(which).arg(k).arg(apart)));
+                        for (std::size_t j = 0; j < 9; ++j) {
+                            // (at 150 dpi a line of 0.6 mm is 4 px and never thinner than 1: a quarter of its width)
+                            const double low = other == &coarse ? 0.25 : 0.0;
+                            QVERIFY2(std::fabs(std::max(a.weight[j], low) - std::max(b.weight[j], low)) <= 0.125,
+                                     qPrintable(QStringLiteral("%1: stroke %2 at %3 tenths: %4 for %5").arg(which).arg(k).arg(j + 1).arg(b.weight[j]).arg(a.weight[j])));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The drips are the line's own too (the review's P2-2): the same line has the same drips at 150, 350, 600 and 1200 dpi —
+    // as many, each standing in the same place (within a pixel of the coarsest), as wide and reaching as far down. Over
+    // sizes whose slot count sat on a knife edge (72 mm: 0.8 × 72 ÷ 12.8 is 4.5), the widths at the 4 mm limit, square
+    // kinds, bursts, clouds and symbols, and twelve arrangements each.
+    void theDripsAreTheSameAtEveryResolution_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<double>("w");
+        QTest::addColumn<double>("h");
+        const std::tuple<const char*, double, double> cases[] = {
+            {"speech", 72, 20}, {"speech", 38, 18}, {"speech", 56, 24}, {"speech", 88, 30}, {"speech", 104, 30}, {"speech", 16.8, 14}, {"speech", 40, 16},
+            {"box", 40, 16}, {"box", 49.78, 20}, {"box", 64, 22}, {"rounded", 46, 30}, {"narration", 35.5556, 18}, {"shout", 44, 34}, {"cloud", 44, 34},
+            {"heart", 40, 38}, {"star", 44, 42}, {"diamond", 44, 30}, {"capsule", 15, 40}, {"polygon", 40, 32}, {"flower", 40, 38},
+        };
+        for (const auto& [kind, w, h] : cases) QTest::newRow(qPrintable(QStringLiteral("%1 %2 × %3").arg(kind).arg(w).arg(h))) << QString::fromLatin1(kind) << w << h;
+    }
+    void theDripsAreTheSameAtEveryResolution() {
+        QFETCH(QString, kind);
+        QFETCH(double, w);
+        QFETCH(double, h);
+        namespace balloon = genko::render::text::balloon;
+        int drawn = 0;
+        for (int seed = 0; seed < 12; ++seed) {
+            Json style{{"drip_mm", 5}, {"drip_seed", seed}};
+            if (seed % 4 == 3) style["drip_width_mm"] = 1.0 + seed * 0.4;
+            if (seed % 5 == 4) style["drips"] = 3 + seed;
+            const Document doc = one_line(kind.toStdString().c_str(), Json{{"x_mm", 30.37}, {"y_mm", 41.13}, {"w_mm", w}, {"h_mm", h + 5}, {"style", style}});
+            const std::vector<balloon::DripTrace> base = balloon::drip_trace(doc.story.front(), 600);
+            drawn += static_cast<int>(base.size());
+            for (const int dpi : {150, 350, 1200}) {
+                const std::vector<balloon::DripTrace> other = balloon::drip_trace(doc.story.front(), dpi);
+                const QString which = QStringLiteral("seed %1 at %2 dpi").arg(seed).arg(dpi);
+                QVERIFY2(other.size() == base.size(), qPrintable(QStringLiteral("%1: %2 drips for %3").arg(which).arg(other.size()).arg(base.size())));
+                const double pixel = 25.4 / std::min(dpi, 600);  // (a pixel of the coarser of the two)
+                for (std::size_t k = 0; k < base.size(); ++k) {
+                    QVERIFY2(std::fabs(other[k].x_mm - base[k].x_mm) <= pixel * 1.5, qPrintable(QStringLiteral("%1: drip %2 at %3 for %4").arg(which).arg(k).arg(other[k].x_mm).arg(base[k].x_mm)));
+                    QVERIFY2(std::fabs(other[k].tip_mm - base[k].tip_mm) <= pixel * 2.5, qPrintable(QStringLiteral("%1: drip %2 down to %3 for %4").arg(which).arg(k).arg(other[k].tip_mm).arg(base[k].tip_mm)));
+                    QVERIFY2(std::fabs(other[k].half_mm - base[k].half_mm) <= pixel, qPrintable(QStringLiteral("%1: drip %2 half %3 for %4").arg(which).arg(k).arg(other[k].half_mm).arg(base[k].half_mm)));
+                }
+            }
+        }
+        QVERIFY2(drawn >= 12, qPrintable(QString::number(drawn)));  // (at least the longest, every time)
+    }
+
+    // Where a short stroke lies between two corners and the strokes beside it thin toward them, the corner is as thin as
+    // they are — no knob of the full width sits there (the review's P2-3) —, and corners nearer each other than the line
+    // is wide are one corner. The geometry (a box with one corner cut off by a short side), and the review's hearts drawn:
+    // along every pen's line no point is far heavier than the points either side of it.
+    void aShortStrokeBetweenCornersIsNoKnob() {
+        // (a box 400 × 300 whose corner at the top right is cut off: a side of 28 px between two corners, the line 8 px)
+        const clean::Contour cut{{100, 100}, {480, 100}, {500, 120}, {500, 400}, {100, 400}};
+        const std::vector<clean::Shape> shapes{clean::whole(cut)};
+        clean::Pen pen;
+        pen.width = 8.0;
+        pen.taper = 0.6;
+        pen.swell = 0.5;
+        pen.corners = cut;
+        const std::vector<clean::PenRun> runs = clean::pen_runs(clean::edge_runs(shapes), shapes, pen);
+        QCOMPARE(runs.size(), std::size_t{1});
+        int corners = 0;
+        for (std::size_t i = 0; i < runs.front().points.size(); ++i) {
+            const clean::P p = runs.front().points[i];
+            const double r = runs.front().reach[i];
+            corners += runs.front().stroke_start[i];
+            // (on the short side and at its two ends: no heavier than a long stroke's end thinned, with the swell)
+            if (p.x >= 480 - 1e-6 && p.y <= 120 + 1e-6) QVERIFY2(r <= 8.0 * 1.5 * 0.5 + 1e-9, qPrintable(QStringLiteral("%1, %2: %3").arg(p.x).arg(p.y).arg(r)));
+            if ((std::fabs(p.x - 480) < 1e-6 && std::fabs(p.y - 100) < 1e-6) || (std::fabs(p.x - 500) < 1e-6 && std::fabs(p.y - 120) < 1e-6)) {
+                QVERIFY2(r <= 8.0 * 0.15 * 1.5 + 1e-9, qPrintable(QString::number(r)));
+            }
+        }
+        QCOMPARE(corners, 5);
+        // (the same with the cut 6 px long — shorter than the line is wide: its two corners are one)
+        const clean::Contour nick{{100, 100}, {496, 100}, {500, 104}, {500, 400}, {100, 400}};
+        const std::vector<clean::Shape> nicked{clean::whole(nick)};
+        pen.corners = nick;
+        corners = 0;
+        const std::vector<clean::PenRun> nicked_runs = clean::pen_runs(clean::edge_runs(nicked), nicked, pen);
+        for (const unsigned char start : nicked_runs.front().stroke_start) corners += start;
+        QCOMPARE(corners, 4);
+        // (drawn: the review's hearts, and the kinds with short strokes — no point of the line stands out as a knob: none
+        // is more than 1.8 times as heavy as the heavier of the points half a millimetre either side of it)
+        namespace balloon = genko::render::text::balloon;
+        const std::pair<const char*, Json> cases[] = {
+            {"heart", Json{{"pen_taper", 0.8}, {"wave_mm", 0.3}}}, {"heart", Json{{"pen_taper", 0.8}, {"wave_mm", 0.3}, {"border_mm", 0.7}}},
+            {"heart", Json{{"pen_taper", 0.8}, {"wave_mm", 0.3}, {"border_mm", 0.7}, {"pen_swell", 0.9}}}, {"heart", Json{{"pen_taper", 0.8}, {"border_mm", 0.7}}},
+            {"star", Json{{"pen_taper", 1.0}, {"points", 12}, {"border_mm", 0.8}}}, {"shout", Json{{"pen_taper", 1.0}, {"spikes", 40}, {"border_mm", 0.8}}},
+            {"cloud", Json{{"pen_taper", 1.0}, {"bumps", 40}, {"border_mm", 0.8}}}, {"electric", Json{{"pen_taper", 1.0}, {"border_mm", 0.8}}},
+            {"polygon", Json{{"pen_taper", 1.0}, {"sides", 12}, {"border_mm", 1.0}}}, {"box", Json{{"pen_taper", 1.0}, {"corner_mm", 0.5}, {"border_mm", 1.0}}},
+        };
+        for (const auto& [kind, style] : cases) {
+            for (const int dpi : {150, 600}) {
+                const Document doc = one_line(kind, Json{{"w_mm", 30}, {"h_mm", 28}, {"tail", Json::array({66, 84})}, {"style", style}});
+                const auto traces = balloon::pen_trace({&doc.story.front()}, dpi);
+                QVERIFY(!traces.empty());
+                for (const balloon::PenTrace& trace : traces) {
+                    const std::size_t n = trace.weight.size();
+                    for (std::size_t i = 0; i < n; ++i) {
+                        if (!trace.closed && (i == 0 || i + 1 == n)) continue;
+                        const double before = trace.weight[(i + n - 1) % n], after = trace.weight[(i + 1) % n];
+                        QVERIFY2(trace.weight[i] <= 1.8 * std::max(before, after) + 0.3,
+                                 qPrintable(QStringLiteral("%1 %2 at %3 dpi: %4 between %5 and %6").arg(kind, QString::fromStdString(style.dump())).arg(dpi).arg(trace.weight[i]).arg(before).arg(after)));
+                    }
+                }
+            }
+        }
+    }
+
+    // A balloon that drips keeps its second line (double), the white a tone leaves inside its line and a tone box's margin
+    // along its body and its tails: they do not follow the drips' fingers (the review's P2-4 — a thick line's second line
+    // along a slim finger took close to a minute). Drawn, a thick double line with drips takes about what it takes without
+    // them (a wide margin: three times as long and three seconds more — a guard against the minute, not a measure); the
+    // second line is there, in the body and not in a finger.
+    void aThickDoubleLineWithDripsIsNotSlow() {
+        const auto timed = [](const Document& doc, int dpi) {
+            QElapsedTimer timer;
+            timer.start();
+            const Image drawn = balloon_alone(doc, dpi, 90, 80);
+            return std::pair<qint64, Image>{timer.elapsed(), drawn};
+        };
+        for (const auto& [kind, border] : {std::pair{"cloud", 2.5}, std::pair{"speech", 1.2}, std::pair{"heart", 2.5}}) {
+            const Json plain{{"border_mm", border}, {"double", true}};
+            Json dripping = plain;
+            dripping["drip_mm"] = 5;
+            dripping["drip_seed"] = 2;
+            dripping["pen_swell"] = 0.5;
+            dripping["fill_tone"] = Json{{"density", 0.2}, {"inset_mm", 1.0}};
+            const Document without = one_line(kind, Json{{"x_mm", 20}, {"y_mm", 20}, {"w_mm", 38}, {"h_mm", 13.5}, {"style", plain}});
+            const Document with = one_line(kind, Json{{"x_mm", 20}, {"y_mm", 20}, {"w_mm", 38}, {"h_mm", 18.5}, {"style", dripping}});
+            const auto [base_ms, base] = timed(without, 600);
+            const auto [drip_ms, drawn] = timed(with, 600);
+            QVERIFY2(drip_ms <= base_ms * 3 + 3000, qPrintable(QStringLiteral("%1, a line of %2 mm: %3 ms with drips, %4 ms without").arg(kind).arg(border).arg(drip_ms).arg(base_ms)));
+            QVERIFY(drawn.tobytes() != base.tobytes());
+        }
+        // (the second line: in the body — above the body's foot, 3 to 4 widths inside its edge —, none in a finger)
+        const int dpi = 600;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const Json thin{{"double", true}, {"drip_mm", 8}, {"drip_seed", 5}, {"drip_width_mm", 4}, {"drips", 5}};
+        const Document doc = one_line("box", Json{{"h_mm", 48}, {"style", thin}});  // (40..90 × 40..88: the body to 80)
+        const Document plain = one_line("box", Json{{"h_mm", 40}, {"style", Json{{"double", true}}}});
+        const Grey with = grey_of(balloon_alone(doc, dpi)), body = grey_of(balloon_alone(plain, dpi));
+        // (above the body's foot less 6 widths — clear of the fingers' mouths — the two are the same pixels)
+        int unlike = 0;
+        for (int y = 0; y < px(80) - 60; ++y) {
+            for (int x = 0; x < with.w; ++x) unlike += with.at(x, y) != body.at(x, y) ? 1 : 0;
+        }
+        QCOMPARE(unlike, 0);
+        // (below the body's foot a finger has its one line each side and white between: walking across a row 3 mm below
+        // the foot, each run of ink is a line's width — 8 px —, never a second line beside it)
+        const int row = px(83);
+        int run = 0, longest = 0, runs = 0;
+        for (int x = 0; x < with.w; ++x) {
+            if (with.at(x, row) < 128) {
+                ++run;
+            } else {
+                if (run > 0) ++runs;
+                longest = std::max(longest, run), run = 0;
+            }
+        }
+        QVERIFY2(runs >= 2 && runs % 2 == 0 && longest <= 12, qPrintable(QStringLiteral("%1 runs, the longest %2 px").arg(runs).arg(longest)));
+    }
+
+    // A drip is never wider than its slot or its balloon can hold, its join with the balloon stops at the balloon's
+    // corners, and the longest drip is always there (the review's P3-1: drips of 10 mm on a diamond of 20 mm left bumps
+    // without a line and ran out of the box; on a small star none was drawn though the body was shortened). Whatever the
+    // width asked and the arrangement: nothing outside the box, the line closed, ink below the body's foot.
+    void aWideDripStaysInItsBalloon_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<double>("w");
+        QTest::addColumn<double>("h");
+        QTest::addColumn<QString>("style");
+        const Json wide{{"drip_mm", 4}, {"drip_width_mm", 10}, {"drips", 6}};
+        QTest::newRow("diamond 20 × 13.5") << QStringLiteral("diamond") << 20.0 << 13.5 << QString::fromStdString(wide.dump());
+        QTest::newRow("rounded 20 × 13.5") << QStringLiteral("rounded") << 20.0 << 13.5 << QString::fromStdString(wide.dump());
+        QTest::newRow("star 20, twelve drips") << QStringLiteral("star") << 20.0 << 20.0 << QString::fromStdString(Json{{"drip_mm", 4}, {"drip_width_mm", 10}, {"drips", 12}}.dump());
+        QTest::newRow("speech 20 × 13.5") << QStringLiteral("speech") << 20.0 << 13.5 << QString::fromStdString(wide.dump());
+        QTest::newRow("box 20 × 13.5") << QStringLiteral("box") << 20.0 << 13.5 << QString::fromStdString(wide.dump());
+        QTest::newRow("heart 24 × 22") << QStringLiteral("heart") << 24.0 << 22.0 << QString::fromStdString(wide.dump());
+        QTest::newRow("capsule 12 × 30, 24 drips") << QStringLiteral("capsule") << 12.0 << 30.0 << QString::fromStdString(Json{{"drip_mm", 6}, {"drip_width_mm", 10}, {"drips", 24}}.dump());
+        QTest::newRow("polygon 30 × 24, one drip") << QStringLiteral("polygon") << 30.0 << 24.0 << QString::fromStdString(Json{{"drip_mm", 6}, {"drip_width_mm", 10}, {"drips", 1}}.dump());
+        QTest::newRow("cloud 30 × 24") << QStringLiteral("cloud") << 30.0 << 24.0 << QString::fromStdString(wide.dump());
+        QTest::newRow("shout 30 × 24") << QStringLiteral("shout") << 30.0 << 24.0 << QString::fromStdString(wide.dump());
+    }
+    void aWideDripStaysInItsBalloon() {
+        QFETCH(QString, kind);
+        QFETCH(double, w);
+        QFETCH(double, h);
+        QFETCH(QString, style);
+        const int dpi = 300;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        Json st = Json::parse(style.toStdString());
+        const double drip = st["drip_mm"].get<double>();
+        for (int seed = 0; seed < 32; ++seed) {
+            st["drip_seed"] = seed;
+            const Document doc = one_line(kind.toStdString().c_str(), Json{{"x_mm", 20}, {"y_mm", 20}, {"w_mm", w}, {"h_mm", h + drip}, {"style", st}});
+            const Grey g = grey_of(balloon_alone(doc, dpi, 70, 70));
+            int outside = 0, hanging = 0;
+            for (int y = 0; y < g.h; ++y) {
+                for (int x = 0; x < g.w; ++x) {
+                    if (g.at(x, y) == 255) continue;
+                    if (x < px(20) || x >= px(20 + w) || y < px(20) || y >= px(20 + h + drip)) ++outside;
+                    if (y >= px(20 + h) + 2) ++hanging;
+                }
+            }
+            QVERIFY2(outside == 0, qPrintable(QStringLiteral("seed %1: %2 px outside the box").arg(seed).arg(outside)));
+            QVERIFY2(hanging > 0, qPrintable(QStringLiteral("seed %1: no drip").arg(seed)));
+            QVERIFY2(closed_round(g, px(20 + w / 2), px(20 + h / 2)), qPrintable(QStringLiteral("seed %1: the line is open").arg(seed)));
+        }
+    }
+
+    // The white edge of the letters over a tone follows the tone that is drawn (the review's P3-2): a group of joined
+    // balloons has its first line's — the second line's letters have the edge when the first line has the tone, whatever
+    // the second says, and none when the first has none —; a tone that draws nothing gives no edge.
+    void theWhiteEdgeFollowsTheToneDrawn() {
+        const Json tone{{"fill_tone", Json{{"density", 0.3}}}};
+        const auto pair = [&](const Json& first, const Json& second) {
+            Json a{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"balloon", "speech"}, {"x_mm", 30}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 34}, {"text", "あいう"}};
+            Json b{{"op", "add_line"}, {"page", 1}, {"id", "L2"}, {"balloon", "speech"}, {"x_mm", 62}, {"y_mm", 56}, {"w_mm", 40}, {"h_mm", 34}, {"text", "えおか"}};
+            a["style"] = first;
+            a["style"]["group"] = "g";
+            b["style"] = second;
+            b["style"]["group"] = "g";
+            return run_ops(blank_book(), Json::array({a, b}));
+        };
+        const auto drawn = [](const Document& doc) { return page_part(doc, 300, 24, 34, 84, 62).tobytes(); };
+        const std::string both = drawn(pair(tone, tone));
+        QVERIFY(drawn(pair(tone, Json::object())) == both);            // (the second line's own key does not matter)
+        const std::string neither = drawn(pair(Json::object(), Json::object()));
+        QVERIFY(drawn(pair(Json::object(), tone)) == neither);         // (no tone is drawn: no edge either)
+        QVERIFY(both != neither);
+        // (the letters' picture itself, set as draw_group sets it for its group: ToneUnder)
+        const Document plain = one_line("speech", Json::object(), "あ");
+        const Document toned = one_line("speech", Json{{"style", tone}}, "あ");
+        const int own = genko::render::text::text_layout(plain.story.front(), 600).image.width();
+        {
+            const genko::render::text::ToneUnder under(true);
+            QVERIFY(genko::render::text::text_layout(plain.story.front(), 600).image.width() > own);
+        }
+        {
+            const genko::render::text::ToneUnder under(false);
+            QCOMPARE(genko::render::text::text_layout(toned.story.front(), 600).image.width(), own);
+        }
+        QVERIFY(genko::render::text::text_layout(toned.story.front(), 600).image.width() > own);
+        // (a tone of nothing — density 0, growing to nothing — draws nothing and gives no edge; growing to something, it does)
+        for (const Json& nothing : {Json{{"density", 0}}, Json{{"density", 0.0}, {"to", 0}}, Json{{"lpi", 60}}}) {
+            const Document doc = one_line("speech", Json::object(), "あ");
+            Document with = doc;
+            with.story.front().style["fill_tone"] = nothing;
+            QCOMPARE(genko::render::text::text_layout(with.story.front(), 600).image.width(), own);
+            QVERIFY(page_part(with, 300, 30, 30, 70, 60).tobytes() == page_part(doc, 300, 30, 30, 70, 60).tobytes());
+        }
+        Document growing = plain;
+        growing.story.front().style["fill_tone"] = Json{{"density", 0}, {"to", 0.4}};
+        QVERIFY(genko::render::text::text_layout(growing.story.front(), 600).image.width() > own);
+    }
+
+    // A book's styles are not checked when it is read: whatever a line's style holds under the additions' keys — a text, a
+    // list, a truth value, a number far out of range, a tone of the wrong things —, the page is drawn (the review's P3-3:
+    // a huge number of drips, a blend to a colour that is not three numbers stopped the page). A value of the wrong kind
+    // is as if the key were not there; a number out of range is taken to the nearest it may be.
+    void aMalformedStyleStillDraws() {
+        const Json wrong = Json::array({"x", true, false, Json::array(), Json::array({1, 2}), Json::object(), Json{{"a", 1}}, nullptr});
+        const Json numbers = Json::array({1e300, -1e300, 18446744073709551615ull, -5, 3.7, 0, 1e-300, 9223372036854775807ll});
+        const char* keys[] = {"pen_swell", "pen_angle", "pen_taper", "pen_strokes", "drip_mm", "drips", "drip_width_mm", "drip_seed", "points", "fill_tone", "fill_gradient"};
+        // (a line that has every addition well said, so that each key's neighbours are in play)
+        const Json good{{"pen_swell", 0.4}, {"pen_taper", 0.5}, {"drip_mm", 5}, {"fill_tone", Json{{"density", 0.2}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}}},
+                        {"fill_gradient", Json{{"to", Json::array({200, 220, 255})}, {"dir", 90.0}}}};
+        for (const char* kind : {"speech", "star", "box"}) {
+            const Document base = one_line(kind, Json{{"h_mm", 45}, {"tail", Json::array({100, 100})}, {"style", good}});
+            for (const char* key : keys) {
+                Document absent = base;
+                absent.story.front().style.erase(key);
+                const std::string without = page_part(absent, 150, 30, 30, 80, 80).tobytes();
+                for (const Json& value : wrong) {
+                    Document doc = base;
+                    doc.story.front().style[key] = value;
+                    std::string drawn;
+                    try {
+                        drawn = page_part(doc, 150, 30, 30, 80, 80).tobytes();
+                    } catch (const std::exception& error) {
+                        QFAIL(qPrintable(QStringLiteral("%1 %2 = %3: %4").arg(kind, key, QString::fromStdString(value.dump()), QString::fromUtf8(error.what()))));
+                    }
+                    // (a truth value is no number here: as absent. An empty object for a tone or a blend: nothing to draw)
+                    QVERIFY2(drawn == without, qPrintable(QStringLiteral("%1 %2 = %3 is not drawn as without it").arg(kind, key, QString::fromStdString(value.dump()))));
+                }
+                for (const Json& value : numbers) {
+                    Document doc = base;
+                    doc.story.front().style[key] = value;
+                    try {
+                        (void)page_part(doc, 150, 30, 30, 80, 80);
+                        (void)genko::formats::checks::page_issues(doc, doc.page(0));
+                        (void)payload_of(doc);
+                    } catch (const std::exception& error) {
+                        QFAIL(qPrintable(QStringLiteral("%1 %2 = %3: %4").arg(kind, key, QString::fromStdString(value.dump()), QString::fromUtf8(error.what()))));
+                    }
+                }
+            }
+            // (inside a tone and a blend: each member of the wrong kind, far out of range)
+            const std::pair<const char*, const char*> members[] = {{"fill_tone", "density"}, {"fill_tone", "lpi"}, {"fill_tone", "angle"}, {"fill_tone", "pattern"},
+                                                                   {"fill_tone", "to"}, {"fill_tone", "dir"}, {"fill_tone", "radial"}, {"fill_tone", "inset_mm"},
+                                                                   {"fill_gradient", "to"}, {"fill_gradient", "dir"}, {"fill_gradient", "radial"}};
+            Json values = wrong;
+            for (const Json& value : numbers) values.push_back(value);
+            for (const Json& more : {Json::array({1, 2, "x"}), Json::array({Json::array({1}), Json::array({2}), Json::array({3})}), Json::array({1e300, -4, 999}),
+                                     Json::array({1, 2, 3, 4}), Json("line"), Json("zigzag")}) {
+                values.push_back(more);
+            }
+            for (const auto& [key, member] : members) {
+                for (const Json& value : values) {
+                    Document doc = base;
+                    doc.story.front().style[key][member] = value;
+                    try {
+                        (void)page_part(doc, 150, 30, 30, 80, 80);
+                        (void)genko::render::text::text_layout(doc.story.front(), 150);
+                        (void)genko::formats::checks::page_issues(doc, doc.page(0));
+                    } catch (const std::exception& error) {
+                        QFAIL(qPrintable(QStringLiteral("%1 %2.%3 = %4: %5").arg(kind, key, member, QString::fromStdString(value.dump()), QString::fromUtf8(error.what()))));
+                    }
+                }
+            }
+        }
+        // (the review's own: a huge count and seed, a colour that is not three numbers — the page as without the key)
+        const Document base = one_line("speech", Json{{"h_mm", 45}, {"style", Json{{"drip_mm", 5}}}});
+        const std::string plain = page_part(base, 150, 30, 30, 80, 80).tobytes();
+        Document doc = base;
+        doc.story.front().style["drips"] = 1e300;
+        Document most = base;
+        most.story.front().style["drips"] = 24;
+        QVERIFY(page_part(doc, 150, 30, 30, 80, 80).tobytes() == page_part(most, 150, 30, 30, 80, 80).tobytes());  // (as many as there may be)
+        doc = base;
+        doc.story.front().style["fill_gradient"] = Json{{"to", Json::array({1, 2, "x"})}};
+        QVERIFY(page_part(doc, 150, 30, 30, 80, 80).tobytes() == plain);
+    }
+
+    // The pen's line with what else a balloon may have: a notch cut into it (an inward tail), an outline drawn by hand —
+    // as given and smoothed —, the balloon eraser's cuts and a tail that fades. Drawn at 150, 600 and 1200 dpi, the same
+    // each time; a notch and a hand-drawn outline close round the balloon; the eraser and the fading tail open the line
+    // only where they do without the pen.
+    void thePensLineWithANotchAPathCutsAndAFade() {
+        const Json pen{{"pen_swell", 0.6}, {"pen_taper", 0.7}};
+        const auto px_of = [](int dpi, double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        const Json path = Json::array({Json::array({42, 44}), Json::array({70, 40}), Json::array({90, 54}), Json::array({84, 78}), Json::array({58, 80}), Json::array({40, 65})});
+        for (const int dpi : {150, 600, 1200}) {
+            const double page = dpi == 1200 ? 110 : 140;
+            {  // (a notch: its sides are part of the one line, closed)
+                const Document doc = one_line("speech", Json{{"tails", Json::array({Json{{"to", Json::array({70, 62})}, {"kind", "inward"}}})}, {"style", pen}});
+                const Image drawn = balloon_alone(doc, dpi, page, page - 20);
+                QVERIFY(closed_round(grey_of(drawn), px_of(dpi, 50), px_of(dpi, 52), 200));
+                genko::render::text::clear_balloon_cache();
+                QVERIFY(balloon_alone(doc, dpi, page, page - 20).tobytes() == drawn.tobytes());
+                if (dpi == 600) QCOMPARE(genko::render::text::balloon::pen_trace({&doc.story.front()}, dpi).size(), std::size_t{1});
+            }
+            for (const bool curved : {false, true}) {  // (drawn by hand)
+                Json style = pen;
+                if (curved) style["path_curve"] = true;
+                const Document doc = one_line("speech", Json{{"path", path}, {"tail", Json::array({100, 96})}, {"style", style}});
+                const Image drawn = balloon_alone(doc, dpi, page, page - 20);
+                QVERIFY2(closed_round(grey_of(drawn), px_of(dpi, 65), px_of(dpi, 60), 200), curved ? "smoothed" : "as given");
+                const auto traces = genko::render::text::balloon::pen_trace({&doc.story.front()}, dpi);
+                QCOMPARE(traces.size(), std::size_t{1});
+                int starts = 0;
+                for (const unsigned char start : traces.front().stroke_start) starts += start;
+                // (as given: its six points and its tail's tip, the two joins with the tail rounded; smoothed: the tip alone)
+                QCOMPARE(starts, curved ? 1 : 7);
+            }
+            {  // (the eraser and a fading tail: where the pen's line is, the even line is too — nothing new is opened —, and
+               // the balloon away from them closes as without them)
+                const Document cut = run_ops(one_line("speech", Json{{"tail", Json::array({100, 96})}, {"style", pen}}),
+                                             Json::array({Json{{"op", "cut_balloon"}, {"id", "L1"}, {"points", Json::array({Json::array({36, 52}), Json::array({48, 40})})}, {"width_mm", 4.0}}}));
+                Document even = cut;
+                even.story.front().style.erase("pen_swell");
+                even.story.front().style.erase("pen_taper");
+                const Grey a = grey_of(balloon_alone(cut, dpi, page, page - 20)), b = grey_of(balloon_alone(even, dpi, page, page - 20));
+                int gone = 0, ink = 0;
+                for (int y = 0; y < a.h; ++y) {
+                    for (int x = 0; x < a.w; ++x) {
+                        ink += a.at(x, y) < 128 ? 1 : 0;
+                        // (where the eraser took the even line away, the pen's line is gone too)
+                        if (b.at(x, y) == 255 && a.at(x, y) < 128) ++gone;
+                    }
+                }
+                QVERIFY(ink > 100);
+                QVERIFY2(gone < ink / 3, qPrintable(QStringLiteral("%1 of %2").arg(gone).arg(ink)));
+                const Document fade = one_line("speech", Json{{"tails", Json::array({Json{{"to", Json::array({100, 96})}, {"kind", "fade"}}})}, {"style", pen}});
+                const Grey f = grey_of(balloon_alone(fade, dpi, page, page - 20));
+                QVERIFY(f.at(px_of(dpi, 99.5), px_of(dpi, 95.5)) > 200);  // (nothing left at the tip)
+                QVERIFY(!closed_round(f, px_of(dpi, 65), px_of(dpi, 60), 200));  // (open at the tip, as a fading tail is)
+            }
+        }
+    }
+
+    // The pen's line and the drips at 1200 dpi: closed round the balloon, its tail and its drips, the same line as at 600
+    // (the strokes above), and made black and white too.
+    void thePenAndTheDripsAt1200Dpi() {
+        const int dpi = 1200;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        for (const char* kind : {"speech", "box", "shout", "heart"}) {
+            const Document doc = one_line(kind, Json{{"x_mm", 10}, {"y_mm", 10}, {"w_mm", 40}, {"h_mm", 40}, {"tail", Json::array({34, 60})},
+                                                     {"style", Json{{"pen_swell", 0.6}, {"pen_taper", 0.8}, {"drip_mm", 7}, {"drip_seed", 4}}}});
+            const Image drawn = balloon_alone(doc, dpi, 62, 66);
+            QVERIFY2(closed_round(grey_of(drawn), px(30), px(24), 200), kind);
+            QVERIFY2(closed_round(grey_of(genko::render::to_bitonal(drawn)), px(30), px(24)), kind);
+            QVERIFY(!genko::render::text::balloon::drip_trace(doc.story.front(), dpi).empty());
+        }
+    }
+
+    // A symbol's letters in boxes far from square and with other numbers of points than its own: still inside the symbol,
+    // at every resolution (a box too small for them makes them smaller, never lets them out).
+    void theLettersFitASymbolOfAnyShape_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<double>("w");
+        QTest::addColumn<double>("h");
+        QTest::addColumn<QString>("style");
+        const std::pair<double, double> boxes[] = {{80, 25}, {25, 80}, {30, 30}, {60, 20}, {20, 60}, {100, 100}};
+        const std::pair<const char*, Json> kinds[] = {{"heart", Json::object()}, {"diamond", Json::object()}, {"star", Json{{"points", 4}, {"spike_depth", 0.6}}},
+                                                      {"star", Json{{"points", 7}}}, {"star", Json{{"points", 12}, {"spike_depth", 0.05}}}, {"star", Json{{"points", 9}, {"spike_depth", 0.6}}},
+                                                      {"flower", Json{{"points", 4}}}, {"flower", Json{{"points", 7}}}, {"flower", Json{{"points", 12}}}};
+        for (const auto& [kind, style] : kinds) {
+            for (const auto& [w, h] : boxes) {
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2 in %3 × %4").arg(kind, QString::fromStdString(style.dump())).arg(w).arg(h))) << QString::fromLatin1(kind) << w << h << QString::fromStdString(style.dump());
+            }
+        }
+    }
+    void theLettersFitASymbolOfAnyShape() {
+        QFETCH(QString, kind);
+        QFETCH(double, w);
+        QFETCH(double, h);
+        QFETCH(QString, style);
+        const std::string k = kind.toStdString();
+        const Json st = Json::parse(style.toStdString());
+        const Document doc = one_line(k.c_str(), Json{{"x_mm", 20}, {"y_mm", 20}, {"w_mm", w}, {"h_mm", h}, {"style", st}}, "すき\nだよ");
+        const genko::core::StoryLine& line = doc.story.front();
+        for (const int dpi : {150, 600}) {
+            const genko::render::text::Layout layout = genko::render::text::text_layout(line, dpi);
+            const double a = w / 25.4 * dpi / 2, b = h / 25.4 * dpi / 2;
+            const clean::Box box{-a, -b, a, b};
+            const int points = genko::core::symbol_points(line);
+            const double inner = genko::core::star_inner(line);
+            const clean::Contour outline = k == "heart" ? clean::heart(box, -1.0) : k == "diamond" ? clean::diamond(box, -1.0)
+                                           : k == "star" ? clean::star(box, points, inner, -1.0) : clean::flower(box, points);
+            const std::string alpha = layout.image.getchannel(layout.image.bands() - 1).tobytes();
+            int x0 = layout.image.width(), y0 = layout.image.height(), x1 = 0, y1 = 0;
+            for (int y = 0; y < layout.image.height(); ++y) {
+                for (int x = 0; x < layout.image.width(); ++x) {
+                    if (static_cast<unsigned char>(alpha[static_cast<std::size_t>(y) * static_cast<std::size_t>(layout.image.width()) + static_cast<std::size_t>(x)]) <= 40) continue;
+                    x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x + 1), y1 = std::max(y1, y + 1);
+                }
+            }
+            QVERIFY(x1 > x0 && y1 > y0);
+            QVERIFY(layout.em >= 8);
+            // (letters at their smallest — 8 px — may not fit a box of a few millimetres at 150 dpi: the others are inside)
+            if (layout.em <= 8) continue;
+            for (const double x : {static_cast<double>(x0), static_cast<double>(x1)}) {
+                for (const double y : {static_cast<double>(y0), static_cast<double>(y1)}) {
+                    QVERIFY2(clean::inside(outline, {layout.corner_x + x, layout.corner_y + y}),
+                             qPrintable(QStringLiteral("%1 dpi: a corner of the letters at %2, %3 is outside").arg(dpi).arg(layout.corner_x + x).arg(layout.corner_y + y)));
+                }
+            }
+        }
+    }
+
+    // A tone printed at its lightest and its darkest (a page of 600 dpi made black and white): within the densities
+    // tone_print_range says print — for 60 lines, from 4% — the dots are whole (no black pixel alone) and, to 90%, the
+    // white between them too (no white pixel alone); lighter than that the dots do drop to single pixels, which is what
+    // the book's check warns of: on a monochrome page a tone too light, or too dark, for its screen is said (a warning,
+    // in Japanese, with the density to use), once for a group of joined balloons, and never on a colour page.
+    void aToneOutsideWhatPrintsIsWarnedOf() {
+        namespace balloon = genko::render::text::balloon;
+        const balloon::TonePrint sixty = balloon::tone_print_range(600, 60, false);
+        QVERIFY2(sixty.lightest > 0.03 && sixty.lightest < 0.04 && sixty.darkest == 0.9, qPrintable(QStringLiteral("%1 .. %2").arg(sixty.lightest).arg(sixty.darkest)));
+        const balloon::TonePrint fine = balloon::tone_print_range(600, 85, false);
+        QVERIFY2(fine.lightest > 0.06 && fine.lightest < 0.07 && fine.darkest > 0.8 && fine.darkest < 0.88, qPrintable(QStringLiteral("%1 .. %2").arg(fine.lightest).arg(fine.darkest)));
+        const balloon::TonePrint stripes = balloon::tone_print_range(600, 60, true);
+        QVERIFY(std::fabs(stripes.lightest - 0.2) < 1e-9 && std::fabs(stripes.darkest - 0.8) < 1e-9);
+        QVERIFY(balloon::tone_print_range(1200, 60, false).lightest < sixty.lightest / 3.9);
+        const auto lone = [](const Document& doc, int white_or_black) {
+            const Grey g = grey_of(genko::render::to_bitonal(page_part(doc, 600, 50, 50, 8, 20)));  // (inside the oval, clear of its line and its letter)
+            int alone = 0;
+            for (int y = 1; y + 1 < g.h; ++y) {
+                for (int x = 1; x + 1 < g.w; ++x) {
+                    const bool here = (g.at(x, y) < 128) == (white_or_black == 0);
+                    if (!here) continue;
+                    const auto same = [&](int dx, int dy) { return (g.at(x + dx, y + dy) < 128) == (white_or_black == 0); };
+                    if (!same(-1, 0) && !same(1, 0) && !same(0, -1) && !same(0, 1)) ++alone;
+                }
+            }
+            return alone;
+        };
+        const auto toned = [](double density, double lpi = 60.0) {
+            return one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", density}, {"lpi", lpi}}}, {"line_rgb", Json::array({0, 0, 0})}}}}, "あ");
+        };
+        for (const double density : {0.04, 0.06, 0.1, 0.3, 0.5, 0.7, 0.8, 0.9}) {
+            QVERIFY2(lone(toned(density), 0) == 0, qPrintable(QStringLiteral("black pixels alone at %1").arg(density)));
+            qInfo("60 lines at %g: %d white pixels alone", density, lone(toned(density), 1));
+        }
+        QVERIFY(lone(toned(0.01), 0) > 0);  // (what the check is for)
+        // (the check)
+        const auto codes = [](const Document& doc) {
+            std::vector<std::string> out;
+            for (const Json& issue : genko::formats::checks::page_issues(doc, doc.page(0))) {
+                const std::string code = issue.value("code", std::string());
+                if (code.rfind("balloon_tone", 0) == 0) {
+                    out.push_back(code);
+                    const QString message = QString::fromStdString(issue.value("message", std::string()));
+                    if (QRegularExpression(QStringLiteral("[A-Za-z]{4,}")).match(message).hasMatch() || !message.contains(QStringLiteral("トーン")) || !message.contains(QStringLiteral("%"))) {
+                        out.push_back("a message that does not read: " + message.toStdString());
+                    }
+                    if (issue.value("level", std::string()) != "warning" || issue["target"].value("id", std::string()).empty()) out.push_back("not a warning on its line");
+                }
+            }
+            return out;
+        };
+        using Codes = std::vector<std::string>;
+        QCOMPARE(codes(toned(0.02)), Codes{"balloon_tone_light"});
+        QCOMPARE(codes(toned(0.03)), Codes{"balloon_tone_light"});
+        QCOMPARE(codes(toned(0.04)), Codes{});
+        QCOMPARE(codes(toned(0.5)), Codes{});
+        QCOMPARE(codes(toned(0.9)), Codes{});
+        QCOMPARE(codes(toned(0.9, 85.0)), Codes{"balloon_tone_dark"});
+        QCOMPARE(codes(toned(0.05, 85.0)), Codes{"balloon_tone_light"});
+        QCOMPARE(codes(toned(0.5, 85.0)), Codes{});
+        QCOMPARE(codes(one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", 0}, {"to", 0.5}}}}}})), Codes{"balloon_tone_light"});  // (it begins at nothing)
+        QCOMPARE(codes(one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", 0.05}, {"to", 0.5}}}}}})), Codes{});
+        QCOMPARE(codes(one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", 0.1}, {"pattern", "line"}}}}}})), Codes{"balloon_tone_light"});
+        QCOMPARE(codes(one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", 0.85}, {"pattern", "line"}}}}}})), Codes{"balloon_tone_dark"});
+        QCOMPARE(codes(one_line("speech", Json{{"style", Json{{"fill_tone", Json{{"density", 0.02}, {"to", 0.9}, {"lpi", 85}}}}}})), (Codes{"balloon_tone_light", "balloon_tone_dark"}));
+        QCOMPARE(codes(one_line("sfx", Json{{"style", Json{{"fill_tone", Json{{"density", 0.02}}}}}})), Codes{});  // (no balloon: no tone)
+        Document nothing = toned(0.02);
+        nothing.story.front().style["fill_tone"] = Json{{"density", 0}};
+        QCOMPARE(codes(nothing), Codes{});
+        {  // (a colour page prints its tone as it is)
+            Document colour = genko::core::new_episode("フキダシ", genko::core::Num(1), 1, genko::core::PageSpec::b5_doujin());
+            colour = run_ops(colour, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"balloon", "speech"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 50}, {"h_mm", 40},
+                                                       {"text", "あ"}, {"style", Json{{"fill_tone", Json{{"density", 0.02}}}}}}}));
+            if (colour.page(0).spec.expression == "color") QCOMPARE(codes(colour), Codes{});
+        }
+        {  // (joined balloons: the tone drawn is the first line's — said once, for that line)
+            const Json light{{"fill_tone", Json{{"density", 0.02}}}, {"group", "g"}};
+            const Document joined = run_ops(blank_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"balloon", "speech"}, {"x_mm", 30}, {"y_mm", 40}, {"w_mm", 40},
+                                                                            {"h_mm", 34}, {"text", "あ"}, {"style", Json{{"group", "g"}}}},
+                                                                       Json{{"op", "add_line"}, {"page", 1}, {"id", "L2"}, {"balloon", "speech"}, {"x_mm", 62}, {"y_mm", 56}, {"w_mm", 40},
+                                                                            {"h_mm", 34}, {"text", "い"}, {"style", light}}}));
+            QCOMPARE(codes(joined), Codes{});
+        }
+    }
+
+    // The feature is named for a symbol on a type layer inside a smart object's contents too (the pages a book writes
+    // beside its own), and the same picture is drawn whoever draws it: four threads at once, each from nothing, draw the
+    // additions' pages as one does.
+    void theAdditionsInsideContentsAndOnManyThreads() {
+        const auto names = [](const Json& payload, std::string_view feature) {
+            const Json& features = payload["features"];
+            return std::find(features.begin(), features.end(), Json(std::string(feature))) != features.end();
+        };
+        Document doc = run_ops(blank_book(), Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "すき"}, {"box", Json::array({20, 20, 40, 36})}, {"new_id", "t1"},
+                                                               {"balloon", "heart"}, {"style", Json{{"drip_mm", 4}}}}}));
+        QVERIFY(names(payload_of(doc), genko::core::kFukidashi2Feature));
+        doc = run_ops(doc, Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}, {"new_id", "so"}}}));
+        QVERIFY(doc.story.empty());
+        bool on_the_page = false;
+        for (const genko::core::Layer& layer : doc.page(0).layers) on_the_page = on_the_page || (layer.type && layer.type->balloon == "heart");
+        QVERIFY(!on_the_page);  // (the record is in the contents now)
+        QVERIFY(names(payload_of(doc), genko::core::kFukidashi2Feature));
+        // (many threads)
+        const Document book = genko::test::additions_book();
+        const Json pins = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/pins/additions_pages.json"))));
+        genko::render::text::clear_balloon_cache();
+        std::vector<std::string> drawn(8);
+        std::vector<std::thread> threads;
+        for (std::size_t t = 0; t < 8; ++t) {
+            threads.emplace_back([&, t] { drawn[t] = picture_sha(genko::render::render_page(book.page(t % 4), 150, {}, &book).image); });
+            if (threads.size() == 4) {  // (four at a time)
+                for (std::thread& thread : threads) thread.join();
+                threads.clear();
+                genko::render::text::clear_balloon_cache();
+            }
+        }
+        for (std::size_t t = 0; t < 8; ++t) QCOMPARE(drawn[t], pins["additions"]["150"][t % 4].get<std::string>());
+    }
+
+    // --- the clean renderer: a tail at a box's corner ---------------------------------------------------------------------------
+
+    // A tail whose root falls on a corner of a box (or of a rounded balloon with a small corner) left the line open
+    // there: its base, as deep as asked, was wider than the corner, and the stretch of it outside the box had no line
+    // (a defect of the clean renderer of 2026-11-13, found by the review). Such an end of the base is drawn in to just
+    // inside the outline. Round each of the four corners — every degree and a half from 15° before the corner's own direction to 15°
+    // past it —, for a wedge, a straight tail and a zigzag, on boxes of the sizes the review measured and with wide tails:
+    // the line closes round the balloon and its tail.
+    void aTailAtABoxCornerClosesItsLine_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<QString>("style");
+        QTest::addColumn<QString>("tail");
+        const std::pair<const char*, Json> bodies[] = {{"box", Json::object()}, {"box", Json{{"corner_mm", 1.0}}}, {"rounded", Json{{"corner_mm", 0}}},
+                                                       {"rounded", Json{{"corner_mm", 1.0}}}, {"rounded", Json{{"corner_mm", 3.0}}}, {"rounded", Json::object()},
+                                                       {"box", Json{{"border_mm", 0.8}}}, {"box", Json{{"pen_swell", 0.5}, {"pen_taper", 0.7}}}};
+        for (const auto& [kind, style] : bodies) {
+            for (const char* tail : {"wedge", "straight", "zigzag"}) {
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2, %3").arg(kind, QString::fromStdString(style.dump()), tail))) << QString::fromLatin1(kind) << QString::fromStdString(style.dump()) << QString::fromLatin1(tail);
+            }
+        }
+    }
+    void aTailAtABoxCornerClosesItsLine() {
+        QFETCH(QString, kind);
+        QFETCH(QString, style);
+        QFETCH(QString, tail);
+        const int dpi = 300;
+        const auto px = [dpi](double mm) { return static_cast<int>(std::lround(mm / 25.4 * dpi)); };
+        struct Size {
+            double w, h, width;
+        };
+        // (the review's sizes; the last two with a wide tail: 6 and 8 mm on a box of 24 × 18)
+        const Size sizes[] = {{30, 24, 0}, {40, 30, 0}, {44, 36, 0}, {50, 46, 0}, {60, 40, 0}, {80, 30, 0}, {24, 18, 6}, {24, 18, 8}};
+        int drawn = 0;
+        for (const Size& size : sizes) {
+            const double x = 30, y = 30;
+            const double cx = x + size.w / 2, cy = y + size.h / 2;
+            for (int corner = 0; corner < 4; ++corner) {
+                const double to_corner = std::atan2((corner < 2 ? 1 : -1) * size.h / 2, (corner == 0 || corner == 3 ? 1 : -1) * size.w / 2) * 180 / 3.141592653589793;
+                for (double off = -15.0; off <= 15.0; off += 1.5) {
+                    const double angle = (to_corner + off) * 3.141592653589793 / 180;
+                    const double ux = std::cos(angle), uy = std::sin(angle);
+                    const double edge = std::min(std::fabs(ux) > 1e-9 ? (size.w / 2) / std::fabs(ux) : 1e9, std::fabs(uy) > 1e-9 ? (size.h / 2) / std::fabs(uy) : 1e9);
+                    Json one{{"to", Json::array({cx + ux * (edge + 14), cy + uy * (edge + 14)})}};
+                    if (tail != "wedge") one["kind"] = tail.toStdString();
+                    if (size.width > 0) one["width_mm"] = size.width;
+                    const Document doc = one_line(kind.toStdString().c_str(), Json{{"x_mm", x}, {"y_mm", y}, {"w_mm", size.w}, {"h_mm", size.h}, {"tails", Json::array({one})},
+                                                                                    {"style", Json::parse(style.toStdString())}});
+                    const Grey g = grey_of(balloon_alone(doc, dpi, x + size.w + 50, y + size.h + 50));
+                    ++drawn;
+                    QVERIFY2(closed_round(g, px(cx), px(cy), 200),
+                             qPrintable(QStringLiteral("%1 × %2, corner %3, %4° off it%5: the line is open").arg(size.w).arg(size.h).arg(corner).arg(off).arg(size.width > 0 ? QStringLiteral(", a tail of %1 mm").arg(size.width) : QString())));
+                }
+            }
+        }
+        QCOMPARE(drawn, 8 * 4 * 21);
     }
 
     // A part of the additions' sample is the whole page cut there, every pixel: each page at 600 dpi in tiles, and at 150.

@@ -1965,7 +1965,10 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const Json& outline = at(st, "outline_mm");
     std::int64_t grow = core::py_truthy(outline) ? px(core::to_float(outline), dpi) : (kind == "sfx" ? std::max<std::int64_t>(2, floordiv(em, 8)) : 0);
     // (a white edge over the tone: a tone box's, and — fukidashi@2 — any balloon's with a tone inside, style.fill_tone)
-    const bool toned = kind == "tone_box" || (at(st, "fill_tone").is_object() && kind != "none" && kind != "sfx" && kind != "picture");
+    // (the tone that is drawn under them: the group's — ToneUnder —, or the line's own; a tone that draws nothing gives no
+    // edge, and letters without a balloon have none)
+    const bool over_tone = kind != "none" && kind != "sfx" && kind != "picture" && (ToneUnder::current() ? *ToneUnder::current() : fill_tone_draws(st));
+    const bool toned = kind == "tone_box" || over_tone;
     if (toned && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));
     if (grow != 0) {
         image = outlined(image, grow, core::py_truthy(at(st, "outline_rgb")) ? rgb_tuple(at(st, "outline_rgb")) : Rgb{255, 255, 255});
@@ -2244,6 +2247,7 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
     if (const std::uint64_t lost = font_files::generation(); lost != 0) key.push_back(Json::array({"fonts", lost}));
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
     if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
+    if (const auto toned = ToneUnder::current()) key.push_back(Json::array({"tone_under", *toned}));  // (fukidashi@2: its group's tone)
     // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes —,
     // a line across with features alone too; their digest, made once where they are set: review P2-3, P3-10)
     if (TypeStyles::current() != nullptr && !TypeStyles::current()->is_null() && sets_opentype(line))
@@ -2601,6 +2605,22 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
 namespace {
 thread_local std::optional<double> text_gamma_now;
 }  // namespace
+
+thread_local std::optional<bool> tone_under_now;
+
+ToneUnder::ToneUnder(bool toned) : was_(tone_under_now) { tone_under_now = toned; }
+ToneUnder::~ToneUnder() { tone_under_now = was_; }
+std::optional<bool> ToneUnder::current() { return tone_under_now; }
+
+bool fill_tone_draws(const Json& style) {
+    const Json& tone = at(style, "fill_tone");
+    if (!tone.is_object()) return false;
+    const auto above = [&tone](const char* key) {
+        const Json& value = at(tone, key);
+        return value.is_number() && core::to_float(value) > 0;
+    };
+    return above("density") || above("to");
+}
 
 TextGamma::TextGamma(std::optional<double> gamma) : was_(text_gamma_now) { text_gamma_now = gamma; }
 TextGamma::~TextGamma() { text_gamma_now = was_; }

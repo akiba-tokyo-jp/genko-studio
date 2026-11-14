@@ -98,6 +98,34 @@ Pt turned(Pt point, Pt centre, double degrees);
 // _thought_trail(line, panels): where a thought's bubbles trail to when nobody is named.
 Pt thought_trail(const core::StoryLine& line, const Panels* panels);
 
+// fukidashi@2 (SPEC BALLOON-02; internal — for the tests and the sample sheets, not an op): the pen's line of a group
+// (its lines in order, the first one's style) as it is drawn at a resolution — each stretch of line with its points on
+// the page (mm), how heavy the line is at each (its width there ÷ the line's even width) and where a stroke begins.
+// Nothing for a group without the pen's keys or without a line.
+struct PenTrace {
+    std::vector<Pt> points_mm;
+    std::vector<double> weight;
+    std::vector<unsigned char> stroke_start;
+    bool closed = false;
+};
+std::vector<PenTrace> pen_trace(const std::vector<const core::StoryLine*>& group, int dpi);
+// The drips of a line's balloon as they are drawn at a resolution: where each one's upright line stands and how far down
+// its tip lies on the page (mm), and half its width (mm).
+struct DripTrace {
+    double x_mm = 0.0;
+    double half_mm = 0.0;
+    double tip_mm = 0.0;
+};
+std::vector<DripTrace> drip_trace(const core::StoryLine& line, int dpi);
+// The densities of a tone inside a balloon (style.fill_tone) that print on a page made black and white at `dpi`, for a
+// screen of `lpi` lines: lighter than `lightest` its dots (its stripes, `lines`) are under two pixels and drop out,
+// darker than `darkest` the white left between them is (0.9 at the most: the densities a tone takes).
+struct TonePrint {
+    double lightest = 0.0;
+    double darkest = 0.9;
+};
+TonePrint tone_print_range(double dpi, double lpi, bool lines);
+
 }  // namespace balloon
 
 }  // namespace genko::render::text

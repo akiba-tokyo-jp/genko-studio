@@ -247,6 +247,25 @@ private:
     std::optional<double> was_;
 };
 
+// fukidashi@2 (SPEC BALLOON-02): whether a style's fill_tone draws anything — an object whose density, or the density
+// it grows to, is above 0.
+bool fill_tone_draws(const core::Json& style);
+// The white edge the letters over a tone get follows the tone that is drawn under them: a group of joined balloons has
+// the tone of its first line. While one of these is alive on this thread (draw_group makes one for a group's letters),
+// a line's letters are set as over a tone (true) or not (false), whatever its own style says; with none alive, by the
+// line's own fill_tone (a line drawn by itself is its own group). A tone box's own edge is the line's kind's, as ever.
+class ToneUnder {
+public:
+    explicit ToneUnder(bool toned);
+    ~ToneUnder();
+    ToneUnder(const ToneUnder&) = delete;
+    ToneUnder& operator=(const ToneUnder&) = delete;
+    static std::optional<bool> current();
+
+private:
+    std::optional<bool> was_;
+};
+
 // The letters ("RGBA") over the picture ("RGB" or "RGBA") at `at`, mixed in `gamma` (PhotoCraft's composite_gamma in
 // the normal mode): each colour ((1 − a)·under^g + a·letter^g)^(1/g) over an opaque picture — weighted by the alphas
 // over a transparent one, whose alpha becomes a + under·(1 − a). Other pictures: Pillow's paste.
