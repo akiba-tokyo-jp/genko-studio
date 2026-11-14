@@ -357,7 +357,7 @@ void FontPalette::step() {
         timer_->stop();
         return;
     }
-    if (warming_->isRunning()) {  // (its file is being read: the sample when that is done)
+    if (!isVisible() || warming_->isRunning()) {  // (put away: the rest when it is shown again; its file being read: when that is done)
         timer_->stop();
         return;
     }
