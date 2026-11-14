@@ -307,6 +307,104 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     connect(tail_kind, &QComboBox::activated, this, [this](int) { carry_on("set_tail_kind", [this] { set_tail_kind(); }); });
     tail_fillet = own_spin(-0.5, 20, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"), "set_tail_fillet", &StoryPanel::set_tail_fillet);
     tail_fillet->setToolTip(QStringLiteral("しっぽとフキダシのつなぎ目の丸み（0 で角のまま。「自動」はほどよい丸み）"));
+    // fukidashi@2: the pen's line, the drips, a symbol's points, the tone and the blend inside
+    const auto key_spin = [this](QAbstractSpinBox* box, auto get, const char* key, double half_step, auto value) {
+        connect(box, &QAbstractSpinBox::editingFinished, this, [this, box, get, key, half_step, value] {
+            carry_on("set_shape_key", [this, box, get, key, half_step, value] { set_shape_key(box, get(), half_step, key, value()); });
+        });
+    };
+    pen_swell = new QDoubleSpinBox;
+    pen_swell->setRange(0, 0.9);
+    pen_swell->setSingleStep(0.1);
+    pen_swell->setDecimals(2);
+    pen_swell->setSpecialValueText(QStringLiteral("なし"));
+    pen_swell->setToolTip(QStringLiteral("フキダシの線を、片側で太く反対側で細くします（G ペンや筆の強弱。0〜0.9。線の太さはその平均）"));
+    key_spin(pen_swell, [this] { return pen_swell->value(); }, "pen_swell", 0.005, [this] { return pen_swell->value() > 0 ? Json(pen_swell->value()) : Json(); });
+    pen_angle = new QSpinBox;
+    pen_angle->setRange(0, 360);
+    pen_angle->setSingleStep(15);
+    pen_angle->setValue(45);
+    pen_angle->setSuffix(QStringLiteral("°"));
+    pen_angle->setToolTip(QStringLiteral("線の太い側の向き（0° が右、90° が下。初めは 45°: 右下が太い）"));
+    key_spin(pen_angle, [this] { return static_cast<double>(pen_angle->value()); }, "pen_angle", 0.5,
+             [this] { return pen_angle->value() != 45 ? Json(pen_angle->value()) : Json(); });
+    pen_taper = new QDoubleSpinBox;
+    pen_taper->setRange(0, 1);
+    pen_taper->setSingleStep(0.1);
+    pen_taper->setDecimals(2);
+    pen_taper->setSpecialValueText(QStringLiteral("なし"));
+    pen_taper->setToolTip(QStringLiteral("ひと筆ごとに、両端へ向かって線を細くします（入り抜き。筆の長さのうち細る割合、0〜1）"));
+    key_spin(pen_taper, [this] { return pen_taper->value(); }, "pen_taper", 0.005, [this] { return pen_taper->value() > 0 ? Json(pen_taper->value()) : Json(); });
+    pen_strokes = new QSpinBox;
+    pen_strokes->setRange(1, 8);
+    pen_strokes->setValue(2);
+    pen_strokes->setSuffix(QStringLiteral(" 筆"));
+    pen_strokes->setToolTip(QStringLiteral("角のない丸いフキダシを何筆で描くか（1〜8。初めは 2）。角のある形は角から角までがひと筆"));
+    key_spin(pen_strokes, [this] { return static_cast<double>(pen_strokes->value()); }, "pen_strokes", 0.5,
+             [this] { return pen_strokes->value() != 2 ? Json(pen_strokes->value()) : Json(); });
+    drip_length = new QDoubleSpinBox;
+    drip_length->setRange(0, 30);
+    drip_length->setSingleStep(1);
+    drip_length->setDecimals(1);
+    drip_length->setSuffix(QStringLiteral(" mm"));
+    drip_length->setSpecialValueText(QStringLiteral("なし"));
+    drip_length->setToolTip(QStringLiteral("フキダシの下からしずくを垂らします（ホラー・溶ける声に）。いちばん長いしずくの長さ。フキダシの箱はそのぶん下へ伸びます"));
+    connect(drip_length, &QDoubleSpinBox::editingFinished, this, [this] { carry_on("set_drip_length", [this] { set_drip_length(); }); });
+    drip_count = new QSpinBox;
+    drip_count->setRange(0, 24);
+    drip_count->setSpecialValueText(QStringLiteral("自動"));
+    drip_count->setToolTip(QStringLiteral("しずくの数（1〜24。「自動」はフキダシの幅に合わせる）"));
+    key_spin(drip_count, [this] { return static_cast<double>(drip_count->value()); }, "drips", 0.5,
+             [this] { return drip_count->value() > 0 ? Json(drip_count->value()) : Json(); });
+    drip_width = new QDoubleSpinBox;
+    drip_width->setRange(0, 10);
+    drip_width->setSingleStep(0.2);
+    drip_width->setDecimals(1);
+    drip_width->setSuffix(QStringLiteral(" mm"));
+    drip_width->setSpecialValueText(QStringLiteral("自動"));
+    drip_width->setToolTip(QStringLiteral("しずくの太さ（0.3〜10 mm。「自動」はフキダシの幅に合わせる）"));
+    connect(drip_width, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("set_shape_key", [this] {
+            if (drip_width->value() > 0 && drip_width->value() < 0.3) drip_width->setValue(0.3);  // (the slimmest drip)
+            set_shape_key(drip_width, drip_width->value(), 0.05, "drip_width_mm", drip_width->value() > 0 ? Json(drip_width->value()) : Json());
+        });
+    });
+    drip_seed = new QPushButton(QStringLiteral("しずくの並びを変える"));
+    drip_seed->setToolTip(QStringLiteral("しずくの並び（場所・長さ・太さ）を別のものにします。同じ並びは何度描いても同じです"));
+    connect(drip_seed, &QPushButton::clicked, this, [this] { carry_on("next_drip_arrangement", [this] { next_drip_arrangement(); }); });
+    points = new QSpinBox;
+    points->setRange(3, 12);
+    points->setSpecialValueText(QStringLiteral("自動"));
+    points->setToolTip(QStringLiteral("星の先の数・花の花びらの数（4〜12。「自動」は星 5・花 6。星を 4 にしてトゲを長くすると、きらめき）"));
+    key_spin(points, [this] { return static_cast<double>(points->value()); }, "points", 0.5,
+             [this] { return points->value() >= 4 ? Json(points->value()) : Json(); });
+    const auto tone_spin = [this](int lo, int hi, int step, const QString& suffix, const QString& special, const QString& tip) {
+        auto* box = new QSpinBox;
+        box->setRange(lo, hi);
+        box->setSingleStep(step);
+        box->setSuffix(suffix);
+        if (!special.isEmpty()) box->setSpecialValueText(special);
+        box->setToolTip(tip);
+        connect(box, &QSpinBox::editingFinished, this, [this] { carry_on("set_tone", [this] { set_tone(); }); });
+        return box;
+    };
+    tone_density = tone_spin(-5, 90, 5, QStringLiteral(" %"), QStringLiteral("なし"),  // (its least, −5: none)
+                             QStringLiteral("フキダシの中にトーンを敷きます（線の色で。文字には白いフチがつきます）。"
+                                            "白黒の原稿では、60 線なら 4〜90%、85 線なら 7〜85% が点として印刷に残ります"
+                                            "（それより薄いと点が飛び、濃いと白がつぶれます。外れると点検で知らせます）"));
+    tone_lpi = tone_spin(20, 85, 5, QStringLiteral(" 線"), QString(), QStringLiteral("トーンの線数（20〜85。初めは 60。大きいほど細かい網）"));
+    tone_pattern = new QComboBox;
+    tone_pattern->addItem(QStringLiteral("点"), QStringLiteral("dot"));
+    tone_pattern->addItem(QStringLiteral("線"), QStringLiteral("line"));
+    tone_pattern->setToolTip(QStringLiteral("トーンの柄（網点か、平行な線か）"));
+    connect(tone_pattern, &QComboBox::activated, this, [this](int) { carry_on("set_tone", [this] { set_tone(); }); });
+    tone_to = tone_spin(-5, 90, 5, QStringLiteral(" %"), QStringLiteral("同じ"),  // (its least, −5: the same all over)
+                        QStringLiteral("トーンがだんだん濃く（薄く）なる、先の濃さ（グラデーションのトーン。白黒の原稿でグラデーションにするのはこちら）"));
+    tone_dir = tone_spin(0, 359, 45, QStringLiteral("°"), QString(), QStringLiteral("トーンが濃くなっていく向き（0° が右、90° が下、180° が左、270° が上）"));
+    fill_blend = new QPushButton(QStringLiteral("中の色のグラデーション…"));
+    fill_blend->setToolTip(QStringLiteral("フキダシの中の塗りを、塗りの色から別の色へなめらかに変えます（カラーの原稿向け。"
+                                          "白黒の原稿では印刷のとき白か黒になるので、「中のトーン」の「先の濃さ」を使います）"));
+    connect(fill_blend, &QPushButton::clicked, this, [this] { carry_on("pick_blend", [this] { pick_blend(); }); });
     path_curve = check(QStringLiteral("手で描いたフキダシを曲線にする"));
     ruby_scale = spin(0.25, 0.8, 0.05, QStringLiteral(" 字"));
     ruby_scale->setToolTip(QStringLiteral("ルビの大きさ（本文の何字ぶんか。既定 0.5）"));
@@ -396,6 +494,10 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
              {outline_colour, "outline_colour"}, {double_line, "double"}, {spikes, "spikes"},
              {corner, "corner"}, {squircle, "squircle"}, {sides, "sides"}, {wave, "wave"}, {spike_alt, "spike_alt"}, {dash, "dash"},
              {tail_kind, "tail_kind"}, {tail_fillet, "tail_fillet"},
+             {pen_swell, "pen_swell"}, {pen_angle, "pen_angle"}, {pen_taper, "pen_taper"}, {pen_strokes, "pen_strokes"},
+             {drip_length, "drip_length"}, {drip_count, "drip_count"}, {drip_width, "drip_width"}, {drip_seed, "drip_seed"}, {points, "points"},
+             {tone_density, "tone_density"}, {tone_lpi, "tone_lpi"}, {tone_pattern, "tone_pattern"}, {tone_to, "tone_to"}, {tone_dir, "tone_dir"},
+             {fill_blend, "fill_blend"},
              {spike_depth, "spike_depth"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
              {fill_cover, "fill_cover"}, {text_dx, "text_dx"}, {text_dy, "text_dy"}, {tail_width, "tail_width"},
              {path_curve, "path_curve"}, {ruby_scale, "ruby_scale"}, {mono_ruby, "mono_ruby"}, {layer_order, "layer_order"},
@@ -436,6 +538,21 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     form->addRow(QStringLiteral("トゲの数"), spikes);
     form->addRow(QStringLiteral("トゲの長さ"), spike_depth);
     form->addRow(QStringLiteral("トゲの長短"), spike_alt);
+    form->addRow(QStringLiteral("星の先・花びらの数"), points);
+    form->addRow(QStringLiteral("線の強弱"), pen_swell);
+    form->addRow(QStringLiteral("太い側の向き"), pen_angle);
+    form->addRow(QStringLiteral("入り抜き"), pen_taper);
+    form->addRow(QStringLiteral("筆の運び"), pen_strokes);
+    form->addRow(QStringLiteral("しずくの長さ"), drip_length);
+    form->addRow(QStringLiteral("しずくの数"), drip_count);
+    form->addRow(QStringLiteral("しずくの太さ"), drip_width);
+    form->addRow(QString(), drip_seed);
+    form->addRow(QStringLiteral("中のトーン"), tone_density);
+    form->addRow(QStringLiteral("トーンの線数"), tone_lpi);
+    form->addRow(QStringLiteral("トーンの柄"), tone_pattern);
+    form->addRow(QStringLiteral("先の濃さ"), tone_to);
+    form->addRow(QStringLiteral("濃くなる向き"), tone_dir);
+    form->addRow(QString(), fill_blend);
     form->addRow(QStringLiteral("回転"), rotate);
     form->addRow(QStringLiteral("傾き"), skew);
     form->addRow(QStringLiteral("弓なり"), arc);
@@ -630,7 +747,7 @@ void StoryPanel::show_picked() {
     mark->setCurrentIndex(std::max(0, mark->findData(qs(core::py_str(st["emphasis_mark"])))));
     double_line->setChecked(core::py_truthy(st["double"]));
     spikes->setValue(read([&] { return core::py_truthy(st["spikes"]) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(st["spikes"]), 0, 80)) : 0; }, 0));
-    spike_depth->setValue(f("spike_depth", 0.2));
+    spike_depth->setValue(f("spike_depth", l->balloon == "star" ? 0.38 : 0.2));  // (fukidashi@2: a star's own depth)
     fill_cover->setValue(read(
         [&] {
             const double percent = 100 * (st["fill_opacity"].is_null() ? 1.0 : core::to_float(st["fill_opacity"]));
@@ -664,9 +781,34 @@ void StoryPanel::show_picked() {
     tail_fillet->setValue(read([&] { return first_fillet.is_number() ? std::clamp(core::to_float(first_fillet), 0.0, 20.0) : tail_fillet->minimum(); },
                                tail_fillet->minimum()));
     tail_fillet->setEnabled(!tails_now.empty());
+    // fukidashi@2
+    const auto number_of = [&](const Json& value, double fallback, double least, double most) {
+        return read([&] { return value.is_number() ? std::clamp(core::to_float(value), least, most) : fallback; }, fallback);
+    };
+    pen_swell->setValue(number_of(own("pen_swell"), 0, 0, 0.9));
+    pen_angle->setValue(static_cast<int>(std::lround(number_of(own("pen_angle"), 45, 0, 360))));
+    pen_taper->setValue(number_of(own("pen_taper"), 0, 0, 1));
+    pen_strokes->setValue(static_cast<int>(number_of(own("pen_strokes"), 2, 1, 8)));
+    drip_length->setValue(number_of(own("drip_mm"), 0, 0, 30));
+    drip_count->setValue(static_cast<int>(number_of(own("drips"), 0, 0, 24)));
+    drip_width->setValue(number_of(own("drip_width_mm"), 0, 0, 10));
+    points->setValue(static_cast<int>(number_of(own("points"), 3, 3, 12)));
+    {
+        const Json tone = own("fill_tone");
+        const bool toned = tone.is_object() && tone.contains("density");
+        tone_density->setValue(toned ? static_cast<int>(std::lround(100 * number_of(tone["density"], 0, 0, 0.9))) : tone_density->minimum());
+        tone_lpi->setValue(toned ? static_cast<int>(std::lround(number_of(core::get_or(tone, "lpi", Json()), 60, 20, 85))) : 60);
+        tone_pattern->setCurrentIndex(toned && core::get_or(tone, "pattern", Json()) == Json("line") ? 1 : 0);
+        const Json to = toned ? core::get_or(tone, "to", Json()) : Json();
+        tone_to->setValue(to.is_number() ? static_cast<int>(std::lround(100 * number_of(to, 0, 0, 0.9))) : tone_to->minimum());
+        const double dir = toned ? number_of(core::get_or(tone, "dir", Json()), 90, -360, 360) : 90;
+        tone_dir->setValue(static_cast<int>(std::lround(std::fmod(std::fmod(dir, 360.0) + 360.0, 360.0))) % 360);
+        fill_blend->setText(own("fill_gradient").is_object() ? QStringLiteral("中の色のグラデーションを外す") : QStringLiteral("中の色のグラデーション…"));
+    }
     show_shape_rows(*l);
     shown_.clear();  // (what each of these fields shows now: one left so makes no edit — left_as_shown)
-    for (const QDoubleSpinBox* box : {corner, wave, spike_alt, dash, tail_fillet, tail_width}) shown_[box] = box->value();
+    for (const QDoubleSpinBox* box : {corner, wave, spike_alt, dash, tail_fillet, tail_width, pen_swell, pen_taper, drip_length, drip_width}) shown_[box] = box->value();
+    for (const QSpinBox* box : {pen_angle, pen_strokes, drip_count, points}) shown_[box] = box->value();
     shown_[sides] = sides->value();
     shown_[squircle] = squircle->isChecked() ? 1.0 : 0.0;
     path_curve->setVisible(l->path.has_value() && !l->path->empty());
@@ -705,7 +847,11 @@ void StoryPanel::style_changed() {
     change["emphasis_mark"] = data(mark);
     change["double"] = on_or_none(double_line->isChecked());
     change["spikes"] = spikes->value() != 0 ? Json(spikes->value()) : Json();
-    change["spike_depth"] = std::abs(spike_depth->value() - 0.2) > 1e-6 ? Json(spike_depth->value()) : Json();
+    {
+        const core::StoryLine* l = line();
+        const double usual = l != nullptr && l->balloon == "star" ? 0.38 : 0.2;  // (fukidashi@2: a star's own depth)
+        change["spike_depth"] = std::abs(spike_depth->value() - usual) > 1e-6 ? Json(spike_depth->value()) : Json();
+    }
     change["fill_opacity"] = fill_cover->value() < 100 ? Json(fill_cover->value() / 100.0) : Json();
     change["text_dx_mm"] = or_none(text_dx->value());
     change["text_dy_mm"] = or_none(text_dy->value());
@@ -971,10 +1117,11 @@ void StoryPanel::show_shape_rows(const core::StoryLine& l) {
     const bool squared = kind_in(kind, {"box", "narration", "dotted_box", "tone_box", "fancy_box"});
     // (a dotted box is drawn as dots along its square edge and a fancy box has its marks at its square corners: no
     // rounded corners for either, and no trembling line for the dots)
-    style_form->setRowVisible(corner, !drawn && (kind == "rounded" || (squared && kind != "dotted_box" && kind != "fancy_box") || kind == "polygon"));
+    style_form->setRowVisible(corner, !drawn && (kind == "rounded" || (squared && kind != "dotted_box" && kind != "fancy_box") || kind == "polygon" ||
+                                                 kind_in(kind, {"heart", "star", "diamond"})));
     style_form->setRowVisible(squircle, !drawn && kind == "rounded");
     style_form->setRowVisible(sides, !drawn && kind == "polygon");
-    style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash", "dotted_box"})));
+    style_form->setRowVisible(wave, !none && (drawn || !kind_in(kind, {"cloud", "shout", "electric", "flash", "dotted_box", "star", "flower"})));
     style_form->setRowVisible(spike_alt, !drawn && kind == "shout");
     style_form->setRowVisible(dash, !none && !kind_in(kind, {"dotted_box", "flash"}));
     // (a narration, a flash and the framed boxes are drawn without tails: render/text/balloons no_tail)
@@ -982,6 +1129,22 @@ void StoryPanel::show_shape_rows(const core::StoryLine& l) {
     style_form->setRowVisible(tail_kind, tailed && kind != "thought");  // (a thought's tails are always bubbles)
     style_form->setRowVisible(tail_fillet, tailed);
     corner->setEnabled(!squircle->isChecked() || kind != "rounded");  // (the fuller box has its own corners)
+    // fukidashi@2: what the pen, the drips, the points, the tone and the blend change (render/text/balloons: the pen not on
+    // a dotted box or a flash; drips not on a balloon drawn by hand, a dotted box or a flash; points on a star and a
+    // flower; the tone and the blend wherever there is a balloon)
+    const bool lined = !none && !kind_in(kind, {"dotted_box", "flash"});
+    style_form->setRowVisible(pen_swell, lined);
+    style_form->setRowVisible(pen_angle, lined && pen_swell->value() > 0);
+    style_form->setRowVisible(pen_taper, lined);
+    style_form->setRowVisible(pen_strokes, lined && pen_taper->value() > 0);
+    const bool drips = !drawn && lined;
+    style_form->setRowVisible(drip_length, drips);
+    for (QWidget* row : std::initializer_list<QWidget*>{drip_count, drip_width, drip_seed}) style_form->setRowVisible(row, drips && drip_length->value() > 0);
+    style_form->setRowVisible(points, !drawn && kind_in(kind, {"star", "flower"}));
+    style_form->setRowVisible(tone_density, !none);
+    for (QWidget* row : std::initializer_list<QWidget*>{tone_lpi, tone_pattern, tone_to}) style_form->setRowVisible(row, !none && tone_density->value() >= 0);
+    style_form->setRowVisible(tone_dir, !none && tone_density->value() >= 0 && tone_to->value() >= 0);
+    style_form->setRowVisible(fill_blend, !none);
 }
 
 bool StoryPanel::left_as_shown(const QWidget* field, double value, double half_step) {
@@ -1044,6 +1207,70 @@ void StoryPanel::set_tail_fillet() {
     }
     if (tails == before) return;
     window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"tails", tails}}}));
+}
+
+void StoryPanel::set_drip_length() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_ || left_as_shown(drip_length, drip_length->value(), 0.05)) return;
+    const Json value = drip_length->value() > 0 ? Json(drip_length->value()) : Json();
+    Json after = l->style.is_object() ? l->style : Json::object();
+    if (value.is_null()) {
+        after.erase("drip_mm");
+    } else {
+        after["drip_mm"] = value;
+    }
+    // (the box grows by as much as the drips do, its top kept: the body — the box less the drips — stays the size it was)
+    const std::string kind = l->balloon.empty() ? std::string("speech") : l->balloon;
+    const double grown = lettering::drip_height(kind, after) - lettering::drip_height(kind, l->style);
+    Json ops = Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"style", Json{{"drip_mm", value}}}}});
+    if (std::abs(grown) > 1e-9 && !(l->path && !l->path->empty())) {
+        const double h = (l->h_mm.truthy() ? l->h_mm.value() : 20.0) + grown;
+        if (h > 1) ops.push_back(Json{{"op", "move_line"}, {"id", l->id}, {"h_mm", core::py_round(h, 2)}});
+    }
+    window_->apply_ops(ops);
+}
+
+void StoryPanel::next_drip_arrangement() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_) return;
+    const Json now = core::get_or(l->style, "drip_seed", Json());
+    const std::int64_t seed = now.is_number() ? static_cast<std::int64_t>(std::clamp(core::to_float(now), 0.0, 999999.0)) : 0;
+    style(Json{{"drip_seed", (seed + 1) % 1000000}});
+}
+
+void StoryPanel::set_tone() {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_) return;
+    const Json was = core::get_or(l->style, "fill_tone", Json());
+    Json tone;  // (null: no tone)
+    if (tone_density->value() >= 0) {
+        tone = Json{{"density", tone_density->value() / 100.0}, {"lpi", static_cast<double>(tone_lpi->value())},
+                    {"angle", was.is_object() && core::get_or(was, "angle", Json()).is_number() ? core::get_or(was, "angle", Json()) : Json(45.0)},
+                    {"pattern", tone_pattern->currentData().toString().toStdString()}};
+        if (tone_to->value() >= 0) {
+            tone["to"] = tone_to->value() / 100.0;
+            tone["dir"] = static_cast<double>(tone_dir->value());
+            if (was.is_object() && core::py_truthy(core::get_or(was, "radial", Json()))) tone["radial"] = true;
+        }
+        if (was.is_object() && core::get_or(was, "inset_mm", Json()).is_number()) tone["inset_mm"] = core::get_or(was, "inset_mm", Json());
+    }
+    if (tone == was || (tone.is_null() && !l->style.contains("fill_tone"))) {
+        show_shape_rows(*l);  // (the rows that go with a tone, as the fields say)
+        return;
+    }
+    style(Json{{"fill_tone", tone}});
+}
+
+void StoryPanel::pick_blend() {
+    const core::StoryLine* l = line();
+    if (l == nullptr) return;
+    if (core::get_or(l->style, "fill_gradient", Json()).is_object()) {
+        style(Json{{"fill_gradient", nullptr}});
+        return;
+    }
+    const auto to = ask::colour(this, QColor(150, 200, 255), QStringLiteral("中の色のグラデーションの先の色（元の色はフキダシの中の色）"));
+    if (!to) return;
+    style(Json{{"fill_gradient", Json{{"to", Json::array({to->red(), to->green(), to->blue()})}, {"dir", 90.0}}}});
 }
 
 void StoryPanel::pick_gradient() {

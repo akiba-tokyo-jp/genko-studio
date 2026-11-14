@@ -46,6 +46,18 @@ Json tail(double fx, double fy, const char* kind = nullptr) {
     return out;
 }
 
+// fukidashi@2: a tone inside — `density`, growing to `to` (down the page, or from the middle outward), 60 lines at 45°
+// (in the form the op keeps it in)
+Json tone(double density, double to = -1.0, bool radial = false) {
+    Json out{{"density", density}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}};
+    if (to >= 0) {
+        out["to"] = to;
+        out["dir"] = 90.0;
+        if (radial) out["radial"] = true;
+    }
+    return out;
+}
+
 bool is_white(const Json& colour) {
     if (!colour.is_array() || colour.size() < 3) return false;
     return std::all_of(colour.begin(), colour.begin() + 3, [](const Json& c) { return c.is_number() && core::to_float(c) >= 255; });
@@ -103,6 +115,32 @@ const std::vector<BalloonPreset>& balloon_presets() {
          true, false},
         {"two_tails", "しっぽ 2 本", "しっぽが 2 本。2 人が同時に言う台詞に", "speech", Json::object(), Json::array({tail(-0.5, 0.85), tail(0.5, 0.85)}), true,
          false},
+        // fukidashi@2 (SPEC BALLOON-02): the pen's line, the drips, the symbols, the tone inside
+        {"pen_swell", "強弱の線", "線が片側で太く反対側で細い、手で描いたような線", "speech", Json{{"pen_swell", 0.5}}, Json::array(), false, false},
+        {"g_pen", "G ペン風", "強弱と入り抜きのある、G ペンで描いたような線", "speech", Json{{"pen_swell", 0.5}, {"pen_taper", 0.6}, {"border_mm", 0.5}},
+         Json::array(), false, false},
+        {"brush", "筆風", "ひと筆で描いたような、太く抜けのある線", "speech", Json{{"pen_swell", 0.8}, {"pen_taper", 0.9}, {"pen_strokes", 1}, {"border_mm", 0.8}},
+         Json::array(), false, false},
+        {"g_pen_shout", "叫び（G ペン風）", "トゲの 1 本ずつが入り抜きのある線の叫び", "shout", Json{{"pen_swell", 0.5}, {"pen_taper", 0.8}, {"border_mm", 0.5}},
+         Json::array(), false, false},
+        {"drips", "したたる", "下からしずくが垂れるフキダシ。不気味な声・溶けるような声に", "speech", Json{{"drip_mm", 6}}, Json::array(), false, false},
+        {"horror_black", "ホラー（ベタ）", "黒いフキダシから黒いしずくが垂れる。ホラーの声に", "speech",
+         Json{{"drip_mm", 7}, {"drip_seed", 3}, {"fill_rgb", rgb(0, 0, 0)}, {"line_rgb", rgb(0, 0, 0)}, {"rgb", rgb(255, 255, 255)}}, Json::array(), false, false},
+        {"melting_box", "溶ける四角", "下が溶けて垂れる四角。ナレーションや不穏な説明に", "box", Json{{"drip_mm", 6}, {"drip_seed", 1}}, Json::array(), false, false},
+        {"horror_wave", "ホラー（ふるえ）", "ふるえる線から垂れるしずく。おびえた声・呪いの声に", "speech", Json{{"drip_mm", 6}, {"drip_seed", 2}, {"wave_mm", 0.35}},
+         Json::array(), false, false},
+        {"heart", "ハート", "ハートの形。甘い声・好きな気持ちに", "heart", Json::object(), Json::array(), false, false},
+        {"star", "星", "星の形。はしゃぐ声・うれしい声に", "star", Json::object(), Json::array(), false, false},
+        {"sparkle", "きらめき", "4 つの先がとがったきらめき。キラッとしたひとことに", "star", Json{{"points", 4}, {"spike_depth", 0.6}}, Json::array(), false,
+         false},
+        {"flower", "花", "花びらの形。やわらかい声・明るい気持ちに", "flower", Json::object(), Json::array(), false, false},
+        {"diamond", "ひし形", "ひし形。冷たいひとこと・テレパシー・機械の声に", "diamond", Json::object(), Json::array(), false, false},
+        {"tone", "トーン", "中に薄いトーンを敷いたフキダシ。回想や心の声に", "speech", Json{{"fill_tone", tone(0.1)}}, Json::array(), false, false},
+        {"gradient_tone", "グラデトーン", "下へだんだん濃くなるトーン。暗い気持ち・沈んだ声に", "speech", Json{{"fill_tone", tone(0.05, 0.5)}}, Json::array(), false,
+         false},
+        {"tone_shout", "トーンの叫び", "中にトーンを敷いた叫び", "shout", Json{{"fill_tone", tone(0.2)}}, Json::array(), false, false},
+        {"gradient_dark", "グラデ（濃い）", "外へ向かって濃くなるトーン。重い気持ち・こもった声に", "speech", Json{{"fill_tone", tone(0.1, 0.6, true)}}, Json::array(),
+         false, false},
     };
     return all;
 }
@@ -116,9 +154,12 @@ const BalloonPreset* balloon_preset(const QString& key) {
 
 const std::vector<std::string>& balloon_look_keys() {
     // (wobble: a line of before's, drawn as a trembling outline — part of the look it had)
+    // (fukidashi@2: the pen's line, the drips, a symbol's points, the tone and the blend inside are part of the look too)
     static const std::vector<std::string> keys = {"border_mm", "fill",        "fill_rgb",     "line_rgb",  "fill_opacity", "double",
                                                   "spikes",    "spike_depth", "spike_jitter", "spike_alt", "bumps",        "corner_mm",
-                                                  "squircle",  "sides",       "wave_mm",      "dash_mm",   "wobble"};
+                                                  "squircle",  "sides",       "wave_mm",      "dash_mm",   "wobble",
+                                                  "pen_swell", "pen_angle",   "pen_taper",    "pen_strokes", "drip_mm",    "drips",
+                                                  "drip_width_mm", "drip_seed", "points",     "fill_tone", "fill_gradient"};
     return keys;
 }
 
@@ -258,15 +299,24 @@ QImage preset_picture(const BalloonPreset& preset, double scale) {
     } else if (kind == "narration") {  // (a narration's box: tall, as it sits in a panel's corner)
         w = 15;
         h = 26;
+    } else if (kind == "heart" || kind == "star" || kind == "flower") {  // (fukidashi@2: the symbols, about as wide as tall)
+        w = 27;
+        h = 26;
+    } else if (kind == "diamond") {
+        w = 31;
+        h = 26;
     }
     if (tailed) h = std::min(h, 20.0);
+    // (drips: the body as it would be without them, the drips below it — up a little, so that they are seen whole)
+    const double drips = preset.style.contains("drip_mm") && preset.style["drip_mm"].is_number() ? core::to_float(preset.style["drip_mm"]) : 0.0;
+    if (drips > 0) h = std::min(h, kPaperH - 4 - drips) + drips;
     core::StoryLine line;
     line.id = std::string("preset_") + preset.key;
     line.text = preset.across ? "ひとこと" : kind == "narration" ? "その頃" : "セリフ";
     line.balloon = kind;
     line.wrap = preset.across ? "horizontal" : "vertical";
     line.x_mm = core::Num((kPaperW - w) / 2 + (tailed ? 2.0 : 0.0));
-    line.y_mm = core::Num(tailed ? 3.5 : (kPaperH - h) / 2 - (kind == "thought" ? 2.0 : 0.0));
+    line.y_mm = core::Num(tailed ? 3.5 : drips > 0 ? 2.0 : (kPaperH - h) / 2 - (kind == "thought" ? 2.0 : 0.0));
     line.w_mm = core::Num(w);
     line.h_mm = core::Num(h);
     line.style = preset.style;

@@ -13,6 +13,7 @@
 #include <tuple>
 
 #include "core/font_catalog.hpp"
+#include "core/fukidashi.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -250,6 +251,10 @@ const std::vector<std::pair<QString, QString>>& kinds() {
         {"rounded", "角丸"},
         {"box", "四角"},
         {"polygon", "多角形（機械の声）"},
+        {"heart", "ハート（甘い声）"},  // (fukidashi@2: the symbols)
+        {"star", "星（はしゃぐ声・きらめき）"},
+        {"flower", "花（やわらかい声）"},
+        {"diamond", "ひし形（冷たいひとこと）"},
         {"cloud", "雲（もくもく）"},
         {"thought", "心の声（泡つき）"},
         {"shout", "叫び（トゲ）"},
@@ -388,7 +393,17 @@ std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_c
     return out;
 }
 
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em, int sides) {
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em, int sides, const Json& style) {
+    if (core::is_symbol(balloon)) {
+        // (fukidashi@2: a symbol sized as the service sizes it — its points, its depth from the style; its drips are
+        // box_size's)
+        std::vector<std::string> words;
+        for (const auto& b : breaks) words.push_back(render::text::utf8(b));
+        Json shape = style.is_object() ? style : Json::object();
+        shape.erase("drip_mm");
+        const std::array<double, 2> box = service::letter::measure_styled(words, std::string(balloon), em, shape);
+        return {box[0], box[1]};
+    }
     if (one_of(balloon, {"capsule", "polygon"})) {
         // (fukidashi@1: sized as the auto-lettering sizes them — service::letter::measure, the one formula)
         std::vector<std::string> words;
@@ -427,19 +442,30 @@ std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std
     return {text_w + 2 * pad, text_h + 2 * pad};
 }
 
-std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm, int sides) {
+std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm, int sides,
+                                   const Json& style) {
     const double em = kEmMm;
     const std::u32string words = render::text::u32(text);
     double w = 0, h = 0;
     if (vertical) {
-        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (one_of(balloon, {"speech", "thought", "shout", "whisper", "capsule", "polygon"}) ? 1.5 : 1.1)));
+        const bool hugged = one_of(balloon, {"speech", "thought", "shout", "whisper", "capsule", "polygon"}) || core::is_symbol(balloon);
+        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (hugged ? 1.5 : 1.1)));
         const std::int64_t per = std::max<std::int64_t>(2, std::min<std::int64_t>(fits, balloon == "sfx" ? 4 : 7));  // (a manga column: about 7)
-        std::tie(w, h) = measure(columns(words, per), balloon, em, sides);
+        std::tie(w, h) = measure(columns(words, per), balloon, em, sides, style);
     } else {
         const std::int64_t per = std::max<std::int64_t>(4, core::py_trunc_int((max_w_mm * 0.8) / em));
-        std::tie(h, w) = measure(columns(words, per), balloon, em, sides);  // (the same box turned: rows across, characters along)
+        std::tie(h, w) = measure(columns(words, per), balloon, em, sides, style);  // (the same box turned: rows across, characters along)
     }
+    h += drip_height(balloon, style);  // (fukidashi@2: the drips below the body — the body is the box the words were measured for)
     return {core::py_round(core::py_min(w, max_w_mm), 2), core::py_round(core::py_min(h, max_h_mm), 2)};
+}
+
+double drip_height(std::string_view balloon, const Json& style) {
+    if (!style.is_object() || one_of(balloon, {"dotted_box", "flash", "picture", "sfx", "none"})) return 0.0;
+    const auto drip = style.find("drip_mm");
+    if (drip == style.end() || !drip->is_number()) return 0.0;
+    const double mm = core::to_float(*drip);
+    return mm > 0 ? core::py_min(mm, 30.0) : 0.0;
 }
 
 Json place_new(const core::Document& doc, const core::Page& page, const core::Frame& frame, const std::string& text, const std::string& balloon,
@@ -467,22 +493,24 @@ int sides_of(const Json& style) {
 Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon, bool vertical) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style));
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style), line.path && !line.path->empty() ? Json() : line.style);
     const Num right = line.x_mm + line.w_mm;
     return Json{{"x_mm", core::py_round((right - Num(w)).value(), 2)}, {"y_mm", line.y_mm.json()}, {"w_mm", w}, {"h_mm", h}};
 }
 
 Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const Json& style_after) {
     const std::string was = line.balloon.empty() ? std::string("speech") : line.balloon;
-    const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon"; };
+    const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon" || core::is_symbol(k); };
     if (was == kind || !(own_shape(was) || own_shape(kind))) return Json();
     if (line.path && !line.path->empty()) return Json();              // (drawn by hand: its box is its outline's)
     if (!render::text::shape_of(line).empty()) return Json();         // (a point or box text: not set in a balloon)
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
-    const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after));
+    const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after), style_after);
+    // (about the body's middle — a balloon that drips keeps where its body was, its drips below it)
     const double cx = (line.x_mm + line.w_mm / Num(2)).value();
-    const double cy = (line.y_mm + line.h_mm / Num(2)).value();
+    const double was_drip = drip_height(was, line.style), now_drip = drip_height(kind, style_after);
+    const double cy = line.y_mm.value() + (line.h_mm.value() - was_drip) / 2 + now_drip / 2;
     const double x = core::py_round(cx - w / 2, 2);
     const double y = core::py_round(cy - h / 2, 2);
     if (x == line.x_mm.value() && y == line.y_mm.value() && w == line.w_mm.value() && h == line.h_mm.value()) return Json();
@@ -493,7 +521,7 @@ Json place_at(double x_mm, double y_mm, const std::string& text, const std::stri
               const Json& style) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 160.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(style));
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(style), style);
     Num x(x_mm - w / 2);
     Num y(y_mm - h / 2);
     if (frame != nullptr) {

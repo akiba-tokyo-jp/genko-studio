@@ -62,10 +62,17 @@ const std::vector<std::pair<QString, core::Json>>& style_tags();
 std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_column);
 // studio.letter.measure(breaks, balloon, em): the balloon's box as the renderer draws it. A capsule and a polygon
 // (fukidashi@1) are sized by service::letter::measure itself (`sides`: a polygon's style.sides, 0 when none is said).
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0);
-// box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm.
+// fukidashi@2: a symbol (heart, star, flower, diamond) is sized by service::letter::measure_styled, its points and depth
+// from `style`.
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0,
+                                  const core::Json& style = core::Json());
+// box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm. `style` (fukidashi@2): a
+// symbol's points and depth, and the drips below the body — the box that much taller (drip_height).
 std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm,
-                                   int sides = 0);
+                                   int sides = 0, const core::Json& style = core::Json());
+// fukidashi@2: how much taller than its body a balloon of this kind and style is for its drips (style.drip_mm, 30 at
+// most; none for the kinds that draw none).
+double drip_height(std::string_view balloon, const core::Json& style);
 // A style's sides as the renderer reads them (5..12; 0: none said).
 int sides_of(const core::Json& style);
 // place_new(episode, page, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm, wrap}.
@@ -75,7 +82,7 @@ core::Json place_new(const core::Document& doc, const core::Page& page, const co
 core::Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon,
                  bool vertical);
 // fukidashi@1: the box a line is given when a person changes its balloon to or from a kind that holds its letters in
-// its own shape (a capsule, a polygon): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
+// its own shape (a capsule, a polygon; fukidashi@2: a symbol): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
 // balloon's middle — a round oval made a capsule becomes a slim one, not a blob. Null when the kind does not change
 // that way (speech to shout, the same kind), the balloon is drawn by hand or the line is not set in a balloon, or the
 // box would not change. `style_after`: the style the line has then (a polygon's sides).
