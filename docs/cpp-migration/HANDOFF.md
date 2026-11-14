@@ -152,6 +152,104 @@
 - 〔直し〕`docs/cpp-migration/SPEC.md` の書体の節は群 2・3 の終わりに足した（FONT-01）。
 - Windows のビルドの木では書体をコピーする（157 MB）。
 
+### F2 群 1 のレビューの直し（同じブランチ。リードの 2 コミット bc4de561 の上）— 2026-11-14
+
+読むだけのレビュー（P1 は無し、P2 が 4、P3 が 8）と、リードの決定のとおりに直した。前からの 6 書体と、パスで名指しした書体ファイルの絵は 1 ビットも変えていない。
+
+#### 直したこと（それぞれに試験。どれも `test_font_faces`）
+- **P2-1 スタイルの語**（「！？」を半角に置き換える 3 書体で、「！」「？」を含む語に付けたスタイルが黙って外れていた）: 追加の書体のときだけ、スタイルの語も書体の置き換えで読み替えてから探す（`lettering.cpp` の `style_runs_of`）。`aShoutedWordWithMarksKeepsItsStyle`。
+- **P2-2 中身の確かめ**（大きさが同じで中身が違うファイルを黙って描いていた）: 「入っている」は大きさと SHA-256 の両方。最初に読むときに確かめ、答えはプロセスの間変えない。違えば「入っていない」（いつもの書体と知らせ）。`aFileOfTheSameSizeButOtherContentIsNotInstalled`。
+- **P2-3 知らせる場所**: `font_not_installed` を、台詞の `style.font` のほかに、文字の属性の書体・ルビの書体・文字レイヤーの記録・本のいつもの書体（`font_path`。最初のページに 1 つ）でも出す。相方のファイルだけ無いときは `font_partner_not_installed`。書体ごとにページに 1 つ。`theMissingFaceIsSaidWhereverItIsNamed`。
+- **P2-4 文**: 1 つの言い方（「…描いた（アプリを入れ直すと元の書体で描ける）」）、英字 4 字以上の続き・キー・製品名の英字を出さない。何で描いたか（アンチック・極太の書体・本文の書体）を種類ごとに正しく言う。英字の長い 2 つの名前は一覧の `name_ja` を日本語にし、元の名前は `name_original` に残した（gothic_seed「ラインシード B」、narrow_lubrifont「滑油字（長体）」）。`everyLabelAndWarningReadsInJapanese`。
+- **P3-1 異体字の印**: 追加の書体で、異体字の印（VS）が付いた字は、元の字で書体を決める。書体に無い印は描かない（豆腐にしない）。`aLetterWithASelectorGoesWhereTheLetterGoes`。
+- **P3-2 フォルダーの決め方**: 場所は起動のとき、アプリを作ったスレッドで 1 度だけ決める（`font_files::prime()`。`genko`・画面・印刷の入口で呼ぶ）。追加のキーをファイルの名前として探す道は無い。`theProgramFindsTheFacesBesideItself`。
+- **P3-3 読む量と、動かしている途中の変化**: 読むのは一覧の大きさ＋1 バイトまで。覚えは 64 MB まで。読み直すたびに中身を確かめ、違う・消えたときは、その書体をそこから「入っていない」にする（`generation()` が進み、文字組の覚えの鍵に入る。進むまでは鍵は前と同じ）。描いている途中で失った書体は、その 1 回だけ前からのゴシックで描く。`aFileThatChangesWhileGenkoRuns`、`theAddedFacesAreNotReadUntilAsked`。
+- **P3-4 `face_index`**: 追加の書体に残っていた `face_index` は読まない（追加の書体は 1 ファイル 1 書体）。`aFaceNumberLeftOnAnAddedFaceIsNotRead`。
+- **P3-6 ビルドの木の手順**: `native/cmake/GenkoDevFonts.cmake` と独立したターゲット `genko_dev_fonts`（リンクを張る。張れなければコピー。古いものだけ写し直す）。`genko` のビルドの後に走り、試験の支えのライブラリーがこれに依る。`theBuildTreeStepLinksOrCopies`。
+- **P3-7 試験の穴**: 上の各項目のほか、前の本が 1 バイトも変わらずに保存されることを、書体を足す前の版（2026-11-13 の配布物）が書いた `native/tests/data/fonts/book_before/project.json` と比べる（`aBookOfBeforeIsWrittenToTheSameBytes`）。`test_psd_text` は項目ごとに書体のフォルダーを元に戻す。
+- **P3-5 は直していない（分かっている限り）**: 1 つの文字（type@1）の中で追加の書体と前からの書体を文字ごとに混ぜたとき、「！？」の置き換えは段落の書体で決まる。文字ごとの書体で決めるには前からの書体の組み方に手を入れることになるので、決定のとおり書き残すだけにした。
+
+#### いつ何を呼んでよいか（`render::font_files`）
+- `file_there(key)`: stat 1 回。画面のスレッドで呼んでよい（`inspect` の `available`、`lint`、パレットの「ファイルなし」、開いたときの知らせ）。前に「中身が違う」と分かった書体には false。
+- `present(key)`: 入っているか。最初の 1 回はその 1 ファイルを読む（数 MB と SHA-256）。描く道・検査・選んだ書体の確かめに使う。パレットは別のスレッドで呼ぶ。
+- `bytes(key)`: 描く道だけ。`missing()`・`verify(true)`: 40 個を全部読む。`genko doctor` と試験だけ。画面のスレッドと起動では呼ばない。
+- 試験の実行物は、ビルドの木の `<genko のフォルダー>/../share/genko-studio/fonts` ではなく自分の横を探すので、追加の書体を使う試験は `set_dir_for_testing(<リポジトリ>/native/resources/fonts)` を呼ぶ（替えたら `render::text::clear_layout_cache()` も）。終わりに `set_dir_for_testing(std::nullopt)` で戻す。
+
+#### 変えた期待値（緩めていない）
+- `test_font_faces` の `font_not_installed` の文（P2-4 の言い方に）。`replace_fonts` が追加のキーを「見つからないフォント」に挙げる、という群 1 の期待は、群 2 で「挙げない」に変えた（下）。
+- 項目の数: test_font_catalog 96、test_font_faces 505（群 1 の終わりは 95・452）。
+
+#### 確かめたこと
+- 関係する試験 42 本が合格（1,751 項目。失敗 0。SKIP は前からの 17 項目: test_save_e2e の 16 と test_migrate_e2e の 1、Release に故障の注入が無いため）。
+
+### F2 群 2（F2-B: 配布・サービス・手引き）— 2026-11-14
+
+#### 作ったもの
+- **配布物**: `native/cmake/GenkoPackage.cmake` が `FONTS.json` を読んで、`storage: file` の 40 個と一覧を `share/genko-studio/fonts/` に入れる（40 個でなければ構成で止まる）。`native/package/sbom.cmake` に 3 つのパッケージ: `fonts-lettering`（OFL の 36 個）、`fonts-genei`（源暎の 2 個）、`fonts-littlelimit`（k8x12・美咲の 2 個。`LicenseRef-LittleLimit-Free`。ライセンス文を SBOM に入れる）。`THIRD_PARTY.md` の 3 行を「入れてある」に書き換えた。`native/package/README-ja.md` に書体の説明。
+- **`genko doctor`**: 40 個の有無・大きさ・SHA-256 を見て、違うものを `problems` に挙げる（`lettering font missing|of another size|changed: <キー> (<ファイル>) in <フォルダー>`。コマンドラインの英語の報告で、画面には出ない）。
+- **`lint`**: 追加のキーを知っている書体として扱う。ファイルが無ければ `font_not_installed`（警告。「書体「…」のファイルがこのパソコンに無い（アンチックで描かれる）」、手がかり「アプリを入れ直すと元の書体で描ける」）。
+- **`inspect target=fonts`**（`service/briefs.cpp`）: `bundled` は前からの 7 行（前と同じ）＋追加の 40 行 `{key, label, category, use, kanji, fallback?, available}`。`categories` を足した。`note` は前のまま。
+- **HTTP の `font_path`**（`api/headless_server.cpp`）: 追加のキーはキーのまま受け取る（作業フォルダーの下のパスに直さない）。
+- **`replace_fonts`**（`render/ops_type_fonts.cpp`）: 追加のキーは「見つからないフォント」に数えない。尋ねる op の答えに、そういう書体があるときだけ `not_installed: [{font, label}]`。
+- **PSD の書き出し**（`formats/psd_export.cpp`・`psd_text.cpp`）: ファイルが無くても、本が名指しした書体の PostScript 名で書く。`font_warnings` がその名前を挙げる。
+- **手引き**: `native/resources/studio/guide/SKILL.md` と、同じバイトの写し `integrations/hermes/genko-manga/SKILL.md`・`integrations/claude-code/skills/genko-manga/SKILL.md`、`docs/AGENT.md`。使い道ごとの書体の表、かなだけの書体と相方、極太の書体の使い方、`available` の見方。
+- **`service/wording.cpp`**: 足していない（この群で増えた、投げる英語の文が無い）。
+- **MCP**: 道具の入力の形（inputSchema）と説明文は変えていない（`test_mcp_api_e2e` の合計の検査が合格）。承認の流れに触っていない。
+
+#### 配布物の大きさ（Linux x86_64。2026-11-14 に測った。導入したフォルダーを `tar -czf` で固めた値）
+- 群 3 まで入れた最後のビルド: tar.gz **162,044,123 バイト**、展開して 333,658,732 バイト、うち `share/genko-studio/fonts` が 157,645,644 バイト（40 個と一覧で 41 ファイル）、`bin/genko` が 86,348,600 バイト。
+- 群 2 の終わりに測った値: tar.gz 161,843,212 バイト、展開して 333,534,836 バイト。
+- 書体を足す前の記録: tar.gz 75,199,411 バイト。増えたのは 87 MB ほど（書体は固めてもあまり縮まない）。
+- Windows の zip と macOS は測っていない。
+
+#### 変えた期待値（緩めていない）
+- `test_package`: SBOM の行の表に上の 3 つのパッケージ。ライセンスのファイルの数（OFL 39・LICENSE 2・合わせて 41）は群 1 で直したまま。導入したプログラムで doctor・`inspect fonts` を流す所は、別の利用者のホームで行う（片付けの検査が、試した人のホームに残るものを見るため）。
+- `test_psd_text` の `without.fonts`: ファイルが無いときも、名指しした追加の書体の名前が入る（上の PSD の決まり）。
+- `test_font_faces`: `replace_fonts` は追加のキーを挙げず、`not_installed` に入れる。
+
+#### 試験
+- 新しい試験: `native/tests/unit/test_font_service.cpp`（`inspectListsTheSevenThenTheForty`・`lintKnowsTheAddedFaces`・`replaceAllNeverStripsAnAddedFace`・`psdNamesTheFaceAskedForWithoutItsFile`）、`test_mcp_api_e2e` の `httpApiKeepsAnAddedFacesKey`、`test_package` の `theLetteringFontsAreInstalledAsFetched`・`theInstalledProgramFindsEveryFace`（導入した `genko` が 40 書体を見つけ、描いた絵が変わり、ファイルを消す・中身を変えると doctor が言う。install.sh のリンク越しは別の利用者のホームから）。
+- 関係する試験 20 本が合格（496 項目、SKIP 0）: test_font_catalog・test_font_faces・test_font_service・test_psd_text・test_mcp_api_e2e（全部）・test_ledger_service_a・b・c・test_gui_ledger_a・b・c・test_gui_type_panels・test_gui_output ほか。test_package（8）も合格。
+
+### F2 群 3（F2-C: 画面）— 2026-11-14
+
+#### 作ったもの
+- **ドック「書体」**（`app/font_palette.{hpp,cpp}`、`app/main_window_fonts.cpp`）: ウィンドウ → 書体、ページ → 台詞 → 書体のパレットを開く（`act_font_palette`。名前のある操作は 822 → 823）、文字ツールの設定の「ほかの書体…」。台詞のタブの隣、初めは閉じている、配置と一緒に覚える。
+  - 一覧: 区分の見出し 11 と書体 47（アンチックが最初）。行は「名前 → 知っておくこと（かなだけ（漢字は…）・漢字は一部（残りは…）・ファイルなし）→ 見本」の縦並び（`FaceRow` という行の描き手。ドックが狭いので、見本の横に名前を置くと名前が頭の 3 字で切れた）。
+  - 見本: `render::text::text_layout` で「あア漢字！」（4.6 mm、96 dpi）を描いたもの。文字の色は画面の文字の色（明るい・暗いを切り替えると塗り直す）。
+  - 遅らせ方: 窓を開いただけでは書体ファイルを読まず、見本も作らない。初めて見せてから、画面の合間に 1 つずつ。追加の書体のファイルは、見本の前に別のスレッド（QtConcurrent）で 1 つずつ読んで確かめる（相方も）。画面のスレッドは組むだけ。測った値: 47 個で 1.3 秒ほど、1 つの見本が画面を止めるのは長くて 40 ms ほど（別のスレッドにする前は 150〜190 ms）。
+  - 検索: 名前・使い道・区分・キー・元の名前。空白で区切ると全部を含むもの。
+  - 選ぶ: クリックは、このページの台詞を選んでいて文字ツールを持っていなければその台詞に（`edit_line` 1 つ。同じなら何もしない）、そうでなければ次に置く台詞に（本は変えない。文字ツールの「書体」にその 1 つだけ足す）。右クリックで 選んだ台詞・次に置く台詞・選んだルビ・この本のいつもの書体。
+  - この本のいつもの書体: `set_meta` の `font_path`。文字ツールの「書体」の最初の行が「いつもの書体（名前）」と言う。
+  - ファイルが無い書体: 淡い色と「ファイルなし」、選べない（選ぶと言うだけ）。選ぶときは `present` で中身まで確かめる。
+- **開いたときの知らせ**（`MainWindow::note_fonts_on_open`）: ページの上の帯（`fonts_band()`。閉じるまで出ている。「この知らせを閉じる」で消え、その本ではもう出ない。別の本のタブに移ると隠れ、戻ると出る）。言うのは 2 つ: 本が使っている書体のファイルが無いこと、`fonts@1` を持たない前の本が名前で書いていた書体をこの版から付属の書体で描くこと（D2）。ページを読んでいる途中の本は、読み終わってから調べる（後のページの文字レイヤーも数える）。
+- **前からの一覧**（レビューの P3-8）: 文字パネルの書体の一覧は、7 つの後に区分ごとの 40 書体を名前で並べる（`type_panels.cpp`。Qt に書体を登録しない）。`qt_family` は、追加の書体をパスの書体と同じに「見せている 1 つだけ登録し、次で外す」。ルビの書体と文字パネルは、キーでなく名前を見せる。`note_missing_glyphs` は相方で描く字を「無い字」と言わない。
+- **見つからないフォント**: 「見つからないフォントを解決…」「すべての見つからないフォントを置換」は、付属の書体をファイルが無いだけで置き換えず、そのことを言う。
+- `native/src/core/data/commands.json`: 2 行増えた（ウィンドウの「書体」、ページ → 台詞の「書体のパレットを開く」）。
+
+#### 計画と変えた所
+1. **開いたときの知らせを、状態行でなくページの上の帯にした**。状態行は 1 行で、名前を挙げた文が窓の幅で切れた（見本の絵で分かった）。帯は読み取り専用の帯と同じ作り。
+2. **見本は画面のスレッドで組む**（ファイルを読んで確かめるのだけ別のスレッド）。重いのは読むほうで、組むのは 1 つ 40 ms までだったので、組むのまで別のスレッドには出していない。
+3. **行を縦並びにした**（上のとおり）。
+4. 文字ツールの「書体」は 7 つのまま。パレットで選んだ追加の書体は、その 1 つだけを 8 行目に足す（次を選ぶと入れ替わる）。
+
+#### 変えた期待値（緩めていない）
+- `test_gui_actions`: 名前のある操作の数 822 → 823（`act_font_palette`）。
+- `test_gui_lines` の `commandsAsPythonsWindowHasThem`: ページ → 台詞 の並びに「書体のパレットを開く」（フキダシのパレットの次）。
+- `commands.json`（`test_gui_prefs` の `commandsJsonIsTheMenus` が比べる表）: 上の 2 行。
+
+#### 試験
+- 新しい試験 `native/tests/gui/test_gui_fonts.cpp`（18 項目）: 一覧と見出し・行の作り、見せるまで何も読まない・作らない（別のスレッドで 40 個を読むこと）、見本が紙面の描き方と同じ画素、検索、選んだ台詞に 1 回で、次の台詞に、かなだけの印、ファイルが無い書体（大きさだけ同じ別物も）、前からの一覧、文字パネルが Qt に書体を足さない、本のいつもの書体、ルビ、配置、開いたときの知らせ（何も言わない本・D2・ファイルなし・別の本との行き来・閉じる）、読んでいる途中の本、見つからないフォント、明るい・暗い、読む言葉が全部日本語（英字 4 字以上の続き・キー無し、です・ます）。
+- `GENKO_FONTS_GUI_OUT=<フォルダー>` を付けて流すと、画面の絵を書く（明るい・暗いそれぞれ: 窓、パレット、印の付いた行、一覧の終わり、検索、文字ツールの設定、ファイルが無いときの知らせとパレット、前の本の知らせ）。作業用の `fonts-f2/gui/` に 18 枚。紙面の見本 36 枚（`fonts-f2/`）も最後のビルドで書き直した（前からの `sfx`・`hand` のかっこの不具合が出ている 1 枚目もそのまま）。
+- **確かめたこと（最後のビルド。Linux Release、2 本ずつ）**: 関係する試験 35 本が合格（1,334 項目。失敗 0、SKIP 0）: test_gui_fonts・test_gui_actions・test_gui_prefs・test_gui_lines・test_gui_type_panels・test_gui_type・test_gui_ruby・test_gui_fukidashi・test_gui_book・test_gui_layout・test_gui_workspace・test_gui_look・test_gui_studio・test_gui_view・test_gui_ledger_a・b・c・test_gui_output・test_gui_file・test_gui_smart・test_gui_tool_presets・test_gui_styles・test_cli_e2e・test_control_channel・test_font_faces（505）・test_font_catalog（96）・test_font_service・test_psd_text・test_contract_prefs・test_mcp_api_e2e・test_service・test_ledger_service_a・b・c・test_package。1 回目に落ちたのは test_gui_lines のメニューの並び 1 つ（上の「変えた期待値」）。
+
+#### 残り・確かめていないもの
+- Windows・MSVC・macOS のビルドと配布物、ASan、Debug。Windows のビルドの木では書体をコピーする（157 MB）。
+- 実機の画面（高 DPI、タッチ）での見本の見え方。試験は offscreen。
+- P3-5（上）。かなだけの 3 書体のかなの大きさ（合わせていない）。
+- 前からの `sfx`・`hand` の縦のかっこの不具合と、横組みの最後の行の `_` が切れること（どちらも前から。触っていない）。
+- 全体の試験は流していない（関係する試験だけ。決まりのとおり）。
+
 ## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合
 
 ### 利用者の決定（2026-11-13）
