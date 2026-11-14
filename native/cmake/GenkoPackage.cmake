@@ -81,6 +81,28 @@ elseif(UNIX AND NOT APPLE)
 endif()
 install(FILES "${GENKO_REPO_ROOT}/docs/cpp-migration/THIRD_PARTY.md" DESTINATION "${_genko_doc}")
 install(DIRECTORY "${GENKO_SOURCE_ROOT}/resources/fonts/licenses/" DESTINATION "${_genko_doc}/licenses/fonts")
+# fonts@1 (書体の追加 F2, render/font_files.hpp): the forty added lettering faces, as files beside the program — exactly
+# the files the catalogue lists as storage "file", unmodified and under their own names (some carry Reserved Font Names:
+# never subset, converted or renamed) —, and the catalogue itself for people to read. The six fonts compiled into the
+# program, the screen's fonts and the licences (above) are not put here: the program reads none of them from this folder.
+file(READ "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json" _genko_font_catalogue)
+string(JSON _genko_font_count LENGTH "${_genko_font_catalogue}" fonts)
+math(EXPR _genko_font_last "${_genko_font_count} - 1")
+set(_genko_font_files "")
+foreach(_i RANGE ${_genko_font_last})
+  string(JSON _genko_font_storage GET "${_genko_font_catalogue}" fonts ${_i} storage)
+  if(_genko_font_storage STREQUAL "file")
+    string(JSON _genko_font_file GET "${_genko_font_catalogue}" fonts ${_i} file)
+    list(APPEND _genko_font_files "${GENKO_SOURCE_ROOT}/resources/fonts/${_genko_font_file}")
+  endif()
+endforeach()
+list(LENGTH _genko_font_files _genko_font_installed)
+if(NOT _genko_font_installed EQUAL 40)
+  message(FATAL_ERROR "the font catalogue lists ${_genko_font_installed} added faces, not 40: GenkoPackage.cmake, package/sbom.cmake and the tests name forty")
+endif()
+install(FILES ${_genko_font_files} "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/genko-studio/fonts")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json")
 install(FILES "${GENKO_SOURCE_ROOT}/resources/lucide/LICENSE" DESTINATION "${_genko_doc}/licenses/lucide")
 install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/qt/LGPL-3.0.txt" "${GENKO_SOURCE_ROOT}/package/licenses/qt/GPL-3.0.txt"
         DESTINATION "${_genko_doc}/licenses/qt")

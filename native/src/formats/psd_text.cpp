@@ -188,6 +188,15 @@ void font_warnings(const core::StoryLine& line, std::int64_t page, const std::op
     const auto [face, missing] = render::text::line_face(line, font_path);
     const Json st = render::text::style_of(line);
     if (missing) warnings.push_back(Json{{"page", page}, {"line", line.id}, {"kind", "font_missing"}, {"detail", core::py_str(at(st, "font"))}});
+    // fonts@1: a line in one of the faces Genko comes with whose file is not on this computer — its text layer names the
+    // face it asks for (psd_export: body_text), so that is the font listed for its letters, not the default face's they
+    // are drawn in here
+    const core::fonts::Entry* asked = missing && at(st, "font").is_string() ? core::fonts::find(at(st, "font").get_ref<const std::string&>()) : nullptr;
+    if (asked != nullptr && !asked->added) asked = nullptr;
+    if (asked != nullptr && used != nullptr) {
+        const std::string name = font_token(asked->postscript);
+        if (std::find(used->begin(), used->end(), name) == used->end()) used->push_back(name);
+    }
     const auto note = [&](const std::string& path) {
         if (used == nullptr) return;
         const std::string name = font_name(fonts, path);
@@ -197,7 +206,7 @@ void font_warnings(const core::StoryLine& line, std::int64_t page, const std::op
     for (const char32_t c : fonts.normalize(face, render::text::u32(line.text))) {
         if (c == U'\n' || render::text::py_isspace(c) || render::text::is_vs(c)) continue;
         const std::string path = fonts.path_for(face, std::u32string(1, c));
-        note(path);
+        if (asked == nullptr) note(path);
         if (!face.own(path)) elsewhere.push_back(c);  // (fonts@1: the face's partner is its own)
     }
     if (!elsewhere.empty()) {

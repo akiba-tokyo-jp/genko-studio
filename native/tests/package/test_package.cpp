@@ -276,6 +276,8 @@ private slots:
             {"photocraft", QStringLiteral("| PhotoCraft（")}, {"photocraft-coated-cmyk", QStringLiteral("| PhotoCraft Coated CMYK（")},
             {"icc-profiles", QStringLiteral("| 内蔵の RGB・グレーの ICC プロファイル")},
             {"cpython-re", QStringLiteral("| CPython の `re`")}, {"fonts", QStringLiteral("| Dela Gothic One")}, {"lucide", QStringLiteral("| Lucide")},
+            // (書体の追加 F2: the forty lettering faces installed as files, by where they came from and their terms)
+            {"fonts-lettering", QStringLiteral("| 追加の書体（")}, {"fonts-genei", QStringLiteral("| 源暎アンチック v6")}, {"fonts-littlelimit", QStringLiteral("| k8x12（")},
             {"zlib", QStringLiteral("| zlib")}, {"libpng", QStringLiteral("| libpng")}, {"libjpeg-turbo", QStringLiteral("| libjpeg-turbo")},
             {"libtiff", QStringLiteral("| libtiff")}, {"harfbuzz", QStringLiteral("| HarfBuzz")}, {"libwebp", QStringLiteral("| libwebp")},
             {"lcms2", QStringLiteral("| Little CMS 2")}, {"msvc-runtime", QStringLiteral("| Microsoft Visual C++")},
@@ -329,6 +331,126 @@ private slots:
     }
 
 #ifndef _WIN32
+    // 書体の追加 F2: the forty added lettering faces are in share/genko-studio/fonts as they were fetched — exactly the
+    // files the catalogue lists, each of its size and SHA-256, under its own name (case and all), with the catalogue
+    // itself byte for byte, and nothing else there; every one is named in the SBOM, in the package of its licence.
+    void theLetteringFontsAreInstalledAsFetched() {
+        const QString folder = prefix_ + QStringLiteral("/share/genko-studio/fonts");
+        const std::string source = gt::read_bytes(gt::repo_root() + QStringLiteral("/native/resources/fonts/FONTS.json"));
+        QCOMPARE(gt::read_bytes(folder + QStringLiteral("/FONTS.json")), source);
+        const Json catalogue = genko::core::parse_python_json(source);
+        QStringList expected{QStringLiteral("FONTS.json")};
+        std::map<QString, std::string> licence_of;
+        for (const Json& font : catalogue["fonts"]) {
+            if (font["storage"] != Json("file")) continue;
+            const QString name = QString::fromStdString(font["file"].get<std::string>());
+            expected << name;
+            QCOMPARE(QFileInfo(folder + QLatin1Char('/') + name).size(), static_cast<qint64>(font["bytes"].get<std::int64_t>()));
+            QCOMPARE(sha256(folder + QLatin1Char('/') + name), QString::fromStdString(font["sha256"].get<std::string>()));
+            licence_of[name] = font["license"].get<std::string>();
+            // (its licence text is in the folder of the licences)
+            const QString text = QString::fromStdString(font["license_file"].get<std::string>()).section(QLatin1Char('/'), -1);
+            QVERIFY2(QFileInfo(prefix_ + QStringLiteral("/share/doc/genko-studio/licenses/fonts/") + text).size() > 0, qPrintable(text));
+        }
+        QCOMPARE(expected.size(), 41);
+        expected.sort();
+        QCOMPARE(QDir(folder).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden, QDir::Name), expected);
+        // (the six fonts compiled into the program are not put there a second time)
+        for (const char* built_in : {"ZenKakuGothicNew-Bold.ttf", "DelaGothicOne-Regular.ttf", "Yomogi-Regular.ttf"}) {
+            QVERIFY(!QFileInfo::exists(folder + QLatin1Char('/') + QString::fromLatin1(built_in)));
+        }
+        // the SBOM: each of the forty files in one package, of its licence
+        const Json sbom = gt::read_json(prefix_ + QStringLiteral("/share/doc/genko-studio/sbom.spdx.json"));
+        std::map<std::string, QString> file_of;
+        for (const Json& file : sbom["files"]) file_of[file["SPDXID"].get<std::string>()] = QString::fromStdString(file["fileName"].get<std::string>()).mid(2);
+        std::map<QString, QStringList> package_of;
+        for (const Json& r : sbom["relationships"]) {
+            const std::string from = r["spdxElementId"].get<std::string>(), to = r["relatedSpdxElement"].get<std::string>();
+            if (r["relationshipType"] == Json("CONTAINS") && file_of.contains(to)) package_of[file_of[to]] << QString::fromStdString(from);
+        }
+        std::map<std::string, QString> declared;
+        for (const Json& package : sbom["packages"]) declared[package["SPDXID"].get<std::string>()] = QString::fromStdString(package["licenseDeclared"].get<std::string>());
+        int lettering = 0, genei = 0, littlelimit = 0;
+        for (const QString& name : expected) {
+            if (name == QStringLiteral("FONTS.json")) continue;
+            const QStringList in = package_of[QStringLiteral("share/genko-studio/fonts/") + name];
+            QVERIFY2(in.size() == 1, qPrintable(name + QStringLiteral(": ") + in.join(QLatin1Char(' '))));  // (once: no file in two packages)
+            lettering += in[0] == QStringLiteral("SPDXRef-Package-fonts-lettering") ? 1 : 0;
+            genei += in[0] == QStringLiteral("SPDXRef-Package-fonts-genei") ? 1 : 0;
+            littlelimit += in[0] == QStringLiteral("SPDXRef-Package-fonts-littlelimit") ? 1 : 0;
+            const QString licence = declared[in[0].toStdString()];
+            QCOMPARE(licence, licence_of[name] == "OFL-1.1" ? QStringLiteral("OFL-1.1") : QStringLiteral("LicenseRef-LittleLimit-Free"));
+        }
+        QCOMPARE(lettering, 36);
+        QCOMPARE(genei, 2);
+        QCOMPARE(littlelimit, 2);
+        // (the licence SPDX has no id for is described in the document)
+        bool described = false;
+        for (const Json& info : sbom["hasExtractedLicensingInfos"]) {
+            if (info["licenseId"] == Json("LicenseRef-LittleLimit-Free")) {
+                described = QString::fromStdString(info["extractedText"].get<std::string>()).contains(QStringLiteral("THESE FONTS ARE PROVIDED \"AS IS\" WITHOUT WARRANTY"));
+            }
+        }
+        QVERIFY(described);
+    }
+
+    // The installed program finds every one of them, with a bare environment and whatever folder it is run from: the
+    // doctor reads all forty and finds no problem; an agent's list of the faces says each is there; a line in an added
+    // face is drawn in it (not as the same line with no face is). A file taken away, or swapped for another of its size,
+    // is the doctor's problem, by the face's key and file.
+    void theInstalledProgramFindsEveryFace() {
+        const QProcessEnvironment env = bare(home_);
+        const QString program = prefix_ + QLatin1Char('/') + kProgram;
+        const QString book = home_ + QStringLiteral("/books/faces.genko");
+        QVERIFY(gt::run(program, {QStringLiteral("new"), book, QStringLiteral("--pages"), QStringLiteral("1")}, env, 120000).exit_code == 0);
+        const auto doctor = [&](const QString& with) {
+            const gt::Run run = gt::run(with, {QStringLiteral("doctor"), book}, env, 300000, {}, scratch_.path());
+            return gt::one_line(run.out);
+        };
+        const Json well = doctor(program);
+        QVERIFY2(well["ok"] == Json(true) && well["problems"].empty(), well.dump().c_str());
+        const gt::Run listed = gt::run(program, {QStringLiteral("studio"), QStringLiteral("inspect"), book, QStringLiteral("fonts")}, env, 120000, {}, scratch_.path());
+        QVERIFY2(listed.finished && listed.exit_code == 0, qPrintable(listed.described()));
+        const Json fonts = gt::one_line(listed.out)["fonts"];
+        QCOMPARE(fonts["bundled"].size(), std::size_t(47));
+        int available = 0;
+        for (const Json& row : fonts["bundled"]) available += row.value("available", false) ? 1 : 0;
+        QCOMPARE(available, 40);
+        // (drawn: a line in an added face against the same line with none)
+        const auto rendered = [&](const char* name, const Json& style) {
+            const QString ops = scratch_.filePath(QString::fromLatin1(name) + QStringLiteral(".json"));
+            gt::write_bytes(ops, genko::core::dump_python(Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", name}, {"balloon", "none"}, {"x_mm", 40},
+                                                                            {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 60}, {"text", "かなと漢字！"}, {"style", style}}})));
+            const QString copy = home_ + QStringLiteral("/books/") + QString::fromLatin1(name) + QStringLiteral(".genko");
+            if (gt::run(program, {QStringLiteral("new"), copy, QStringLiteral("--pages"), QStringLiteral("1")}, env, 120000).exit_code != 0) return std::string();
+            if (gt::run(program, {QStringLiteral("apply"), copy, ops}, env, 120000).exit_code != 0) return std::string();
+            const QString out = scratch_.filePath(QString::fromLatin1(name) + QStringLiteral(".png"));
+            if (gt::run(program, {QStringLiteral("render"), copy, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"), QStringLiteral("72"),
+                                  QStringLiteral("--out"), out}, env, 120000).exit_code != 0) return std::string();
+            return gt::read_bytes(out);
+        };
+        const std::string plain = rendered("plain", Json{{"size_mm", 6}});
+        const std::string kiwami = rendered("kiwami", Json{{"size_mm", 6}, {"font", "gothic_kiwami"}});
+        QVERIFY(!plain.empty() && !kiwami.empty());
+        QVERIFY(kiwami != plain);
+        // a file taken away, and one swapped for zeros of its size: the doctor's problems (and put back)
+        const QString folder = prefix_ + QStringLiteral("/share/genko-studio/fonts/");
+        QVERIFY(QFile::rename(folder + QStringLiteral("KleeOne-SemiBold.ttf"), folder + QStringLiteral("away.bin")));
+        const std::string stick = gt::read_bytes(folder + QStringLiteral("Stick-Regular.ttf"));
+        gt::write_bytes(folder + QStringLiteral("Stick-Regular.ttf"), std::string(stick.size(), '\0'));
+        const Json unwell = doctor(program);
+        QVERIFY(QFile::rename(folder + QStringLiteral("away.bin"), folder + QStringLiteral("KleeOne-SemiBold.ttf")));
+        gt::write_bytes(folder + QStringLiteral("Stick-Regular.ttf"), stick);
+        QCOMPARE(unwell["ok"], Json(false));
+        QStringList problems;
+        for (const Json& problem : unwell["problems"]) problems << QString::fromStdString(problem.get<std::string>());
+        QCOMPARE(problems.size(), 2);
+        QVERIFY2(problems[0].startsWith(QStringLiteral("lettering font missing: klee (KleeOne-SemiBold.ttf) in ")), qPrintable(problems[0]));
+        QVERIFY2(problems[0].endsWith(QStringLiteral("/share/genko-studio/fonts")), qPrintable(problems[0]));
+        QVERIFY2(problems[1].startsWith(QStringLiteral("lettering font changed: stick (Stick-Regular.ttf) in ")), qPrintable(problems[1]));
+        QCOMPARE(doctor(program)["problems"], Json::array());
+    }
+
     void installAndUninstallForThePersonAlone() {
         const QString home = scratch_.filePath(QStringLiteral("person"));
         QVERIFY(QDir().mkpath(home));
@@ -355,6 +477,17 @@ private slots:
         QVERIFY(exec.hasMatch());
         const gt::Run from_menu = gt::run(exec.captured(1), {QStringLiteral("--version")}, env, 120000);
         QVERIFY2(from_menu.finished && from_menu.exit_code == 0, qPrintable(from_menu.described()));
+        // (書体の追加 F2: run through the link in ~/.local/bin — not the folder the program is in —, it finds the forty faces
+        // beside the real program: the doctor reads every one, and the list of faces says each is there)
+        const gt::Run doctored = gt::run(link, {QStringLiteral("doctor"), home + QStringLiteral("/books/mine.genko")}, env, 300000, {}, home);
+        QVERIFY2(doctored.finished && doctored.exit_code == 0, qPrintable(doctored.described()));
+        QCOMPARE(gt::one_line(doctored.out)["problems"], Json::array());
+        const gt::Run faces = gt::run(link, {QStringLiteral("studio"), QStringLiteral("inspect"), home + QStringLiteral("/books/mine.genko"), QStringLiteral("fonts")}, env,
+                                      120000, {}, home);
+        QVERIFY2(faces.finished && faces.exit_code == 0, qPrintable(faces.described()));
+        int there = 0;
+        for (const Json& row : gt::one_line(faces.out)["fonts"]["bundled"]) there += row.value("available", false) ? 1 : 0;
+        QCOMPARE(there, 40);
         // a second time: refused, nothing changed
         const auto installed_tree = gt::tree_hashes(target);
         const gt::Run again = gt::run(QStringLiteral("/bin/sh"), {prefix_ + QStringLiteral("/install.sh")}, env, 300000);

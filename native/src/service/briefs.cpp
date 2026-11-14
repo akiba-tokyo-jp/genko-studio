@@ -17,6 +17,7 @@
 #include <unistd.h>
 #endif
 
+#include "core/font_catalog.hpp"
 #include "core/brushes.hpp"
 #include "core/frames.hpp"
 #include "core/paths.hpp"
@@ -25,6 +26,7 @@
 #include "core/pyops.hpp"
 #include "core/pyre.hpp"
 #include "render/brushes.hpp"
+#include "render/font_files.hpp"
 #include "render/draw.hpp"
 #include "render/materials.hpp"
 #include "render/text/fonts.hpp"
@@ -688,6 +690,21 @@ Json type_fonts() {
 Json fonts_list() {
     Json bundled = Json::array();
     for (const auto& [key, label] : lint::bundled_fonts()) bundled.push_back(Json::object({{"key", key}, {"label", label}}));
+    // fonts@1 (書体の追加 F2): the forty added faces after the seven of before — each by its key and name, with what it is
+    // for (category, use), how much kanji it has (full | partial | none; a face without all of them draws the rest in its
+    // fallback face) and whether its file is on this computer (available: a file of the right size is there — one stat,
+    // nothing read; false: a line that names it is drawn in the default face)
+    for (const core::fonts::Entry& face : core::fonts::entries()) {
+        if (!face.added) continue;
+        Json row = Json::object({{"key", face.key}, {"label", face.label}, {"category", face.category}, {"use", face.use}, {"kanji", face.kanji}});
+        if (!face.fallback.empty()) row["fallback"] = face.fallback;
+        row["available"] = render::font_files::file_there(face.key);
+        bundled.push_back(std::move(row));
+    }
+    Json categories = Json::array();
+    for (const core::fonts::Category& category : core::fonts::categories()) {
+        categories.push_back(Json::object({{"id", category.id}, {"label", category.label}}));
+    }
     Json system = Json::array();
     try {
         for (const Json& f : core::iterate(system_fonts())) {
@@ -703,6 +720,7 @@ Json fonts_list() {
         families = Json::array();
     }
     return Json::object({{"bundled", std::move(bundled)},
+                         {"categories", std::move(categories)},
                          {"system", std::move(system)},
                          {"families", std::move(families)},
                          {"note", "style.font takes a bundled key or a system font's path; style.weight normal|bold|heavy thickens any face"}});

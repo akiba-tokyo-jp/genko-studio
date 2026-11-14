@@ -368,6 +368,12 @@ genko_test(test_font_faces SOURCES unit/test_font_faces.cpp DEPS genko_test_supp
            LABELS unit TIMEOUT 1800)
 set_tests_properties(test_font_faces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 target_compile_definitions(test_font_faces PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}")
+# fonts@1, 群 2: inspect target=fonts (the seven as they were, then the forty and the categories), lint's known faces and
+# font_not_installed, replace_fonts never taking one of Genko's own faces out of a book, the editable PSD naming the face
+# asked for when its file is not on the computer.
+genko_test(test_font_service SOURCES unit/test_font_service.cpp DEPS genko_test_support genko_service genko_formats genko_render_ops
+           LABELS unit TIMEOUT 600)
+set_tests_properties(test_font_service PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.

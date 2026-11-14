@@ -953,6 +953,42 @@ private slots:
         for (const QByteArray& line : mcp.lines()) QVERIFY2(!line.contains("injected"), line.constData());
     }
 
+    // fonts@1 over the HTTP API: the book's usual face (set_meta font_path) named by the key of one of the forty added
+    // faces is kept as that key — a face's name, not a file to keep inside the root —, and the book says fonts@1; every
+    // other value is still a path kept inside the root (one of the seven keys of before among them, as it always was),
+    // and one outside it refused.
+    void httpApiKeepsAnAddedFacesKey() {
+        const QString dir = fresh("api-fonts");
+        const QString root = dir + "/root";
+        write_file(dir + "/config/tokens.json", R"({"tok-human": {"actor": "human:owner"}})");
+        Server server({"serve", "--root", root, "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const auto post = [port](const std::string& path, const std::string& body) { return http(port, request_text("POST", path, port, "tok-human", body)); };
+        QCOMPARE(post("/v1/new", R"({"dest": "b.genko", "pages": 1})").status, 200);
+        const auto book = [&] { return genko::core::parse_python_json(genko::test::read_bytes(root + "/b.genko/project.json")); };
+        const Response keyed = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "antique_genei"}]})");
+        QVERIFY2(keyed.status == 200, keyed.body.c_str());
+        QCOMPARE(book()["font_path"], Json("antique_genei"));
+        QCOMPARE(book()["features"], Json::array({"fonts@1"}));
+        // (a key of before: the path it always became — and no feature)
+        const Response old = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "gothic"}]})");
+        QVERIFY2(old.status == 200, old.body.c_str());
+        const std::string kept = book()["font_path"].get<std::string>();
+        QVERIFY2(kept != "gothic" && QString::fromStdString(kept).endsWith(QStringLiteral("/root/gothic")), kept.c_str());
+        QCOMPARE(book()["features"], Json::array());
+        // (a key in another case, or with a path before it, is a path like any other)
+        const Response outside = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "../antique_genei"}]})");
+        QCOMPARE(outside.status, 403);
+        QVERIFY(str(outside.json()["error"]).starts_with("path outside --root"));
+        const Response cased = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "Antique_Genei"}]})");
+        QVERIFY2(cased.status == 200, cased.body.c_str());
+        QVERIFY(QString::fromStdString(book()["font_path"].get<std::string>()).endsWith(QStringLiteral("/root/Antique_Genei")));
+        // (in for_pages too, as the other files' paths are looked at there)
+        const Response nested = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "for_pages", "pages": "all", "ops": [{"op": "set_meta", "font_path": "klee"}]}]})");
+        if (nested.status == 200) QCOMPARE(book()["font_path"], Json("klee"));
+    }
+
     // The HTTP API's own lines: no route for a person's approvals and no way for an agent's token to approve, unlock,
     // let chat approvals in, change what a person pinned or a panel's regions; tokens.json read again when it changes; /v1/new never over a book; the files ops read stay inside the
     // root in for_pages too; NaN and deep JSON refused; pictures that are not, or are too big, refused; oversized and

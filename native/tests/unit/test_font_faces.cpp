@@ -802,13 +802,15 @@ private slots:
             QCOMPARE(notes.size(), std::size_t(1));
             QCOMPARE(notes[0].kind, std::string("font_fallback"));
             QCOMPARE(notes[0].detail, "font:" + e->key);
-            // (listed by 見つからないフォントを解決: a question, the book as it was)
+            // (見つからないフォントを解決 — a question, the book as it was — tells it apart from the missing fonts: one of
+            // Genko's own faces, not installed here, which is never replaced or taken out of the book: test_font_service)
             Document doc = blank_book();
             doc.story.push_back(lettering(e->key));
             const genko::core::ApplyResult asked = run_ops(doc, Json::array({Json{{"op", "replace_fonts"}}}));
             QVERIFY(asked.unchanged);
             QCOMPARE(asked.results.size(), std::size_t(1));
-            QCOMPARE(asked.results[0]["missing"], Json::array({Json{{"font", e->key}, {"texts", 1}}}));
+            QCOMPARE(asked.results[0]["missing"], Json::array());
+            QCOMPARE(asked.results[0]["not_installed"], Json::array({Json{{"font", e->key}, {"label", e->label}}}));
             QCOMPARE(fonts::named(asked.doc), std::vector<std::string>{e->key});
             // (the page's check says so, once for the line, by the face's name: font_not_installed, a warning)
             const std::vector<Json> said = font_issues(doc);
@@ -826,7 +828,9 @@ private slots:
         // (and with the files back the same book names nothing missing, and its check says nothing of fonts)
         Document doc = blank_book();
         doc.story.push_back(lettering(e->key));
-        QCOMPARE(run_ops(doc, Json::array({Json{{"op", "replace_fonts"}}})).results[0]["missing"], Json::array());
+        const genko::core::ApplyResult with_files = run_ops(doc, Json::array({Json{{"op", "replace_fonts"}}}));
+        QCOMPARE(with_files.results[0]["missing"], Json::array());
+        QVERIFY(!with_files.results[0].contains("not_installed"));
         QVERIFY(font_issues(doc).empty());
     }
 

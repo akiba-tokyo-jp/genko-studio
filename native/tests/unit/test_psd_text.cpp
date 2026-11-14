@@ -999,7 +999,10 @@ private slots:
         for (Json& w : without.warnings) said.push_back(w["line"].get<std::string>() + ":" + w["kind"].get<std::string>() + ":" + w["detail"].get<std::string>());
         QCOMPARE(said, (std::vector<std::string>{"a:font_missing:horror_chokoku", "a:font_missing:sfx_aoboshi", "b:font_missing:sfx_aoboshi",
                                                  "c:font_missing:sfx_inline", "e:font_missing:techno_monomaniac"}));
-        QCOMPARE(without.fonts, (std::vector<std::string>{kMincho, kGothic}));  // (the default face's two)
+        // (each line's letters are listed by the face the line asks for — its text layer names that, by the catalogue's
+        // PostScript name, though they are drawn in the default face here —; the reading of line a, whose own face is
+        // missing too, is set in the line's face: the default face's two)
+        QCOMPARE(without.fonts, (std::vector<std::string>{"Chokokutai-Regular", kGothic, kMincho, "AoboshiOne-Regular", "TrainOne-Regular", "MonomaniacOne-Regular"}));
         genko::render::font_files::set_dir_for_testing(std::nullopt);
         genko::render::text::clear_layout_cache();
     }

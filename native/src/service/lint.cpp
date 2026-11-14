@@ -5,9 +5,11 @@
 #include <filesystem>
 #include <string>
 
+#include "core/font_catalog.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/font_files.hpp"
 #include "service/fxwords.hpp"
 #include "service/komawari_shape.hpp"
 #include "service/pyfmt.hpp"
@@ -242,6 +244,16 @@ std::vector<Issue> lint_bible(const Json& bible) {
         const auto& bundled = bundled_fonts();
         const bool is_bundled = face.is_string() &&
                                 std::any_of(bundled.begin(), bundled.end(), [&name](const auto& item) { return item.first == name; });
+        // (fonts@1: one of the forty added faces is known by its key — and said when its file is not on this computer:
+        // font_not_installed, by the face's name)
+        if (const core::fonts::Entry* added = face.is_string() ? core::fonts::find(name) : nullptr; added != nullptr && added->added) {
+            if (!render::font_files::file_there(added->key)) {
+                issues.push_back(warning("font_not_installed", "/lettering/" + kind + "/font",
+                                         "書体「" + added->label + "」のファイルがこのパソコンに無い（アンチックで描かれる）",
+                                         "アプリを入れ直すと元の書体で描ける"));
+            }
+            continue;
+        }
         if (!is_bundled && !font_file(name)) {
             issues.push_back(warning("unknown_font", "/lettering/" + kind + "/font", "書体 " + name + " が見つからない（台詞の書体になる）",
                                      "inspect target=fonts の bundled の key か、パソコンの書体のパス"));

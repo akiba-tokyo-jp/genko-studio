@@ -1912,6 +1912,14 @@ int doctor(const QStringList& args, bool ascii) {
         report["problems"].push_back("bundled font missing: :/genko/text/sfx (DelaGothicOne-Regular.ttf)");
         report["ok"] = false;
     }
+    // (fonts@1: the forty added lettering faces, installed as files beside the program — each there, of the catalogue's
+    // size and SHA-256; a problem names the face's key and its file, and where it was looked for)
+    for (const render::font_files::Checked& font : render::font_files::verify(true)) {
+        if (font.exists && font.size_ok && font.hash_ok.value_or(false)) continue;
+        const char* what = !font.exists ? "lettering font missing" : !font.size_ok ? "lettering font of another size" : "lettering font changed";
+        report["problems"].push_back(std::string(what) + ": " + font.key + " (" + font.file + ") in " + render::font_files::dir());
+        report["ok"] = false;
+    }
     print_json(report, ascii);
     return report["ok"].get<bool>() ? 0 : 1;
 }

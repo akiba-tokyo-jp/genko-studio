@@ -13,6 +13,7 @@
 #include <set>
 #include <unordered_map>
 
+#include "core/font_catalog.hpp"
 #include "core/video.hpp"
 #include "core/channels.hpp"
 #include "core/error.hpp"
@@ -1478,6 +1479,18 @@ private:
     }
 
     render::psd::TextLayer body_text(const core::StoryLine& line, const render::text::SetLetters& set, const std::array<double, 6>& m) {
+        // fonts@1: a line in one of the faces Genko comes with whose file is not on this computer is set in the default
+        // face here (and warned of: font_missing) — but its text layer still names the face it asks for, by the PostScript
+        // name the catalogue holds, so that a computer that has the font shows the line in it
+        std::optional<std::string> asked;
+        if (line.style.is_object()) {
+            const auto font = line.style.find("font");
+            const core::fonts::Entry* face = font != line.style.end() && font->is_string() ? core::fonts::find(font->get_ref<const std::string&>()) : nullptr;
+            if (face != nullptr && face->added && !render::text::face_exists(face->key)) {
+                asked = detail::font_token(face->postscript);
+                if (std::find(report_.fonts.begin(), report_.fonts.end(), *asked) == report_.fonts.end()) report_.fonts.push_back(*asked);
+            }
+        }
         render::psd::TextLayer out;
         out.vertical = set.vertical;
         const core::Json st = render::text::style_of(line);
@@ -1507,7 +1520,7 @@ private:
             std::size_t start = out.text.size();
             for (const render::text::SetChar& ch : rows[r].chars) {
                 render::psd::TextStyle style;
-                style.font = font_name(ch.font);
+                style.font = asked ? *asked : font_name(ch.font);
                 style.size = static_cast<double>(ch.size);
                 style.faux_bold = ch.weight > 0;
                 style.faux_italic = set.italic;
@@ -1525,7 +1538,7 @@ private:
                 have_last = true;
             }
             if (!have_last) {  // (an empty first row: the line's own size and face)
-                last.font = font_name(set.face.other);
+                last.font = asked ? *asked : font_name(set.face.other);
                 last.size = em;
                 last.faux_italic = set.italic;
             }

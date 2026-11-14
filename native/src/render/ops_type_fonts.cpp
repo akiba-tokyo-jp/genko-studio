@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/command_bus.hpp"
+#include "core/font_catalog.hpp"
 #include "core/layer_basics.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -49,7 +50,11 @@ struct Seen {
     Json names = Json::object();
 };
 
-bool missing(const std::string& font) { return !font.empty() && !text::face_exists(font); }
+// (fonts@1: one of the faces Genko comes with whose file is not on this computer is not a missing font — it comes back
+// when Genko is installed whole again, and replacing it, or all the missing fonts at once, would take the face out of the
+// book for good. It is said by the page's check (font_not_installed) and listed apart: not_installed, below)
+bool missing(const std::string& font) { return !font.empty() && !core::fonts::added(font) && !text::face_exists(font); }
+bool not_installed(const std::string& font) { return core::fonts::added(font) && !text::face_exists(font); }
 
 // (`text`: a text names it — a style's font is listed, its texts counted where they take it)
 void note(std::map<std::string, Seen>& seen, const std::string& font, const Json* chars, std::set<std::string>& in_this, bool text = true) {
@@ -293,6 +298,19 @@ void check_faces(const StoryLine& record) {
     }
 }
 
+// fonts@1: the added faces the book names whose files are not on this computer ({font: its key, label: its name}), in
+// the catalogue's order.
+Json faces_not_installed(const Document& doc) {
+    Json out = Json::array();
+    const std::vector<std::string> named = core::fonts::named(doc);
+    for (const core::fonts::Entry& entry : core::fonts::entries()) {
+        if (entry.added && std::find(named.begin(), named.end(), entry.key) != named.end() && not_installed(entry.key)) {
+            out.push_back(Json{{"font", entry.key}, {"label", entry.label}});
+        }
+    }
+    return out;
+}
+
 bool replace_fonts_asks(const Json& op) { return !op.contains("map") && !core::py_truthy(core::get_or(op, "all", Json(false))); }
 
 void replace_fonts(core::OpContext& c) {
@@ -311,6 +329,10 @@ void replace_fonts(core::OpContext& c) {
     }
     if (replace_fonts_asks(op)) {  // (a question: what is missing)
         c.report = Json{{"missing", listed}};
+        // (fonts@1: the faces Genko comes with that the book names and this computer does not have, by key and name — told,
+        // never replaced; the key is there only when there is one, so a book without them is answered as before)
+        const Json absent = faces_not_installed(c.doc);
+        if (!absent.empty()) (*c.report)["not_installed"] = absent;
         return;
     }
     std::map<std::string, Becomes> map;
