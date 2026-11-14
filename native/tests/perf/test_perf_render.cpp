@@ -314,6 +314,79 @@ private slots:
         QVERIFY(bare.image.tobytes() != cold.image.tobytes());
     }
 
+    // fukidashi@2 (SPEC BALLOON-02; shown, not judged): the same ten balloons on the B4 page at 600 dpi with each of the
+    // additions — the pen's line, drips, a tone inside (dots; dots that grow darker; lines; a coarse lattice whose dots
+    // are each drawn where they lie), a blend of colours, and all of them at once — and ten symbols: the page with them
+    // from nothing, and their shapes alone from nothing, beside the same ten without (the first row).
+    void ten_balloons_with_the_additions_at_600dpi() {
+        using genko::core::Json;
+        struct Variant {
+            const char* name;
+            Json style;
+            bool symbols = false;
+        };
+        const Json pen{{"pen_swell", 0.5}, {"pen_taper", 0.6}};
+        const Json drips{{"drip_mm", 7}, {"drip_seed", 3}};
+        const Json tone{{"fill_tone", Json{{"density", 0.3}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}}}};
+        const Json graded{{"fill_tone", Json{{"density", 0.05}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"to", 0.6}, {"dir", 90.0}}}};
+        const Json inset{{"fill_tone", Json{{"density", 0.3}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"inset_mm", 1.0}}}};
+        const Json lines{{"fill_tone", Json{{"density", 0.3}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "line"}, {"to", 0.6}, {"dir", 90.0}}}};
+        const Json coarse{{"fill_tone", Json{{"density", 0.3}, {"lpi", 20.0}, {"angle", 30.0}, {"pattern", "dot"}}}};
+        const Json fine{{"fill_tone", Json{{"density", 0.3}, {"lpi", 85.0}, {"angle", 15.0}, {"pattern", "dot"}, {"to", 0.6}, {"dir", 90.0}}}};
+        const Json blend{{"fill_gradient", Json{{"to", Json::array({150, 200, 255})}, {"dir", 90.0}}}};
+        Json all = pen;
+        for (const Json& more : {drips, graded, blend}) {
+            for (const auto& [key, value] : more.items()) all[key] = value;
+        }
+        const Variant variants[] = {{"as before", Json::object()}, {"as before, a white edge on the letters (outline_mm 0.7)", Json{{"outline_mm", 0.7}}},
+                                    {"the pen's line", pen}, {"drips", drips}, {"a tone of dots", tone},
+                                    {"dots that grow darker", graded}, {"dots, white left inside the line", inset}, {"lines that grow darker", lines},
+                                    {"a coarse lattice (each dot drawn)", coarse}, {"a fine lattice at 15 degrees, growing darker", fine},
+                                    {"a blend of colours", blend}, {"all of them", all}, {"ten symbols", Json::object(), true},
+                                    {"ten symbols with all of them", all, true}};
+        const char* kinds[10] = {"speech", "rounded", "capsule", "polygon", "cloud", "shout", "electric", "whisper", "thought", "speech"};
+        const char* symbols[10] = {"heart", "star", "flower", "diamond", "heart", "star", "flower", "diamond", "heart", "star"};
+        qint64 base_page = 0, base_shapes = 0;
+        for (const Variant& variant : variants) {
+            Document doc = genko::core::new_episode("フキダシ", genko::core::Num(1), 1, genko::core::PageSpec::b4_comic());
+            doc.edit_page(0).numero = false;
+            for (int i = 0; i < 10; ++i) {
+                const double x = 30.0 + (i % 3) * 68.0;
+                const double y = 30.0 + (i / 3) * 80.0;
+                const char* kind = variant.symbols ? symbols[i] : kinds[i];
+                const bool capsule = std::strcmp(kind, "capsule") == 0;
+                genko::core::StoryLine& line =
+                    doc.add_line(genko::core::Num(1), capsule ? "そうなんだ" : "今日は\nいい天気", "", std::nullopt, "", genko::core::Num(x), genko::core::Num(y),
+                                 genko::core::Num(capsule ? 16.0 : 46.0), genko::core::Num(variant.style.contains("drip_mm") ? 45.0 : 38.0), kind,
+                                 genko::core::Point{genko::core::Num(x + 56.0), genko::core::Num(y + 56.0)});
+                line.wrap = "vertical";
+                if (i == 0 && !variant.symbols) line.style["double"] = true;
+                for (const auto& [key, value] : variant.style.items()) line.style[key] = value;
+            }
+            render::clear_render_caches();
+            render::text::clear_balloon_cache();
+            QElapsedTimer timer;
+            timer.start();
+            const render::RenderResult cold = render::render_page(*doc.pages[0], 600, {}, &doc);
+            const qint64 page = timer.elapsed();
+            render::text::clear_balloon_cache();
+            render::Image blank = render::Image::create("RGB", cold.image.size(), render::Ink{255, 255, 255});
+            std::vector<const genko::core::StoryLine*> lines_of;
+            for (const genko::core::StoryLine& line : doc.story) lines_of.push_back(&line);
+            const render::text::LetterParts shapes_only{true, false, false, false};
+            timer.restart();
+            render::text::draw_lines(render::text::whole_page(blank), lines_of, 600, std::nullopt, false, nullptr, {}, nullptr, &shapes_only);
+            const qint64 shapes = timer.elapsed();
+            // (and once more with the tone's tiles remembered — the balloons' shapes worked out again)
+            render::text::clear_balloon_cache();
+            if (base_page == 0) base_page = page, base_shapes = shapes;
+            qInfo("ten balloons at 600 dpi, %s: the page from nothing %lld ms (%+lld); their shapes alone %lld ms (%+.1f ms a balloon)", variant.name,
+                  static_cast<long long>(page), static_cast<long long>(page - base_page), static_cast<long long>(shapes),
+                  static_cast<double>(shapes - base_shapes) / 10.0);
+            QVERIFY(!cold.image.empty());
+        }
+    }
+
     void small_picture_of_200_lines() {
         Document doc = f1_page(200);
         render::RenderOptions proof;

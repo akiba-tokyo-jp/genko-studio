@@ -181,6 +181,7 @@ Document pinned_clean_book() {
 }
 
 Document pinned_book(const std::string& name) {
+    if (name == "additions") return genko::test::additions_book();  // (fukidashi@2's sample: its ids are fixed as it is made)
     return name == "classic" ? genko::test::classic_book(genko::core::PageSpec::a4_mono()) : pinned_clean_book();
 }
 
@@ -2167,6 +2168,61 @@ private slots:
     }
 
 
+    // The additions themselves are held too: the sample of the additions (a page each: the symbols, the pen's line, the
+    // drips, the tone and the blend) at 150 and 600 dpi is the picture this build's first drew (its sha256:
+    // tests/data/fukidashi/pins/additions_pages.json), and it is saved as the bytes it was then, naming fukidashi@2
+    // (additions_project.json) — a later change to how an addition is drawn or kept is seen.
+    void theAdditionsAreDrawnAsRecorded_data() {
+        QTest::addColumn<int>("dpi");
+        QTest::newRow("150 dpi") << 150;
+        QTest::newRow("600 dpi") << 600;
+    }
+    void theAdditionsAreDrawnAsRecorded() {
+        QFETCH(int, dpi);
+        const Json pins = Json::parse(genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/pins/additions_pages.json"))));
+        const Json& held = pins["additions"][std::to_string(dpi)];
+        const Document doc = genko::test::additions_book();
+        QCOMPARE(held.size(), doc.pages.size());
+        for (std::size_t page = 0; page < doc.pages.size(); ++page) {
+            const std::string drawn = picture_sha(page_picture(doc, dpi, page));
+            QVERIFY2(drawn == held[page].get<std::string>(), qPrintable(QStringLiteral("page %1: %2").arg(page + 1).arg(QString::fromStdString(drawn))));
+        }
+    }
+    void theAdditionsAreSavedAsRecorded() {
+        const std::string held = genko::test::read_bytes(genko::test::test_data(QStringLiteral("fukidashi/pins/additions_project.json")));
+        const Document doc = genko::test::additions_book();
+        const std::string saved = saved_text(doc);
+        QVERIFY2(saved == held, "the saved book is not the bytes recorded");
+        // (it names both features — its pages use the kinds and keys of both —, and read back it is the same book, for writing)
+        const Json payload = Json::parse(saved);
+        QCOMPARE(payload["features"], Json::array({"fukidashi@1", "fukidashi@2"}));
+        QTemporaryDir dir;
+        const std::filesystem::path path(dir.path().toStdString());
+        genko::test::write_project(doc, path);
+        const genko::storage::LoadResult read = genko::storage::load_document(path);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        QVERIFY(saved_text(read.document) == saved);
+    }
+
+    // A balloon the page cuts off — past its right edge and its foot — is the part of it that is on the page: the same
+    // pixels as on a page big enough for it, with every addition at once (the pen's line, drips, a tone that grows darker,
+    // a blend).
+    void aBalloonThePageCutsOffIsTheSame() {
+        const Json style{{"pen_swell", 0.6}, {"pen_taper", 0.7}, {"drip_mm", 8}, {"drip_seed", 2}, {"fill_tone", Json{{"density", 0.1}, {"to", 0.6}}},
+                         {"fill_gradient", Json{{"to", Json::array({255, 200, 120})}}}};
+        for (const char* kind : {"speech", "shout", "heart", "box"}) {
+            const Document doc = one_line(kind, Json{{"x_mm", 70}, {"y_mm", 60}, {"w_mm", 50}, {"h_mm", 48}, {"tail", Json::array({128, 116})}, {"style", style}});
+            for (const int dpi : {150, 600}) {
+                const Image small = balloon_alone(doc, dpi, 100, 90);
+                const Image big = balloon_alone(doc, dpi, 150, 130);
+                QVERIFY2(small.tobytes() == big.crop(genko::render::Box{0, 0, small.width(), small.height()}).tobytes(), kind);
+                int dark = 0;
+                for (const char c : grey_of(small).v) dark += static_cast<unsigned char>(c) < 128 ? 1 : 0;
+                QVERIFY(dark > 100);
+            }
+        }
+    }
+
     // --- the sample sheets (written when asked: GENKO_FUKIDASHI_OUT) -------------------------------------------------------
     // (not a test of their own, and never a SKIP: the audit of a stage's run refuses every skipped slot. As the screenshots
     // of test_gui_color, they are written at the end of a run that names a folder)
@@ -2177,6 +2233,7 @@ private slots:
         if (qgetenv("GENKO_FUKIDASHI_SHEETS") == "additions") {
             std::filesystem::create_directories(std::filesystem::path(out.toStdString()));
             write_addition_sheets(std::filesystem::path(out.toStdString()));
+            write_addition_pins(std::filesystem::path(out.toStdString()));
             return;
         }
         write_sample_sheets(out);
@@ -2201,6 +2258,7 @@ private:
                 genko::storage::write_atomic(dir / "pins-drawn" / (std::string(book) + "_project.json"), saved_text(pinned));
             }
             genko::storage::write_atomic(dir / "pins-drawn" / "pages.json", pages.dump(2) + "\n");
+            write_addition_pins(dir);
         }
         const Document doc = genko::test::clean_book();
         write("clean-150-kinds.png", page_picture(doc, 150, 0));
@@ -2228,6 +2286,20 @@ private:
         for (std::size_t i = 0; i < old.pages.size(); ++i) write("after-" + std::to_string(i + 1) + ".png", page_picture(old, 200, i));
         const Document old2 = genko::storage::load_document(old_book_dir(QStringLiteral("old_book2"))).document;
         for (std::size_t i = 0; i < old2.pages.size(); ++i) write("after2-" + std::to_string(i + 1) + ".png", page_picture(old2, 200, i));
+    }
+
+    // (what this build draws and writes of the additions' sample: beside tests/data/fukidashi/pins)
+    static void write_addition_pins(const std::filesystem::path& dir) {
+        std::filesystem::create_directories(dir / "pins-drawn");
+        const Document doc = genko::test::additions_book();
+        Json pages = Json::object();
+        for (const int dpi : {150, 600}) {
+            Json list = Json::array();
+            for (std::size_t page = 0; page < doc.pages.size(); ++page) list.push_back(picture_sha(page_picture(doc, dpi, page)));
+            pages["additions"][std::to_string(dpi)] = std::move(list);
+        }
+        genko::storage::write_atomic(dir / "pins-drawn" / "additions_pages.json", pages.dump(2) + "\n");
+        genko::storage::write_atomic(dir / "pins-drawn" / "additions_project.json", saved_text(doc));
     }
 
     // fukidashi@2: the sample of the additions — each page at 150 dpi, its parts at 600 dpi pixel for pixel, and the same

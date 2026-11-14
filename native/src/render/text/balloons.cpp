@@ -546,13 +546,35 @@ std::shared_ptr<const std::string> tone_tile(std::int64_t m, std::int64_t n, std
     return bytes;
 }
 
-// The tone over the region (coverage 0..1, not yet cut to the balloon): `ramp` in the region's pixels, (ox, oy) the
-// region's corner on the page.
-std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size, int dpi, std::int64_t ox, std::int64_t oy) {
+// The tone over the region, cut to where the group lies (`cover`): `ramp` in the region's pixels, (ox, oy) the region's
+// corner on the page.
+// (`edge`: nothing, or the line's reach at each pixel when white is left inside it — the tone is taken away there. What
+// comes back is the tone cut to the group: a byte a pixel, 0..255.)
+std::string tone_bytes(const ToneSpec& tone, const Ramp& ramp, Size size, int dpi, std::int64_t ox, std::int64_t oy, const std::vector<float>& cover,
+                       const std::vector<float>* edge) {
     const auto w = static_cast<std::size_t>(size.width);
     const auto h = static_cast<std::size_t>(size.height);
-    std::vector<float> out(w * h, 0.0f);
+    std::string out(w * h, '\0');
     if (!(tone.density > 0) && !(tone.graded && tone.to > 0)) return out;
+    // (a pixel of the tone: its share of ink × how much of it the group covers, less the line's reach)
+    const auto put = [&](std::size_t at, double share) {
+        double v = share * static_cast<double>(cover[at]);
+        if (edge != nullptr) v *= 1.0 - static_cast<double>((*edge)[at]);
+        out[at] = static_cast<char>(static_cast<std::uint8_t>(clamp01(v) * 255.0 + 0.5));
+    };
+    // (only where the group lies — `cover` —: the rows and columns it reaches)
+    std::size_t x_from = w, x_to = 0, y_from = h, y_to = 0;
+    for (std::size_t y = 0; y < h; ++y) {
+        const float* row = cover.data() + y * w;
+        std::size_t first = 0;
+        while (first < w && row[first] <= 0.0f) ++first;
+        if (first == w) continue;
+        std::size_t last = w;
+        while (last > first && row[last - 1] <= 0.0f) --last;
+        x_from = std::min(x_from, first), x_to = std::max(x_to, last);
+        y_from = std::min(y_from, y), y_to = y + 1;
+    }
+    if (x_from >= x_to) return out;
     const std::pair<int, int> vector = tones::screen_vector(dpi, tone.lpi, tone.angle);
     const std::int64_t m = std::abs(vector.first), n = std::abs(vector.second);
     const std::int64_t norm = m * m + n * n;
@@ -564,9 +586,10 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
         // stripes along the lattice's (m, n), a cell apart, each density × the cell thick: every pixel's share of the
         // stripe it lies on and of the two beside it
         const double na = static_cast<double>(std::max(m, n)) / pitch, nb = static_cast<double>(std::min(m, n)) / pitch;
-        for (std::size_t y = 0; y < h; ++y) {
+        for (std::size_t y = y_from; y < y_to; ++y) {
             const std::int64_t py = static_cast<std::int64_t>(y) + oy;
-            for (std::size_t x = 0; x < w; ++x) {
+            for (std::size_t x = x_from; x < x_to; ++x) {
+                if (cover[y * w + x] <= 0.0f) continue;
                 const std::int64_t px = static_cast<std::int64_t>(x) + ox;
                 const double half = density_at(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5) * pitch / 2;
                 if (!(half > 0)) continue;
@@ -574,7 +597,7 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
                 const double s = (static_cast<double>(floor_mod(-px * n + py * m, norm)) / static_cast<double>(norm) - 0.5) * pitch;
                 double share = 0.0;
                 for (const double d : {s - pitch, s, s + pitch}) share += edge_share(d + half, na, nb) - edge_share(d - half, na, nb);
-                out[y * w + x] = static_cast<float>(clamp01(share));
+                put(y * w + x, clamp01(share));
             }
         }
         return out;
@@ -596,15 +619,16 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
             if (!tile) tile = tone_tile(m, n, side, radius_of(tone.graded ? level_density(level) : tone.density));
             return *tile;
         };
-        for (std::size_t y = 0; y < h; ++y) {
+        for (std::size_t y = y_from; y < y_to; ++y) {
             const std::int64_t py = static_cast<std::int64_t>(y) + oy;
             const std::size_t row = static_cast<std::size_t>(floor_mod(py, side)) * static_cast<std::size_t>(side);
-            for (std::size_t x = 0; x < w; ++x) {
+            for (std::size_t x = x_from; x < x_to; ++x) {
+                if (cover[y * w + x] <= 0.0f) continue;
                 const std::int64_t px = static_cast<std::int64_t>(x) + ox;
                 // (the cell the pixel's middle lies in: whole numbers, as the tone layers count them)
                 const int level = tone.graded ? cell_level(floor_div(px * m + py * n, norm), floor_div(-px * n + py * m, norm)) : 0;
                 const auto v = static_cast<unsigned char>(tile_of(level)[row + static_cast<std::size_t>(floor_mod(px, side))]);
-                out[y * w + x] = static_cast<float>(v) / 255.0f;
+                put(y * w + x, static_cast<double>(v) / 255.0);
             }
         }
         return out;
@@ -612,7 +636,8 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
     // (a coarse lattice that does not repeat soon: the region's own dots, each drawn where it lies)
     const double most = radius_of(core::py_max(tone.density, tone.to));
     const double fx = static_cast<double>(ox), fy = static_cast<double>(oy);
-    const auto [i0, i1, j0, j1] = cells_over(fx, fy, fx + size.width, fy + size.height, m, n, most + 1);
+    const double bx0 = static_cast<double>(x_from), by0 = static_cast<double>(y_from), bx1 = static_cast<double>(x_to), by1 = static_cast<double>(y_to);
+    const auto [i0, i1, j0, j1] = cells_over(fx + bx0, fy + by0, fx + bx1, fy + by1, m, n, most + 1);
     std::vector<clean::Contour> dots;
     for (std::int64_t j = j0; j <= j1; ++j) {
         for (std::int64_t i = i0; i <= i1; ++i) {
@@ -620,11 +645,17 @@ std::vector<float> tone_plane(const ToneSpec& tone, const Ramp& ramp, Size size,
             const double radius = radius_of(tone.graded ? level_density(cell_level(i, j)) : tone.density);
             if (!(radius > 0)) continue;
             const P local{c.x - fx, c.y - fy};
-            if (local.x < -radius - 1 || local.y < -radius - 1 || local.x > size.width + radius + 1 || local.y > size.height + radius + 1) continue;
+            if (local.x < bx0 - radius - 1 || local.y < by0 - radius - 1 || local.x > bx1 + radius + 1 || local.y > by1 + radius + 1) continue;
             dots.push_back(clean::circle(local, radius));
         }
     }
-    return clean::union_plane(dots, size.width, size.height).values;
+    const clean::Plane drawn = clean::union_plane(dots, size.width, size.height);
+    for (std::size_t y = y_from; y < y_to; ++y) {
+        for (std::size_t x = x_from; x < x_to; ++x) {
+            if (cover[y * w + x] > 0.0f) put(y * w + x, static_cast<double>(drawn.values[y * w + x]));
+        }
+    }
+    return out;
 }
 
 // --- fukidashi@2 (SPEC BALLOON-02): drips ---------------------------------------------------------------------------------
@@ -957,17 +988,10 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     if (const std::optional<ToneSpec> tone = tone_spec(st)) {
         // (fukidashi@2: a tone inside any outline — the tails and the joined balloons with it, being cut to where the
         // group lies —, clear of the line by inset_mm when that is said)
-        clean::Plane dots;
-        dots.width = size.width;
-        dots.height = size.height;
-        dots.values = tone_plane(*tone, ramp_over(whole_boxes, tone->dir, tone->radial), size, dpi, rx0, ry0);
-        if (tone->inset_mm > 0) {
-            const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), width + tone->inset_mm / 25.4 * dpi, size.width, size.height);
-            for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
-        } else {
-            for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i];
-        }
-        out.tone = as_image(dots);
+        clean::Plane edge;
+        if (tone->inset_mm > 0) edge = clean::ribbon_plane(clean::edge_runs(shapes), width + tone->inset_mm / 25.4 * dpi, size.width, size.height);
+        out.tone = Image::frombytes("L", size, tone_bytes(*tone, ramp_over(whole_boxes, tone->dir, tone->radial), size, dpi, rx0, ry0, cover,
+                                                              tone->inset_mm > 0 ? &edge.values : nullptr));
     } else if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
         const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), core::py_max(2.0, static_cast<double>(px(1.0, dpi))), size.width, size.height);
         clean::Plane dots = clean::union_plane(tone_dots(size, dpi, rx0, ry0), size.width, size.height);
