@@ -67,12 +67,16 @@ std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_c
 std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0,
                                   const core::Json& style = core::Json());
 // box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm. `style` (fukidashi@2): a
-// symbol's points and depth, and the drips below the body — the box that much taller (drip_height).
+// symbol's points and depth, and the drips below the body — the box that much taller (drip_growth).
 std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm,
                                    int sides = 0, const core::Json& style = core::Json());
-// fukidashi@2: how much taller than its body a balloon of this kind and style is for its drips (style.drip_mm, 30 at
-// most; none for the kinds that draw none).
-double drip_height(std::string_view balloon, const core::Json& style);
+// fukidashi@2: how far below its body the drips of a balloon of this kind and style reach in a box `box_h` mm high, as
+// the renderer draws them (core::drip_reach): style.drip_mm, 30 at most and 0.6 of the box; none for the kinds that
+// draw none. The body is the box less that.
+double drip_height(std::string_view balloon, const core::Json& style, double box_h);
+// How much taller than a body `body_h` mm high its box is made for its drips: style.drip_mm, 30 at most and 1.5 × the
+// body — the drips drawn in that box (drip_height: 0.6 of it) reach exactly as far, and the body keeps its size.
+double drip_growth(std::string_view balloon, const core::Json& style, double body_h);
 // A style's sides as the renderer reads them (5..12; 0: none said).
 int sides_of(const core::Json& style);
 // place_new(episode, page, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm, wrap}.
@@ -83,9 +87,11 @@ core::Json refit(const core::StoryLine& line, const core::Frame* frame, const st
                  bool vertical);
 // fukidashi@1: the box a line is given when a person changes its balloon to or from a kind that holds its letters in
 // its own shape (a capsule, a polygon; fukidashi@2: a symbol): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
-// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. Null when the kind does not change
-// that way (speech to shout, the same kind), the balloon is drawn by hand or the line is not set in a balloon, or the
-// box would not change. `style_after`: the style the line has then (a polygon's sides).
+// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. fukidashi@2: to any other kind (or
+// the same), the box as much taller or shorter as the drips drawn change (a kind that draws none — a flash, a dotted
+// box —, or a style without them), its top kept: the body stays the size it was. Null when neither changes the box,
+// the balloon is drawn by hand or the line is not set in a balloon. `style_after`: the style the line has then (a
+// polygon's sides, the drips).
 core::Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const core::Json& style_after);
 // place_at(x_mm, y_mm, text, balloon, vertical, frame): {x_mm, y_mm, w_mm, h_mm, wrap}, centred where clicked (`style`:
 // the style the line is given — a polygon's sides size its box).

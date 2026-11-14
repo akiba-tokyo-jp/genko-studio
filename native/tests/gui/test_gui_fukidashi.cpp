@@ -1470,9 +1470,19 @@ private slots:
         const std::string drawn = s.put(Json{{"op", "add_line"}, {"text", "て"}, {"balloon", "speech"}, {"path", path}});
         s.choose(drawn);
         const Json box{{"x", s.line(drawn)->x_mm.json()}, {"y", s.line(drawn)->y_mm.json()}, {"w", s.line(drawn)->w_mm.json()}, {"h", s.line(drawn)->h_mm.json()}};
-        s.window->restyle_with_balloon_preset(QStringLiteral("drips"));
+        // (review 3, P3-1: the drips' keys are not written to it — the book names no fukidashi@2 for drips that draw
+        // nothing; a look that is its drips alone gives it nothing, and says so)
+        const std::size_t count_before = s.ops.size();
+        QVERIFY(!s.window->restyle_with_balloon_preset(QStringLiteral("drips")));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("手で描いたフキダシには、しずくは付きません"));
+        QCOMPARE(s.ops.size(), count_before);
+        QVERIFY(s.window->restyle_with_balloon_preset(QStringLiteral("horror_black")));
         QCOMPARE(s.window->last_notice(), QStringLiteral("手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）"));
+        QCOMPARE(s.line(drawn)->style["fill_rgb"], Json::array({0, 0, 0}));
+        for (const char* key : {"drip_mm", "drips", "drip_width_mm", "drip_seed"}) QVERIFY2(!s.line(drawn)->style.contains(key), key);
+        QVERIFY(!core::uses_fukidashi2(*s.line(drawn)));
         QCOMPARE((Json{{"x", s.line(drawn)->x_mm.json()}, {"y", s.line(drawn)->y_mm.json()}, {"w", s.line(drawn)->w_mm.json()}, {"h", s.line(drawn)->h_mm.json()}}), box);
+
         // (a symbol's look given to an oval: the kind and the box fitted to the words, one step)
         s.choose(id);
         const std::size_t count = s.ops.size();
@@ -1544,6 +1554,7 @@ private slots:
         QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.drip_length))->text(), QStringLiteral("しずくの長さ"));
         QCOMPARE(qobject_cast<QLabel*>(form->labelForField(p.tone_density))->text(), QStringLiteral("中のトーン"));
         QVERIFY(p.tone_density->toolTip().contains(QStringLiteral("4〜90%")));  // (the range that prints, said where it is set)
+        QVERIFY(p.tone_density->toolTip().contains(QStringLiteral("600 dpi の白黒の原稿では")));  // (and at what resolution: review 3, P3-5)
         QVERIFY(p.fill_blend->toolTip().contains(QStringLiteral("白黒の原稿")));
 
         // one setting changed: the op, the key the line holds, one undo back
@@ -1617,6 +1628,72 @@ private slots:
         QCOMPARE(p.fill_blend->text(), QStringLiteral("中の色のグラデーションを外す"));
         one(speech, [&] { p.fill_blend->click(); }, Json::array({edit(speech, Json{{"fill_gradient", nullptr}})}), "外す");
         app::ask::set_responder(nullptr);
+    }
+
+    // The drips' length is the length drawn (review 3, P3-2): the renderer draws drips 0.6 of the box long at most, so
+    // a length longer than half as long again as the body is kept to that — written so, the box grown by it, the body
+    // the size it was — and a line whose drips are longer than that (an op's) shows the length drawn. A kind chosen
+    // that draws no drips (a flash, a dotted box) takes their growth off the box, in the same step (P3-3).
+    void theDripsLengthIsTheLengthDrawn() {
+        Studio s;
+        auto& p = s.panel();
+        const std::string id = s.put(Json{{"op", "add_line"}, {"text", "あ"}, {"balloon", "speech"}, {"x_mm", 60}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 12}});
+        s.choose(id);
+        std::size_t count = s.ops.size();
+        p.drip_length->setValue(25);
+        emit p.drip_length->editingFinished();
+        QCOMPARE(s.ops.size(), count + 2);
+        QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"style", Json{{"drip_mm", 18.0}}}}));  // (1.5 × 12)
+        QCOMPARE(s.ops[count + 1], (Json{{"op", "move_line"}, {"id", id}, {"h_mm", 30.0}}));
+        QCOMPARE(core::drip_reach(*s.line(id)), 18.0);        // (drawn as long as written)
+        QCOMPARE(core::body_box(*s.line(id))[3], 12.0);       // (the body as it was)
+        s.choose(id);
+        QCOMPARE(p.drip_length->value(), 18.0);
+        // (a length within it: as typed — 12 on the body of 12)
+        count = s.ops.size();
+        p.drip_length->setValue(12);
+        emit p.drip_length->editingFinished();
+        QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"style", Json{{"drip_mm", 12.0}}}}));
+        QCOMPARE(s.ops[count + 1], (Json{{"op", "move_line"}, {"id", id}, {"h_mm", 24.0}}));
+        QCOMPARE(core::body_box(*s.line(id))[3], 12.0);
+        // (drips longer than drawn, written by an op: the field shows what is drawn, 0.6 of 37; left so, no edit)
+        const std::string op_made = s.put(Json{{"op", "add_line"}, {"text", "い"}, {"balloon", "speech"}, {"x_mm", 120}, {"y_mm", 60}, {"w_mm", 30}, {"h_mm", 37},
+                                               {"style", Json{{"drip_mm", 25}}}});
+        s.choose(op_made);
+        QCOMPARE(p.drip_length->value(), 22.2);
+        count = s.ops.size();
+        emit p.drip_length->editingFinished();
+        QCOMPARE(s.ops.size(), count);
+        // (P3-3: to a flash — no drips — the box as much shorter, one step; to a shout — drips — as it was)
+        s.choose(id);
+        const Json before = snapshot(*s.line(id));
+        const auto kind_to = [&](const char* kind) {
+            s.choose(id);
+            QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
+            for (QAction* a : shapes->actions())
+                if (a->text() == app::lettering::kind_label(kind)) a->trigger();
+        };
+        for (const char* kind : {"flash", "dotted_box"}) {
+            s.choose(id);
+            count = s.ops.size();
+            kind_to(kind);
+            QCOMPARE(s.ops.size(), count + 2);
+            QCOMPARE(s.ops[count], (Json{{"op", "edit_line"}, {"id", id}, {"balloon", kind}}));
+            QCOMPARE(s.ops[count + 1], (Json{{"op", "move_line"}, {"id", id}, {"x_mm", 60.0}, {"y_mm", 60.0}, {"w_mm", 30.0}, {"h_mm", 12.0}}));
+            s.trigger("act_undo");
+            QCOMPARE(snapshot(*s.line(id)), before);
+        }
+        s.choose(id);
+        count = s.ops.size();
+        kind_to("shout");
+        QCOMPARE(s.ops.size(), count + 1);  // (its drips drawn as before: the box as it was)
+        QCOMPARE(s.line(id)->h_mm.value(), 24.0);
+        // (and back from the flash: the drips grow the box again)
+        kind_to("flash");
+        QCOMPARE(s.line(id)->h_mm.value(), 12.0);
+        kind_to("speech");
+        QCOMPARE(s.line(id)->h_mm.value(), 24.0);
+        QCOMPARE(core::body_box(*s.line(id))[3], 12.0);
     }
 
     void cleanupTestCase() {

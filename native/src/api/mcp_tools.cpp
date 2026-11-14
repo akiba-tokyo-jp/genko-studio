@@ -281,9 +281,9 @@ const std::vector<ToolSpec>& table() {
         pen_taper 0〜1（入り抜き。ひと筆の両端が細る）、pen_strokes 1〜8（丸い形を何筆で描くか）、drip_mm 0〜30（下に垂れる
         しずくの長さ。箱の下がしずくになるので、箱をその分だけ高くする）、drips 1〜24、drip_width_mm 0.3〜10、drip_seed 0〜999999
         （しずくの並び。同じ番号は同じ並び）、fill_tone {density 0〜0.9, lpi? 20〜85, angle? 0〜90, pattern? dot / line, to? 0〜0.9,
-        dir?, radial?, inset_mm? 0〜5}（中のトーン。to で濃さが変わるグラデーションのトーン。白黒の原稿では 60 線なら 0.04〜0.9 が
-        印刷に残る）、fill_gradient {to: [r, g, b], dir?, radial?}（中の塗りの色のグラデーション。カラーの原稿向け。白黒の原稿では
-        fill_tone の to を使う）。形に関係のない鍵は受け取って何もしない。
+        dir?, radial?, inset_mm? 0〜5}（中のトーン。to で濃さが変わるグラデーションのトーン。600 dpi の白黒の原稿では 60 線なら
+        0.04〜0.9 が印刷に残る。解像度が低いほど薄い側が狭く、350 dpi なら 0.09 から）、fill_gradient {to: [r, g, b], dir?,
+        radial?}（中の塗りの色のグラデーション。カラーの原稿向け。白黒の原稿では fill_tone の to を使う）。形に関係のない鍵は受け取って何もしない。
         形は箱（x_mm・y_mm・w_mm・h_mm）に合わせて描かれる。capsule は箱の長い辺が長い辺になる（縦長の箱なら縦長、横長の箱なら
         横長。文字の向きでは決まらない）。大きさを省いた add_line の箱は 40×20 mm。edit_line は箱を変えないので、capsule や
         polygon に変えたら move_line の w_mm・h_mm で言葉に合う箱にする（目安: 縦書き 1 列の capsule は幅 9.5 mm・高さ

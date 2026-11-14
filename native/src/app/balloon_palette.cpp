@@ -181,7 +181,11 @@ Json preset_style_change(const BalloonPreset& preset, const core::StoryLine& lin
         if (line.style.contains(key)) style[key] = nullptr;
     }
     const Json letters = held(line, "rgb");
+    // (a balloon drawn by hand has no drips: a look's drips are not written to it — they would draw nothing, and name
+    // fukidashi@2 for the book all the same)
+    const bool drawn = line.path.has_value() && !line.path->empty();
     for (const auto& [key, value] : preset.style.items()) {
+        if (drawn && (key == "drip_mm" || key == "drips" || key == "drip_width_mm" || key == "drip_seed")) continue;
         // (ベタ: white letters for a line whose letters are the usual black — a colour the person chose is kept)
         if (key == "rgb" && !(letters.is_null() || is_dark(letters))) continue;
         style[key] = value;

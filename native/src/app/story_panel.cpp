@@ -390,8 +390,9 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     };
     tone_density = tone_spin(-5, 90, 5, QStringLiteral(" %"), QStringLiteral("なし"),  // (its least, −5: none)
                              QStringLiteral("フキダシの中にトーンを敷きます（線の色で。文字には白いフチがつきます）。"
-                                            "白黒の原稿では、60 線なら 4〜90%、85 線なら 7〜85% が点として印刷に残ります"
-                                            "（それより薄いと点が飛び、濃いと白がつぶれます。外れると点検で知らせます）"));
+                                            "600 dpi の白黒の原稿では、60 線なら 4〜90%、85 線なら 7〜85% が点として印刷に残ります"
+                                            "（それより薄いと点が飛び、濃いと白がつぶれます。解像度が低いほど薄い側が狭く、350 dpi・60 線なら 9% から。"
+                                            "外れると点検で知らせます）"));
     tone_lpi = tone_spin(20, 85, 5, QStringLiteral(" 線"), QString(), QStringLiteral("トーンの線数（20〜85。初めは 60。大きいほど細かい網）"));
     tone_pattern = new QComboBox;
     tone_pattern->addItem(QStringLiteral("点"), QStringLiteral("dot"));
@@ -791,7 +792,11 @@ void StoryPanel::show_picked() {
     pen_angle->setValue(static_cast<int>(std::lround(number_of(own("pen_angle"), 45, 0, 360))));
     pen_taper->setValue(number_of(own("pen_taper"), 0, 0, 1));
     pen_strokes->setValue(static_cast<int>(number_of(own("pen_strokes"), 2, 1, 8)));
-    drip_length->setValue(number_of(own("drip_mm"), 0, 0, 30));
+    {  // (the drips' length as they are drawn: drip_mm, 0.6 of the box at most — what the renderer draws)
+        const std::string kind = l->balloon.empty() ? std::string("speech") : l->balloon;
+        const double drawn = read([&] { return lettering::drip_height(kind, l->style, l->h_mm.value()); }, 0.0);
+        drip_length->setValue(drawn > 0 ? drawn : number_of(own("drip_mm"), 0, 0, 30));
+    }
     drip_count->setValue(static_cast<int>(number_of(own("drips"), 0, 0, 24)));
     drip_width->setValue(number_of(own("drip_width_mm"), 0, 0, 10));
     points->setValue(static_cast<int>(number_of(own("points"), 3, 3, 12)));
@@ -1214,19 +1219,31 @@ void StoryPanel::set_tail_fillet() {
 void StoryPanel::set_drip_length() {
     const core::StoryLine* l = line();
     if (l == nullptr || loading_ || left_as_shown(drip_length, drip_length->value(), 0.05)) return;
-    const Json value = drip_length->value() > 0 ? Json(drip_length->value()) : Json();
+    // (the box grows by as much as the drips do, its top kept: the body — the box less the drips — stays the size it
+    // was. Drips longer than half as long again as the body are drawn no longer — the renderer's 0.6 of the box —: the
+    // length is kept to that, and the field shows it)
+    const std::string kind = l->balloon.empty() ? std::string("speech") : l->balloon;
+    const double box_h = l->h_mm.truthy() ? l->h_mm.value() : 20.0;
+    const double body = box_h - lettering::drip_height(kind, l->style, box_h);
+    Json value = drip_length->value() > 0 ? Json(drip_length->value()) : Json();
+    if (!value.is_null() && !(l->path && !l->path->empty())) {
+        const double most = std::floor(1.5 * body * 10 + 1e-9) / 10;  // (in the field's steps)
+        if (drip_length->value() > most) {
+            value = most > 0 ? Json(most) : Json();
+            const QSignalBlocker quiet(drip_length);
+            drip_length->setValue(most > 0 ? most : 0.0);
+        }
+    }
     Json after = l->style.is_object() ? l->style : Json::object();
     if (value.is_null()) {
         after.erase("drip_mm");
     } else {
         after["drip_mm"] = value;
     }
-    // (the box grows by as much as the drips do, its top kept: the body — the box less the drips — stays the size it was)
-    const std::string kind = l->balloon.empty() ? std::string("speech") : l->balloon;
-    const double grown = lettering::drip_height(kind, after) - lettering::drip_height(kind, l->style);
+    const double grown = lettering::drip_growth(kind, after, body) - (box_h - body);
     Json ops = Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"style", Json{{"drip_mm", value}}}}});
     if (std::abs(grown) > 1e-9 && !(l->path && !l->path->empty())) {
-        const double h = (l->h_mm.truthy() ? l->h_mm.value() : 20.0) + grown;
+        const double h = box_h + grown;
         if (h > 1) ops.push_back(Json{{"op", "move_line"}, {"id", l->id}, {"h_mm", core::py_round(h, 2)}});
     }
     window_->apply_ops(ops);

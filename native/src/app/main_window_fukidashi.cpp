@@ -90,19 +90,9 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
                 after[name] = value;
             }
         }
-        Json box = lettering::refit_for_kind(l, frame_by_id(l.frame_id), preset->kind, after);
         // (fukidashi@2: drips that come or go with the look — the box as much taller or shorter, its top kept: the body,
         // the box less the drips, stays the size it was; a balloon drawn by hand has none)
-        const std::string was = l.balloon.empty() ? std::string("speech") : l.balloon;
-        const double grown = lettering::drip_height(preset->kind, after) - lettering::drip_height(was, l.style);
-        if (std::abs(grown) > 1e-9 && !(l.path && !l.path->empty())) {
-            if (!box.is_object()) {
-                box = Json{{"x_mm", l.x_mm.json()}, {"y_mm", l.y_mm.json()}, {"w_mm", l.w_mm.truthy() ? l.w_mm.json() : Json(40.0)},
-                           {"h_mm", l.h_mm.truthy() ? l.h_mm.json() : Json(20.0)}};
-                box["h_mm"] = core::py_round(core::to_float(box["h_mm"]) + grown, 2);
-            }
-            // (a box refitted to the words is the body's own: the drips are box_size's already)
-        }
+        Json box = lettering::refit_for_kind(l, frame_by_id(l.frame_id), preset->kind, after);
         return box;
     };
     // (the lines joined with it: one balloon, drawn with its first line's inside and line — each takes the look)
@@ -116,6 +106,11 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
     }
     const Json ops = preset_restyle_ops(*preset, *line, fitted(*line), joined);
     const QString name = QString::fromUtf8(preset->name);
+    const bool drips = preset->style.contains("drip_mm");
+    if (ops.empty() && drawn && drips) {  // (drawn by hand, and the look nothing but its drips: nothing to give it)
+        flash(QStringLiteral("手で描いたフキダシには、しずくは付きません"), 4000);
+        return false;
+    }
     if (ops.empty()) {  // (that look already: no edit, no step of 取り消し)
         flash(QStringLiteral("選んだ台詞のフキダシは、もう「%1」です").arg(name), 4000);
         return false;
@@ -124,7 +119,6 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
     if (!apply_ops(ops)) return false;
     canvas_->selected_line_id = id;
     on_line_selected(id, false);
-    const bool drips = preset->style.contains("drip_mm");
     flash(drawn && drips ? QStringLiteral("手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）")
           : drawn        ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻す で取り消せます）").arg(name)
           : many ? QStringLiteral("つないだフキダシをまとめて「%1」にしました（元に戻す で取り消せます）").arg(name)

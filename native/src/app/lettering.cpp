@@ -456,16 +456,31 @@ std::pair<double, double> box_size(const std::string& text, std::string_view bal
         const std::int64_t per = std::max<std::int64_t>(4, core::py_trunc_int((max_w_mm * 0.8) / em));
         std::tie(h, w) = measure(columns(words, per), balloon, em, sides, style);  // (the same box turned: rows across, characters along)
     }
-    h += drip_height(balloon, style);  // (fukidashi@2: the drips below the body — the body is the box the words were measured for)
+    h += drip_growth(balloon, style, h);  // (fukidashi@2: the drips below the body — the body is the box the words were measured for)
     return {core::py_round(core::py_min(w, max_w_mm), 2), core::py_round(core::py_min(h, max_h_mm), 2)};
 }
 
-double drip_height(std::string_view balloon, const Json& style) {
+namespace {
+
+// style.drip_mm for a kind that draws drips, 30 at most (0: none)
+double drips_asked(std::string_view balloon, const Json& style) {
     if (!style.is_object() || one_of(balloon, {"dotted_box", "flash", "picture", "sfx", "none"})) return 0.0;
     const auto drip = style.find("drip_mm");
     if (drip == style.end() || !drip->is_number()) return 0.0;
     const double mm = core::to_float(*drip);
     return mm > 0 ? core::py_min(mm, 30.0) : 0.0;
+}
+
+}  // namespace
+
+double drip_height(std::string_view balloon, const Json& style, double box_h) {
+    const double asked = drips_asked(balloon, style);
+    return asked > 0 && box_h > 0 ? core::py_round(core::py_min(asked, 0.6 * box_h), 9) : 0.0;  // (as core::drip_reach)
+}
+
+double drip_growth(std::string_view balloon, const Json& style, double body_h) {
+    const double asked = drips_asked(balloon, style);
+    return asked > 0 && body_h > 0 ? core::py_min(asked, 1.5 * body_h) : 0.0;
 }
 
 Json place_new(const core::Document& doc, const core::Page& page, const core::Frame& frame, const std::string& text, const std::string& balloon,
@@ -501,15 +516,23 @@ Json refit(const core::StoryLine& line, const core::Frame* frame, const std::str
 Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const Json& style_after) {
     const std::string was = line.balloon.empty() ? std::string("speech") : line.balloon;
     const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon" || core::is_symbol(k); };
-    if (was == kind || !(own_shape(was) || own_shape(kind))) return Json();
     if (line.path && !line.path->empty()) return Json();              // (drawn by hand: its box is its outline's)
     if (!render::text::shape_of(line).empty()) return Json();         // (a point or box text: not set in a balloon)
+    const double was_drip = drip_height(was, line.style, line.h_mm.value());
+    if (was == kind || !(own_shape(was) || own_shape(kind))) {
+        // (fukidashi@2: not fitted to the words — the box as much taller or shorter as the drips, its top kept)
+        const double body = line.h_mm.value() - was_drip;
+        const double now_drip = drip_growth(kind, style_after, body);
+        const double h = core::py_round(body + now_drip, 2);
+        if (std::abs(now_drip - was_drip) < 1e-6 || h == line.h_mm.value() || !(h > 1)) return Json();
+        return Json{{"x_mm", line.x_mm.json()}, {"y_mm", line.y_mm.json()}, {"w_mm", line.w_mm.truthy() ? line.w_mm.json() : Json(40.0)}, {"h_mm", h}};
+    }
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
     const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after), style_after);
     // (about the body's middle — a balloon that drips keeps where its body was, its drips below it)
     const double cx = (line.x_mm + line.w_mm / Num(2)).value();
-    const double was_drip = drip_height(was, line.style), now_drip = drip_height(kind, style_after);
+    const double now_drip = drip_height(kind, style_after, h);
     const double cy = line.y_mm.value() + (line.h_mm.value() - was_drip) / 2 + now_drip / 2;
     const double x = core::py_round(cx - w / 2, 2);
     const double y = core::py_round(cy - h / 2, 2);
