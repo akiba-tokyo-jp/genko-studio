@@ -358,8 +358,9 @@ class SourceTree:
         if self._programs_of is not None:
             return self._programs_of
         result = {name: {d for d in self.depends.get(name, ()) if d in self.programs} for name in self.tests}
-        own = {s for sources in self.tests.values() for s in sources}
-        shared = sorted(p for p in self.text if p.startswith('native/tests/') and p not in own)
+        # (the helpers the tests share: not a test's or a program's own source)
+        shared = sorted(p for p in self.text if p.startswith('native/tests/') and p not in self.executable_sources)
+        started_by = {}   # 実行物 → それを動かす実行物（補助が genko を起こす、など）
         classes = set()
         for path in shared:
             for match in re.finditer(r'\b(?:class|struct|union)\s+([A-Za-z_]\w*)[^;{()]*\{', self.text[path]):
@@ -385,9 +386,20 @@ class SourceTree:
             reached = set()
             for path in carrier_files:
                 reached |= self.reaching(path)
+            def starts(sources):
+                return bool(reached & set(sources)) or any(used.search(self.text[s]) for s in sources if s in self.text)
             for name, sources in self.tests.items():
-                if reached & set(sources) or any(used.search(self.text[s]) for s in sources if s in self.text):
+                if starts(sources):
                     result[name].add(program)
+            for other, sources in self.programs.items():
+                if other != program and starts(sources):
+                    started_by.setdefault(other, set()).add(program)
+        for found in result.values():   # (a helper that starts another program: the test runs both)
+            while True:
+                more = {p for helper in found for p in started_by.get(helper, ())} - found
+                if not more:
+                    break
+                found |= more
         self._programs_of = result
         return result
 

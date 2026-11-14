@@ -442,6 +442,15 @@ class ChildProcessTests(MadeUpTree):
             self.assertEqual(runs['test_alpha'], {'genko'})
             self.assertEqual(runs['test_beta'], {'genko'})
 
+    def test_a_helper_program_that_starts_genko(self):
+        files = dict(MADE_UP)
+        files['native/tests/support/lock_helper.cpp'] += 'void again() { QProcess::execute(QStringLiteral(GENKO_CLI)); }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            tree = policy.SourceTree(write_tree(folder, files))
+            self.assertEqual(tree.programs_of()['test_contract_gamma'], {'genko_lock_helper', 'genko'})
+            self.assertEqual(tree.programs_of()['test_beta'], set())
+            self.assertEqual(tree.carriers['genko'][0], ['GENKO_CLI', 'genko_cli', 'run_genko'])   # (the helper's own functions are not helpers of the tests)
+
     def test_a_use_whose_owner_cannot_be_read_counts_for_the_whole_file(self):
         files = dict(MADE_UP)
         # (the macro handed to another macro at file scope: no function to name)
