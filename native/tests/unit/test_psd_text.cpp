@@ -1000,9 +1000,11 @@ private slots:
         QCOMPARE(said, (std::vector<std::string>{"a:font_missing:horror_chokoku", "a:font_missing:sfx_aoboshi", "b:font_missing:sfx_aoboshi",
                                                  "c:font_missing:sfx_inline", "e:font_missing:techno_monomaniac"}));
         // (each line's letters are listed by the face the line asks for — its text layer names that, by the catalogue's
-        // PostScript name, though they are drawn in the default face here —; the reading of line a, whose own face is
+        // PostScript name, though they are drawn in the default face here —, and, for the kanji of a face the catalogue
+        // says has none (line a's), by that face's partner, as with the files; the reading of line a, whose own face is
         // missing too, is set in the line's face: the default face's two)
-        QCOMPARE(without.fonts, (std::vector<std::string>{"Chokokutai-Regular", kGothic, kMincho, "AoboshiOne-Regular", "TrainOne-Regular", "MonomaniacOne-Regular"}));
+        QCOMPARE(without.fonts, (std::vector<std::string>{"Chokokutai-Regular", "ZenOldMincho-Black", kGothic, kMincho, "AoboshiOne-Regular", "TrainOne-Regular",
+                                                          "MonomaniacOne-Regular"}));
         genko::render::font_files::set_dir_for_testing(std::nullopt);
         genko::render::text::clear_layout_cache();
     }

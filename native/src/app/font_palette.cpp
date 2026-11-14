@@ -374,10 +374,10 @@ void FontPalette::step() {
             // (its bytes, not only whether it is installed: a face whose answer is known already — the book drew in it —
             // may have had its bytes let go, and the sample would read the file on the screen's thread)
             HeldBytes read;
-            for (const std::string& key : {face, partner}) {
-                if (key.empty()) continue;
+            for (const std::string& wanted : {face, partner}) {
+                if (wanted.empty()) continue;
                 try {
-                    read.push_back(render::font_files::bytes(key));
+                    read.push_back(render::font_files::bytes(wanted));
                 } catch (const std::exception&) {  // (not installed: its row will say so)
                 }
             }

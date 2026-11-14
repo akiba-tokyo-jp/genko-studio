@@ -153,7 +153,8 @@ private slots:
     // computer that is said (font_not_installed), by the face's name, in Japanese. A name nobody knows is unknown as before.
     void lintKnowsTheAddedFaces() {
         const Json bible = Json::parse(R"({"lettering": {"shout": {"font": "gothic_kiwami"}, "whisper": {"font": "gothic"},
-                                                          "aside": {"font": "no_such_face"}, "narration": {"font": "klee"}}})");
+                                                          "aside": {"font": "no_such_face"}, "narration": {"font": "klee"},
+                                                          "sfx": {"font": "sfx_outline"}}})");
         const auto codes = [&] {
             std::vector<std::string> out;
             for (const genko::studio::Issue& issue : service::lint::lint_bible(bible)) {
@@ -168,7 +169,10 @@ private slots:
         files::set_dir_for_testing(empty.path().toStdString());
         const std::vector<std::string> without = codes();
         use_source_fonts();
-        QCOMPARE(without.size(), std::size_t(3));
+        QCOMPARE(without.size(), std::size_t(4));
+        // (what it will be drawn in is said by the kind: a sound effect's default is the heavy face, not アンチック)
+        QCOMPARE(without[3], std::string("font_not_installed /lettering/sfx/font 書体「ランパート（立体の袋文字）」のファイルがこのパソコンに無い（極太の書体で描かれる） / "
+                                         "アプリを入れ直すと元の書体で描ける"));
         QCOMPARE(without[0], std::string("font_not_installed /lettering/shout/font 書体「源暎きわみゴ」のファイルがこのパソコンに無い（アンチックで描かれる） / "
                                          "アプリを入れ直すと元の書体で描ける"));
         QCOMPARE(without[1], unknown[0]);
@@ -220,17 +224,28 @@ private slots:
             QCOMPARE(all.font_path, std::string("antique_genei"));
             QCOMPARE(fonts::named(all), (std::vector<std::string>{"antique_genei", "gothic_kiwami", "klee"}));
             // (a map that names the face: it is not a missing font, so it stays)
-            const Document mapped = run_ops(doc, Json::array({Json{{"op", "replace_fonts"}, {"map", Json{{"klee", "mincho"}, {"/no/such/font.otf", "maru"}}}}})).doc;
+            const genko::core::ApplyResult by_map =
+                run_ops(doc, Json::array({Json{{"op", "replace_fonts"}, {"map", Json{{"klee", "mincho"}, {"/no/such/font.otf", "maru"}}}}}));
+            const Document& mapped = by_map.doc;
             QCOMPARE(line_of(mapped, "a").style.value("font", std::string()), std::string("klee"));
             QCOMPARE(line_of(mapped, "b").style.value("font", std::string()), std::string("maru"));
+            // (… and the answer says so, by the face, instead of saying nothing of it)
+            QCOMPARE(by_map.results[0]["replaced"], Json(1));
+            QCOMPARE(by_map.results[0]["kept"].size(), std::size_t(1));
+            QCOMPARE(by_map.results[0]["kept"][0]["font"], Json("klee"));
+            QCOMPARE(by_map.results[0]["kept"][0]["label"], Json(genko::core::fonts::find("klee")->label));
+            QVERIFY(by_map.results[0]["kept"][0]["why"].get<std::string>().find("never replaced") != std::string::npos);
+            // (a map that names none of Genko's faces is answered as before: no such key)
+            QVERIFY(!run_ops(doc, Json::array({Json{{"op", "replace_fonts"}, {"map", Json{{"/no/such/font.otf", "maru"}}}}})).results[0].contains("kept"));
         }();
         use_source_fonts();
     }
 
     // The editable PSD of a line in a face whose file is not on this computer: its letters are set in the default face
     // here — and its text layer names the face the line asks for, by the PostScript name the catalogue holds, as does
-    // the list of fonts the export tells; the missing font is warned of as before. A line in a font file that is not
-    // there is named by the default face, as it always was.
+    // the list of fonts the export tells; the missing font is warned of as before. In a face the catalogue says has no
+    // kanji, the kanji name the face's partner — what Genko draws them in where the fonts are —, the kana the face. A
+    // line in a font file that is not there is named by the default face, as it always was.
     void psdNamesTheFaceAskedForWithoutItsFile() {
         const Document doc = book_of({{"a", "klee"}, {"b", "/no/such/font.otf"}, {"c", "cute_daruma"}});
         QTemporaryDir empty, out;
@@ -255,12 +270,25 @@ private slots:
                 return names;
             };
             QCOMPARE(fonts_in("本文 #a"), std::vector<std::string>{"KleeOne-SemiBold"});
-            QCOMPARE(fonts_in("本文 #c"), std::vector<std::string>{"DarumadropOne-Regular"});
+            QCOMPARE(fonts_in("本文 #c"), (std::vector<std::string>{"DarumadropOne-Regular", "MochiyPopOne-Regular"}));
+            {  // (letter by letter: かなと in the face, 漢字 in its partner)
+                std::vector<std::string> by_letter;
+                for (const genko::render::psd::Layer& layer : file.layers()) {
+                    if (layer.name != "本文 #c") continue;
+                    const std::optional<genko::render::psd::TextLayer> text = file.text(layer);
+                    QVERIFY(text.has_value());
+                    for (const auto& run : text->runs) by_letter.insert(by_letter.end(), run.length, run.style.font);
+                    QVERIFY(text->text.starts_with(u"かなと漢字"));
+                }
+                QVERIFY(by_letter.size() >= 5);
+                for (int i = 0; i < 5; ++i) QCOMPARE(by_letter[static_cast<std::size_t>(i)], std::string(i < 3 ? "DarumadropOne-Regular" : "MochiyPopOne-Regular"));
+            }
             QCOMPARE(fonts_in("本文 #b"), (std::vector<std::string>{"ZenOldMincho-SemiBold", "ZenKakuGothicNew-Bold"}));
             std::vector<std::string> warned;
             for (const Json& w : report.warnings) warned.push_back(w["line"].get<std::string>() + ":" + w["kind"].get<std::string>());
             QCOMPARE(warned, (std::vector<std::string>{"a:font_missing", "b:font_missing", "c:font_missing"}));
-            QCOMPARE(report.fonts, (std::vector<std::string>{"KleeOne-SemiBold", "ZenOldMincho-SemiBold", "ZenKakuGothicNew-Bold", "DarumadropOne-Regular"}));
+            QCOMPARE(report.fonts, (std::vector<std::string>{"KleeOne-SemiBold", "ZenOldMincho-SemiBold", "ZenKakuGothicNew-Bold", "DarumadropOne-Regular",
+                                                             "MochiyPopOne-Regular"}));
             const auto listed = genko::formats::psd_text_fonts(doc);
             QCOMPARE(listed.fonts, report.fonts);
         }();
