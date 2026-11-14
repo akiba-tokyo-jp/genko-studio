@@ -507,8 +507,11 @@ DATA.update({
     'docs/ops.schema.json': '{}',
     'docs/GUIDE.md': 'guide',
     'integrations/agent/config.yaml': 'a: 1',
+    'integrations/agent/first.json': '{}',
+    'integrations/agent/client.py': 'pass',
+    'native/resources/pictures/first.json': '{}',
     'native/tests/unit/test_alpha.cpp': MADE_UP['native/tests/unit/test_alpha.cpp'] + (
-        'void d() {\n    read(test_data(QStringLiteral("tables/first.json")));\n    read(repo_root() + "/docs/ops.schema.json");\n'
+        'void d() {\n    read(test_data(QStringLiteral("tables/first.json")));\n    read(repo_root() + "/docs/ops.schema.json");\n    run(repo_root() + "/integrations/agent/client.py");\n'
         '    read(test_data("books/book-" + version + ".genko"));\n}\n'),
     'native/tests/unit/test_beta.cpp': MADE_UP['native/tests/unit/test_beta.cpp'] + (
         'void d() {\n    list(test_data(QStringLiteral("kinds/")));\n    read(fs::path(GENKO_TEST_DATA) / "tables" / "first.json");\n'
@@ -556,7 +559,11 @@ class DataRuleTests(MadeUpTree):
         self.assertEqual(self.asan(['docs/ops.schema.json'])[1], {'test_alpha'})
         # (a word without a slash names a file only: {"kinds", 1} is not the folder, "tables" is not tables/…)
         self.assertEqual(self.tree.tests_naming('native/tests/data/tables/second.json'), set())
-        for path, reason in (('native/tests/data/nobody/reads.bin', '試験の木のデータ（読む試験を読み取れない）'), ('integrations/agent/config.yaml', '未分類変更')):
+        self.assertEqual(self.asan(['integrations/agent/client.py'])[1], {'test_alpha'})
+        # (outside native/ and not a document: a file's name alone decides nothing — "first.json" is said by test_beta —,
+        # and what the build takes in is never decided by a name)
+        for path, reason in (('native/tests/data/nobody/reads.bin', '試験の木のデータ（読む試験を読み取れない）'), ('integrations/agent/config.yaml', '未分類変更'),
+                             ('integrations/agent/first.json', '未分類変更'), ('native/resources/pictures/first.json', '未分類native変更を安全側で全体へ拡大')):
             plan, _ = self.asan([path])
             self.assertEqual(plan['tier'], 'full', path)
             self.assertIn(reason, plan['reasons'], path)
@@ -690,6 +697,17 @@ class StageExitTests(MadeUpTree):
         self.assertEqual(plan['tier'], 'integration')
         self.assertFalse(plan['performance_required'])
 
+    def test_everything_can_be_asked_for_without_adding_a_configuration(self):
+        # (while validation_closure_check.py fails, the classification is not relied on: the same configurations, every test)
+        plan = policy.make_plan(['native/src/render/draw.cpp'], 'milestone', self.root, all_tests=True)
+        rows = {r['preset']: r for r in plan['matrix']['include']}
+        self.assertEqual(sorted(rows), ['linux-asan', 'linux-release', 'windows-debug', 'windows-release'])
+        self.assertTrue(all(r['suite'] == 'full' for r in rows.values()))
+        self.assertEqual(set(rows['linux-asan']['tests']), {'test_alpha', 'test_beta', 'test_cli', 'test_contract_gamma', 'test_json'})
+        self.assertIn('指定（--all-tests）: 分類によらず全体へ拡大', plan['reasons'])
+        self.assertEqual(plan['tier'], 'full')
+        self.assertEqual(policy.make_plan(['docs/x.md'], 'development', self.root, all_tests=True)['tier'], 'full')
+
     def test_a_ci_change_at_a_stage_exit(self):
         plan, rows = self.rows(['tools/ci/validation_run.py', 'native/src/render/draw.cpp'], 'milestone')
         self.assertNotIn('linux-debug', rows)
@@ -753,6 +771,19 @@ class RealTreeTests(unittest.TestCase):
         self.assertEqual({m: t for m, t in self.tree.macros.items() if t}, {
             'GENKO_CLI': 'genko', 'GENKO_LOCK_HELPER': 'genko_lock_helper', 'GENKO_ARGV_HELPER': 'genko_argv_helper',
             'GENKO_TEST_NATIVE_PLUGIN': 'genko_test_native_plugin', 'GENKO_FAKE_MCP': 'genko_fake_mcp'})
+
+    def test_every_include_of_the_tree_is_found_or_is_not_the_trees(self):
+        # (an include root added in CMake and not in INCLUDE_ROOTS would cut the closures short: every quoted include is
+        # found, or is a file moc writes, or a header of the vendored libraries)
+        vendored = {p.name for p in (ROOT / 'native/third_party').rglob('*.h')}
+        made = ' '.join(p.read_text(encoding='utf-8') for p in (ROOT / 'native/third_party').rglob('CMakeLists.txt'))  # (ImagingCxx.h)
+        for path, names in sorted(self.tree.unresolved.items()):
+            for name in sorted(names):
+                beside = policy.normal_path(path.rsplit('/', 1)[0] + '/' + name) or ''
+                in_vendor = beside.startswith('native/third_party/') and (ROOT / beside).is_file()   # (a test built with a vendored file)
+                self.assertTrue(name.endswith('.moc') or name in vendored or in_vendor or '/' + name + '"' in made, (path, name))
+        self.assertIn('native/tests/support/testsupport.hpp', self.tree.includes['native/tests/unit/test_json.cpp'])
+        self.assertIn('native/tests/gui/gui_support.hpp', self.tree.includes['native/tests/gui/test_gui_canvas.cpp'])
 
     def test_every_source_of_the_product_is_explained_and_genko_holds_them(self):
         # (a .cpp no header brings would be sent to every test: none today. validation_closure_check.py compares the

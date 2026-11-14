@@ -1,6 +1,6 @@
 # 検証計画・実行頻度（正本）
 
-版: 1.2 / 2026-10-05 / 利用者の整理・Windows検証保留指示を反映
+版: 1.3 / 2026-11-14 / 工程出口の範囲（利用者決定 2026-11-13）と差分の機械的な分類（利用者決定 2026-11-14）を反映。1.2（2026-10-05）: 利用者の整理・Windows検証保留指示
 
 ## 0. 開発中のWindows検証の扱い（利用者指示）
 
@@ -26,15 +26,15 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 - 不具合・新機能は対象のRED→GREENを確認する。
 - 変更箇所と依存先のunit、正常対照、無効入力、拒否時の原稿不変、権限、Undo/Redo、保存再開、CLIを選択する。
 - 通常はLinux Debugの関連試験。数値・画像・所有権・非同期経路と保存安全をLinux ASan/UBSanでも確認する。CIの開発候補はLinux Debug・ASanとWindows Debugの関連試験。
-- 描画変更は該当領域のPython契約・画素比較を含む。例: raster_ops/selectionはラスタ契約・CLI・保存・描画対照、トーン/定規は該当契約と混合操作、3Dは該当契約と混合操作。
-- 共通モデル・保存・権限・数値変換・共有描画・oracle・依存・CMake・未知の変更範囲は安全側でV2相当の全体へ拡大する。単純な設定保存でも共通CommandBusを直接変える場合、機械選択は保守的に全体とする。最小化のために危険な依存を隠さない。
+- どの試験が関係するかは、名前の推測ではなく §2a の規則（ソースの閉包・子プロセス・データ）で決める。描画のコード（render/）は op の登録表とページの描画で一つにつながっているので、その 1 ファイルの変更は、描画を持つ試験のほぼ全部に届く。
+- 依存・CMake・oracle（tools/migration・tools/acceptance）・規則が説明できない変更は安全側で全体へ拡大する。共通モデル・保存のように全試験の閉包に入るコードは、規則の結果として全体になる。最小化のために危険な依存を隠さない。
 - 小さなopごとに公開・全体3構成を繰り返さない。同じ依存境界の関連機能を、完結した候補単位でまとめる。作業者の開発試験とHermesの独立確認は役割を分けるが、独立確認も同じ関連範囲でよく、毎回全体に広げない。
 
 ### V2 統合候補の一本化後
 
 - 完結した機能群をnative/integrationへ統合し、その実ソースを一度検証する。全体受入前は候補であり、次の機能を混ぜず同じソースを保持する。
 - 通常の全契約・全画素比較はLinux Releaseで一度実行する。
-- Linux ASanは非契約の安全対照と変更に関係する契約を実行する。共通境界の変更なら全契約へ拡大する。Releaseの故障注入OFFによる未実施は同ソースASan（Debug）の同slot PASSと対応付ける。対応が欠ければgate不合格。
+- Linux ASanは常時保護の対照（§2）と、差分に関係する試験（§2a）を実行する。全体へ拡大した差分なら全通常試験。Releaseの故障注入OFFによる未実施は同ソースASan（Debug）の同slot PASSと対応付ける。対応が欠ければgate不合格。
 - Windows Debug/Releaseで実build・関連試験（全体候補では全非契約試験）を実行する。従来どおりPython契約はWindows未実施と明記し、Linuxの結果と混同しない。
 - 元CPU/RAM・故障注入・警告・sanitizer設定を維持する。ローカルはgdevの1 CPU/2 GiB、-j1。CI実行機は実環境を記録し、ローカルの資源合格に代用しない。
 - 同じソース・実行物・構成・依存・fixture・検査範囲の証跡は再利用する。CIとローカルの同じ一式を機械的に重ねない。ソース/実行物/依存/fixture変更、統合競合、失敗時は該当証跡が無効になり再実行する。
@@ -42,8 +42,17 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 
 ### V3 工程出口・配布候補
 
-- M2/M3/M4/M5/M6の出口とM7最終候補で、Linux Debug/Release/ASanの全通常試験＋CLI23、Windows Debug/Releaseの全非契約試験を行う。
-- V2の対象と実ソース・構成・実行物・全対象が一致する構成は証跡を再利用できる。V2の関連試験をV3の全体合格へ拡大しない。
+- **利用者の決定（2026-11-13）**: 「変更分と影響箇所だけを見る」。工程の出口は、`validation_policy.py` が差分から選ぶ範囲を ASan と Release の 2 構成で流す。**Debug は最終配布の前に 1 回だけ。** 同じ試験を 3 構成で重ねて流さない。合格値・監査（SKIP・Totals・sanitizer 診断・pins）は変えない。流さなかった構成・試験は合格に数えない。
+- **利用者の決定（2026-11-14）**: 「分類されていない変更は全試験」の規則を見直し、差分の分類を細かくする（§2a）。
+- **工程出口**（M2〜M6 の出口、機能の工程の出口）は `--phase milestone`:
+  - linux-release: 全通常試験（契約を含む）＋CLI23。全部で約 20 分と安いので毎回全部流す。分類が外れたときの安全網。
+  - linux-asan: 常時保護の対照（§2）と、差分に関係する試験（§2a）＋CLI23。全体へ拡大した差分（依存・CMake・説明できない変更・関係する試験が全試験に及ぶ差分）は全通常試験。
+  - Windows Debug/Release: ASan と同じ集合から契約を除いたもの（全体へ拡大した差分は全非契約試験）。§0 の保留はそのまま。
+  - linux-debug は入れない。
+  - 構成ごとの範囲とその理由は、計画の `reasons`（構成ごとの行）と `classification`（変更パスごとの扱い）に残る。
+- **最終配布候補**（M7。配布の前に一度）は `--phase final`: Linux Debug/Release/ASan の全通常試験＋CLI23、Windows Debug/Release の全非契約試験。2026-11-13 までの `--phase milestone` と同じ中身。
+- Release の故障注入 OFF による SKIP は、同じ計画の ASan の同 slot PASS と対にする（`--pair`）。故障注入の試験は常時保護の対照に入っているので、ASan が関係する試験だけの工程出口でも対になる（方針の回帰試験で固定）。
+- V2の対象と実ソース・構成・実行物・全対象が一致する構成は証跡を再利用できる。V2の関連試験をV3の全体合格へ拡大しない。工程出口（milestone）の ASan の合格を、最終配布候補（final）の ASan の合格に数えない。
 - 実GUI・固定の全画面/DPI条件・正式API実通信・全出力・配布物検査は該当工程の出口で行う。GUI変更・保存/終了保護変更があれば、その画面と操作はV1から確認する。
 - 性能改修中は該当PERFだけ再測定。工程出口で影響するPERF、M7で全PERFと2時間試験を実施。短い性能slot PASSでp95/p99や2時間試験を代用しない。
 - 最終配布物そのもののM7受入は省略しない。waived項目と代替検査はACCEPTANCE.md §6のまま。
@@ -53,18 +62,38 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 試験資産を削除せず、実行対象を次に分類する。
 
 - **常時保護の関連対照**: JSON/原稿モデル、保存・排他・履歴・transaction、CommandBus、session、CLI/保存/変換E2E、GUI保存・終了・レイアウト。新opの拒否原子性と既存正常操作を含む。
-- **領域の契約**: ラスタ、筆跡、選択/マスク、トーン/効果線/定規、3D、描画、保存、CLI。変更領域の契約はV1、全領域はV2 ReleaseとV3。
+- **領域の契約**: ラスタ、筆跡、選択/マスク、トーン/効果線/定規、3D、描画、保存、CLI。変更に関係する契約（§2a）はV1、全領域はV2・V3 の Release と最終配布候補。
 - **画面・操作の受入**: 実GUI、Undo/再開、全画面と倍率、文字の見え方。自動試験と画像所見を別証拠にする。
 - **長時間・性能・配布物**: perfラベルを通常CIから分離したまま、指定された工程で必ず実行する。頻度の変更をnot_runの隠蔽に使わない。
 - **CI自身の変更**: 方針/ログ監査のunitに加えLinux Release/ASan・Windows Debug/Releaseの全非契約試験で実ワークフローを確認する。製品・oracleが不変なら全画素契約を重ねない。
 
 名前の登録件数だけで受入しない。成功、拒否無変更、権限、Undo、保存再開、GUI/API入口の台帳は維持。固定・乱数・保存比較のケース数/DPI/許容値も維持。
 
+### 2a. 差分の分類（どの試験が関係するか。利用者決定 2026-11-14）
+
+`validation_policy.py` が、木に置かれたソースだけから決める（ビルドの前に計画を作る。Linux と Windows の checkout で同じ答え）。試験を消したり SKIP にしたりはしない。決めるのは、ASan・Windows・V1 の構成にどの試験を入れるかだけ。
+
+- **ソースの閉包**: 試験の閉包は、`native/tests/CMakeLists.txt` の SOURCES から `#include "…"` をたどり（インクルードした側の隣、`native/src`、`native/tests/support` の順に探す。木に書かれた綴りそのまま）、ヘッダーが出てきたら、そのヘッダーが宣言した名前を行頭で定義している同じライブラリ（`native/src/<名前>`、試験の木は `native/tests`）の実装ファイルを足し、そのファイルのインクルードをまたたどったもの。
+  - 「宣言した名前を定義している」: 実装ファイルの行頭にある定義（`型 名前(`、`クラス::名前(`、`operator`、値の定義）の名前がヘッダーに現れ（関数は `名前(` の形）、修飾（`クラス::`・`名前空間::`）があればその名前の class・struct・namespace がヘッダーで開かれていること。同じ名前の .cpp（`a.hpp`→`a.cpp`）も、分割した実装（`main_window.hpp`→`main_window_*.cpp`）も、別名の .cpp で定義した関数も、この一つの規則で入る。`static` の定義は数えない。
+  - 実行物のソース（試験の SOURCES、`add_executable` のソース）は、その実行物だけのもの。ヘッダーからは連れて来ない。
+  - Q_OBJECT のヘッダーは、ライブラリごとに一まとまり（AUTOMOC の生成物が 1 ファイルで全クラスを参照するため）。
+  - どのヘッダーも連れて来ない実装ファイルは「説明できない」として全体へ拡大する。
+- **子プロセス**: 試験が動かす実行物（`genko`、`genko_lock_helper`、`genko_argv_helper`、`genko_test_native_plugin`、`genko_fake_mcp`）は、試験の名前ではなく、CMake の定義（`GENKO_CLI="$<TARGET_FILE:genko>"` など）のマクロをソースが使っているか（補助関数・クラスごしを含む）と、`add_dependencies(試験 実行物)` から決める。動かす試験は、その実行物の閉包に入る変更すべてに関係する（`genko` を動かす試験は、製品のほぼ全ソース）。
+- **ビルドが埋め込むデータ**: CMake が雛形（`*_data.cpp.in`）へ埋めるファイル（`core/data/ops_schema.json`・`commands.json`・`unicode_names.bin`、`resources/studio/` の手引きと表）は、雛形が定義する名前を使うソースの閉包へ。qrc に並ぶファイルと qrc 自身は、`Q_INIT_RESOURCE(その名前)` を書いたソースの閉包へ。埋め込み方を読み取れないもの（`data/profiles/*.icc`、qrc にも CMake にも無い resources、名前を CMake が作る雛形）は全体へ。
+- **試験のデータ・木の外のファイル**: 試験の木のソースが文字列で名指しするもの（ファイル名、`/` を含む部分パス、`"legacy/book-" + 版` のような途中まで）を、そのソースを閉包に持つ試験へ。名指しが無い試験のデータは全体へ。文書（`docs/`、`*.md`）は、名指しする試験があればその試験、無ければ文書だけの変更（V0）。文書でも試験の木でもないものは、`/` を含む部分パスで名指しされたときだけ。製品のソースを文字として読む試験（`test_gui_ledger_a` の `"/native/src/"`）も、この規則で関係づく。
+- **CMake の変更**（基点の中身と比べられるときだけ。比べられなければ全体）: `native/tests/CMakeLists.txt` は、試験ごとの文（`genko_test(...)`、その試験を第 1 引数に取る文）だけが変わったなら、その試験。共通の部分（補助の実行物・定義・関数・if・foreach）が変わったら全体。`native/src/<名前>/CMakeLists.txt` は、ソースの並び（`*.cpp` の語）だけが変わったなら、足されたソースの閉包。ほかが変わったら全体。
+- **全体へ拡大するもの**（従来どおり）: `native/cmake/`・`native/third_party/`・`native/CMakeLists.txt`・`CMakePresets.json`・`vcpkg.json`・`.gitattributes`、`tools/migration/`・`tools/acceptance/`、`native/wasm-host/`・`native/package/` などの分類の無い native の変更、消えた・名前の変わったソース、native の外の分類の無い変更、差分なし・基点不明。`tools/ci/`・`native.yml` は「CI自身の変更」（非契約の全試験）。関係する試験が全試験に及ぶ差分も全体として扱う。
+- 2026-11-13 までの名前による規則（render のファイル名から `image`・`raster`・`tone`・`3d` などの名前の試験を選ぶ、app は `test_gui_*`、core・storage・tests/support は全体）は、この規則に置き換えた。render は、名前の規則が外していた試験（例: `raster_ops.cpp` に対する `test_contract_psd`）も入る。逆に外れるのは、そのコードを持たず `genko` も動かさない試験だけ（例: render の変更に対する `test_pynum`・`test_pyrandom`・`test_strokes`・`test_stroke_geom`）。
+- **確かめ方**: `tools/ci/validation_closure_check.py --build build/linux-release`（手で走らせる。計画を作るのには要らない）。静的ライブラリの Release のビルドでは、実行物に入るのは参照が届くオブジェクトだけなので、実行物ごとに nm の記号で「入っているオブジェクト」を調べ、そのソースが全部その試験の閉包にあること（閉包 ⊇ リンクされたもの）を確かめる。生成物（埋め込みデータ・qrc・moc）は、上の規則が説明できることを確かめる。漏れが 1 つでもあれば不合格。**工程出口で Release のビルドができたら走らせ、合格を HANDOFF に書く。不合格なら、規則を直すまで計画に `--all-tests` を付け、ASan も全通常試験で流す（構成は増えない）。**
+  - 2026-11-14 の実測（main da6acebd に書体の作業中を足した Release のビルド）: 試験 273 本と実行物 5 本の 278 本、漏れ 0。リンクされた製品のソース 延べ 110,761 に対し閉包 延べ 120,934（余分 9.2%）。ライブラリの単位では閉包とリンクがほぼ同じ集合になる。
+- **どれだけ減るか**（2026-11-14、ASan の 1 本ごとの秒は凍結 a72bd1e8 の出口の記録、全 267 本で 17,927 秒）: 代表の 1 ファイルの変更で ASan に入るのは、app 141 本・8,240 秒、service 160 本・8,434 秒、studio 161 本・8,434 秒、api 85 本・5,859 秒、formats 181 本・13,714 秒、tests/support 175 本・14,909 秒、render 256 本・17,801 秒、storage 263 本、core 266 本。**機能の工程の差分はどれも共通モデル（`core/model.hpp`）・本の読み書き（`storage/reader.cpp`・`writer.cpp`）・描画のコードに触れるので、ASan も全通常試験になる**（フキダシ・ネーム・コマ割り・書体の 4 つの差分で確かめた）。減るのは、app だけ・service だけ・api だけのような狭い差分。重いフィルター・スマートオブジェクト・高精度の試験は描画と本の読み書きのコードを丸ごと持つので、リンクの関係からは外せない。外すには、試験ごとに実際に通ったコードの記録（カバレッジ）が要る（未着手。利用者に相談する）。
+- **残る危険**（どれも、Release は毎回全試験を流すので、見落とすのは「選ばれなかった試験が ASan でだけ落ちる」場合に限られる）: 部品から組み立てたパスで読むデータ（文字列に名前も `/` も出ない）、CMake の書き方が変わって埋め込み先を取り違える場合、行頭に無い定義・マクロで作った定義・ヘッダー無しの `extern` 宣言（突き合わせの道具が見つける）、ASan の共有ライブラリだけで走る静的初期化（そのライブラリを読む選ばれた試験と常時保護の対照が同じ初期化を通る）。
+
 ## 3. CIの起動と重複の除去
 
 - featureブランチのpushは保管だけ。native/integration/mainへのpushまたはそれらへのPRで実行する。feature pushとPRの二重起動を避ける。integration→mainの公開候補PRは別の境界として検査する。ブランチ名だけで検査を省略しない。PRの全jobはmerge treeではなくhead SHAそのものをcheckoutする。実workflow定義がhead側と異なれば停止しrebaseする。統合後にtarget由来の製品差分があれば別の全体候補として検査する。今回の基盤変更は独立レビュー後、工程出口PRの全構成で受入し、全treeが同一の統合pushは証跡を再使用する。
-- 通常PRはV1、統合pushはV2。`native/milestone/<工程名>`からのPRはV3の全5構成。現mainにはnative workflowがないため、default branchへの反映前はこのPR経路を使う。mainへの反映後は手動起動 `phase=milestone` も可能。新cron・observer・夜間自動実行は作らない。
-- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する。統合pushの基点は同じbranchの前回合格runの祖先SHA、または全構成合格の工程出口PR（祖先SHAとworkflow/script/CMake/preset/依存制御が同一）とし、前のCI失敗分を直前commit差分だけで落とさない。通常PR・別の制御・不明な履歴は再利用しない。候補決定時だけ公開CI metadataを読み、新認証/permission/cronは追加しない。基点の合格を照合できなければ全体へ拡大する。合格工程出口PRと全treeまで同一のマージpushはrun URLを記録して再buildしない。差分取得失敗は停止、それ以外の差分空/分類不能は全体へ拡大する。変更されたテストを除外しない。
+- 通常PRはV1、統合pushはV2。`native/milestone/<工程名>`からのPRはV3の工程出口（`--phase milestone` の 4 構成: Release は全通常試験、ASan と Windows は差分に関係する試験）。最終配布候補の全 5 構成（`--phase final`）は手元で計画を作る（無効にしてある native.yml の手動起動には `final` の選択肢が無い）。現mainにはnative workflowがないため、default branchへの反映前はこのPR経路を使う。mainへの反映後は手動起動 `phase=milestone` も可能。新cron・observer・夜間自動実行は作らない。
+- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する（`reasons`: 構成ごとの範囲と理由、`classification`: 変更パスごとの扱い）。統合pushの基点は同じbranchの前回合格runの祖先SHA、または全構成合格の工程出口PR（祖先SHAとworkflow/script/CMake/preset/依存制御が同一）とし、前のCI失敗分を直前commit差分だけで落とさない。通常PR・別の制御・不明な履歴は再利用しない。候補決定時だけ公開CI metadataを読み、新認証/permission/cronは追加しない。基点の合格を照合できなければ全体へ拡大する。合格工程出口PRと全treeまで同一のマージpushはrun URLを記録して再buildしない。差分取得失敗は停止、それ以外の差分空/分類不能は全体へ拡大する。変更されたテストを除外しない。
 - Python pytestはsrc/tests/依存設定/公開op schema/Python workflow変更時だけLinux/Windowsで実行する。C++専用変更のたびにPython全pytestを実行しない。ただし必要なPython参照契約はnative試験に残す。
 - CTestをverboseで一度実行し、Windowsでは同じCTest登録から`-o file,txt`で全選択QtTestのrawログも出す。その一回のrawログでQt Totals/FAIL/SKIPを検査する。ログ取得のための再実行と、失敗後の全exe再実行を廃止する。
 - 0試験、欠落/重複Totals、未完走、未知SKIP、sanitizer診断、構成artifact欠落を成功にしない。Releaseの既知SKIPだけを許可し、Debug/ASan側の同slot PASSを総合auditで要求する。
@@ -79,10 +108,23 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 
 ## 4. 実行入口
 
-計画を作る（baseは依存境界を固定した実コミット）:
+計画を作る（baseは依存境界を固定した実コミット。head の木を checkout した所で作る。数秒）:
 
 ```sh
 python3 tools/ci/validation_policy.py --base <基点SHA> --phase development --output build/validation-plan.json
+```
+
+`--phase` は `development`（V1）、`integration`（V2）、`milestone`（V3 の工程出口: linux-release 全通常試験、linux-asan と Windows は差分に関係する試験、Debug なし）、`final`（最終配布候補: 全通常試験を Debug を含む全構成で）。`--all-tests` は、分類によらずその段階の全構成で全通常試験にする（§2a の突き合わせが不合格のあいだ）。工程出口と最終配布候補:
+
+```sh
+python3 tools/ci/validation_policy.py --base <前の工程の統合SHA> --phase milestone --output build/validation-plan.json
+python3 tools/ci/validation_policy.py --base <基点SHA> --phase final --output build/validation-plan.json
+```
+
+工程出口で Release のビルドができたら、分類の規則をそのビルドと突き合わせる（§2a。約 20 秒、nm が要る。漏れがあれば終了コード 1）:
+
+```sh
+python3 tools/ci/validation_closure_check.py --build build/linux-release --output build/validation/closure-check.json
 ```
 
 GPU と CPU の表示の一致（render:GPU-CPU-parity、PC5 H-a）を Xvfb と Mesa の OpenGL で比べる試験 `test_gui_canvas_gpu`（`genko_xvfb_test`、ラベル gui・gpu、Linux だけ）は、計画に `--gpu` を付けたときだけ入る（アプリの試験を流す Linux の構成に）。機械に xvfb-run と Mesa が要る。xvfb-run が無ければ SKIP ではなく失敗する。CI（native.yml）はまだ `--gpu` を付けない。offscreen の `test_gui_canvas` は、OpenGL の無い所で CPU に戻る道を毎回確かめる。一致の許し（利用者の決定 2026-10-29）: 再標本しない表示は全画素 1/255 以内。回転と画面に合わせた倍率は、2/255 を超える画素が 2‰ まで、差は 12/255 まで（用紙の縁と影の 14 画素は比べない）。

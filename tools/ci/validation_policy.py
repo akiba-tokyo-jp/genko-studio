@@ -260,6 +260,7 @@ class SourceTree:
 
     def _graph(self):
         self.includes = {}
+        self.unresolved = {}   # (quoted includes found in no root: Qt's .moc files, the vendored libraries' headers)
         for path, text in self.text.items():
             found = set()
             for name in _INCLUDE.findall(text):
@@ -268,6 +269,8 @@ class SourceTree:
                     if target in self.text:
                         found.add(target)
                         break
+                else:
+                    self.unresolved.setdefault(path, set()).add(name)
             self.includes[path] = found
         # ヘッダーが宣言した名前を、同じライブラリのどの実装ファイルが行頭で定義しているか。
         defined = {}
@@ -472,11 +475,11 @@ class SourceTree:
             self._literals = (names, paths)
         return self._literals
 
-    def tests_naming(self, path):
+    def tests_naming(self, path, by_name=True):
         """試験の木のソースが文字列で名指しする path（ファイル名、または / を含む部分パス）を読む試験。"""
         names, paths = self.literal_index()
         parts = path.split('/')
-        files = set(names.get(parts[-1], ()))
+        files = set(names.get(parts[-1], ())) if by_name else set()
         for start, part in enumerate(parts):
             for wanted, folder, file in paths.get(part, ()):
                 k = len(wanted)
@@ -655,9 +658,11 @@ def classify(path, tree, inv, before=None):
                 for user in sorted(users):
                     tests |= source.tests_reaching(user)
         if not explained:
-            if document:
-                return 'skip', set(), ''  # (a note beside the data: no build reads it)
-            return 'broad', set(), '未分類native変更を安全側で全体へ拡大'
+            if not document:
+                return 'broad', set(), '未分類native変更を安全側で全体へ拡大'
+            # (a note beside the data: no build reads it; a test may)
+            tests = source.tests_naming(path)
+            return related(tests, '試験が名指しで読むファイル') if tests else ('skip', set(), '')
         return related(tests | source.tests_naming(path), '埋め込みデータ・resource: 読むソースの閉包')
     if path.startswith('native/tests/'):
         source = tree()
@@ -667,8 +672,9 @@ def classify(path, tree, inv, before=None):
                 return 'skip', set(), ''
             return 'broad', set(), '試験の木のデータ（読む試験を読み取れない）'
         return related(tests, '試験のデータ: 名指しで読む試験')
-    # native の外: 試験が名指しで読むもの（docs/ops.schema.json、integrations の手引き）だけ関係づける。
-    tests = tree().tests_naming(path) if (tree().root / path).is_file() else set()
+    # native の外: 試験が名指しで読むもの（docs/ops.schema.json、integrations の手引き）だけ関係づける。文書でないものは、
+    # ファイル名だけの一致では決めない（/ を含む部分パスで名指しされたときだけ）。
+    tests = tree().tests_naming(path, by_name=document) if (tree().root / path).is_file() else set()
     if tests:
         return related(tests, '試験が名指しで読むファイル')
     if document:
@@ -676,12 +682,16 @@ def classify(path, tree, inv, before=None):
     return 'broad', set(), '未分類変更'
 
 
-def make_plan(paths, phase, root, gpu=False, before=None):
-    """paths は基点からの変更パス。before(path) は基点でのファイルの文字を返す関数（無ければ、CMake の変更は全体へ）。"""
+def make_plan(paths, phase, root, gpu=False, before=None, all_tests=False):
+    """paths は基点からの変更パス。before(path) は基点でのファイルの文字を返す関数（無ければ、CMake の変更は全体へ）。
+
+    all_tests: 分類の結果によらず、計画の全構成で全通常試験にする（分類を当てにできないとき。構成は増やさない）。
+    """
     if phase not in PHASES:
         raise ValueError('不明な検証段階')
     paths = sorted(set(normal_path(p) or p for p in paths))
     inv = inventory(root)
+    widen = all_tests
     all_tests = inv['normal'] | inv['contract']
     related = set(SAFETY)
     reasons = []
@@ -689,6 +699,9 @@ def make_plan(paths, phase, root, gpu=False, before=None):
     broad = not paths
     if broad:
         reasons.append('差分なし・基点不明: 全体へ拡大')
+    if widen:
+        broad = True
+        reasons.append('指定（--all-tests）: 分類によらず全体へ拡大')
     infrastructure = False
     native_change = False
     shared = set()
@@ -849,6 +862,8 @@ def main():
     parser.add_argument('--repository')
     # (PC5 H-a: the GUI tests on Xvfb and Mesa too — test_gui_canvas_gpu —; the machine needs xvfb-run and Mesa)
     parser.add_argument('--gpu', action='store_true')
+    # 分類を当てにできないとき（validation_closure_check.py が不合格のあいだ）: 計画の全構成で全通常試験。構成は増やさない。
+    parser.add_argument('--all-tests', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     base = args.base
@@ -876,7 +891,7 @@ def main():
             # (the file as it was at the base: None when it was not there)
             shown = subprocess.run(['git', 'show', f'{base}:{path}'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return shown.stdout.decode('utf-8', 'replace') if shown.returncode == 0 else None
-        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None)
+        plan = make_plan(paths, args.phase, root, gpu=args.gpu, before=before if base else None, all_tests=args.all_tests)
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:

@@ -145,6 +145,25 @@ class PairTests(unittest.TestCase):
             plan['phase'] = 'milestone'; plan['matrix']['include'][0]['suite'] = 'full'
             self.assertFalse(runner.pair_results(folder, plan)['passed'])
 
+    def test_related_cannot_become_the_final_candidate_by_renaming_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            plan, _, _ = self.evidence(folder)
+            plan['phase'] = 'final'; plan['matrix']['include'][0]['suite'] = 'full'
+            self.assertFalse(runner.pair_results(folder, plan)['passed'])
+
+    def test_which_rows_need_the_access_check(self):
+        need = runner.cli23_required
+        for preset in ('linux-debug', 'linux-release', 'linux-asan'):
+            for suite in ('full', 'related'):
+                row = {'suite': suite}
+                self.assertTrue(need({'phase': 'milestone'}, preset, row))
+                self.assertTrue(need({'phase': 'final'}, preset, row))
+                self.assertEqual(need({'phase': 'integration'}, preset, row), suite == 'full')
+                self.assertFalse(need({'phase': 'development'}, preset, row))
+        for phase in ('development', 'integration', 'milestone', 'final'):
+            for preset in ('windows-debug', 'windows-release'):
+                self.assertFalse(need({'phase': phase}, preset, {'suite': 'full'}))
+
     def test_pins_cannot_be_missing(self):
         with tempfile.TemporaryDirectory() as folder:
             plan, out, state = self.evidence(folder)
@@ -837,6 +856,24 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(self.state()['cli23'], 'pass')
         self.assertIn(b'checked', (self.out / 'cli23.log').read_bytes())
         self.assertTrue(runner.pair_results(self.folder, self.plan)['passed'])
+
+    def test_the_access_check_of_a_final_candidate_and_of_a_stage_exits_related_row(self):
+        # (the stage exit's ASan row holds only what the diff reaches — suite related — and still needs the access check;
+        # the final distribution candidate, phase final, needs it as the stage exit does)
+        for phase, suite in (('final', 'full'), ('milestone', 'related')):
+            with self.subTest(phase=phase, suite=suite):
+                for file in list(self.out.glob('*')) if self.out.is_dir() else []:
+                    file.unlink()
+                self.plan['phase'] = phase
+                self.plan['matrix']['include'][0]['suite'] = suite
+                self.plan_file.write_text(json.dumps(self.plan))
+                code, _ = self.go(self.everything(), resume=False)
+                self.assertEqual(code, 0)
+                self.assertEqual((self.state()['phase'], self.state()['suite'], self.state()['cli23']), (phase, suite, 'pass'))
+                self.assertTrue(runner.pair_results(self.folder, self.plan)['passed'])
+                # without the access check's record the pairing fails
+                (self.out / 'cli23.log').unlink()
+                self.assertIn('linux-release: CLI23証跡の欠落', runner.pair_results(self.folder, self.plan)['failures'])
 
     def test_a_failed_access_check_is_run_again_and_stays_on_record(self):
         self.milestone()
