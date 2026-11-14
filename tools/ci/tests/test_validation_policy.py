@@ -177,6 +177,15 @@ class PolicyTests(unittest.TestCase):
             self.assertIn('test_gui_layout', r['tests'])
             self.assertNotIn('test_contract_psd', r['tests'])
 
+    def test_the_workflow_is_ci_wherever_it_is_kept(self):
+        # (review P3: the workflow lives in .github/disabled-workflows while CI is off; named only at .github/workflows it
+        # went to "unclassified", every test)
+        for path in ('.github/workflows/native.yml', '.github/disabled-workflows/native.yml'):
+            p = self.plan([path], 'integration')
+            self.assertEqual(p['tier'], 'infrastructure', path)
+            self.assertEqual(p['classification'][path], 'infrastructure')
+        self.assertEqual(self.plan(['.github/disabled-workflows/build-executables.yml'])['tier'], 'full')
+
     def test_changed_test_is_never_omitted(self):
         p = self.plan(['native/tests/unit/test_strokes.cpp'])
         self.assertTrue(all('test_strokes' in r['tests'] for r in p['matrix']['include']))
