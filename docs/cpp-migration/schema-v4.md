@@ -86,6 +86,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 
 | `komawari@1` | コマ割り K1 | コマの `"over": true`（ほかのコマの上に重なる。差し込み・重ね）。SPEC LAYOUT-01、この文書の「コマの重ね」 |
 | `fukidashi@1` | 今風のフキダシ B1 | 台詞（と文字レイヤーの記録）の種類 `capsule`・`polygon`、スタイルの鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽの `"kind": "inward"` と `fillet_mm`。SPEC BALLOON-01、この文書の「フキダシ」 |
+| `fukidashi@2` | フキダシの追加 群 1 | 台詞（と文字レイヤーの記録）の種類 `heart`・`star`・`flower`・`diamond`、スタイルの鍵 `pen_swell`・`pen_angle`・`pen_taper`・`pen_strokes`・`drip_mm`・`drips`・`drip_width_mm`・`drip_seed`・`points`・`fill_tone`・`fill_gradient`。SPEC BALLOON-02、この文書の「フキダシの追加」 |
 | `fonts@1` | 書体の追加 F2 | 追加の 40 書体のキー（`antique_genei`・`gothic_kiwami`・`dot16` など。`native/resources/fonts/FONTS.json` の `storage` が `file` の書体）を、台詞の `style.font`・ルビの `font`・文字（type@1）の文字属性の `font`・文字スタイルの `font`・本の `font_path` のどれかが名指ししているあいだ。この文書の「書体」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
@@ -593,6 +594,20 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - **拡張 `fukidashi@1`**: 台詞か文字レイヤーの記録が、種類 `capsule`・`polygon`、`style` の `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽ（`tails[]`）の `"kind": "inward"` か `fillet_mm` のどれかを持つあいだ、`features` に加える。無くなれば外す。知らない読み手は、未知の拡張として読み取り専用で開く。
 - **台詞の `style` の鍵**（どれも任意。null で消す）: `corner_mm`（数。0〜50）、`squircle`（真偽）、`sides`（整数。5〜12）、`wave_mm`（数。0〜3）、`spike_alt`（数。0〜0.8）、`dash_mm`（数。0.2〜10）。**しっぽ**: `kind` に `inward`、`fillet_mm`（数。0〜20。0 も書く）。
 - **前からの鍵**: `hand`・`wobble` は今までどおり読み書きする。フキダシの描く形は変えない（`hand: false` は文字を箱そのものの真の楕円に収める。`wobble` は波の輪郭として描く。SPEC BALLOON-01）。`border_mm: 0` は線なし（前の本の 0 は上の 3 で 0.01 になる）。`corner_mm: 0` は四角い角。
+
+## フキダシの追加（fukidashi@2。SPEC BALLOON-02、フキダシの追加 群 1。利用者の決定 2026-11-14）
+
+- **新しい一番上の鍵は無い。読み替えも無い**（`balloon_geometry` は 2 のまま）。足すのは台詞（と文字レイヤーの記録）の種類 4 つと、`style` の鍵 11 個だけ。どれも持たない台詞は前と同じバイトで書く。
+- **拡張 `fukidashi@2`**: 台詞か文字レイヤーの記録（スマートオブジェクトの中身のページの台詞も）が、種類 `heart`・`star`・`flower`・`diamond` か、`style` の `pen_swell`・`pen_angle`・`pen_taper`・`pen_strokes`・`drip_mm`・`drips`・`drip_width_mm`・`drip_seed`・`points`・`fill_tone`・`fill_gradient` のどれかを持つあいだ、`features` に加える（鍵があるかどうかで決める）。無くなれば外す。知らない読み手（fukidashi@1 までの版も）は、未知の拡張として読み取り専用で開く。`fukidashi@1` の条件は変えない。両方を持つ本は両方を書く。
+- **台詞の `style` の鍵**（どれも任意。null で消す。op は範囲の外を断る。読み手は確かめず、描くときに範囲へ収める）:
+  - `pen_swell`（数。0〜0.9）、`pen_angle`（数。0〜360。無ければ 45）、`pen_taper`（数。0〜1）、`pen_strokes`（整数。1〜8。無ければ 2）。
+  - `drip_mm`（数。0〜30）、`drips`（整数。1〜24）、`drip_width_mm`（数。0.3〜10）、`drip_seed`（整数。0〜999999。無ければ 0）。
+  - `points`（整数。4〜12。星は無ければ 5、花は 6）。
+  - `fill_tone`: `{"density": 数 0〜0.9, "lpi": 数 20〜85, "angle": 数 0〜90, "pattern": "dot" | "line", "to"?: 数 0〜0.9, "dir"?: 数 −360〜360, "radial"?: true, "inset_mm"?: 数 0〜5}`。鍵はこの順。op は `density`・`lpi`・`angle`・`pattern` を必ず書き（無ければ 60・45・`"dot"`）、`to` があるときだけ `to` と `dir`（無ければ 90）、真のときだけ `radial`、0 より大きいときだけ `inset_mm` を書く。
+  - `fill_gradient`: `{"to": [r, g, b]（整数 0〜255）, "dir": 数 −360〜360（無ければ 90）, "radial"?: true}`。
+- **箱の意味**: `drip_mm` を持つ台詞の `x_mm`〜`h_mm` は、本体としずくを合わせた箱。本体は下を `min(drip_mm, 0.6 × h_mm)`（小数 9 桁）だけ上げた箱で、文字の箱（検査の指摘の `box` も）はそこから作る。手で描いた輪郭（`path`）と、`dotted_box`・`flash`・`picture`・`sfx`・`none` では `drip_mm` は何もしない。
+- **しずくの並び**は `drip_seed` だけで決まる（台詞の id も場所も使わない）。同じ台詞はどの版でも同じ絵になるので、決まりを変えるときは鍵か拡張の名前を変える。
+- **当てはまらない組み合わせ**（楕円の `points`、`sfx` の `fill_tone` など）は、そのまま読み書きして、描くときに無視する。
 
 ## 書体（fonts@1。SPEC FONT-01、書体の追加 F2。利用者の決定 2026-11-13）
 

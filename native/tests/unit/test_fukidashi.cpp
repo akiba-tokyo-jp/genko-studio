@@ -1638,6 +1638,17 @@ private slots:
         };
         QVERIFY(whites(toned.image) > 500);
         QCOMPARE(whites(plain.image), 0);
+        // (the editable PSD gives a halo as its text layer's stroke: the edge over a tone is one, as wide and as white as
+        // a tone box's — and a line without a tone has none)
+        const auto stroke = [](const char* kind, Json style) {
+            const Document doc = one_line(kind, Json{{"style", std::move(style)}}, "あ");
+            return genko::render::text::set_layout(doc.story.front(), 600, std::nullopt, genko::render::text::LetterParts{false, true, false, false}).set.halo;
+        };
+        const auto over_tone = stroke("speech", tone), of_box = stroke("tone_box", Json::object());
+        QVERIFY(over_tone.has_value() && of_box.has_value());
+        QVERIFY(!stroke("speech", Json::object()).has_value());
+        QCOMPARE(over_tone->first, of_box->first);
+        QVERIFY(over_tone->second == of_box->second);
     }
 
     // style.fill_gradient: the fill runs from its own colour to another — down the page, from the fill's colour at the

@@ -807,7 +807,7 @@ private slots:
         QTRY_COMPARE(chars.family->currentText(), QStringLiteral("test-mincho"));
         // 既定の設定に戻す: every style key but the group, cleared
         panel.reset->click();
-        QCOMPARE(s.last()["style"].size(), std::size_t{52});  // (fukidashi@1: six more keys a line's style takes)
+        QCOMPARE(s.last()["style"].size(), std::size_t{63});  // (fukidashi@1: six more keys a line's style takes; fukidashi@2: eleven more)
         QVERIFY(!s.last()["style"].contains("group"));
         QCOMPARE(s.last()["style"].begin().key(), std::string("font"));
         const Json cleared = s.last()["style"];  // (kept: a range-for over a temporary's items() reads freed memory)
