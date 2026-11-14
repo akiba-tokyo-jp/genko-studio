@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 import time
 import unittest
@@ -555,16 +556,57 @@ class DataRuleTests(MadeUpTree):
         self.assertEqual(self.asan(['native/tests/data/books/book-v3.genko/project.json'])[1], {'test_alpha'})  # ("books/book-" + …)
         self.assertEqual(self.asan(['native/tests/data/kinds/plain.json'])[1], {'test_beta'})  # (the folder "kinds/", "kinds/%1")
         self.assertEqual(self.asan(['docs/ops.schema.json'])[1], {'test_alpha'})
-        # (a word without a slash names a file only: {"kinds", 1} is not the folder, "tables" is not tables/…)
-        self.assertEqual(self.tree.tests_naming('native/tests/data/tables/second.json'), set())
         self.assertEqual(self.asan(['integrations/agent/client.py'])[1], {'test_alpha'})
         # (outside native/ and not a document: a file's name alone decides nothing — "first.json" is said by test_beta —,
         # and what the build takes in is never decided by a name)
-        for path, reason in (('native/tests/data/nobody/reads.bin', '試験の木のデータ（読む試験を読み取れない）'), ('integrations/agent/config.yaml', '未分類変更'),
+        for path, reason in (('native/tests/data/nobody/reads.bin', '試験の木のデータ（読む試験を言い切れない）'), ('integrations/agent/config.yaml', '未分類変更'),
                              ('integrations/agent/first.json', '未分類変更'), ('native/resources/pictures/first.json', '未分類native変更を安全側で全体へ拡大')):
             plan, _ = self.asan([path])
             self.assertEqual(plan['tier'], 'full', path)
             self.assertIn(reason, plan['reasons'], path)
+
+    def test_a_path_built_from_parts_names_the_folder_and_an_unsure_reader_is_everything(self):
+        # (review P1-1: test_ledger_service_b reads root / "fixtures" / "studio" / "demo4" / ("p00" + n + ".json") — no
+        # literal with a slash, none with the file's name — while other tests name the folder by its path)
+        files = dict(DATA)
+        files['native/tests/fixtures/studio/demo/p001.json'] = '{}'
+        files['native/tests/fixtures/studio/demo/bible.json'] = '{}'
+        files['native/tests/fixtures/elsewhere/p001.json'] = '{}'
+        files['native/tests/unit/test_alpha.cpp'] += 'void f() { read(repo_root() + "/native/tests/fixtures/studio/demo/" + name); read(root() + "/native/tests/fixtures/studio/demo/bible.json"); }\n'
+        files['native/tests/unit/test_beta.cpp'] += 'void f() { read(root / "native" / "tests" / "fixtures" / "studio" / "demo" / ("p00" + n + ".json")); }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+            tree = policy.SourceTree(root)
+            self.assertEqual(tree.data_readers('native/tests/fixtures/studio/demo/p001.json'), ({'test_alpha', 'test_beta'}, True))
+            plan = policy.make_plan(['native/tests/fixtures/studio/demo/p001.json'], 'development', root)
+            for row in plan['matrix']['include']:
+                if row['preset'].startswith('linux'):
+                    self.assertIn('test_beta', row['tests'], row['preset'])
+            # (a path that runs past the folder to another file reads that file, not this one)
+            self.assertEqual(tree.data_readers('native/tests/fixtures/studio/demo/bible.json'), ({'test_alpha', 'test_beta'}, True))
+            # a source that says a path ending at a folder of this name somewhere else: who reads the file cannot be told
+            files['native/tests/e2e/test_cli.cpp'] += 'void g() { list(scratch + "/copies/demo"); }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+            tree = policy.SourceTree(root)
+            tests, sure = tree.data_readers('native/tests/fixtures/studio/demo/p001.json')
+            self.assertEqual((tests, sure), ({'test_alpha', 'test_beta'}, False))
+            plan = policy.make_plan(['native/tests/fixtures/studio/demo/p001.json'], 'integration', root)
+            self.assertEqual(plan['tier'], 'full')
+            self.assertIn('試験の木のデータ（読む試験を言い切れない）', plan['reasons'])
+
+    def test_a_folder_named_alone_reads_what_is_in_it(self):
+        # ({"tables", 2} in test_beta: a word equal to the folder right above the file counts as naming the folder —
+        # more tests than need be, never fewer; "/package" in one test no longer names every path with a part "package")
+        self.assertEqual(self.tree.data_readers('native/tests/data/tables/second.json'), ({'test_beta'}, True))
+        self.assertEqual(self.tree.files_naming('native/tests/data/tables/second.json', by_name=True), set())
+        files = dict(DATA)
+        files['native/tests/unit/test_alpha.cpp'] += 'void h() { open(dir + "/unit"); }\n'
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+            tree = policy.SourceTree(root)
+            kind, tests, _ = policy.classify('native/tests/unit/beta_extra.c', lambda: tree, policy.inventory(root))
+            self.assertEqual((kind, tests), ('related', {'test_beta'}))
 
     def test_documents_no_test_names_start_nothing(self):
         for path in ('docs/GUIDE.md', 'native/tests/data/NOTES.md', 'native/resources/pictures/README.md', 'README.md'):
@@ -635,12 +677,59 @@ class CMakeChangeTests(MadeUpTree):
         self.assertEqual(tests, {'test_beta', 'test_contract_gamma'})
         self.assertEqual(plan['tier'], 'integration')
         self.assertIn('related: 試験の登録: 文の変わった試験だけ（2 試験）', plan['classification']['native/tests/CMakeLists.txt'])
-        # (a comment or blank lines alone: nothing; a statement about one test: that test)
+        # (a comment or blank lines alone: nothing; a statement about a test put right after that test's own: that test)
         same = {'native/tests/CMakeLists.txt': '# a note\n\n' + SUITE.replace('# runs genko (a helper)', '')}
         self.assertEqual(self.asan(['native/tests/CMakeLists.txt'], before=self.before(same))[1], set())
-        self.assertEqual(policy.changed_tests_of_suite(SUITE, SUITE + 'set_tests_properties(test_alpha PROPERTIES RUN_SERIAL TRUE)\nadd_dependencies(test_cli genko)\n'),
-                         {'test_alpha', 'test_cli'})
+        alpha = 'genko_test(test_alpha SOURCES unit/test_alpha.cpp DEPS genko_core LABELS unit)\n'
+        self.assertEqual(policy.changed_tests_of_suite(SUITE, SUITE.replace(alpha, alpha + 'set_tests_properties(test_alpha PROPERTIES RUN_SERIAL TRUE)\n')), {'test_alpha'})
         self.assertEqual(policy.changed_tests_of_suite(SUITE.replace('\n', '\r\n'), SUITE), set())
+        # (a new test wherever it is put among the statements that are there, with its own statements)
+        base = SUITE + 'if(GENKO_BUILD_APP)\n  set(X 1)\nendif()\n'
+        added = base.replace('  set(X 1)\n', '  set(X 1)\n  genko_test(test_new SOURCES unit/test_new.cpp LABELS unit)\n  add_dependencies(test_new genko)\n')
+        self.assertEqual(policy.changed_tests_of_suite(base, added), {'test_new'})
+        self.assertEqual(policy.changed_tests_of_suite(SUITE, SUITE + 'genko_test(test_new SOURCES unit/test_new.cpp LABELS unit)\n'), {'test_new'})
+        # (a new block around it is a change of the shared part)
+        self.assertIsNone(policy.changed_tests_of_suite(SUITE, SUITE + 'if(UNIX)\n  genko_test(test_new SOURCES unit/test_new.cpp LABELS unit)\nendif()\n'))
+
+    def test_a_statement_about_several_tests_belongs_to_each(self):
+        # (review P3: set_tests_properties(a b PROPERTIES …) and set_property(TEST a b …) were given to the first name only)
+        alpha = 'genko_test(test_alpha SOURCES unit/test_alpha.cpp DEPS genko_core LABELS unit)\n'
+        both = SUITE.replace(alpha, alpha + 'set_tests_properties(test_alpha test_beta PROPERTIES TIMEOUT 100)\nset_property(TEST test_alpha test_cli APPEND PROPERTY ENVIRONMENT "A=1")\n')
+        changed = both.replace('TIMEOUT 100', 'TIMEOUT 200').replace('A=1', 'A=2')
+        self.assertEqual(policy.changed_tests_of_suite(both, changed), {'test_alpha', 'test_beta', 'test_cli'})
+        self.assertEqual(policy.changed_tests_of_suite(both, both), set())
+
+    def test_a_moved_or_removed_registration_is_everything(self):
+        # (review P1-3a: the statements of the tests were cut out and the rest compared, so where a statement stood was
+        # not seen — a test moved into if(MSVC) is no longer registered on Linux, and read as "nothing changed")
+        alpha = 'genko_test(test_alpha SOURCES unit/test_alpha.cpp DEPS genko_core LABELS unit)\n'
+        blocked = SUITE.replace(alpha, '') + 'if(MSVC)\n  set(X 1)\n  ' + alpha + 'endif()\n'
+        before_block = SUITE + 'if(MSVC)\n  set(X 1)\nendif()\n'
+        for old, new in ((before_block, blocked), (blocked, before_block),
+                         (SUITE, SUITE.replace(alpha, '')),                                    # (the registration gone)
+                         (SUITE, SUITE.replace(alpha, '') + alpha),                             # (moved to the end)
+                         (SUITE, SUITE + 'set_tests_properties(test_alpha PROPERTIES RUN_SERIAL TRUE)\n'),   # (a statement far from its test)
+                         (SUITE + 'add_dependencies(test_cli genko)\n', SUITE)):
+            self.assertIsNone(policy.changed_tests_of_suite(old, new), new[-120:])
+        files = dict(MADE_UP)
+        files['native/tests/CMakeLists.txt'] = blocked
+        with tempfile.TemporaryDirectory() as folder:
+            plan = policy.make_plan(['native/tests/CMakeLists.txt'], 'milestone', write_tree(folder, files), before=lambda path: before_block)
+            self.assertEqual(plan['tier'], 'full')
+            self.assertTrue(all(r['suite'] == 'full' for r in plan['matrix']['include']))
+
+    def test_target_sources_of_a_test_are_its_sources(self):
+        # (review P3: a test given more sources by target_sources had them outside its closure)
+        files = dict(MADE_UP)
+        files['native/tests/CMakeLists.txt'] += 'target_sources(test_alpha PRIVATE unit/alpha_more.cpp)\n'
+        files['native/tests/unit/alpha_more.cpp'] = '#include "core/window.hpp"\nvoid more() {}\n'
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+            tree = policy.SourceTree(root)
+            self.assertEqual(tree.tests['test_alpha'], ['native/tests/unit/alpha_more.cpp', 'native/tests/unit/test_alpha.cpp'])
+            self.assertIn('native/src/core/window_part.cpp', tree.closure(tree.tests['test_alpha']))
+            self.assertIn('test_alpha', tree.tests_reaching('native/src/core/window.cpp'))
+            self.assertIn('native/tests/unit/alpha_more.cpp', tree.executable_sources)
 
     def test_a_change_of_the_shared_part_of_the_registration_is_everything(self):
         for old in (SUITE.replace('support/lock_helper.cpp', 'support/other_helper.cpp'),
@@ -668,6 +757,75 @@ class CMakeChangeTests(MadeUpTree):
         lonely = {'native/src/core/CMakeLists.txt': now.replace('    lonely.cpp\n', '')}
         plan, _ = self.asan(['native/src/core/CMakeLists.txt'], before=self.before(lonely))
         self.assertEqual(plan['tier'], 'full')
+
+    def test_a_source_named_outside_the_list_or_moved_between_lists_is_everything(self):
+        # (review P1-3b: every *.cpp word of the file was taken as "the list" — a source added to
+        # set_source_files_properties(… COMPILE_OPTIONS "-fno-builtin"), the floating-point code's options, read as
+        # "0 tests"; and a source moved between two libraries of one folder)
+        base = ('genko_library(genko_render\n  SOURCES\n    a.cpp\n    b.cpp\n    npcompat.cpp\n  PUBLIC_DEPS genko_core)\n'
+                'if(NOT MSVC)\n  set_source_files_properties(npcompat.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")\nendif()\n'
+                'set(GENKO_RENDER_OPS_SOURCES ops_registry.cpp ops_tones.cpp)\n'
+                'genko_library(genko_render_ops SOURCES ${GENKO_RENDER_OPS_SOURCES} PUBLIC_DEPS genko_render)\n'
+                'add_executable(tool tool_main.cpp)\n')
+        self.assertEqual(policy.changed_sources_of_library(base, base), set())
+        self.assertEqual(policy.changed_sources_of_library(base, base.replace('    b.cpp\n', '    b.cpp\n    c.cpp\n')), {'c.cpp'})
+        self.assertEqual(policy.changed_sources_of_library(base, base.replace('ops_tones.cpp)', 'ops_tones.cpp ops_3d.cpp)')), {'ops_3d.cpp'})
+        for other in (base.replace('set_source_files_properties(npcompat.cpp', 'set_source_files_properties(npcompat.cpp b.cpp'),   # (compile options)
+                      base.replace('    b.cpp\n', '').replace('ops_tones.cpp)', 'ops_tones.cpp b.cpp)'),                          # (moved to the other library)
+                      base.replace('tool_main.cpp', 'tool_main.cpp extra.cpp'),                                                     # (a program's sources)
+                      base.replace('PUBLIC_DEPS genko_core', 'PUBLIC_DEPS genko_core extra.cpp'),                                   # (after the list)
+                      base + 'set(GENKO_MORE_SOURCES d.cpp)\n',                                                                    # (another list)
+                      base + 'genko_library(genko_render SOURCES z.cpp)\n'):                                                       # (two lists of one name)
+            self.assertIsNone(policy.changed_sources_of_library(base, other), other[-100:])
+            self.assertIsNone(policy.changed_sources_of_library(other, base), other[-100:])
+        # the real files read as lists, with their compile-option statements outside them
+        for library, inside, outside in (('render', 'npcompat.cpp', 'set_source_files_properties(npcompat.cpp PROPERTIES'),
+                                         ('core', 'pymath.cpp', 'set_source_files_properties(pymath.cpp linalg3.cpp PROPERTIES')):
+            text = (ROOT / 'native/src' / library / 'CMakeLists.txt').read_text(encoding='utf-8')
+            lists, rest = policy.library_sources(text)
+            self.assertIn(inside, lists['genko_library genko_' + library])
+            self.assertIn(outside, rest)
+            self.assertIsNone(policy.changed_sources_of_library(text, text.replace(outside, outside.replace(' PROPERTIES', ' resample.cpp PROPERTIES'))))
+            self.assertEqual(policy.changed_sources_of_library(text, text.replace('    ' + inside + '\n', '    ' + inside + '\n    brand_new.cpp\n')), {'brand_new.cpp'})
+        text = (ROOT / 'native/src/render/CMakeLists.txt').read_text(encoding='utf-8')
+        moved = text.replace('set(GENKO_RENDER_OPS_SOURCES ops_registry.cpp', 'set(GENKO_RENDER_OPS_SOURCES npcompat.cpp ops_registry.cpp').replace('    npcompat.cpp\n', '', 1)
+        self.assertNotEqual(moved, text)
+        self.assertIsNone(policy.changed_sources_of_library(text, moved))
+
+
+class RenameTests(unittest.TestCase):
+    def test_a_renamed_file_is_its_old_path_gone(self):
+        # (review P1-2: git's rename detection listed only the new name, so "a path that is gone → everything" never fired:
+        # a picture renamed for one test, still read under its old name by another, went to the tests naming the folder)
+        files = dict(DATA)
+        files['native/tests/data/tables/first.json'] = '{"rows": [' + ', '.join(str(i) for i in range(400)) + ']}\n'
+        files['native/src/core/later.hpp'] = MADE_UP['native/src/core/later.hpp']
+        with tempfile.TemporaryDirectory() as folder:
+            root = write_tree(folder, files)
+
+            def git(*args):
+                return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', *args],
+                                      cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.decode()
+            git('init', '-q')
+            git('add', '-A')
+            git('commit', '-q', '-m', 'base')
+            base = git('rev-parse', 'HEAD').strip()
+            git('mv', 'native/tests/data/tables/first.json', 'native/tests/data/tables/first-v2.json')
+            git('mv', 'native/src/core/later.hpp', 'native/src/core/afterwards.hpp')
+            git('commit', '-q', '-m', 'renamed')
+            # (git itself calls both renames)
+            self.assertEqual(git('diff', '--name-status', '-M', base, 'HEAD').count('R100'), 2)
+            paths = policy.changed_paths(root, base, 'HEAD')
+            self.assertEqual(sorted(paths), ['native/src/core/afterwards.hpp', 'native/src/core/later.hpp',
+                                             'native/tests/data/tables/first-v2.json', 'native/tests/data/tables/first.json'])
+            for phase in ('development', 'integration', 'milestone'):
+                for changed in (paths, [p for p in paths if 'tables' in p], [p for p in paths if 'core' in p]):
+                    plan = policy.make_plan(changed, phase, root)
+                    self.assertEqual(plan['tier'], 'full', (phase, changed))
+                    self.assertTrue(all(r['suite'] == 'full' for r in plan['matrix']['include']))
+            plan = policy.make_plan(paths, 'integration', root)
+            self.assertEqual(plan['classification']['native/tests/data/tables/first.json'], 'broad: 試験の木のデータ（読む試験を言い切れない）')
+            self.assertEqual(plan['classification']['native/src/core/later.hpp'], 'broad: 消えた・名前の変わったソース（今の木から閉包を作れない）')
 
 
 class StageExitTests(MadeUpTree):
@@ -1047,7 +1205,17 @@ class RealTreeTests(unittest.TestCase):
         self.assertEqual(self.reached('docs/cpp-migration/THIRD_PARTY.md')[1], {'test_package'})
         self.assertEqual(self.reached('native/tests/e2e/refusal_cases.json')[1], {'test_refusals_e2e'})
         self.assertEqual(self.reached('native/tests/contract/psd_cases.json')[1], {'test_contract_psd'})
-        self.assertIn('test_wasm_plugins', self.reached('native/tests/data/plugins/invert.wasm')[1])
+        # (review P1-1, live on 2026-11-14: the pages of demo4 are read by test_ledger_service_b through
+        # root / "native" / "tests" / "fixtures" / "studio" / "demo4" / ("p00" + n + ".json"))
+        for name in ('p001.json', 'p004.json', 'bible.json'):
+            kind, tests, _ = self.reached('native/tests/fixtures/studio/demo4/' + name)
+            self.assertEqual(kind, 'related', name)
+            self.assertLessEqual({'test_ledger_service_b', 'test_ledger_service_a', 'test_mcp_api_e2e', 'test_layout_ideas'}, tests, name)
+        # (test_raster_ops says a path ending in "/plugins" of its own scratch folder: who reads data/plugins cannot be told)
+        self.assertEqual(self.reached('native/tests/data/plugins/invert.wasm')[0::2], ('broad', '試験の木のデータ（読む試験を言い切れない）'))
+        # (the folders the tests get by a macro are not named by a word: GENKO_TEST_DATA, GENKO_SOURCE_DIR, the repository)
+        self.assertEqual(self.tree.data_roots(), {'', 'native', 'native/tests/data'})
+        self.assertEqual(self.reached('native/tests/data/ruby_cases.json')[1], {'test_ruby', 'test_gui_ruby'})
         self.assertIn('test_fukidashi', self.reached('native/tests/data/fukidashi/old_letters.json')[1])
         self.assertIn('test_ledger_service_b', self.reached('integrations/hermes/genko-manga/SKILL.md')[1])
         self.assertEqual(self.reached('docs/cpp-migration/HANDOFF.md')[0], 'skip')

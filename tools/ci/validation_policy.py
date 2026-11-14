@@ -242,6 +242,7 @@ class SourceTree:
         self.macros = {}       # コンパイル定義の名前 → それが指す実行物（ソースの分からないものは None）
         self.depends = {}      # 試験 → add_dependencies で求めた実行物
         suite = self.cmake.get('native/tests/CMakeLists.txt', '')
+        more = {}
         for path, code in sorted(self.cmake.items()):
             folder = path.rsplit('/', 1)[0]
             for command, body, _, _ in cmake_commands(code):
@@ -253,6 +254,12 @@ class SourceTree:
                     self.programs[words[0]] = sorted(filter(None, (normal_path(folder + '/' + s) for s in words[1:] if s.endswith(CODE_SUFFIXES))))
                 elif command == 'add_dependencies' and words:
                     self.depends.setdefault(words[0], set()).update(words[1:])
+                elif command == 'target_sources' and words:
+                    more.setdefault(words[0], set()).update(filter(None, (normal_path(folder + '/' + s) for s in words[1:] if s.endswith(CODE_SUFFIXES))))
+        for target, sources in more.items():   # (target_sources(test …): more sources of a test or a program)
+            for registry in (self.tests, self.programs):
+                if target in registry:
+                    registry[target] = sorted(set(registry[target]) | sources)
         for name, directory, target in _PROGRAM_MACRO.findall(suite):
             # ($<TARGET_FILE_DIR:genko>/…: a program beside genko whose sources this tree does not hold — the plugin host)
             self.macros[name] = None if directory else target
@@ -469,29 +476,46 @@ class SourceTree:
         return {path for path, code in self.text.items() if 'Q_INIT_RESOURCE' in code and wanted.search(code)}
 
     def literal_index(self):
-        """試験の木のソースに書かれた文字列。(ファイル名だけの文字列 → ファイル, 先頭の部品 → [(部品, / で終わるか, ファイル)])"""
+        """試験の木のソースに書かれた文字列の索引。
+
+        names: / の無い文字列 → ファイル。singles: 部品が一つだけの文字列（/ の有無によらず） → ファイル。
+        paths: 先頭の部品 → [(二つ以上の部品, / で終わるか, ファイル)]。ending: 二つ以上の部品の文字列の最後の部品 → ファイル。
+        """
         if self._literals is None:
-            names = {}
-            paths = {}
+            names, singles, paths, ending = {}, {}, {}, {}
             for file in sorted(p for p in self.text if p.startswith('native/tests/')):
                 for literal in set(_LITERAL.findall(self.text[file])):
                     literal = literal.replace('\\\\', '/')
                     if '/' not in literal:
                         if literal:
                             names.setdefault(literal, set()).add(file)
+                            singles.setdefault(literal, set()).add(file)
                         continue
                     parts = [p for p in literal.split('/') if p not in ('', '.')]
                     folder = literal.endswith('/')
                     if parts and '%' in parts[-1]:  # ("type/%1": the name is put in later)
                         parts, folder = parts[:-1], True
-                    if parts and '..' not in parts:
-                        paths.setdefault(parts[0], []).append((parts, folder, file))
-            self._literals = (names, paths)
+                    if not parts or '..' in parts:
+                        continue
+                    if len(parts) == 1:
+                        singles.setdefault(parts[0], set()).add(file)   # ("pcraft/", "/plugins/": a folder by its name)
+                        continue
+                    paths.setdefault(parts[0], []).append((parts, folder, file))
+                    ending.setdefault(parts[-1], set()).add(file)
+            self._literals = (names, singles, paths, ending)
         return self._literals
 
-    def tests_naming(self, path, by_name=True):
-        """試験の木のソースが文字列で名指しする path（ファイル名、または / を含む部分パス）を読む試験。"""
-        names, paths = self.literal_index()
+    def data_roots(self):
+        """試験がマクロで受け取る木の場所（GENKO_TEST_DATA など）: 名前では呼ばれないフォルダー。"""
+        suite = self.cmake.get('native/tests/CMakeLists.txt', '')
+        roots = {''}
+        for tail in re.findall(r'\b\w+=\\?"\$\{GENKO_SOURCE_ROOT\}((?:/[\w.\-]+)*)\\?"', suite):
+            roots.add(normal_path('native' + tail))
+        return roots
+
+    def files_naming(self, path, by_name):
+        """path を、二つ以上の部品の部分パス（途中までを含む）か、ファイル名（by_name のとき）で名指しする試験の木のソース。"""
+        names, _, paths, _ = self.literal_index()
         parts = path.split('/')
         files = set(names.get(parts[-1], ())) if by_name else set()
         for start, part in enumerate(parts):
@@ -499,13 +523,47 @@ class SourceTree:
                 k = len(wanted)
                 if parts[start:start + k] == wanted:
                     files.add(file)
-                elif k >= 2 and not folder and len(parts) >= start + k and parts[start:start + k - 1] == wanted[:-1] and parts[start + k - 1].startswith(wanted[-1]):
+                elif not folder and len(parts) >= start + k and parts[start:start + k - 1] == wanted[:-1] and parts[start + k - 1].startswith(wanted[-1]):
                     files.add(file)  # (a path cut inside its last part: "legacy/book-" + version)
+        return files
+
+    def tests_holding(self, files):
         result = set()
         for file in files:
             reach = self.reaching(file)
             result |= {name for name, sources in self.tests.items() if reach & set(sources)}
         return result
+
+    def tests_naming(self, path, by_name=True):
+        """path を名指しする文字列を持つソースを閉包に持つ試験（足すだけの用途: ソースを文字として読む試験、埋め込みデータを木から読む試験）。"""
+        return self.tests_holding(self.files_naming(path, by_name))
+
+    def data_readers(self, path, by_name=True):
+        """データのファイルを読む試験と、それで全部だと言えるか。返すのは (試験, 言えるか)。
+
+        読むとみなすのは、名指し（files_naming）と、すぐ上のフォルダーの名前だけの文字列（"demo4"、"pcraft/"）を持つソース
+        （部品から組み立てたパス: root / "fixtures" / "studio" / "demo4" / name）。すぐ上のフォルダーの名前で終わる部分パス
+        （その先を実行時に足せる）を書いているのに path の場所には当たらないソースが一つでもあれば、誰が読むか言い切れない
+        （全体へ）。フォルダーの先まで書いて別のファイルを指している文字列（"…/demo4/bible.json"）は、path を読まない。
+        """
+        _, singles, _, ending = self.literal_index()
+        files = self.files_naming(path, by_name)
+        folder = path.rsplit('/', 1)[0] if '/' in path else ''
+        sure = True
+        if folder not in self.data_roots():
+            parent = folder.rsplit('/', 1)[-1]
+            files |= singles.get(parent, set())
+            sure = ending.get(parent, set()) <= files
+        return self.tests_holding(files), sure
+
+    def document_readers(self, path):
+        """文書を読んで比べる試験: 二つ以上の部品の部分パスで名指しするか、ファイル名と、すぐ上のフォルダーの名前の両方を書いているソース。"""
+        names, singles, _, _ = self.literal_index()
+        files = self.files_naming(path, by_name=False)
+        if '/' in path:
+            folder, name = path.rsplit('/', 1)
+            files |= names.get(name, set()) & singles.get(folder.rsplit('/', 1)[-1], set())
+        return self.tests_holding(files)
 
 
 _TREES = {}
@@ -528,64 +586,131 @@ def source_tree(root):
     return cached[1]
 
 
-def suite_statements(code, names):
-    """native/tests/CMakeLists.txt を、試験ごとの文と、それ以外（共通の部分）に分ける。"""
+TEST_STATEMENTS = ('target_compile_definitions', 'target_link_libraries', 'add_dependencies', 'set_tests_properties', 'target_sources', 'target_compile_options')
+
+
+def suite_statements(code, names, kept):
+    """native/tests/CMakeLists.txt を、試験ごとの文と、それ以外（共通の部分）に分ける。
+
+    共通の部分には、試験の文があった場所に印（⟦試験名⟧）を残すので、文の位置と入れ子（if・foreach の中か外か）も比べられる。
+    印に書くのは kept の試験だけ（新しく足された試験の文は、どこに置いても共通の部分を変えない）。続けて並ぶ同じ印は一つにまとめる
+    （既にある試験の文のすぐ後ろに、その試験の文を足しても、共通の部分は変わらない）。
+    """
     own = {}
     rest = []
     last = 0
     for command, body, start, end in cmake_commands(code):
         words = body.split()
-        target = None
+        targets = []
         if command == 'genko_test' and words:
-            target = words[0]
-        elif command in ('target_compile_definitions', 'target_link_libraries', 'add_dependencies', 'set_tests_properties', 'target_sources', 'target_compile_options') and words and words[0] in names:
-            target = words[0]
-        elif command == 'set_property' and len(words) > 1 and words[0] == 'TEST' and words[1] in names:
-            target = words[1]
-        if target is None or start < last:
+            targets = words[:1]
+        elif command in TEST_STATEMENTS and words:
+            # (set_tests_properties(a b PROPERTIES …): every test named before the first keyword)
+            for word in words:
+                if word not in names:
+                    break
+                targets.append(word)
+        elif command == 'set_property' and len(words) > 1 and words[0] == 'TEST':
+            for word in words[1:]:
+                if word not in names:
+                    break
+                targets.append(word)
+        if not targets or start < last:
             continue
         rest.append(code[last:start])
+        marked = sorted(t for t in targets if t in kept)
+        if marked:
+            rest.append(' ⟦' + ','.join(marked) + '⟧ ')
         last = end
-        own.setdefault(target, []).append(command + '(' + ' '.join(words) + ')')
+        for target in targets:
+            own.setdefault(target, []).append(command + '(' + ' '.join(words) + ')')
     rest.append(code[last:])
-    return own, ' '.join(''.join(rest).split())
+    text = ' '.join(''.join(rest).split())
+    text = re.sub(r'(⟦[^⟧]*⟧)(?: \1)+', r'\1', text)
+    return own, text
 
 
 def changed_tests_of_suite(before, after):
-    """試験の登録ファイルの前後を比べる。試験ごとの文だけが変わったなら、その試験の集合。共通の部分が変わったなら None。"""
+    """試験の登録ファイルの前後を比べる。試験ごとの文だけが、その場で変わったなら、その試験の集合。
+
+    共通の部分（補助・定義・関数・if・foreach）が変わった、試験の文が別の場所・別の入れ子へ動いた、登録が消えた試験がある、
+    のどれかなら None（全体へ）。
+    """
     def names(code):
         return {body.split()[0] for command, body, _, _ in cmake_commands(code) if command == 'genko_test' and body.split()}
     old, new = cmake_code(before.replace('\r\n', '\n')), cmake_code(after.replace('\r\n', '\n'))
-    known = names(old) | names(new)
-    old_own, old_rest = suite_statements(old, known)
-    new_own, new_rest = suite_statements(new, known)
+    old_names, new_names = names(old), names(new)
+    if old_names - new_names:
+        return None  # (a test whose registration is gone)
+    kept = old_names & new_names
+    old_own, old_rest = suite_statements(old, old_names | new_names, kept)
+    new_own, new_rest = suite_statements(new, old_names | new_names, kept)
     if old_rest != new_rest:
         return None
     return {name for name in new_own if old_own.get(name) != new_own[name]}
 
 
-def changed_sources_of_library(before, after):
-    """ライブラリのCMakeの前後を比べる。変わったのがソースの並び（*.cpp の行）だけなら、足された・外された名前。ほかも変わったなら None。"""
-    def split(text):
-        code = cmake_code(text.replace('\r\n', '\n'))
-        sources = set()
+_SOURCE_WORD = re.compile(r'(?<![\w./${}"\-])[A-Za-z_][\w/]*\.(?:cpp|c|cc|cxx)(?![\w."}])')
+
+
+def library_sources(text):
+    """ライブラリのCMakeから、ソースの並び（文ごと）と、それ以外の文字を取り出す。
+
+    並びと認めるのは genko_library(名前 SOURCES …) の SOURCES の所と、set(…_SOURCES …) だけ。ほかの文に出るソースの名前
+    （set_source_files_properties・add_executable など）は「それ以外」に残る（変われば全体へ）。
+    """
+    code = cmake_code(text.replace('\r\n', '\n'))
+    lists = {}
+    rest = []
+    last = 0
+    for command, body, start, end in cmake_commands(code):
+        words = body.split()
+        if not words or start < last:
+            continue
+        if command == 'genko_library' and 'SOURCES' in words:
+            head = body.index('SOURCES') + len('SOURCES')
+            stop = re.compile(r'\b(?:PUBLIC_DEPS|PRIVATE_DEPS)\b').search(body, head)
+            tail = stop.start() if stop else len(body)
+        elif command == 'set' and words[0].endswith('_SOURCES'):
+            head = body.index(words[0]) + len(words[0])
+            tail = len(body)
+        else:
+            continue
+        key = command + ' ' + words[0]
+        if key in lists:
+            return None, None   # (two lists of one name: not read)
+        found = set()
+
         def take(match):
-            sources.add(match.group(0))
+            found.add(match.group(0))
             return ' '
-        rest = re.sub(r'(?<![\w./${}"\-])[A-Za-z_][\w/]*\.(?:cpp|c|cc|cxx)(?![\w."}])', take, code)
-        return sources, ' '.join(rest.split())
-    old_sources, old_rest = split(before)
-    new_sources, new_rest = split(after)
-    if old_rest != new_rest:
+        middle = _SOURCE_WORD.sub(take, body[head:tail])
+        lists[key] = found
+        rest.append(code[last:start] + command + '(' + body[:head] + middle + body[tail:] + ')')
+        last = end
+    rest.append(code[last:])
+    return lists, ' '.join(''.join(rest).split())
+
+
+def changed_sources_of_library(before, after):
+    """ライブラリのCMakeの前後を比べる。変わったのがソースの並びの中だけなら、足された・外された名前。
+
+    並びの外が変わった（コンパイルの指定にソースを足した、など）、並びが増減した、ソースが並びの間を動いた、のどれかなら None。
+    """
+    old_lists, old_rest = library_sources(before)
+    new_lists, new_rest = library_sources(after)
+    if old_lists is None or new_lists is None or old_rest != new_rest or set(old_lists) != set(new_lists):
         return None
-    return old_sources ^ new_sources
+    added = {(key, name) for key, found in new_lists.items() for name in found - old_lists[key]}
+    removed = {(key, name) for key, found in old_lists.items() for name in found - new_lists[key]}
+    if {name for _, name in added} & {name for _, name in removed}:
+        return None  # (a source moved from one library's list to another's)
+    return {name for _, name in added | removed}
 
 
 BUILD_CONTROL = ('native/cmake/', 'native/vendor/', 'native/third_party/', 'native/packaging/')
 BUILD_FILES = ('native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpkg.json', '.gitattributes')
 SHARED_REASON = '共通モデル・保存・権限・oracle境界'
-
-
 NAME_RULE = '名前の規則（2026-11-13 までのまま）: '
 
 
@@ -614,6 +739,35 @@ def name_rule(path, inv):
     return None
 
 
+def built_in(path, source):
+    """ビルドが埋め込むデータ（CMake の雛形・qrc）を使うソースの閉包の試験。返すのは (試験 または None, 理由)。
+
+    None で理由があれば、埋め込み方を読み取れない（全体へ）。None で理由が空なら、ビルドは path を埋め込んでいない。
+    """
+    tests = set()
+    explained = False
+    templates = {path} if path.endswith('.in') else set()
+    found, unreadable = (set(), False) if templates else source.embedded(path)
+    if unreadable:
+        return None, 'CMake が使うデータ（使い方を読み取れない）'
+    for template in sorted(templates | found):
+        consumers = source.consumers_of_template(template)
+        if not consumers:
+            return None, '埋め込みデータ（使うソースを読み取れない）'
+        explained = True
+        for consumer in sorted(consumers):
+            tests |= source.tests_reaching(consumer)
+    for name, (qrc, listed) in sorted(source.resources().items()):
+        if path == qrc or path in listed:
+            users = source.resource_users(name)
+            if not users:
+                return None, 'Qt の resource（読み込むソースを読み取れない）'
+            explained = True
+            for user in sorted(users):
+                tests |= source.tests_reaching(user)
+    return (tests, '') if explained else (None, '')
+
+
 def classify(path, tree, inv, before=None):
     """一つの変更パスの扱い。返すのは (種類, 関係する試験, 理由)。種類は skip / infrastructure / broad / related。
 
@@ -628,8 +782,23 @@ def classify(path, tree, inv, before=None):
             return 'broad', tests & all_tests, shared or reason + '（全試験に届く）'
         return 'related', tests & known, reason
 
-    document = path.startswith('docs/') or path.endswith('.md')
-    if path in ('.github/workflows/native.yml',) or path.startswith('tools/ci/'):
+    if path.startswith('docs/') or path.endswith('.md'):
+        # 文書はどこにあっても先に見る（2026-11-13 までと同じ順）。ビルドが埋め込む手引きはその閉包、試験が読んで比べる
+        # 文書はその試験、ほかは何も流さない。文書の変更で全体へは広げない。
+        source = tree()
+        if not (source.root / path).is_file():
+            return 'skip', set(), ''
+        tests = set()
+        if path.startswith(('native/src/', 'native/resources/')):
+            tests, reason = built_in(path, source)
+            if tests is None and reason:
+                return 'broad', set(), reason
+            tests = tests or set()
+            if tests:
+                return related(tests | source.document_readers(path), '埋め込みデータ・resource: 読むソースの閉包')
+        tests = source.document_readers(path)
+        return related(tests, '試験が名指しで読む文書') if tests else ('skip', set(), '')
+    if path in ('.github/workflows/native.yml', '.github/disabled-workflows/native.yml') or path.startswith('tools/ci/'):
         return 'infrastructure', set(), 'CI自身の変更: 実ビルド・非契約全試験・両OSで確認'
     if path.startswith(BUILD_CONTROL) or path in BUILD_FILES:
         return 'broad', set(), 'ビルド・依存・配布・登録の共通境界'
@@ -669,7 +838,8 @@ def classify(path, tree, inv, before=None):
             return 'broad', set(), '消えた・名前の変わったソース（今の木から閉包を作れない）'
         if source.unexplained(path):
             return 'broad', set(), '閉包で説明できないソース（どのヘッダーも連れて来ない）'
-        tests = source.tests_reaching(path) | source.tests_naming(path)
+        # (and the tests that read the sources as text: "/native/src/" — a partial path of two parts or more)
+        tests = source.tests_reaching(path) | source.tests_naming(path, by_name=False)
         if not tests:
             return 'broad', set(), 'どの試験の閉包にも入らないソース'
         shared = '共有描画経路' if path.startswith('native/src/render/') else SHARED_REASON if path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/')) else None
@@ -681,49 +851,20 @@ def classify(path, tree, inv, before=None):
         source = tree()
         if path not in source.present and not (source.root / path).is_file():
             return 'broad', set(), '消えた・名前の変わったデータ'
-        tests = set()
-        explained = False
-        templates = {path} if path.endswith('.in') else set()
-        found, unreadable = (set(), False) if templates else source.embedded(path)
-        if unreadable:
-            return 'broad', set(), 'CMake が使うデータ（使い方を読み取れない）'
-        for template in sorted(templates | found):
-            consumers = source.consumers_of_template(template)
-            if not consumers:
-                return 'broad', set(), '埋め込みデータ（使うソースを読み取れない）'
-            explained = True
-            for consumer in sorted(consumers):
-                tests |= source.tests_reaching(consumer)
-        for name, (qrc, listed) in sorted(source.resources().items()):
-            if path == qrc or path in listed:
-                users = source.resource_users(name)
-                if not users:
-                    return 'broad', set(), 'Qt の resource（読み込むソースを読み取れない）'
-                explained = True
-                for user in sorted(users):
-                    tests |= source.tests_reaching(user)
-        if not explained:
-            if not document:
-                return 'broad', set(), '未分類native変更を安全側で全体へ拡大'
-            # (a note beside the data: no build reads it; a test may)
-            tests = source.tests_naming(path)
-            return related(tests, '試験が名指しで読むファイル') if tests else ('skip', set(), '')
+        tests, reason = built_in(path, source)
+        if tests is None:
+            return 'broad', set(), reason or '未分類native変更を安全側で全体へ拡大'
         return related(tests | source.tests_naming(path), '埋め込みデータ・resource: 読むソースの閉包')
     if path.startswith('native/tests/'):
         source = tree()
-        tests = source.tests_naming(path) if path in source.present else set()
-        if not tests:
-            if document:
-                return 'skip', set(), ''
-            return 'broad', set(), '試験の木のデータ（読む試験を読み取れない）'
+        tests, sure = source.data_readers(path) if path in source.present else (set(), False)
+        if not tests or not sure:
+            return 'broad', set(), '試験の木のデータ（読む試験を言い切れない）'
         return related(tests, '試験のデータ: 名指しで読む試験')
-    # native の外: 試験が名指しで読むもの（docs/ops.schema.json、integrations の手引き）だけ関係づける。文書でないものは、
-    # ファイル名だけの一致では決めない（/ を含む部分パスで名指しされたときだけ）。
-    tests = tree().tests_naming(path, by_name=document) if (tree().root / path).is_file() else set()
-    if tests:
+    # native の外の、文書でないもの: 試験が部分パスで名指しして読み、ほかに読む所が無いと言えるものだけ関係づける。
+    tests, sure = tree().data_readers(path, by_name=False) if (tree().root / path).is_file() else (set(), False)
+    if tests and sure:
         return related(tests, '試験が名指しで読むファイル')
-    if document:
-        return 'skip', set(), ''
     return 'broad', set(), '未分類変更'
 
 
@@ -928,7 +1069,8 @@ def changed_paths(root, base, head):
     # diff失敗は例外で停止。差分なしはmake_plan側で全体へ拡大する。
     for ref in (base, head):
         subprocess.run(['git', 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}'], cwd=root, check=True, stdout=subprocess.PIPE)
-    return subprocess.check_output(['git', 'diff', '--name-only', '-z', base, head, '--'], cwd=root).decode('utf-8').split('\0')[:-1]
+    # (--no-renames: a renamed file is its old path gone and its new path added; the old one is not hidden)
+    return subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', base, head, '--'], cwd=root).decode('utf-8').split('\0')[:-1]
 
 
 def main():
