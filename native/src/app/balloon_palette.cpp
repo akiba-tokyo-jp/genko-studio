@@ -306,6 +306,10 @@ QImage preset_picture(const BalloonPreset& preset, double scale) {
         w = 31;
         h = 26;
     }
+    // (a star of deep points — the sparkle —: its letters' room is small; a little bigger, and smaller letters in one column)
+    const bool deep = kind == "star" && preset.style.contains("spike_depth") && preset.style["spike_depth"].is_number() &&
+                      core::to_float(preset.style["spike_depth"]) >= 0.5;
+    if (deep) w = h = 30;
     if (tailed) h = std::min(h, 20.0);
     // (drips: the body as it would be without them, the drips below it — up a little, so that they are seen whole)
     const double drips = preset.style.contains("drip_mm") && preset.style["drip_mm"].is_number() ? core::to_float(preset.style["drip_mm"]) : 0.0;
@@ -320,7 +324,7 @@ QImage preset_picture(const BalloonPreset& preset, double scale) {
     line.w_mm = core::Num(w);
     line.h_mm = core::Num(h);
     line.style = preset.style;
-    line.style["size_mm"] = 4.0;  // (the sample's letters: one column in every shape)
+    line.style["size_mm"] = deep ? 2.4 : 4.0;  // (the sample's letters: one column in every shape)
     for (const Json& t : preset_tails(preset, line.x_mm.value(), line.y_mm.value(), w, h)) line.tails.push_back(t);
     // (white paper; a balloon without a line is shown on grey, where its white can be seen)
     const bool lineless = preset.style.contains("border_mm") && preset.style["border_mm"].is_number() && core::to_float(preset.style["border_mm"]) == 0;
