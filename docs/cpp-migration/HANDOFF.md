@@ -12,6 +12,7 @@
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - **R3 の置き換え（利用者の決定 2026-11-13）**: 工程の出口は、差分から選んだ範囲（変更分と影響箇所）を ASan と Release の 2 構成で流す。Debug は最終配布の前に 1 回だけ。詳しくは「コマ割り K」の節の「利用者の決定（2026-11-13）」。
+- **範囲の細分と写真加工の試験（利用者の決定 2026-11-14）**: 「写真加工のコードを触った工程でだけ ASan にかけるで良いです」。工程の出口の段階は `--phase milestone`（Release は全通常試験、ASan は差分に関係する試験。写真加工の試験は写真加工のコードに触れた差分だけ）。最終配布の候補は `--phase final`（全構成・全試験。Debug の 1 回はここ）。規則は VALIDATION.md §2a・§2b。枝 `native/validation-scope`（e4dd6924）を `native/fonts-fukidashi2` に取り込み（3584d348）、方針の試験 217 件合格、`validation_closure_check.py` を Release の全ビルドに当てて合格（280 実行物・取りこぼし 0）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
 - 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
