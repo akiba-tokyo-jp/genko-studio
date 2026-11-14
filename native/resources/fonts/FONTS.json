@@ -1615,7 +1615,7 @@
         "gsub_vert": true,
         "gsub_vrt2": true,
         "vhea_vmtx": false,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "OFL-1.1",
       "license_file": "licenses/darumadropone-OFL.txt",
@@ -1766,7 +1766,7 @@
       "kanji_jis_level1": 0,
       "kanji_jis_level2": 0,
       "kanji_joyo": 0,
-      "fallback": "hand",
+      "fallback": "marker_yusei",
       "lookalike": {
         "！": "!",
         "？": "?"
@@ -1776,7 +1776,7 @@
         "gsub_vert": true,
         "gsub_vrt2": true,
         "vhea_vmtx": true,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "OFL-1.1",
       "license_file": "licenses/slacksideone-OFL.txt",
@@ -2142,7 +2142,7 @@
         "gsub_vert": false,
         "gsub_vrt2": false,
         "vhea_vmtx": false,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "LicenseRef-LittleLimit-Free",
       "license_file": "licenses/k8x12-LICENSE.txt",
@@ -2199,7 +2199,7 @@
         "gsub_vert": false,
         "gsub_vrt2": false,
         "vhea_vmtx": false,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "LicenseRef-LittleLimit-Free",
       "license_file": "licenses/misaki-LICENSE.txt",
@@ -2312,7 +2312,7 @@
         "gsub_vert": true,
         "gsub_vrt2": true,
         "vhea_vmtx": true,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "OFL-1.1",
       "license_file": "licenses/monomaniacone-OFL.txt",
@@ -2470,7 +2470,7 @@
         "gsub_vert": true,
         "gsub_vrt2": true,
         "vhea_vmtx": true,
-        "presentation_forms": true
+        "presentation_forms": false
       },
       "license": "OFL-1.1",
       "license_file": "licenses/aoboshione-OFL.txt",

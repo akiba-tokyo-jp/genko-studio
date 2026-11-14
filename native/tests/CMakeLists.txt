@@ -359,6 +359,14 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # they had — data/fukidashi, written by the last build of the hand-drawn look); the sample sheets when asked.
 genko_test(test_fukidashi SOURCES unit/test_fukidashi.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 1800)
+# fonts@1 (書体の追加 F2): the catalogue of the lettering faces (native/resources/fonts/FONTS.json, embedded byte for byte: 46
+# fonts, keys safe as names, every face without kanji with a partner) and the feature a book names while it names one of the
+# forty added faces — each place a face is named, written and read, a book of before written as it was, a book whose faces'
+# files are missing read writable.
+genko_test(test_font_catalog SOURCES unit/test_font_catalog.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_font_faces SOURCES unit/test_font_faces.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS unit TIMEOUT 1800)
+set_tests_properties(test_font_faces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
