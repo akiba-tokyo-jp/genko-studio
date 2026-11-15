@@ -29,6 +29,32 @@ const std::vector<std::pair<QString, QString>>& kinds();
 QString kind_label(const std::string& key);
 // fonts.BUNDLED: each bundled face's key and its name.
 const std::vector<std::pair<QString, QString>>& bundled_fonts();
+// fonts@1 (書体の追加 F2): every face Genko comes with as the 書体 palette lists it — the seven of before (アンチック first,
+// the others in the category the catalogue gives their fonts) and the forty added (core/font_catalog.hpp), by the
+// catalogue's categories in their order —, and a category's name. `mark`: what a person must know before choosing it
+// (「かなだけ（漢字は◯◯）」, 「漢字は一部（残りは◯◯）」; empty: nothing).
+//
+// A face has one name everywhere a person reads it (`label`): an added face's is the catalogue's; the six of before
+// keep the names the text tool has always shown (ゴシック, 明朝, 丸ゴシック, 手書き風, 極太（効果音）, 勢い（効果音）), and
+// アンチック is アンチック. The palette's row (`row`) is that name with, for the six, their font's own name in brackets —
+// ゴシック（ZEN角ゴシック B）, 極太（効果音・デラゴシック）.
+struct FaceRow {
+    QString key;       // what a line's style.font takes
+    QString label;     // its name
+    QString row;       // the palette's row: the name, and the font's own name for the six of before
+    QString category;  // the category's id
+    QString use;       // what it is for
+    QString mark;
+    QString search;    // (its names, key, family, use and category, lower case: what the palette's search looks through)
+    bool added = false;
+};
+const std::vector<FaceRow>& catalog_faces();
+const std::vector<std::pair<QString, QString>>& face_categories();  // {id, name}
+// A face's name for a person: a bundled face's (bundled_fonts), an added face's (the catalogue's), a font file's name
+// without its folder and extension.
+QString face_label(const QString& font);
+// The same in a sentence: アンチック for the composite of before (its list's name explains it in brackets).
+QString face_name(const QString& font);
 // tategaki.STYLE_TAGS: the marks typed in {…|words} and the style each gives, in Python's order.
 const std::vector<std::pair<QString, core::Json>>& style_tags();
 
@@ -36,10 +62,21 @@ const std::vector<std::pair<QString, core::Json>>& style_tags();
 std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_column);
 // studio.letter.measure(breaks, balloon, em): the balloon's box as the renderer draws it. A capsule and a polygon
 // (fukidashi@1) are sized by service::letter::measure itself (`sides`: a polygon's style.sides, 0 when none is said).
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0);
-// box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm.
+// fukidashi@2: a symbol (heart, star, flower, diamond) is sized by service::letter::measure_styled, its points and depth
+// from `style`.
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em = kEmMm, int sides = 0,
+                                  const core::Json& style = core::Json());
+// box_size(text, balloon, vertical, max_h_mm, max_w_mm): (w, h), each rounded to 0.01 mm. `style` (fukidashi@2): a
+// symbol's points and depth, and the drips below the body — the box that much taller (drip_growth).
 std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm,
-                                   int sides = 0);
+                                   int sides = 0, const core::Json& style = core::Json());
+// fukidashi@2: how far below its body the drips of a balloon of this kind and style reach in a box `box_h` mm high, as
+// the renderer draws them (core::drip_reach): style.drip_mm, 30 at most and 0.6 of the box; none for the kinds that
+// draw none. The body is the box less that.
+double drip_height(std::string_view balloon, const core::Json& style, double box_h);
+// How much taller than a body `body_h` mm high its box is made for its drips: style.drip_mm, 30 at most and 1.5 × the
+// body — the drips drawn in that box (drip_height: 0.6 of it) reach exactly as far, and the body keeps its size.
+double drip_growth(std::string_view balloon, const core::Json& style, double body_h);
 // A style's sides as the renderer reads them (5..12; 0: none said).
 int sides_of(const core::Json& style);
 // place_new(episode, page, frame, text, balloon, vertical): {x_mm, y_mm, w_mm, h_mm, wrap}.
@@ -49,10 +86,12 @@ core::Json place_new(const core::Document& doc, const core::Page& page, const co
 core::Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon,
                  bool vertical);
 // fukidashi@1: the box a line is given when a person changes its balloon to or from a kind that holds its letters in
-// its own shape (a capsule, a polygon): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
-// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. Null when the kind does not change
-// that way (speech to shout, the same kind), the balloon is drawn by hand or the line is not set in a balloon, or the
-// box would not change. `style_after`: the style the line has then (a polygon's sides).
+// its own shape (a capsule, a polygon; fukidashi@2: a symbol): {x_mm, y_mm, w_mm, h_mm}, fitted to its words as a new line's is, about the
+// balloon's middle — a round oval made a capsule becomes a slim one, not a blob. fukidashi@2: to any other kind (or
+// the same), the box as much taller or shorter as the drips drawn change (a kind that draws none — a flash, a dotted
+// box —, or a style without them), its top kept: the body stays the size it was. Null when neither changes the box,
+// the balloon is drawn by hand or the line is not set in a balloon. `style_after`: the style the line has then (a
+// polygon's sides, the drips).
 core::Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const core::Json& style_after);
 // place_at(x_mm, y_mm, text, balloon, vertical, frame): {x_mm, y_mm, w_mm, h_mm, wrap}, centred where clicked (`style`:
 // the style the line is given — a polygon's sides size its box).

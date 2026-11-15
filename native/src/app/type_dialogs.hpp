@@ -87,7 +87,10 @@ public:
 class MissingFontsDialog : public QDialog {
     Q_OBJECT
 public:
-    MissingFontsDialog(MainWindow* window, const core::Json& missing);
+    // (`told`: a note under the table — fonts@1, the faces Genko comes with whose files are not on this computer: said,
+    // not offered for replacing; empty: none)
+    MissingFontsDialog(MainWindow* window, const core::Json& missing, const QString& told = {});
+    QLabel* told_label = nullptr;
     // The map replace_fonts takes ({missing: font | {font, face_index, family, font_style, postscript} | null}).
     core::Json map() const;
     QTableWidget* table = nullptr;

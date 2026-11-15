@@ -399,7 +399,7 @@ bool MainWindow::close_all() {
         if (closed) script_event(service::script_events::Event::CloseDocument);
         return false;
     }
-    auto fresh = std::make_shared<Session>(core::new_episode("無題", core::Num(std::int64_t{1}), 8, core::PageSpec::a4_mono()), std::nullopt);
+    auto fresh = std::make_shared<Session>(untitled_book(), std::nullopt);
     documents_.front() = Document{fresh};
     doc_ = -1;
     show_document(0);

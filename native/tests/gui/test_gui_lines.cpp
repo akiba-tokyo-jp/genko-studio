@@ -281,15 +281,16 @@ private slots:
         QVERIFY(lines != nullptr);
         QStringList order;
         for (QAction* a : lines->actions()) order << (a->isSeparator() ? QStringLiteral("|") : a->text());
-        // (fukidashi@1: フキダシのパレットを開く after フキダシを手で描く — test_gui_fukidashi)
+        // (fukidashi@1: フキダシのパレットを開く after フキダシを手で描く — test_gui_fukidashi; fonts@1: 書体のパレットを開く
+        // after it — test_gui_fonts)
         QCOMPARE(order, QStringList({QStringLiteral("台詞を入れる（テキストの道具）"), QStringLiteral("フキダシを手で描く"), QStringLiteral("フキダシのパレットを開く"),
-                                     QStringLiteral("|"),
+                                     QStringLiteral("書体のパレットを開く"), QStringLiteral("|"),
                                      QStringLiteral("選んだ台詞をその場で直す"), QStringLiteral("縦書き・横書きを切り替える"), QStringLiteral("ワープテキスト…"),
                                      QStringLiteral("フキダシの形"), QStringLiteral("選んだ台詞を消す"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
                                      QStringLiteral("シェイプに変換")}));
         QMenu* shapes = s.menu_at(QStringLiteral("ページ/台詞/フキダシの形"));
         QVERIFY(shapes != nullptr);
-        QCOMPARE(shapes->actions().size(), 17);  // (fukidashi@1: 縦長（カプセル） and 多角形（機械の声） with Python's 15)
+        QCOMPARE(shapes->actions().size(), 21);  // (fukidashi@1: 縦長（カプセル） and 多角形（機械の声） with Python's 15; fukidashi@2: the four symbols)
         QCOMPARE(shapes->actions().front()->text(), QStringLiteral("普通（楕円）"));
         QCOMPARE(shapes->actions().back()->text(), QStringLiteral("飾り枠（テーマ・題目）"));
         // the 台詞 panel: a tab of the right row (not closed: as Python's), scrolling on a small screen
@@ -303,7 +304,7 @@ private slots:
         // ツールの設定: the text tool's page (TextToolSettings), and the select tool's with the chosen line's lettering
         auto* settings = s.window->text_settings();
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("text")), static_cast<QWidget*>(settings));
-        QCOMPARE(settings->balloon->count(), 17);  // (fukidashi@1: with the capsule and the polygon)
+        QCOMPARE(settings->balloon->count(), 21);  // (fukidashi@1: with the capsule and the polygon; fukidashi@2: the four symbols)
         QCOMPARE(settings->balloon->currentData().toString(), QStringLiteral("speech"));
         QVERIFY(settings->vertical->isChecked());
         QCOMPARE(settings->draw_balloon->text(), QStringLiteral("フキダシを手で描く"));
@@ -806,7 +807,7 @@ private slots:
         QTRY_COMPARE(chars.family->currentText(), QStringLiteral("test-mincho"));
         // 既定の設定に戻す: every style key but the group, cleared
         panel.reset->click();
-        QCOMPARE(s.last()["style"].size(), std::size_t{52});  // (fukidashi@1: six more keys a line's style takes)
+        QCOMPARE(s.last()["style"].size(), std::size_t{63});  // (fukidashi@1: six more keys a line's style takes; fukidashi@2: eleven more)
         QVERIFY(!s.last()["style"].contains("group"));
         QCOMPARE(s.last()["style"].begin().key(), std::string("font"));
         const Json cleared = s.last()["style"];  // (kept: a range-for over a temporary's items() reads freed memory)

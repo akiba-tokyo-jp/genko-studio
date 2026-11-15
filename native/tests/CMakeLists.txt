@@ -17,7 +17,7 @@ target_compile_definitions(genko_test_support PRIVATE
   GENKO_LOCK_HELPER="$<TARGET_FILE:genko_lock_helper>"
   GENKO_ARGV_HELPER="$<TARGET_FILE:genko_argv_helper>")
 genko_target_flags(genko_test_support)
-add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper)
+add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper genko_dev_fonts)
 
 genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS unit)
 # The HTTP server of `genko serve` and `genko mcp --transport streamable-http` (M5③): errors, the head before the body.
@@ -357,8 +357,27 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # printed line's width, a balloon's own layer laid over the page, a solid black balloon with white letters, a tone box, the
 # keys of before), the book (the feature while used, a book of before growing its hand-drawn ovals once, its letters the size
 # they had — data/fukidashi, written by the last build of the hand-drawn look); the sample sheets when asked.
+# (ASan, 2026-11-15: 1,971 s through ctest with another test_fukidashi beside it — 545 cases; the 24 × 672 pictures of tails
+# at a box's corner 1,008 s of it, aMalformedStyleStillDraws's 1,300 pages the longest function at 174 s. Before that day's
+# speed-ups it passed 1,800 s inside one function, and would have taken about five hours. The limit leaves room for a machine
+# three times as busy; its functions take the slow rule's limit below)
 genko_test(test_fukidashi SOURCES unit/test_fukidashi.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS unit TIMEOUT 7200)
+# fonts@1 (書体の追加 F2): the catalogue of the lettering faces (native/resources/fonts/FONTS.json, embedded byte for byte: 46
+# fonts, keys safe as names, every face without kanji with a partner) and the feature a book names while it names one of the
+# forty added faces — each place a face is named, written and read, a book of before written as it was, a book whose faces'
+# files are missing read writable.
+genko_test(test_font_catalog SOURCES unit/test_font_catalog.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_font_faces SOURCES unit/test_font_faces.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 1800)
+set_tests_properties(test_font_faces PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+target_compile_definitions(test_font_faces PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}")
+# fonts@1, 群 2: inspect target=fonts (the seven as they were, then the forty and the categories), lint's known faces and
+# font_not_installed, replace_fonts never taking one of Genko's own faces out of a book, the editable PSD naming the face
+# asked for when its file is not on the computer.
+genko_test(test_font_service SOURCES unit/test_font_service.cpp DEPS genko_test_support genko_service genko_formats genko_render_ops
+           LABELS unit TIMEOUT 600)
+set_tests_properties(test_font_service PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
@@ -878,6 +897,10 @@ if(GENKO_BUILD_APP)
   # look, the 台詞 panel's settings of a balloon's shape, the palette of balloons (its pictures, a pick restyling the
   # chosen line or shaping the next one placed), the window's measure of a capsule against the auto-lettering's
   genko_test(test_gui_fukidashi SOURCES gui/test_gui_fukidashi.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # 書体 (fonts@1, 書体の追加 F2-C) in the window: the palette of lettering faces (its dock, the faces by category, each
+  # sample the renderer's, made one at a time after it is shown), the search, a pick for the chosen line / the next line
+  # / a ruby / the book's usual face, a face whose file is not on the computer, what is said when a book is opened
+  genko_test(test_gui_fonts SOURCES gui/test_gui_fonts.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # TEXT-01 in the window: the ruby typed with the input method (the table's "gui" cases), the ruby settings beside the
   # select tool, 要確認 marked, reassigned and cleared, Undo, 台詞の検索・置換, 縦書き・横書き, saved and read back
   genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
@@ -1010,7 +1033,7 @@ endif()
 foreach(slow test_smart_stack test_gui_color
         test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_page_size
         test_gui_book test_gui_layout test_adjust test_contract_pyre test_contract_psd test_color_model
-        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines)
+        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi)
   if(TEST ${slow})
     get_test_property(${slow} TIMEOUT limit)
     math(EXPR function_ms "(${limit} - 100) * 1000")

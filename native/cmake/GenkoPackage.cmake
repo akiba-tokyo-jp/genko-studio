@@ -81,6 +81,16 @@ elseif(UNIX AND NOT APPLE)
 endif()
 install(FILES "${GENKO_REPO_ROOT}/docs/cpp-migration/THIRD_PARTY.md" DESTINATION "${_genko_doc}")
 install(DIRECTORY "${GENKO_SOURCE_ROOT}/resources/fonts/licenses/" DESTINATION "${_genko_doc}/licenses/fonts")
+# fonts@1 (書体の追加 F2, render/font_files.hpp): the forty added lettering faces, as files beside the program — exactly
+# the files the catalogue lists as storage "file", unmodified and under their own names (some carry Reserved Font Names:
+# never subset, converted or renamed) —, and the catalogue itself for people to read. The six fonts compiled into the
+# program, the screen's fonts and the licences (above) are not put here: the program reads none of them from this folder.
+# (the list, and the stop when the catalogue does not list forty or a file of them is not there: GenkoFontList.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/GenkoFontList.cmake")
+genko_font_files(_genko_font_files "${GENKO_SOURCE_ROOT}/resources/fonts")
+install(FILES ${_genko_font_files} "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/genko-studio/fonts")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_SOURCE_ROOT}/resources/fonts/FONTS.json")
 install(FILES "${GENKO_SOURCE_ROOT}/resources/lucide/LICENSE" DESTINATION "${_genko_doc}/licenses/lucide")
 install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/qt/LGPL-3.0.txt" "${GENKO_SOURCE_ROOT}/package/licenses/qt/GPL-3.0.txt"
         DESTINATION "${_genko_doc}/licenses/qt")

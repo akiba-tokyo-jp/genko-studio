@@ -38,6 +38,11 @@ set(_packages
   "icc-profiles~Built-in RGB and grey ICC profiles (made by Genko with Little CMS)~=NOASSERTION~CC0-1.0~built-in"
   "cpython-re~CPython re (ported)~=3.12.3~PSF-2.0 AND Unicode-3.0~built-in"
   "fonts~Bundled fonts (Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP)~=NOASSERTION~OFL-1.1~built-in"
+  # (書体の追加 F2: the forty lettering faces installed as files in share/genko-studio/fonts — three packages, by where
+  # they came from and their terms; the patterns do not overlap: a file matched twice would be listed twice)
+  "fonts-lettering~Lettering fonts installed as files (36 fonts of Google Fonts, unmodified)~=NOASSERTION~OFL-1.1~bundled:^share/genko-studio/fonts/([A-FH-Z][^/]*|G[^e][^/]*|Ge[^n][^/]*|Gen[^E][^/]*)\\.ttf$"
+  "fonts-genei~GenEi Antique v6 and GenEi Kiwami Gothic (Reserved Font Names: unmodified, under their own names)~=NOASSERTION~OFL-1.1~bundled:^share/genko-studio/fonts/GenE[^/]*\\.ttf$"
+  "fonts-littlelimit~k8x12 and Misaki Gothic 2nd (pixel fonts of littlelimit.net, 2021-05-05)~=2021-05-05~LicenseRef-LittleLimit-Free~bundled:^share/genko-studio/fonts/(k8x12|misaki_gothic_2nd)\\.ttf$"
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in"
   "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in"
   "sheenbidi~SheenBidi (the bidirectional order of right-to-left text set across)~sheenbidi~Apache-2.0~built-in"
@@ -89,10 +94,14 @@ string(JSON _doc SET "${_doc}" creationInfo "{\"created\": \"${_now}\", \"creato
 string(JSON _doc SET "${_doc}" packages "[]")
 string(JSON _doc SET "${_doc}" files "[]")
 string(JSON _doc SET "${_doc}" relationships "[]")
+# (licences SPDX has no id for: named and described here — the pixel fonts' on every system, the Visual C++ runtime's on
+# Windows)
+set(_extracted "[]")
+string(JSON _extracted SET "${_extracted}" 0 "{\"licenseId\": \"LicenseRef-LittleLimit-Free\", \"name\": \"littlelimit.net font licence (k8x12, Misaki)\", \"extractedText\": \"These fonts are free software. Unlimited permission is granted to use, copy, and distribute them, with or without modification, either commercially or noncommercially. THESE FONTS ARE PROVIDED \\\"AS IS\\\" WITHOUT WARRANTY. (The licence section of the fonts' own notes: share/doc/genko-studio/licenses/fonts/k8x12-LICENSE.txt and misaki-LICENSE.txt.)\"}")
 if(CMAKE_HOST_WIN32)
-  # (a licence SPDX has no id for: named and described here)
-  string(JSON _doc SET "${_doc}" hasExtractedLicensingInfos "[{\"licenseId\": \"LicenseRef-MSVC-Redistributable\", \"name\": \"Microsoft Visual C++ Redistributable\", \"extractedText\": \"The Microsoft Visual C++ runtime files listed as Distributable Code in the Microsoft Software License Terms for Visual Studio 2022 (https://visualstudio.microsoft.com/license-terms/).\"}]")
+  string(JSON _extracted SET "${_extracted}" 1 "{\"licenseId\": \"LicenseRef-MSVC-Redistributable\", \"name\": \"Microsoft Visual C++ Redistributable\", \"extractedText\": \"The Microsoft Visual C++ runtime files listed as Distributable Code in the Microsoft Software License Terms for Visual Studio 2022 (https://visualstudio.microsoft.com/license-terms/).\"}")
 endif()
+string(JSON _doc SET "${_doc}" hasExtractedLicensingInfos "${_extracted}")
 
 set(_root "{\"SPDXID\": \"SPDXRef-genko-studio\", \"name\": \"Genko Studio\", \"versionInfo\": \"${_genko_version}\", \"downloadLocation\": \"NOASSERTION\", \"licenseConcluded\": \"NOASSERTION\", \"filesAnalyzed\": false}")
 string(JSON _doc SET "${_doc}" packages 0 "${_root}")

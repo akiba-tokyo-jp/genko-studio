@@ -8,6 +8,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/commands_list.hpp"
+#include "core/font_catalog.hpp"
 #include "core/ops_schema.hpp"
 #include "core/prefs_table.hpp"
 #include "core/session_file.hpp"
@@ -208,6 +209,7 @@ ToolResult StudioService::create_project(const Json& a) {
     const Json& title = a["title"];
     core::Document doc = core::new_episode(title.is_string() ? title.get<std::string>() : py_str(title), core::Num(1), count, spec, *binding);
     doc.strict_gates = true;  // agent projects: printed layers change only after the name is approved
+    core::fonts::make_new_book(doc);  // (源暎アンチック its usual face: 利用者の決定 2026-11-14)
     // (C++: written under the project lock, and only when no book is there by then)
     storage::ProjectLock lock(path, actor_);
     try {

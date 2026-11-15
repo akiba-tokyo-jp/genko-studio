@@ -23,6 +23,7 @@
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
 #include "render/draw.hpp"
+#include "render/font_files.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/op_limits.hpp"
@@ -65,10 +66,12 @@ bool one_of(std::string_view kind, std::initializer_list<std::string_view> kinds
 const std::initializer_list<std::string_view> kElliptic{"speech", "cloud", "thought", "shout", "electric", "flash", "whisper"};
 const std::initializer_list<std::string_view> kFrames{"dotted_box", "tone_box", "fancy_box"};
 const std::initializer_list<std::string_view> kSquare{"box", "narration", "dotted_box", "tone_box", "fancy_box"};
-const std::initializer_list<std::string_view> kHugged{"speech", "thought", "whisper", "flash", "shout", "capsule", "polygon"};
+const std::initializer_list<std::string_view> kHugged{"speech", "thought", "whisper", "flash", "shout", "capsule", "polygon",
+                                                      "heart", "star", "flower", "diamond"};  // (fukidashi@2: the symbols)
 const std::initializer_list<std::string_view> kUneven{"speech", "thought", "whisper"};
 const std::initializer_list<std::string_view> kSpoken{"speech", "rounded", "box",   "cloud", "thought",
-                                                      "shout",  "electric", "flash", "whisper"};
+                                                      "shout",  "electric", "flash", "whisper",
+                                                      "heart",  "star",     "flower", "diamond"};  // (fukidashi@2: the symbols)
 
 // Python's a // b of ints, and of floats (float_floor_div: fmod, then the quotient snapped to a whole number)
 std::int64_t floordiv(std::int64_t a, std::int64_t b) {
@@ -104,7 +107,8 @@ const Json& at(const Json& st, const char* key) {
 // PC5 G-d: a face of a font collection (.ttc) — the character attribute face_index — as the fonts open it (render::face_font):
 // a face of one font file (not the bundled fonts' composite of two); face 0 as it is.
 Face collection_face(Face f, const Json& index) {
-    if (!index.is_number_integer() || index.get<std::int64_t>() <= 0 || f.composite()) return f;
+    // (fonts@1: an added face is one font of one face — a number left on the record by another font is not its face's)
+    if (!index.is_number_integer() || index.get<std::int64_t>() <= 0 || f.composite() || f.added) return f;
     f.kana = f.other = face_font(f.other, static_cast<unsigned>(index.get<std::int64_t>()));
     return f;
 }
@@ -145,6 +149,18 @@ std::vector<std::u32string> emphasis_of(Fonts& fonts, const core::StoryLine& lin
     for (const std::string& run : line.emphasis_runs) {
         if (!run.empty()) out.push_back(fonts.normalize(face, u32(run)));
     }
+    return out;
+}
+
+// fonts@1: the line's words set larger, bolder or in a colour (style_runs) as the lettering looks for them in the text
+// set. In an added face they go through the face's swaps as the text does — ！ → ! in a face drawn without the
+// full-width mark, the dashes and waves of LOOKALIKE —, or a shouted word that ends in ！ would not be found in its own
+// line. In a face of before the words are taken as they are, as they always were.
+std::vector<std::pair<std::string, Json>> style_runs_of(Fonts& fonts, const core::StoryLine& line, const Face& face) {
+    if (!face.added || line.style_runs.empty()) return line.style_runs;
+    std::vector<std::pair<std::string, Json>> out;
+    out.reserve(line.style_runs.size());
+    for (const auto& [words, style] : line.style_runs) out.emplace_back(utf8(fonts.normalize(face, u32(words))), style);
     return out;
 }
 
@@ -363,7 +379,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     args.latin = latin;
     args.emphasis_runs = emphasis_of(fonts, line, face);
     args.emphasis_mark = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
-    args.style_runs = line.style_runs;
+    args.style_runs = style_runs_of(fonts, line, face);
     args.bold = line_weight(st);
     args.ruby_scale = float_or(at(st, "ruby_scale"), 0.5);
     args.mono_ruby = core::py_truthy(at(st, "mono_ruby"));
@@ -382,7 +398,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
         args.tcy_spans = tcy_spans_of(line, args.text, from);  // (PC5 G-d: the ranges' own 縦中横)
         // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm — as across: review P3-12)
         const double base_mm = float_or(at(st, "size_mm"), kCapMm);
-        const std::vector<Json> words = char_styles(letters, line.style_runs, Json());
+        const std::vector<Json> words = char_styles(letters, args.style_runs, Json());
         for (std::size_t k = 0; k < attrs.size(); ++k) {
             const Json& a = attrs[k];
             const Json& size_mm = at(a, "size_mm");
@@ -932,7 +948,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
     }
     const int weight = line_weight(st);
     // (the OpenType rows take the line's weight from the record's resolved attributes: the words' own alone here)
-    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight && !opentype ? Json{{"bold", weight}} : Json());
+    const std::vector<Json> styles_flat = char_styles(flat, style_runs_of(fonts, line, face), weight && !opentype ? Json{{"bold", weight}} : Json());
     std::vector<Json> styles;  // (styles per character of the text, "\n" included)
     std::size_t k = 0;
     for (const char32_t c : text) styles.push_back(c == U'\n' ? Json::object() : styles_flat[k++]);
@@ -1135,8 +1151,9 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
                 if (draw_text) {
                     Draw draw(out);
                     const Ink ink = Ink::with_alpha(rgb, 255);
-                    draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, letter, fonts.font(face, size, std::u32string(1, text[i])),
-                              ink, {}, thick, thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
+                    const TrueTypeFont& letter_font = fonts.font(face, size, std::u32string(1, text[i]));
+                    draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, drawable(letter, letter_font), letter_font, ink, {}, thick,
+                              thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
                 }
                 const double w = advance(i) - static_cast<double>(em) * tracking;
                 if (set_row != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn)
@@ -1468,6 +1485,25 @@ double shape_gauge(std::string_view kind, double x, double y, double a, double b
     const double sa = core::py_max(a, 1e-6);
     const double sb = core::py_max(b, 1e-6);
     return std::sqrt((ax / sa) * (ax / sa) + (ay / sb) * (ay / sb));
+}
+
+double symbol_gauge(const std::vector<std::array<double, 2>>& room, double a, double b, double block_a, double block_b) {
+    if (room.size() < 3) return 1.0;
+    if (block_a < 0) block_a = a;
+    if (block_b < 0) block_b = b;
+    // (the block moved up or down to where it needs the least room — as fit_in_shape moves the letters: a heart's room
+    // and an odd star's are not the same above and below)
+    // (by 0.3 of the box's half height at most, a fortieth at a time: within what fit_in_shape's steps reach)
+    double best = 0.0;
+    for (int step = -12; step <= 12; ++step) {
+        const double dy = b * static_cast<double>(step) / 40.0;
+        double worst = 0.0;
+        for (const double x : {-block_a, block_a}) {
+            for (const double y : {-block_b, block_b}) worst = core::py_max(worst, shape_gauge("symbol", x, y + dy, a, b, &room));
+        }
+        if (step == -12 || worst < best) best = worst;
+    }
+    return best;
 }
 
 std::vector<std::array<std::int64_t, 4>> ink_rects(const Image& image, std::int64_t em) {
@@ -1843,7 +1879,10 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const double oval_w = static_cast<double>(w) * keep;
     const double oval_h = static_cast<double>(h) * keep;
     // (fukidashi@1: a capsule and a polygon hold the letters in their own shape; the ovals and the bursts in an oval)
-    const bool shaped = hug && (kind == "capsule" || kind == "polygon");
+    // (fukidashi@2: a symbol holds them in the room it leaves — the diamond itself, a star's and a flower's valleys, a
+    // heart below its cleft)
+    const bool symbol = hug && core::is_symbol(kind);
+    const bool shaped = hug && (kind == "capsule" || kind == "polygon" || symbol);
     const double corner_px = at(st, "corner_mm").is_number() ? core::to_float(at(st, "corner_mm")) / 25.4 * dpi : -1.0;  // (0: square corners)
     std::vector<std::array<double, 2>> sides_outline;
     if (hug && kind == "polygon") {
@@ -1851,6 +1890,19 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
         const std::int64_t sides = core::py_truthy(at(st, "sides")) ? core::to_int(at(st, "sides")) : 8;
         for (const clean::P& p : clean::polygon(clean::Box{-a, -b, a, b}, static_cast<int>(sides), corner_px >= 0 ? corner_px : core::py_min(a, b) * 0.14)) {
             sides_outline.push_back({p.x, p.y});
+        }
+    }
+    // (how far a symbol's room reaches across its middle, as shares of the box: what one column — one row — may run)
+    double symbol_across = 1.0, symbol_down = 1.0;
+    if (symbol) {
+        const double a = static_cast<double>(w) / 2, b = static_cast<double>(h) / 2;
+        for (const clean::P& p : clean::symbol_room(kind, clean::Box{-a, -b, a, b}, core::symbol_points(line), core::star_inner(line))) {
+            sides_outline.push_back({p.x, p.y});
+        }
+        if (sides_outline.size() >= 3) {
+            const auto reach = [&](double x, double y) { return 1 / core::py_max(1e-9, shape_gauge(kind, x, y, a, b, &sides_outline)); };
+            symbol_across = core::py_min(1.0, (reach(a, 0.0) + reach(-a, 0.0)) / 2);
+            symbol_down = core::py_min(1.0, (reach(0.0, b) + reach(0.0, -b)) / 2);
         }
     }
     const auto fitted = [&](const std::vector<std::array<double, 2>>& points) {
@@ -1866,6 +1918,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             const double margin = static_cast<double>(2 * size) * kFitPad;
             // (a capsule and a polygon are sized close round their words: the columns may run their whole room)
             const double slack = shaped ? 1.0 : 0.92;
+            if (symbol) return {oval_w * symbol_across - margin, oval_h * symbol_down - margin};
             return {(oval_w - margin) * slack, (oval_h - margin) * slack};
         }
         return inner(kind, static_cast<double>(w), static_cast<double>(h), pad, at(st, "spike_depth"), corner_px);
@@ -1911,7 +1964,12 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     if (core::py_truthy(at(st, "fill_png"))) image = picture_letters(image, at(st, "fill_png"));
     const Json& outline = at(st, "outline_mm");
     std::int64_t grow = core::py_truthy(outline) ? px(core::to_float(outline), dpi) : (kind == "sfx" ? std::max<std::int64_t>(2, floordiv(em, 8)) : 0);
-    if (kind == "tone_box" && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));  // (a white edge over the tone)
+    // (a white edge over the tone: a tone box's, and — fukidashi@2 — any balloon's with a tone inside, style.fill_tone)
+    // (the tone that is drawn under them: the group's — ToneUnder —, or the line's own; a tone that draws nothing gives no
+    // edge, and letters without a balloon have none)
+    const bool over_tone = kind != "none" && kind != "sfx" && kind != "picture" && (ToneUnder::current() ? *ToneUnder::current() : fill_tone_draws(st));
+    const bool toned = kind == "tone_box" || over_tone;
+    if (toned && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));
     if (grow != 0) {
         image = outlined(image, grow, core::py_truthy(at(st, "outline_rgb")) ? rgb_tuple(at(st, "outline_rgb")) : Rgb{255, 255, 255});
         if (rubies != nullptr) {  // (the letters moved in by the halo's room: grow + 1 each side)
@@ -2184,8 +2242,12 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
     for (const auto& [words, style] : line.style_runs) style_runs.push_back(Json::array({words, style}));
     Json key = Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), detail::keyed_style(line.style),
                             Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
+    // (fonts@1: an added face found gone or changed while Genko runs — what was set before it is not used again; nothing is
+    // added to the key until that happens)
+    if (const std::uint64_t lost = font_files::generation(); lost != 0) key.push_back(Json::array({"fonts", lost}));
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
     if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
+    if (const auto toned = ToneUnder::current()) key.push_back(Json::array({"tone_under", *toned}));  // (fukidashi@2: its group's tone)
     // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes —,
     // a line across with features alone too; their digest, made once where they are set: review P2-3, P3-10)
     if (TypeStyles::current() != nullptr && !TypeStyles::current()->is_null() && sets_opentype(line))
@@ -2233,12 +2295,61 @@ Fonts& SpeakerFonts::fonts() {
     return *fonts_;
 }
 
+namespace {
+
+// The largest of each `size` (odd) values along a line of `n` from `in` (a step of `in_step` apart), the line's ends
+// repeated outwards, into `out` (`out_step` apart) — the window's halves of blocks of `size`, each block's running
+// largest from its start and from its end (van Herk, Gil and Werman: three looks a value whatever the size).
+void line_max(const unsigned char* in, std::size_t in_step, std::size_t n, std::size_t size, unsigned char* out, std::size_t out_step,
+              std::vector<unsigned char>& from_start, std::vector<unsigned char>& from_end) {
+    const std::size_t r = size / 2, m = n + 2 * r;
+    from_start.resize(m);
+    from_end.resize(m);
+    unsigned char* const g = from_start.data();
+    unsigned char* const h = from_end.data();
+    for (std::size_t t = 0; t < m; ++t) {  // (the line laid out with its ends repeated, `r` each side)
+        const std::size_t at = t < r ? 0 : (t - r < n ? t - r : n - 1);
+        g[t] = in[at * in_step];
+    }
+    for (std::size_t block = 0; block < m; block += size) {
+        const std::size_t end = block + size < m ? block + size : m;
+        h[end - 1] = g[end - 1];
+        for (std::size_t t = end - 1; t-- > block;) h[t] = g[t] > h[t + 1] ? g[t] : h[t + 1];
+        for (std::size_t t = block + 1; t < end; ++t) g[t] = g[t] > g[t - 1] ? g[t] : g[t - 1];
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const unsigned char a = h[i], b = g[i + size - 1];
+        out[i * out_step] = a > b ? a : b;
+    }
+}
+
+// The largest value in the `size` × `size` square round each pixel of an "L" picture, its edges repeated outwards:
+// Image.filter(ImageFilter.MaxFilter(size)) — the same pixels (the largest of a square is the largest of its rows'
+// largest) —, in a row pass and a column pass instead of a sort of size² values at every pixel (a halo of 30 px at 600 dpi:
+// 3,721 values a pixel).
+Image max_square(const Image& grey, int size) {
+    if (size < 3 || (size & 1) == 0) return grey.filter(Filter::max_filter(size));  // (a size Pillow's way has its own answer for)
+    const std::size_t w = static_cast<std::size_t>(grey.width()), h = static_cast<std::size_t>(grey.height());
+    const std::string pixels = grey.tobytes();
+    const auto* const in = reinterpret_cast<const unsigned char*>(pixels.data());
+    std::string rows(pixels.size(), '\0'), out(pixels.size(), '\0');
+    auto* const across = reinterpret_cast<unsigned char*>(rows.data());
+    auto* const result = reinterpret_cast<unsigned char*>(out.data());
+    std::vector<unsigned char> from_start, from_end;
+    const auto k = static_cast<std::size_t>(size);
+    for (std::size_t y = 0; y < h; ++y) line_max(in + y * w, 1, w, k, across + y * w, 1, from_start, from_end);
+    for (std::size_t x = 0; x < w; ++x) line_max(across + x, w, h, k, result + x, w, from_start, from_end);
+    return Image::frombytes("L", grey.size(), out);
+}
+
+}  // namespace
+
 Image outlined(const Image& text, std::int64_t grow, const Rgb& colour) {
     const Image alpha = text.split()[3];
     const std::int64_t pad = grow + 1;
     Image padded = Image::create("L", {static_cast<int>(alpha.width() + 2 * pad), static_cast<int>(alpha.height() + 2 * pad)}, 0);
     padded.paste(alpha, Point{static_cast<int>(pad), static_cast<int>(pad)});
-    const Image halo = padded.filter(Filter::max_filter(static_cast<int>(halo_filter(grow))));
+    const Image halo = max_square(padded, static_cast<int>(halo_filter(grow)));
     Image out = Image::create("RGBA", padded.size(), Ink::with_alpha(colour, 0));
     out.putalpha(halo);
     Image body = Image::create("RGBA", padded.size(), Ink{0, 0, 0, 0});
@@ -2543,6 +2654,22 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
 namespace {
 thread_local std::optional<double> text_gamma_now;
 }  // namespace
+
+thread_local std::optional<bool> tone_under_now;
+
+ToneUnder::ToneUnder(bool toned) : was_(tone_under_now) { tone_under_now = toned; }
+ToneUnder::~ToneUnder() { tone_under_now = was_; }
+std::optional<bool> ToneUnder::current() { return tone_under_now; }
+
+bool fill_tone_draws(const Json& style) {
+    const Json& tone = at(style, "fill_tone");
+    if (!tone.is_object()) return false;
+    const auto above = [&tone](const char* key) {
+        const Json& value = at(tone, key);
+        return value.is_number() && core::to_float(value) > 0;
+    };
+    return above("density") || above("to");
+}
 
 TextGamma::TextGamma(std::optional<double> gamma) : was_(text_gamma_now) { text_gamma_now = gamma; }
 TextGamma::~TextGamma() { text_gamma_now = was_; }

@@ -127,6 +127,25 @@ class PairTests(unittest.TestCase):
             plan, _, _ = self.evidence(folder)
             self.assertTrue(runner.pair_results(folder, plan)['passed'])
 
+    def test_the_audit_says_which_scope_passed(self):
+        # (review P3: matrix-audit.json did not say the phase or how many tests each configuration ran — a stage exit on
+        # the related tests and a run of everything looked the same)
+        with tempfile.TemporaryDirectory() as folder:
+            plan, out, state = self.evidence(folder)
+            plan.update(tier='related', schema=2, asan_without_photo=['test_fx', 'test_smart'])
+            state['plan_hash'] = runner.plan_hash(plan)
+            (out / 'result.json').write_text(json.dumps(state))
+            audit = runner.pair_results(folder, plan)
+            self.assertTrue(audit['passed'], audit)
+            self.assertEqual(audit['plan'], {'phase': 'development', 'tier': 'related', 'schema': 2, 'asan_without_photo': 2})
+            self.assertEqual(audit['configurations'], {'linux-debug': {'suite': 'related', 'tests': 1}})
+            # (a plan of before the fields: said as it is, not guessed)
+            old = {'phase': 'development', 'matrix': plan['matrix']}
+            state['plan_hash'] = runner.plan_hash(old)
+            (out / 'result.json').write_text(json.dumps(state))
+            audit = runner.pair_results(folder, old)
+            self.assertEqual(audit['plan'], {'phase': 'development', 'tier': None, 'schema': None, 'asan_without_photo': 0})
+
     def test_partial_artifact_missing_log_fails(self):
         with tempfile.TemporaryDirectory() as folder:
             plan, out, _ = self.evidence(folder)
@@ -144,6 +163,25 @@ class PairTests(unittest.TestCase):
             plan, _, _ = self.evidence(folder)
             plan['phase'] = 'milestone'; plan['matrix']['include'][0]['suite'] = 'full'
             self.assertFalse(runner.pair_results(folder, plan)['passed'])
+
+    def test_related_cannot_become_the_final_candidate_by_renaming_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            plan, _, _ = self.evidence(folder)
+            plan['phase'] = 'final'; plan['matrix']['include'][0]['suite'] = 'full'
+            self.assertFalse(runner.pair_results(folder, plan)['passed'])
+
+    def test_which_rows_need_the_access_check(self):
+        need = runner.cli23_required
+        for preset in ('linux-debug', 'linux-release', 'linux-asan'):
+            for suite in ('full', 'related'):
+                row = {'suite': suite}
+                self.assertTrue(need({'phase': 'milestone'}, preset, row))
+                self.assertTrue(need({'phase': 'final'}, preset, row))
+                self.assertEqual(need({'phase': 'integration'}, preset, row), suite == 'full')
+                self.assertFalse(need({'phase': 'development'}, preset, row))
+        for phase in ('development', 'integration', 'milestone', 'final'):
+            for preset in ('windows-debug', 'windows-release'):
+                self.assertFalse(need({'phase': phase}, preset, {'suite': 'full'}))
 
     def test_pins_cannot_be_missing(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -837,6 +875,24 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(self.state()['cli23'], 'pass')
         self.assertIn(b'checked', (self.out / 'cli23.log').read_bytes())
         self.assertTrue(runner.pair_results(self.folder, self.plan)['passed'])
+
+    def test_the_access_check_of_a_final_candidate_and_of_a_stage_exits_related_row(self):
+        # (the stage exit's ASan row holds only what the diff reaches — suite related — and still needs the access check;
+        # the final distribution candidate, phase final, needs it as the stage exit does)
+        for phase, suite in (('final', 'full'), ('milestone', 'related')):
+            with self.subTest(phase=phase, suite=suite):
+                for file in list(self.out.glob('*')) if self.out.is_dir() else []:
+                    file.unlink()
+                self.plan['phase'] = phase
+                self.plan['matrix']['include'][0]['suite'] = suite
+                self.plan_file.write_text(json.dumps(self.plan))
+                code, _ = self.go(self.everything(), resume=False)
+                self.assertEqual(code, 0)
+                self.assertEqual((self.state()['phase'], self.state()['suite'], self.state()['cli23']), (phase, suite, 'pass'))
+                self.assertTrue(runner.pair_results(self.folder, self.plan)['passed'])
+                # without the access check's record the pairing fails
+                (self.out / 'cli23.log').unlink()
+                self.assertIn('linux-release: CLI23証跡の欠落', runner.pair_results(self.folder, self.plan)['failures'])
 
     def test_a_failed_access_check_is_run_again_and_stays_on_record(self):
         self.milestone()

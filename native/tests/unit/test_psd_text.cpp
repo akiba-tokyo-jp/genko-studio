@@ -30,11 +30,15 @@
 #include "psd_book_hashes.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/font_catalog.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/psd_text.hpp"
+#include "formats/psd_text_detail.hpp"
+#include "render/font_files.hpp"
+#include "render/text/fonts.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ops_registry.hpp"
@@ -252,6 +256,12 @@ class TestPsdText : public QObject {
         const QString book = tmp_.path() + "/cli.genko";
         auto ran = genko::test::run_genko({"new", book, "--pages", "4", "--title", "PSD文字", "--plain"});
         QCOMPARE(ran.exit_code, 0);
+        // (the book the image way's pins were drawn from has no usual face of its own — アンチック —; a book made new
+        // starts in 源暎アンチック since the user's decision of 2026-11-14, so it is set back to none first)
+        const QString usual = tmp_.path() + "/usual.json";
+        genko::test::write_bytes(usual, R"([{"op": "set_meta", "font_path": ""}])");
+        ran = genko::test::run_genko({"apply", book, usual});
+        QVERIFY2(ran.exit_code == 0, ran.out.constData());
         ran = genko::test::run_genko({"apply", book, genko::test::test_data("psd_text_book.json")});
         QVERIFY2(ran.exit_code == 0, ran.out.constData());
         cli_book_ = book;
@@ -356,6 +366,15 @@ class TestPsdText : public QObject {
 
 private slots:
     void initTestCase() { QVERIFY(tmp_.isValid()); }
+    // (fonts@1: a slot that named a folder for the added faces' files and stopped half way leaves it named — put back
+    // before the next one, and only then: the other slots share what was set before)
+    void cleanup() {
+        const QString own = QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../share/genko-studio/fonts"));
+        if (QString::fromStdString(genko::render::font_files::dir()) != own) {
+            genko::render::font_files::set_dir_for_testing(std::nullopt);
+            genko::render::text::clear_layout_cache();
+        }
+    }
 
     // The book is the one MANIFEST.json fixes.
     void bookIsFixed() {
@@ -903,6 +922,191 @@ private slots:
         (void)genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("fonts")), kDpi, genko::formats::PsdText{true, false}, &report);
         QCOMPARE(report.warnings.size(), std::size_t{1});
         QCOMPARE(report.to_json()["warnings"][0]["kind"], Json("font_missing"));
+    }
+
+    // A bracket set down in the effects face, whose font has no vertical form of it, is drawn in the Gothic (括弧の四角を
+    // 直す, 2026-11-14): its editable text names the Gothic for that bracket alone — edited in Photoshop, it is drawn as a
+    // bracket, not the effects font's "no glyph" box (review 3, P3-7). The brackets the font has the form of (「」), and
+    // every other letter, name the effects font; across, every letter does.
+    void aBracketDrawnInTheGothicIsNamedSo() {
+        Document doc = genko::core::new_episode("括弧", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "d", "text": "「あ」『い』（う）", "x_mm": 140, "y_mm": 20, "w_mm": 30, "h_mm": 80, "wrap": "vertical",
+             "balloon": "none", "style": {"font": "sfx"}},
+            {"op": "add_line", "page": 1, "id": "a", "text": "『い』（う）", "x_mm": 40, "y_mm": 20, "w_mm": 60, "h_mm": 20, "wrap": "horizontal",
+             "balloon": "none", "style": {"font": "sfx"}}])"));
+        genko::formats::PsdTextReport report;
+        const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("brackets")), kDpi, genko::formats::PsdText{true, false}, &report);
+        const Read r = read_psd(genko::core::path_to_utf8(written.front()));
+        const psd::TextLayer down = text_of(r, "本文 #d");
+        QVERIFY(down.text == u"「あ」『い』（う）");
+        std::u16string in_gothic, in_sfx;
+        std::size_t at = 0;
+        for (const auto& run : down.runs) {
+            for (std::size_t i = 0; i < run.length && at < down.text.size(); ++i, ++at) (run.style.font == kGothic ? in_gothic : in_sfx).push_back(down.text[at]);
+            QVERIFY(run.style.font == kGothic || run.style.font == kSfx);
+        }
+        QVERIFY(in_gothic == u"『』（）");
+        QVERIFY(in_sfx == u"「あ」いう");
+        QCOMPARE(fonts_of(text_of(r, "本文 #a")), std::string(kSfx));
+    }
+
+    // fonts@1 (書体の追加 F2): the forty added faces are named in a PSD by their fonts' own PostScript names, held in the
+    // catalogue (core/font_catalog.hpp) — every one of them, with nothing warned of; the text layer of a line set in one
+    // names it for every letter, and the layer of a line in a face without kanji names the face and its partner.
+    void addedFacesAreNamedByPostScriptName() {
+        namespace added = genko::core::fonts;
+        genko::render::font_files::set_dir_for_testing((genko::test::repo_root() + "/native/resources/fonts").toStdString());
+        genko::render::text::clear_layout_cache();
+        Document doc = genko::core::new_episode("書体", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        Json ops = Json::array();
+        std::vector<std::string> names;
+        for (const added::Entry& e : added::entries()) {
+            if (!e.added) continue;
+            ops.push_back(Json{{"op", "add_line"}, {"page", 1}, {"id", e.key}, {"text", "かな"}, {"x_mm", 20}, {"y_mm", 20}, {"w_mm", 30}, {"h_mm", 40},
+                               {"wrap", "vertical"}, {"balloon", "none"}, {"style", Json{{"size_mm", 5}, {"font", e.key}}}});
+            names.push_back(e.postscript);
+            QCOMPARE(genko::formats::detail::font_token(e.postscript), e.postscript);  // (each is a token of the text engine as it is)
+        }
+        QCOMPARE(names.size(), std::size_t{40});
+        const auto listed = genko::formats::psd_text_fonts(run_ops(doc, ops));
+        QVERIFY2(listed.warnings.empty(), Json(listed.warnings).dump().c_str());
+        for (const std::string& name : names) QVERIFY2(std::find(listed.fonts.begin(), listed.fonts.end(), name) != listed.fonts.end(), name.c_str());
+        QCOMPARE(listed.fonts.size(), std::size_t{40});
+
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "k", "text": "きわみ漢字！", "x_mm": 150, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "gothic_kiwami"}},
+            {"op": "add_line", "page": 1, "id": "d", "text": "だるま漢字", "x_mm": 110, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "cute_daruma"}},
+            {"op": "add_line", "page": 1, "id": "p", "text": "ドット", "x_mm": 70, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "horizontal",
+             "balloon": "none", "style": {"size_mm": 5, "font": "dot12"}}])"));
+        genko::formats::PsdTextReport report;
+        const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("added-faces")), kDpi, genko::formats::PsdText{true, false}, &report);
+        QVERIFY2(report.warnings.empty(), report.to_json().dump().c_str());
+        const Read r = read_psd(genko::core::path_to_utf8(written.front()));
+        const auto fonts_in = [&](const char* layer) {
+            std::vector<std::string> out;
+            const psd::Layer* found = r.named(layer);
+            if (found == nullptr) return out;
+            const std::optional<psd::TextLayer> layer_text = r.file.text(*found);
+            if (!layer_text) return out;
+            for (const auto& run : layer_text->runs) {
+                if (std::find(out.begin(), out.end(), run.style.font) == out.end()) out.push_back(run.style.font);
+            }
+            return out;
+        };
+        QCOMPARE(fonts_in("本文 #k"), std::vector<std::string>{"GenEiKiwamiGo-Ultra"});
+        QCOMPARE(fonts_in("本文 #d"), (std::vector<std::string>{"DarumadropOne-Regular", "MochiyPopOne-Regular"}));
+        QCOMPARE(fonts_in("本文 #p"), std::vector<std::string>{"k8x12"});
+        genko::render::font_files::set_dir_for_testing(std::nullopt);
+        genko::render::text::clear_layout_cache();
+    }
+
+    // A letter drawn in the partner of a face without kanji is the face's own: not warned of as drawn elsewhere
+    // (font_fallback), in the text or in a reading. On a computer without the files, each such line is warned of once —
+    // its font is missing — and nothing else is, for it is then set in the default face.
+    void aPartnersLettersAreNotWarned() {
+        Document doc = genko::core::new_episode("書体", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "a", "text": "こわい漢字", "x_mm": 150, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "horror_chokoku"}, "ruby_spans": [{"start": 3, "end": 5, "ruby": "漢じ", "font": "sfx_aoboshi"}]},
+            {"op": "add_line", "page": 1, "id": "b", "text": "『どん』", "x_mm": 110, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "sfx_aoboshi"}},
+            {"op": "add_line", "page": 1, "id": "c", "text": "【列車】で", "x_mm": 70, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "sfx_inline"}},
+            {"op": "add_line", "page": 1, "id": "e", "text": "だめ！？", "x_mm": 30, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "font": "techno_monomaniac"}}])"));
+        genko::render::font_files::set_dir_for_testing((genko::test::repo_root() + "/native/resources/fonts").toStdString());
+        genko::render::text::clear_layout_cache();
+        const auto with_files = genko::formats::psd_text_fonts(doc);
+        QVERIFY2(with_files.warnings.empty(), Json(with_files.warnings).dump().c_str());
+        for (const char* name : {"Chokokutai-Regular", "ZenOldMincho-Black", "AoboshiOne-Regular", "KaiseiTokumin-ExtraBold", "TrainOne-Regular", "MonomaniacOne-Regular"}) {
+            QVERIFY2(std::find(with_files.fonts.begin(), with_files.fonts.end(), name) != with_files.fonts.end(), name);
+        }
+        QTemporaryDir empty;
+        genko::render::font_files::set_dir_for_testing(empty.path().toStdString());
+        genko::render::text::clear_layout_cache();
+        auto without = genko::formats::psd_text_fonts(doc);
+        std::vector<std::string> said;
+        for (Json& w : without.warnings) said.push_back(w["line"].get<std::string>() + ":" + w["kind"].get<std::string>() + ":" + w["detail"].get<std::string>());
+        QCOMPARE(said, (std::vector<std::string>{"a:font_missing:horror_chokoku", "a:font_missing:sfx_aoboshi", "b:font_missing:sfx_aoboshi",
+                                                 "c:font_missing:sfx_inline", "e:font_missing:techno_monomaniac"}));
+        // (each line's letters are listed by the face the line asks for — its text layer names that, by the catalogue's
+        // PostScript name, though they are drawn in the default face here —, and, for the kanji of a face the catalogue
+        // says has none (line a's), by that face's partner, as with the files; the reading of line a, whose own face is
+        // missing too, is set in the line's face: the default face's two)
+        QCOMPARE(without.fonts, (std::vector<std::string>{"Chokokutai-Regular", "ZenOldMincho-Black", kGothic, kMincho, "AoboshiOne-Regular", "TrainOne-Regular",
+                                                          "MonomaniacOne-Regular"}));
+        genko::render::font_files::set_dir_for_testing(std::nullopt);
+        genko::render::text::clear_layout_cache();
+    }
+
+    // A PSD that names one of the forty by its PostScript name is read as that face's key — from the catalogue, whether
+    // or not the file is on the computer, and without reading any font file —; a type layer's record in an added face
+    // written as a text layer and read back names the face again. The six fonts of before are found as they were, and a
+    // name nobody has is none.
+    void exportThenImportGivesTheKeyBack() {
+        namespace added = genko::core::fonts;
+        QTemporaryDir empty;
+        genko::render::font_files::set_dir_for_testing(empty.path().toStdString());
+        genko::render::font_files::clear_cache();
+        for (const added::Entry& e : added::entries()) {
+            if (!e.added) continue;
+            QCOMPARE(genko::render::psd_type::bundled_font(e.postscript), std::optional<std::string>(e.key));
+        }
+        QCOMPARE(genko::render::font_files::cached_bytes(), std::uint64_t{0});
+        QCOMPARE(genko::render::psd_type::bundled_font(kGothic), std::optional<std::string>("gothic"));
+        QCOMPARE(genko::render::psd_type::bundled_font(kSfx), std::optional<std::string>("sfx"));
+        QCOMPARE(genko::render::psd_type::bundled_font("NoSuchFont-Regular"), std::optional<std::string>());
+        QCOMPARE(genko::render::psd_type::bundled_font("genEiKiwamiGo-Ultra"), std::optional<std::string>());  // (a name is its letters, case and all)
+        // (EngineData's keys naming it: the character attribute font is the key — not a missing font's `postscript`)
+        std::vector<std::string> missing;
+        const Json attrs = genko::render::psd_type::char_attrs(Json{{"Font", "KleeOne-SemiBold"}, {"FontSize", 30.0}}, 25.4 / 300, &missing);
+        QCOMPARE(attrs["font"], Json("klee"));
+        QVERIFY(!attrs.contains("postscript"));
+        QVERIFY(missing.empty());
+
+        genko::render::font_files::set_dir_for_testing((genko::test::repo_root() + "/native/resources/fonts").toStdString());
+        genko::render::text::clear_layout_cache();
+        for (const char* key : {"klee", "gothic_kiwami", "dot8", "cute_cherry"}) {
+            Document doc = a_book();
+            genko::core::StoryLine record;
+            record.text = "かなとカナ";
+            record.wrap = "horizontal";
+            record.balloon = "none";
+            record.style = Json{{"font", key}};
+            record.native_type = genko::core::type_text::check_native_type(Json::parse(R"({"shape": "point", "anchor_mm": [30, 40], "char": {"size_mm": 6}})"), record.text);
+            record.x_mm = genko::core::Num(30);
+            record.y_mm = genko::core::Num(35);
+            record.w_mm = genko::core::Num(40);
+            record.h_mm = genko::core::Num(12);
+            const double k = 300 / 25.4;
+            genko::render::text::Fonts fonts;
+            const auto named = [&](const std::string& font) { return genko::formats::detail::font_name(fonts, font); };
+            const std::optional<psd::TextLayer> text = genko::render::psd_type::text_of(record, doc, k, named);
+            QVERIFY(text.has_value());
+            QVERIFY(!text->runs.empty());
+            for (const auto& run : text->runs) QCOMPARE(run.style.font, added::find(key)->postscript);
+            const psd::TextLayer back = psd::read_tysh(psd::tysh(*text));
+            Document other = a_book();
+            genko::render::psd_type::Sheets sheets;
+            genko::render::psd_type::Frame frame;
+            frame.mm_x = frame.mm_y = 1 / k;
+            const auto read = genko::render::psd_type::read_text(back, frame, other, sheets);
+            QVERIFY2(read.record.has_value(), read.why.c_str());
+            QVERIFY2(read.missing_fonts.empty(), key);
+            // (the record read names the face — and a book that holds it says fonts@1)
+            genko::core::Layer layer;
+            layer.id = "ly_read";
+            layer.kind = genko::core::LayerKind::Type;
+            layer.type = std::make_shared<const genko::core::StoryLine>(*read.record);
+            other.edit_page(0).layers.push_back(std::move(layer));
+            QCOMPARE(added::named(other), std::vector<std::string>{key});
+            QVERIFY(added::uses_feature(other));
+        }
+        genko::render::font_files::set_dir_for_testing(std::nullopt);
+        genko::render::text::clear_layout_cache();
     }
 
     // `genko export --format psd --psd-text editable`: the files the export writes, counted as it counts them.

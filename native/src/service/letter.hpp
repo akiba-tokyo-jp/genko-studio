@@ -69,6 +69,16 @@ std::array<double, 2> measure(const std::vector<std::string>& breaks, const std:
 // How much bigger than a block of words the box of a polygon of `sides` (5..12; 0: eight) is that holds it: the block's
 // corners lie on the polygon's sides (√2 for eight sides, 1.5 for six).
 double polygon_room(int sides);
+// fukidashi@2 (SPEC BALLOON-02): how many times bigger than its words' block a symbol's box is — the block in the room
+// the symbol leaves its letters (render::text::clean::symbol_room: the diamond itself, a star's and a flower's valleys, a
+// heart below its cleft), 2% to spare —, for a square block in a square box (what letter.fits counts with). `kind` heart, star, flower or diamond; `points` a star's points or a flower's
+// petals (0: the kind's own, 5 and 6); `inner` a star's valleys as a share of its points' reach (0: its own, 0.62).
+double symbol_room(const std::string& kind, int points = 0, double inner = 0.0);
+// letter.measure with the line's style (fukidashi@2): a polygon's sides, a star's points and depth and a flower's
+// petals as the style says them, and — style.drip_mm — the box made that much taller, for the drips below the body.
+// A symbol's box: of the shapes the symbol reads at (w / h: a heart 0.95..1.35, a star and a flower 0.85..1.2, a diamond
+// 0.6..1.8), the smallest whose room holds the words' block with the fit's pad, 2% to spare.
+std::array<double, 2> measure_styled(const std::vector<std::string>& breaks, const std::string& balloon, double em, const Json& style);
 // letter.fits(rect, balloon, others, em): how much text the panel takes in one balloon of this kind, in words.
 std::string fits(const Box& rect, const std::string& balloon, std::size_t others = 0, double em = kEmMm);
 // letter.place_page(plan, layout, bible, speakers): the balloons of every panel (and the title, the 名札) and the

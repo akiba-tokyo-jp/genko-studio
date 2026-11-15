@@ -459,6 +459,27 @@ private slots:
         }
     }
 
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: a book an agent makes with create_project starts with 源暎アンチック
+    // as its usual face and says fonts@1; an op applied to it (the book read and written again) keeps both, and what the
+    // agent reads of the fonts says the usual face. The tools' input schema is as it was (onlyAnAgentsTools' hash).
+    void aBookMadeThroughMcpStartsInGeneiAntique() {
+        const QString dir = fresh("new-face");
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        QVERIFY(!make_book(mcp, "n.genko").empty());
+        const auto project = [&] { return genko::core::parse_python_json(genko::test::read_bytes(dir + "/root/n.genko/project.json")); };
+        QCOMPARE(project()["font_path"], Json("antique_genei"));
+        QCOMPARE(project()["features"], Json::array({"fonts@1"}));
+        const std::int64_t revision = project()["revision"].get<std::int64_t>();
+        const Json applied = Mcp::text(mcp.call("apply_ops", Json::object({{"project", "n.genko"}, {"commit", true},
+                                                                          {"ops", Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "漢字（かんじ）"},
+                                                                                                    {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 20}, {"h_mm", 40}}})}})));
+        QVERIFY2(applied["ok"] == Json(true), genko::core::dump_python(applied).c_str());
+        QVERIFY(project()["revision"].get<std::int64_t>() > revision);
+        QCOMPARE(project()["font_path"], Json("antique_genei"));
+        QCOMPARE(project()["features"], Json::array({"fonts@1"}));
+    }
+
     // コマ割り K3 (SPEC LAYOUT-01): the tool layout_ideas through MCP — listed, with its arguments' schema and the layout
     // keys in submit_name's words; the same seed gives the same batch, an exact count gives exactly that many panels (a
     // draft plan's own count when none is given), and the book is not changed by it; an idea's plan goes through
@@ -809,6 +830,49 @@ private slots:
         QVERIFY(persons.find("timeline@1") != std::string::npos && persons.find("\"work\"") != std::string::npos);
     }
 
+    // fukidashi@2 (SPEC BALLOON-02): an agent's apply_ops takes the symbol kinds and the additions' keys as a person's ops
+    // do — kept in their normal form, the book naming fukidashi@2 —, refuses a value out of range with the Japanese
+    // sentence, and its tool's description says the kinds and keys (the description is text: the tools' input schemas,
+    // pinned above, do not change); the book renders.
+    void anAgentsBalloonAdditions() {
+        const QString dir = fresh("fukidashi2");
+        const QString book = dir + "/root/f.genko";
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            QVERIFY(!make_book(mcp, "f.genko", 1).empty());
+            const Json listed = mcp.request(2, "tools/list");
+            std::string description;
+            for (const Json& t : listed["result"]["tools"]) {
+                if (str(t["name"]) == "apply_ops") description = str(t["description"]);
+            }
+            for (const char* said : {"heart", "star", "flower", "diamond", "pen_swell", "pen_taper", "drip_mm", "drip_seed", "fill_tone", "fill_gradient", "points"}) {
+                QVERIFY2(description.find(said) != std::string::npos, said);
+            }
+            const auto apply = [&mcp](const Json& ops) {
+                return Mcp::text(mcp.call("apply_ops", Json::object({{"project", "f.genko"}, {"ops", ops}, {"commit", true}})));
+            };
+            const Json taken = apply(Json::array({Json::object({{"op", "add_line"}, {"page", 1}, {"id", "H1"}, {"text", "すき"}, {"balloon", "heart"}, {"x_mm", 40},
+                                                                {"y_mm", 40}, {"w_mm", 30}, {"h_mm", 32},
+                                                                {"style", Json::object({{"pen_swell", 0.5}, {"drip_mm", 5}, {"fill_tone", Json::object({{"density", 0.1}, {"to", 0.5}})}})}})}));
+            QCOMPARE(taken["ok"], Json(true));
+            const Json refused = apply(Json::array({Json::object({{"op", "edit_line"}, {"id", "H1"}, {"style", Json::object({{"pen_swell", 2}})}})}));
+            QCOMPARE(refused["ok"], Json(false));
+            const std::string all = genko::core::dump_python(refused);
+            QVERIFY2(all.find("pen_swell must be between 0 and 0.9") != std::string::npos || all.find("フキダシの線の強弱は 0〜0.9 です") != std::string::npos, all.c_str());
+            mcp.lines();
+        }
+        const Json saved = Json::parse(genko::test::read_bytes(book + "/project.json"));
+        const Json& features = saved["features"];
+        QVERIFY(std::find(features.begin(), features.end(), Json("fukidashi@2")) != features.end());
+        const Json& line = saved["story"][0];
+        QCOMPARE(line["balloon"], Json("heart"));
+        QCOMPARE(line["style"]["fill_tone"], (Json{{"density", 0.1}, {"lpi", 60.0}, {"angle", 45.0}, {"pattern", "dot"}, {"to", 0.5}, {"dir", 90.0}}));
+        const genko::test::Run drawn = genko::test::run_genko({"render", book, "--page", "1", "--dpi", "150", "--out", dir + "/f.png"});
+        QVERIFY2(drawn.exit_code == 0, (drawn.out + drawn.err).constData());
+        QVERIFY(QFileInfo(dir + "/f.png").size() > 1000);
+    }
+
     // An agent's Undo past a state an older Genko's `genko gc` removed (schema-v4 §8): refused in Japanese (undo_refused,
     // history_missing's words), nothing of the book written.
     void undoPastAGoneState() {
@@ -951,6 +1015,46 @@ private slots:
         QVERIFY(!QFile::exists(dir + "/root/b.genko/hacked") && !QFile::exists(QDir::currentPath() + "/hacked"));
         // the program's own stdout ({"jsonrpc": …, "injected": true}) never reached the protocol
         for (const QByteArray& line : mcp.lines()) QVERIFY2(!line.contains("injected"), line.constData());
+    }
+
+    // fonts@1 over the HTTP API: the book's usual face (set_meta font_path) named by the key of one of the forty added
+    // faces is kept as that key — a face's name, not a file to keep inside the root —, and the book says fonts@1; every
+    // other value is still a path kept inside the root (one of the seven keys of before among them, as it always was),
+    // and one outside it refused.
+    void httpApiKeepsAnAddedFacesKey() {
+        const QString dir = fresh("api-fonts");
+        const QString root = dir + "/root";
+        write_file(dir + "/config/tokens.json", R"({"tok-human": {"actor": "human:owner"}})");
+        Server server({"serve", "--root", root, "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const auto post = [port](const std::string& path, const std::string& body) { return http(port, request_text("POST", path, port, "tok-human", body)); };
+        QCOMPARE(post("/v1/new", R"({"dest": "b.genko", "pages": 1})").status, 200);
+        const auto book = [&] { return genko::core::parse_python_json(genko::test::read_bytes(root + "/b.genko/project.json")); };
+        // (a book made new: 源暎アンチック its usual face from the start — 利用者の決定 2026-11-14)
+        QCOMPARE(book()["font_path"], Json("antique_genei"));
+        QCOMPARE(book()["features"], Json::array({"fonts@1"}));
+        const Response keyed = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "antique_genei"}]})");
+        QVERIFY2(keyed.status == 200, keyed.body.c_str());
+        QCOMPARE(book()["font_path"], Json("antique_genei"));
+        QCOMPARE(book()["features"], Json::array({"fonts@1"}));
+        // (a key of before: the path it always became — and no feature)
+        const Response old = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "gothic"}]})");
+        QVERIFY2(old.status == 200, old.body.c_str());
+        const std::string kept = book()["font_path"].get<std::string>();
+        QVERIFY2(kept != "gothic" && QString::fromStdString(kept).endsWith(QStringLiteral("/root/gothic")), kept.c_str());
+        QCOMPARE(book()["features"], Json::array());
+        // (a key in another case, or with a path before it, is a path like any other)
+        const Response outside = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "../antique_genei"}]})");
+        QCOMPARE(outside.status, 403);
+        QVERIFY(str(outside.json()["error"]).starts_with("path outside --root"));
+        const Response cased = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_meta", "font_path": "Antique_Genei"}]})");
+        QVERIFY2(cased.status == 200, cased.body.c_str());
+        QVERIFY(QString::fromStdString(book()["font_path"].get<std::string>()).endsWith(QStringLiteral("/root/Antique_Genei")));
+        // (in for_pages too, as the other files' paths are looked at there)
+        const Response nested = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "for_pages", "pages": "all", "ops": [{"op": "set_meta", "font_path": "klee"}]}]})");
+        QVERIFY2(nested.status == 200, nested.body.c_str());
+        QCOMPARE(book()["font_path"], Json("klee"));
     }
 
     // The HTTP API's own lines: no route for a person's approvals and no way for an agent's token to approve, unlock,

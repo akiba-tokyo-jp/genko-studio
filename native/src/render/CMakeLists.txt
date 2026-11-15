@@ -9,6 +9,7 @@ genko_library(genko_render
     channels.cpp
     inspect.cpp
     draw.cpp
+    font_files.cpp
     png.cpp
     bmp.cpp
     tiff_webp.cpp

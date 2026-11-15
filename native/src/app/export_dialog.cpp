@@ -40,6 +40,7 @@
 #include "app/theme.hpp"
 #include "service/human_service.hpp"
 #include "service/wording.hpp"
+#include "core/font_catalog.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -396,9 +397,18 @@ void ExportDialog::psd_changed() {
                 }
             }
             const QString detail = qs(warning.value("detail", std::string()));
-            notes << (warning.value("kind", std::string()) == "font_missing"
-                          ? QStringLiteral("・%1 ページ「%2」: 書体「%3」が見つからないため、既定の書体で描きます").arg(page, words, detail)
-                          : QStringLiteral("・%1 ページ「%2」: 「%3」は台詞の書体にないため、別の書体で描きます").arg(page, words, detail));
+            // (fonts@1: one of the faces Genko comes with, its file not on this computer — said by its name, and as it
+            // is: drawn otherwise here, named in the PSD all the same; a face with only some kanji names itself for
+            // every letter there, which the font's own kanji may not cover)
+            const core::fonts::Entry* face = core::fonts::find(detail.toStdString());
+            const bool ours = face != nullptr && face->added;
+            const bool missing = warning.value("kind", std::string()) == "font_missing";
+            notes << (missing && ours
+                          ? QStringLiteral("・%1 ページ「%2」: 書体「%3」のファイルがこのパソコンに無いため、ここでは代わりの書体で描きます（PSD にはこの書体の名前を書きます%4）")
+                                .arg(page, words, qs(face->label),
+                                     face->kanji == "partial" ? QStringLiteral("。この書体に無い漢字も、PSD ではこの書体の名前になります") : QString())
+                          : missing ? QStringLiteral("・%1 ページ「%2」: 書体「%3」が見つからないため、既定の書体で描きます").arg(page, words, detail)
+                                    : QStringLiteral("・%1 ページ「%2」: 「%3」は台詞の書体にないため、別の書体で描きます").arg(page, words, detail));
         }
     } catch (const std::exception& error) {
         notes << wording::error(QString::fromUtf8(error.what()));

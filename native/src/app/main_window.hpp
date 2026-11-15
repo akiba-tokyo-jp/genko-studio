@@ -67,6 +67,10 @@ struct WriteGuard;
 
 namespace genko::app {
 
+// The untitled book a window shows when it has none (8 pages, A4, in memory): a book made new, its usual face
+// 源暎アンチック (core::fonts::make_new_book; 利用者の決定 2026-11-14).
+core::Document untitled_book();
+
 class BrushPanel;
 class SourceChoice;  // (PC5 I-e: app/automate_dialogs.hpp)
 class ChannelPanel;
@@ -83,6 +87,7 @@ class ToolPresetsPanel;
 class StylesPanel;
 class ShapesPanel;
 class BalloonPalette;
+class FontPalette;
 struct BalloonPreset;
 class HistogramPanel;
 class InfoPanel;
@@ -464,6 +469,33 @@ public:
     // next line placed does), "line" the chosen line, "next" the next line; the chosen line given a preset's look (one
     // edit_line: false when no line is chosen or it has no balloon); the preset the next line placed takes (none:
     // nullptr), set by its key (empty: none — the text tool's own フキダシ again).
+    // 書体 (fonts@1, 書体の追加 F2; main_window_fonts.cpp): the palette of lettering faces and its dock; a face picked there
+    // (`how`: "" as the window decides — the chosen line, else the next line placed —, "line", "next", "ruby" the chosen
+    // ruby, "book" the book's usual face); the face the next line placed takes (empty: the text tool's own); the faces
+    // the book names whose files are not on this computer, by name; what is said of the book's faces when it is opened.
+    FontPalette* font_palette() const { return font_palette_; }
+    QDockWidget* font_dock() const { return font_dock_; }
+    void use_font_face(const QString& key, const QString& how = {});
+    void arm_font_face(const QString& key);
+    QString armed_face() const { return armed_face_; }
+    QStringList faces_not_installed() const;
+    void note_fonts_on_open(const std::shared_ptr<Session>& session);
+    void show_usual_face();
+    // What is said of the open book's faces: a band above the page (the status line cut such a sentence short) — its
+    // words wrapped, a button この知らせを閉じる beside them —, there until it is closed: fonts_notice() its words,
+    // nothing when there is none; closed, it is not said again. tell_of_fonts: words for the band now (what a command
+    // left as it was, and why); say_of_fonts: a sentence for the status line, or — when the line is too short to show
+    // it whole — for the band, with a word in the status line that it is there.
+    QWidget* fonts_band() const { return fonts_band_; }
+    QLabel* fonts_band_text() const { return fonts_band_text_; }
+    QPushButton* fonts_band_close() const { return fonts_band_close_; }
+    QString fonts_notice() const;
+    void close_fonts_notice();
+    void tell_of_fonts(const QString& words);
+    void say_of_fonts(const QString& words, int ms);
+    // (the status label made narrower while it shows such a sentence — the widgets beside it grew —: the sentence
+    // moved to the band, as if it had not fitted in the first place)
+    void refit_fonts_sentence();
     BalloonPalette* balloon_palette() const { return balloon_palette_; }
     QDockWidget* balloon_dock() const { return balloon_dock_; }
     void use_balloon_preset(const QString& key, const QString& how = {});
@@ -1189,6 +1221,8 @@ private:
     void build_line_dock();
     void build_balloon_actions();  // (フキダシ: main_window_fukidashi.cpp)
     void build_balloon_dock();
+    void build_font_actions();  // (書体: main_window_fonts.cpp)
+    void build_font_dock();
     QWidget* line_select_page();
     void panel_for_tool(const QString& tool);
     void refresh_lines();
@@ -1583,6 +1617,20 @@ private:
     BalloonPalette* balloon_palette_ = nullptr;
     QDockWidget* balloon_dock_ = nullptr;
     QString armed_balloon_;  // (the palette's preset the next line placed takes; empty: none)
+    FontPalette* font_palette_ = nullptr;
+    QDockWidget* font_dock_ = nullptr;
+    QString armed_face_;  // (the 書体 palette's face the next line placed takes; empty: the text tool's own choice)
+    // (the books whose faces were looked at when they were opened, with what is said of each — nothing: nothing to say,
+    // or the band was closed)
+    std::vector<std::pair<std::weak_ptr<Session>, QString>> fonts_told_;
+    QWidget* fonts_band_ = nullptr;
+    QString fonts_flashed_;  // (what say_of_fonts last put in the status line: the sentence, or the word that it is in the band)
+    bool fonts_refitting_ = false;
+    bool status_fits(const QString& words) const;
+    QLabel* fonts_band_text_ = nullptr;
+    QWidget* fonts_band_words_ = nullptr;  // (the scrolling box the words are in: main_window.cpp's BandWords)
+    QPushButton* fonts_band_close_ = nullptr;
+    void show_fonts_band(const QString& words);
     QPointer<StoryEditor> story_editor_;
     QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
     bool lines_later_ = false;

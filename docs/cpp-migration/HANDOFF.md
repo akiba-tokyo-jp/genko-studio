@@ -12,12 +12,523 @@
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - **R3 の置き換え（利用者の決定 2026-11-13）**: 工程の出口は、差分から選んだ範囲（変更分と影響箇所）を ASan と Release の 2 構成で流す。Debug は最終配布の前に 1 回だけ。詳しくは「コマ割り K」の節の「利用者の決定（2026-11-13）」。
+- **範囲の細分と写真加工の試験（利用者の決定 2026-11-14）**: 「写真加工のコードを触った工程でだけ ASan にかけるで良いです」。工程の出口の段階は `--phase milestone`（Release は全通常試験、ASan は差分に関係する試験。写真加工の試験は写真加工のコードに触れた差分だけ）。最終配布の候補は `--phase final`（全構成・全試験。Debug の 1 回はここ）。規則は VALIDATION.md §2a・§2b。枝 `native/validation-scope`（e4dd6924）を `native/fonts-fukidashi2` に取り込み（3584d348）、方針の試験 217 件合格、`validation_closure_check.py` を Release の全ビルドに当てて合格（280 実行物・取りこぼし 0）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
 - 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13（この節が最新）
+## 書体の追加（F1・F2）とフキダシの追加の出口 — 凍結 7046eea6 で Linux の ASan・Release が合格（2026-11-15）
+- **凍結SHA**: `7046eea6`（native/fonts-fukidashi2。書体の追加 F1・F2、フキダシの追加 群 1・群 2 とレビューの直し、書体の決定 2 件、範囲の細分〔native/validation-scope の取り込み 3584d348〕、レビュー 3 の直し、test_fukidashi の ASan の重さの直し）。計画は `validation_policy.py --base da6acebd --head 7046eea6 --phase milestone`（tier full、203 の変更、理由 13。写真加工の試験も ASan に入る）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB（プロセスは 14 GB の memory cgroup の中）/ Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 結果:
+  - linux-asan: 271/271 合格（2 並列、02:16〜04:46 UTC の 2 時間 30 分。QtTest の項目 6,683、SKIP 0、CLI23 合格）。1 回で走り切った（引き継ぎは起きていない）。test_fukidashi 1,968 秒（545 項目）、test_fx_lens 94 秒（前の出口の 3,054 秒から）、test_package 合格。
+  - linux-release: 271/271 合格（2 並列、05:26〜05:45 UTC の 19 分。項目 6,609、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。test_package 合格。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 66 本すべて合格（項目 1,229。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で、1 回温めてから）: test_perf_app 2 回（開くまで 915 ms・457 ms、入力から画面まで p95 0.78 ms・1.54 ms、p99 2.24 ms・2.99 ms）、test_perf_render 合格（F1 の頁 350 dpi 全体 674 ms。フキダシ 10 個の B4 600 dpi: フキダシ無し 373 ms、一から 778 ms、描き直し 523 ms。追加の全部を付けた 10 個 1,303 ms。表示だけで合否は付けていない。SKIP は前からの psd_of_groups_at_350dpi の 1 つ）、test_perf_pipeline 合格（PERF-F 全体 p95 530.8 ms、書き出し p95 5,347.8 ms）。
+  - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- 合格までの回（合格に数えていない）: 凍結 e5c2c0f3 の回。ASan で test_fukidashi だけが落ちた（1 回目は QtTest の 1 関数 5 分、落ちた 1 本だけの流し直しは ctest の 1,800 秒。どちらも `aThickDoubleLineWithDripsIsNotSlow` の中）。ほかの 270 本は合格、サニタイザーの報告は無し。原因と直しは下の「test_fukidashi の ASan の重さ」の節。コードを直したので、この出口は初めから流した（R4）。
+
+## フキダシの追加（fukidashi@2。SPEC BALLOON-02）— 2026-11-14、2026-11-15 に main に統合
+
+### 利用者の決定（2026-11-14）
+- 今風のフキダシに 4 つを足す:「1、2、3足してください」。(1) 筆や G ペンのように太さの変わる線（強弱・入り抜き）、(2) ホラーのしたたる形、(3) 記号の形（ハート・星・花・ひし形。星は `points: 4` で四方のきらめき）、(4) どの輪郭の中にもトーン・グラデーションのトーン・色のグラデーション。
+- リードの決め（設計 fukidashi-extra-plan の 13）: 拡張の名前は `fukidashi@2`。記号は 4 つとも。色のグラデーションも入れる（白黒のページではグラデーションのトーンを使うよう手引きとツールチップに書く）。トーンの上の文字にはトーン枠と同じ白い縁を自動で付ける。記号はネームの計画には入れない。
+- 群: 群 1 が土台（core・render・service・storage・文言・op の一覧・SPEC と schema・単体とサービスの試験・速さの目安）。群 2 が画面とエージェント（種類のメニュー・パレット・台詞パネル・MCP の説明・手引き・GUI の試験）。この節は群 1。
+
+### 群 1 でしたこと（ブランチ `native/fonts-fukidashi2`。main da6acebd に書体の追加を載せた上）
+- 設計: SPEC.md BALLOON-02、schema-v4.md「フキダシの追加」。op の一覧（`genko schema` と docs/ops.schema.json）の `edit_line` に種類 4 つと「style (fukidashi 2)」。
+- **まず控え**（設計の手順 0）: 手を入れる前の版で、見本の 2 冊（前の種類の本 4 ページ・今風の見本 3 ページ）の 150・600 dpi の絵の sha256 と、保存した project.json を記録した（tests/data/fukidashi/pins の pages.json・classic_project.json・clean_project.json）。test_fukidashi の aBookWithoutTheAdditionsIsDrawnAsBefore・…IsSavedAsBefore が最後まで通っている。前からの控え（PSD の sha256、tests/data/type/plain_lines.json）も動いていない。
+- core: `core/fukidashi.{hpp,cpp}` に `kFukidashi2Feature`・`uses_fukidashi2`・`is_symbol`・`symbol_points`・`star_inner`・`drip_reach`・`body_box`。`letter_box` は本体の箱から始まる（しずくの無い台詞は前と同じ数）。`ops_lines.cpp` に種類 4 つ・鍵 11 個・範囲の確かめ・正規の形、ひし形と星のしっぽの隠れ方。storage の書き手と読み手に `fukidashi@2`。
+- render: `render/text/balloon_clean` に記号の輪郭（`heart`・`star`・`flower`・`diamond`）、しっぽの出る楕円（`star_guide`・`flower_guide`・`star_centre`）、文字の場所（`symbol_room`）、しずくの 1 本（`drip`）、ペンの線（`Pen`・`pen_runs`・`pen_plane`。`Run` に形の番号を足した）。雲は「山を並べる」関数に切り出した（同じ式・同じ順。控えで確かめた）。`balloons.cpp` に本体の箱・しずくの並び（`add_drips`）・中のトーン（`tone_bytes`。格子が 512 px 以内で繰り返すときは 1 周期を描いて覚える）・色のグラデーション（`Masks` に blend と ramp、composite で画素ごと）・ペン（`pen_of`）。`lettering.cpp` は記号を「形に収める」種類に足し、トーンの上の文字の白い縁を足した。
+- service: `service::letter::measure_styled(breaks, balloon, em, style)`（多角形の辺・星と花の数と深さ・しずくの分の高さを style から読む）、`symbol_room(kind, points, inner)`。`measure`・`fits` は記号を受け取る。文言（service/wording.cpp）に 16 の文（範囲ごとの文 12、トーンとグラデーションの形が違うときの文 2、数でない値の文 2）。
+- 見本と試験: tests/support/fukidashi_books.hpp に `additions_book()`（1 ページに 1 つの追加: 記号・ペン・しずく・塗り）。test_fukidashi に 23 の試験（データの行を入れて 284 件）、test_fukidashi_service に 4 つ（41 件）、test_perf_render に速さの目安 1 つ（15 通り）。SKIP は無い。見本の絵は `GENKO_FUKIDASHI_OUT=<フォルダ>` を付けて test_fukidashi を流すと cleanupTestCase で書く（`GENKO_FUKIDASHI_SHEETS=additions` で追加の分だけ）。
+
+### 群 2 が使うもの
+- **種類**: `heart`・`star`・`flower`・`diamond`（`add_line`・`edit_line` の `balloon`）。
+- **鍵・範囲・無いとき**（どれも `edit_line` の `style`。null で消える）:
+
+| 鍵 | 範囲 | 無いとき | 意味 |
+|---|---|---|---|
+| `pen_swell` | 0〜0.9 | 強弱なし | 太さ ×（1 ＋ 値 × 法線·太い側の向き）。`border_mm` は平均の太さのまま |
+| `pen_angle` | 0〜360 | 45 | 太い側の向き（0 右・90 下） |
+| `pen_taper` | 0〜1 | 入り抜きなし | 筆の両端へ細る長さの割合（端は 0.15 倍） |
+| `pen_strokes` | 1〜8（整数） | 2 | 角の無い輪郭を描く筆数（角のある輪郭は角から角まで） |
+| `drip_mm` | 0〜30 | しずくなし | いちばん長いしずく。箱の高さの 0.6 まで。箱はその分だけ高くする |
+| `drips` | 1〜24（整数） | 幅で決まる（3〜16） | しずくの枠の数 |
+| `drip_width_mm` | 0.3〜10 | 幅の 7%（1.2〜4 mm） | しずくのふつうの太さ |
+| `drip_seed` | 0〜999999（整数） | 0 | 並び。「並びを変える」は 1 足す |
+| `points` | 4〜12（整数） | 星 5・花 6 | 星の先・花びらの数 |
+| `fill_tone` | `{density 0〜0.9, lpi 20〜85, angle 0〜90, pattern "dot"/"line", to? 0〜0.9, dir? −360〜360, radial?, inset_mm? 0〜5}` | トーンなし | `density` は必ず要る。op が返す形は `density`・`lpi`（60）・`angle`（45）・`pattern`（dot）が必ず入る。パネルはこの形をまるごと書く |
+| `fill_gradient` | `{to: [r, g, b], dir? −360〜360, radial?}` | なし | `fill_rgb`（無ければ白）から `to` へ。op が返す形は `to`・`dir`（90） |
+
+  星の深さは前からの `spike_depth`（0.05〜0.6。星は無ければ 0.38。`points: 4, spike_depth: 0.6` がきらめき）、角の丸みは `corner_mm`（ハートの先・星の先と谷・ひし形の角）。
+- **パレットが消す鍵**: 上の 11 個を `balloon_look_keys()` に足す（後から当てたプリセットが前の追加を消せるように）。台詞パネルの「既定の設定に戻す」は core::line_style_keys() から作るので、もう 63 個を消す（test_gui_lines の期待値を 52 → 63 にした。下）。
+- **関数**: 寸法は `service::letter::measure_styled(breaks, kind, em, style)`。**app/lettering.cpp の measure・box_size・refit_for_kind には記号としずくの場合がまだ無い**（今は記号を箱の種類として測る）。群 2 で、記号の 4 種類を capsule・polygon と同じ道（service の式）へ回し、`own_shape` に足し、`drip_mm` のある台詞は高さにその分を足す。種類の判定は `core::is_symbol(kind)`、しずくの届く長さは `core::drip_reach(line)`、本体の箱は `core::body_box(line)`。見本の絵は今までどおり `render::text::draw_group`（パレットの 56 dpi ではトーンは 2 px の格子で、点ではなく灰色に見える）。
+- **隠す行の目安**: しずくは手で描いた輪郭・`dotted_box`・`flash`・`picture`・`sfx`・`none` では描かれない。ペンは `dotted_box`・`flash` では描かれず、破線（`whisper`・`dash_mm`）では強弱だけ。`points` は星と花だけ。トーンとグラデーションは `sfx`・`none`・`picture` では描かれない。op はどれも受け取って持つ（断らない）。パレットがしずくのプリセットを手で描いた輪郭に当てたときの文（設計の 6）:「手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）」。
+- **断りの文**（service/wording。画面でも同じ文が出る）: 「フキダシの線の強弱は 0〜0.9 です」「線の太い側の向きは 0〜360 度です」「線の入り抜きは 0〜1 です」「フキダシの線を描く筆数は 1〜8 です」「しずくの長さは 0〜30 mm です」「しずくの数は 1〜24 です」「しずくの太さは 0.3〜10 mm です」「しずくの並びの番号は 0〜999999 です」「星のとがり・花びらの数は 4〜12 です」「フキダシの中のトーンの濃さは 0〜90% です」「フキダシの中のトーンの線数は 20〜85 です」「フキダシの中のトーンの柄は、点か線から選びます」「フキダシの中のトーンの指定が正しくありません」「フキダシの中のグラデーションの指定が正しくありません」「フキダシの線・しずくの設定は数で指定します」「フキダシの筆数・しずくの数や番号・とがりの数は整数で指定します」。
+- **群 2 に残ること**: 種類のメニュー（ハート・星・花・ひし形）と commands.json、パレットのプリセット、台詞パネルの行、MCP の apply_ops・propose_lines の説明、手引き（SKILL.md・drawing.md と integrations/ の写し）、GUI と e2e の試験。手引きには「白黒のページでは `fill_gradient` でなく `fill_tone` の `to`」と書く。
+
+### 変えた既存の試験（意図した変更。緩めていない）
+- test_gui_lines theLinesPanelListsReordersAndEdits: 「既定の設定に戻す」が消す鍵の数 52 → 63。この操作は core が受け取る鍵の一覧（core::line_style_keys）から作るので、core に鍵を 11 個足すと数が変わる（設計では群 2 の項目だったが、原因は土台の側にある）。
+- docs/ops.schema.json: native の一覧と同じ文に（edit_line の balloon と「style (fukidashi 2)」）。
+- ほかの期待値は変えていない。
+
+### 確かめたこと（Linux Release。関係する試験だけ）
+- すべてを作り直した（ビルドの全ターゲット 572 手順、エラーなし）うえで、関係する試験 49 本を 2 本ずつ流して 49 本とも合格（2182 件。失敗 0）: test_fukidashi（356 件。前は 72）・test_fukidashi_service（59 件。前は 18）・test_render_page・test_storage・test_contract_storage・test_model・test_command_bus・test_ops・test_studio_ops・test_features・test_type_text・test_type_styles・test_contract_type・test_contract_type_styles・test_contract_type_fonts・test_contract_opentype・test_measure_features・test_ruby・test_ruby_render・test_psd_text・test_psd_smart・test_contract_psd・test_contract_psd_text・test_contract_psd_smart・test_smart_stack・test_tones_effects・test_tone_ops・test_font_catalog・test_font_faces・test_font_service・test_layout_ideas・test_service・test_ledger_service_a/b/c・test_cli_e2e・test_save_e2e・test_ops_e2e・test_mcp_api_e2e・test_gui_ledger_a（どの断りも日本語で読める）・test_gui_lines・test_gui_fukidashi・test_gui_ruby・test_gui_output・test_gui_type・test_gui_type_panels・test_gui_fonts・test_gui_actions・test_perf_render。全体の試験は流していない。
+- 記録に SKIP は 17 件あるが、どれも前からのもの（test_save_e2e の障害の差し込み 16 件は Release のビルドには無い、test_perf_render の psd_of_groups_at_350dpi は環境変数が無いとき）。この群で足した試験に SKIP は無い。FAIL・QFATAL は 0。
+- 控えの試験（手を入れる前の 2 冊、追加の見本）は、失敗するのを見てから記録して通した。ほかの新しい試験は、それぞれの実装のあとに書いた。書いたときに落ちて実装を直した所: 記号の箱が大きすぎる、星の 1 列が測った寸法で折り返される、下向きのグラデーションの色が行の中で 1 段ずれる。見本の絵を見て直した所: 花の上が平らになる、しずくの付け根で線が切れる（そのあと「線が開かない」試験を足した）。
+- 設計の「確かめていない」の項: (1) 雲を切り出しても画素が同じ → 控えで確かめた。(2) 文字を編集できる PSD の白い縁 → トーン枠の自動の縁は、文字の絵に描くのと同じ値から文字レイヤーの境界線（`SetLetters::halo`）として出ていて、`fill_tone` も同じ値を通る（test_fukidashi の theLettersOverAToneHaveAWhiteEdge で幅と色が同じことを確かめた）。(3) ページの端で切れる領域 → aBalloonThePageCutsOffIsTheSame（全部の追加を付けた 4 種類、150・600 dpi で、大きいページの同じ所と同じ画素）。(4) service/atari.cpp は言われた種類をそのまま使い `letter::measure(breaks, balloon)` で測る（記号はその種類の既定の数で測られる）。service/finish.cpp の `tailed` は、記号を話し言葉の種類として扱う（話し手がいればしっぽを向ける。楕円と同じ）。どちらもコードは変えていない。(5) 速さと、小さい円をたくさん描くときの速さ → 下。
+
+### 見本を見て決めたこと
+- ハート: 設計の「2 つの円が 1 点で接し、先まで直線」だと切れ込みが幅の無い筋になり、下が三角に見えるので、山を少し重ねて（中心 ±0.485・半径 0.515）切れ込みに角度を付け、下の辺を外へふくらむ曲線にした。左右は点ごとに同じ。
+- 星: 先を「短い半径の 0.10 の丸み」で丸めると、細い先（きらめき）が 3 割近く削れるので、無いときは先を短い半径の 0.035 だけ縮める丸みにした（`corner_mm` を書けばその半径）。
+- 花: 山を半円にすると円弧の作り方（半円未満）が破れて上が平らになったので、高さを幅の 0.46 にした。雲とはっきり違って見える。
+- しずく: 傾いた輪郭（ハートの下・楕円の脇）では、上の辺の付け根に小さな段ができたので、指の形は両方の辺が輪郭を出た所から始め、それより上はまっすぐにした。輪郭が指の角をちょうど通ると継ぎ目が 2 つできて線が切れたので、角を少し下げた。番号によっては本数が少なくなる（4 枠で 1 本だけ、など）。それは「並びを変える」で変えてもらう。
+- ペン: 四角は辺ごとに 1 筆で、角で細くなる。しっぽのあるフキダシは先から先までが 1 筆。楕円の 2 筆は左上と右下で細くなる（右下は太い側なので、強弱の山が途中でくびれる。1 筆なら左上だけ）。白黒にしても線は切れない（いちばん細い所で 1 px）。
+- トーン: 600 dpi を白黒にすると、点は面積で 3 割以上かかった画素が黒になるので 2 割ほど太る（60 線の 50% では市松に近くなる）。濃さ 10〜30% では点がそろって見える。
+
+### 速さ（test_perf_render。表示だけ。B4・600 dpi（6071 × 8598 px）に 10 個。数字は揺れる: 同じ条件でも、機械が混んだ回は 1.7 倍まで延びた）
+- 今日の元の数字（何も足さない 10 個。3 回）: フキダシなし 373〜550 ms、ありを最初から 672〜1168 ms、もう一度 399〜595 ms、形だけ 312〜466 ms（1 個 31〜47 ms）。静かな回は前の記録（680 ms）と同じ。機械が混むと 1.7 倍まで延びる。下の差は同じ回の「何も足さない 10 個」との差。
+- ペンの線: 形だけで 1 個 −14〜＋11 ms（揺れの中。差は見えない）。しずく: −7〜＋11 ms（同じ）。記号 10 個: −21〜＋12 ms（同じ）。色のグラデーション: −16〜＋22 ms。
+- トーン（形だけ、1 個あたり）: 点 ＋11〜＋12 ms（1 回は揺れで −11）、濃くなる点 ＋4〜＋28 ms、線の内側を白く ＋4〜＋30 ms、濃くなる線 ＋8〜＋25 ms、15° の細かい格子で濃くなる点（最初に 64 枚の周期を作る）＋4〜＋40 ms、繰り返さない粗い格子（20 線・30°。1 個に 1000 個あまりの点を 1 つずつ描く）＋44〜＋72 ms。全部を一度に: ＋18〜＋56 ms。
+- **ページ全体では、トーンのフキダシ 10 個で最初の 1 回が ＋2.3〜2.9 秒**。ほとんどが文字の白い縁（1 本 0.25〜0.3 秒）で、トーンを付けずに文字に縁取り（`outline_mm: 0.7`）を付けただけでも同じだけ延びる（＋2.6〜2.9 秒）。前からある縁取りの処理の速さで、この群では変えていない。2 回目からは覚えているので速い。
+- 設計の見積もり（1 個あたり ペン ＋1〜4、しずく ＋3〜8、トーン ＋3〜6、グラデーション ＋5〜10 ms）と比べると、ペン・しずくは見積もりの中、トーンとグラデーションは 2〜4 倍。この目安は長いしっぽのせいで 1 個の領域が 2600 × 2400 px あり、トーンの手間は領域の広さで決まる。
+
+### 設計と違う所
+- 記号の寸法: 「（塊＋余白）× 倍率を出してから短い辺を広げる」ではなく、その記号らしい縦横の比の中で、塊が入るいちばん小さい箱を探す（13 通りの比を試す）。縦長の言葉で箱が大きくなりすぎないように。
+- 記号の中で列を折る長さ: 箱の高さではなく、文字の場所が真ん中を通る長さにした（星の 1 列が測った寸法で折り返されないように）。
+- 記号は話し言葉の種類として、文末の「。」を落とす（capsule・polygon は前のまま変えていない）。
+- トーン: 点の中心はトーンのレイヤーと同じ所（設計の式に画素の半分を足した）。繰り返しの周期は N ではなく N ÷ gcd(m, n)（60 線 45° は 14 px）。濃さが π/4 を超える所の半径は表で補う（重なりで面積が足りなくなるので）。`fill: none` でもトーンは敷く。`density` は必ず書く。
+- しずく: 長さは、そのしずくが出る輪郭の所から測る（本体の下の端からではない）。いちばん長い 1 本だけ箱の下の端まで。
+- ペン: 角の無い線の筆の始まりは「周りの 0.875 の所」ではなく、線がいちばん細くなる所（45° の楕円では同じ所）。描き方は帯の分かれ道を作らず、いつも台形とくさびの和集合。つなぐ処理は設計どおりにできた（つなげなかった切れ端を 1 本ずつ描く逃げ道は残してある）。
+- app/lettering.cpp には触れていない（設計の 4.1 は群 1 の記号の節に書いていたが、画面の側なので群 2 に残した。上の「群 2 が使うもの」）。
+
+### 残り・気を付けること（群 1 の時点。直したものは下の「レビューの直し」）
+- ~~前からの不具合: 四角のしっぽが角へ向かうと線が切れる~~ → レビューの直しで直した（下）。
+- トーンの上の文字の白い縁は、前からの縁取り（`outline_mm`・トーン枠）と同じ処理。速さは下の「レビューの直し」で測り直した。
+- 繰り返さない粗い格子（たとえば 20 線・30°）のトーンは点を 1 つずつ描く。600 dpi で 1 個 40〜70 ms。1200 dpi ではその数倍。
+- Windows のビルドはしていない（`__int128`・`near`/`far`・非コピー型の `?:` は使っていない。新しい角度は libm_float の sinf・cosf。`tones::screen_vector` はトーンのレイヤーと同じく、整数に丸める前に環境の cos を使う）。
+
+### 群 1 のレビューの直し（読み取りだけのレビュー fukidashi2-review1 とリードの決め。同じブランチ、7b3fd9e2〜）— 2026-11-14
+
+レビューは P1 なし、P2 が 4 つ、P3 が 7 つ。リードの決めのとおり全部を直し、それぞれに試験を足した。見本の 2 冊の控え（手を入れる前の版の絵と保存のバイト）は最後まで動いていない。PSD の控え（psd_book_hashes）、tests/data/type/plain_lines.json も動いていない。
+
+- **P2-1 筆の区切りが解像度で変わる**: 角を「点と点で 30° を超えて曲がる所」で決めていたので、丸めた角の切り方（解像度で変わる）で角だったりなかったりした。今は**形を作る関数が自分の角を言う**（`clean::rounded`・`polygon`・`diamond`・`star`・`heart`・`cloud`・`flower` の `corners`、叫び・電子音は輪郭の点すべて、しっぽは `Tail::corners` に先と曲がり目、手で描いた形は 30° を超える点）。丸めた角はその丸みの真ん中の点が角。`rounded`・四角は `corner_mm` が 2 mm 未満（`kPenCornerMm`）のときだけ角を言う（無いとき、四角は角、角丸は丸い 1 本の線）。ほかに、形と形のつなぎ目（しっぽの付け根で継ぎ目が無いとき、しずくの付け根）は、そこから 0.5 mm 前後の向きで 30° を超えれば角（点の並びに依らない）。丸く継いだ継ぎ目は角にならない。角の無い閉じた線は、形の重心から太い側と逆へ引いた線が輪郭を出る所から始める（点の並びに依らない）。筆の長さの決まり（太さの何倍か）は、整数の画素にする前の線の太さで数える。試験: `thePensStrokesAreTheSameAtEveryResolution`（32 通りの形と設定 × しっぽの有無 × 2 つの大きさ: 150・600・1200 dpi で筆の数・始まり（0.34 mm 以内）・太さ（線の太さの 1/8 以内、8 倍より短い筆は 1/4））。
+- **P2-2 しずくの並びが解像度で変わる**: しずくの数・ふつうの太さ・並ぶ幅・抜け・長さは、行の mm から（本体を 100 px/mm で作って）`drip_plan` で決め、描くときはその mm を画素にするだけにした（`add_drips`）。数の丸めは「ちょうど半分は上」に 1e-9 の余裕。試験: `theDripsAreTheSameAtEveryResolution`（レビューの 72 mm・38×18・56・88・104・16.8 mm・四角の 49.78 と 35.56 mm など 20 の大きさ × 12 の並び: 150・350・600・1200 dpi で本数・位置（粗い方の 1.5 画素以内）・太さ・長さが同じ）。
+- **P2-3 角の間の短い筆に黒い玉**: 筆の両端の細さは、長さが太さの 8 倍以上なら 0.15 倍、4 倍以下なら細らせず、その間はなめらかに。角では、そこで会う 2 つの筆の細い方にそろえる。太さより近い角は 1 つにまとめる。試験: `aShortStrokeBetweenCornersIsNoKnob`（角を切り落とした四角の幾何、レビューのハート 4 通りと細かいトゲ・雲・電子音・十二角形・小さな角丸の四角を 150・600 dpi で: 線の太さが両隣より 1.8 倍以上太い所が無い）。
+- **P2-4 二重線のしずくが遅い**: しずくのあるフキダシの二重線の内側の線、`inset_mm` の白、トーン枠の余白は、しずくの指を除いた形（本体・しっぽ・継ぎ目）の縁で作る。試験: `aThickDoubleLineWithDripsIsNotSlow`（レビューの雲 38×13.5 mm・線 2.5 mm の二重線としずく・ペン・トーン: しずく無しの 3 倍＋3 秒以内。前は 55 秒。今は無しとほぼ同じ。二重線は本体だけにあり、指には 1 本の線）。**前からの重さ**: `border_mm` に上限が無く、とても太い線（例: 0.3×60 mm の箱に線 30 mm と二重線）は、しずくが無くても前の版から 25 秒以上かかる。今回は変えていない。**同じ重さの残り（レビュー 3 の P3-4）**: ハート 38×13.5 mm・線 2.5 mm・二重線は 600 dpi の 1 個で 22.6 秒（しずく無しで 21.5 秒。同じ大きさの雲は 5.6 秒）だった。→ 2026-11-15 に直した（下の「test_fukidashi の ASan の重さ」）: ASan で 975 秒 → 61 秒、雲は 224 秒 → 0.9 秒。どの絵も前と同じ画素。
+- **P3-1 太いしずくが箱の外へ**: 半分の幅を、枠の 0.45 倍と本体の幅の 0.15 倍までにした。付け根の丸みは、本体の次の角の手前で止める（`clean::drip_joins`）。線の太さの 1.5 倍より細い指には丸みを付けない。**決め**: いちばん長いしずくは必ず描く（その枠で描けなければ輪郭の真ん中から）。だから本体を縮めたのにしずくが 1 本も無い、ということは起きない。試験: `aWideDripStaysInItsBalloon`（レビューのひし形 20×13.5・角丸・小さな星の 12 本・カプセルの 24 本など 10 通り × 32 の並び: 箱の外に何も無い、しずくがある、線が閉じている）。
+- **P3-2 白い縁のずれ**: 文字の白い縁は、そのグループで実際に描かれるトーン（最初の行の `fill_tone`）に従う（`render::text::ToneUnder`。draw_group が文字を描く間だけ置く。文字の覚えの鍵にも入る）。何も描かないトーン（濃さ 0 で先も 0、濃さの無いもの）では縁を付けない（`fill_tone_draws`）。試験: `theWhiteEdgeFollowsTheToneDrawn`。
+- **P3-3 確かめていない値でページが描けない**: 描く側で、しずくの数・番号・太さ、トーンとグラデーションの中身をすべて範囲に収め、形の違う値は無いものとして読む（グラデーションの先の色は数 3 つのときだけ）。試験: `aMalformedStyleStillDraws`（3 種類 × 11 の鍵 × 間違った型 8 つと極端な数 8 つ、トーンとグラデーションの中身 11 個 × 22 の値で、描く・文字を組む・点検する・保存するのどれも失敗しない。型の違う値は鍵が無いのと同じ絵）。
+- **P3-4 白黒のトーン**: 点検に `balloon_tone_light`・`balloon_tone_dark` を足した（formats/checks。白黒のページの、フキダシの中のトーンが、ページの解像度で点（線）が 2 画素より細い・点と点の間の白が 2 画素より細い。グラデーションのトーンは両端で見る。つないだフキダシは最初の行のトーンを 1 回だけ。カラーのページでは言わない）。範囲は `render::text::balloon::tone_print_range(dpi, lpi, lines)`。**600 dpi で印刷に残る濃さ**: 点は 60 線で 4〜90%、85 線で 7〜85%（点が飛ぶ・白がつぶれる）。線は 60 線で 20〜80%。1200 dpi ならその 1/4 から。**残ること**: 60 線・600 dpi の 60〜75% は、隣の点がほとんど触れる所に 1〜2 画素の白い点が残る（網点が点から穴へ移る所。どの網でも起きる。1200 dpi ではほとんど出ない）。点検では言わない（言うとふつうのトーンのほとんどで出てしまう）。試験: `aToneOutsideWhatPrintsIsWarnedOf`。
+- **P3-5 文**: レビューの案を入れた。「フキダシの中のトーンの濃さは 0〜0.9（90%）です」「フキダシの線を何筆で描くかは 1〜8 です」「星の先と花びらの数は 4〜12 です」。トーンの角度・濃くなる向き・線から離す幅・濃さが無い、グラデーションの先の色・向きにそれぞれの文。数でない値は鍵ごとの文（「しずくの数は整数で指定します」など 9 つ）。全部で 29 の文（service/wording.cpp）。試験: test_fukidashi_service の `theAdditionsRefusalsReadInJapanese`（51 行）。
+- **P3-6**: 星の谷の範囲のコメントを直した（0.2〜0.95、行からは 0.4〜0.95）。しっぽが隠れたか・外へ出す決まりは、しずくのある行は本体の箱で、星は星の中心で測る（`inside_star` の三角関数は `inside_polygon` と同じく環境のもののまま）。`inset_mm` は線の同じ太さから測る（ペンの太い側はその分を食う）ことを SPEC に書いた。試験: `aTipIsHiddenByASymbolItself` に足した。
+- **P3-7 白い縁の速さ**: 縁取りの処理は変えていない。測り直し（下の速さの表）: 1 枚を最初から描く試験の中では 10 本で ＋2.6 秒（1 本 0.26 秒）、`genko render`（コマンド）では ＋0.3 秒（10 本）。違いは描き方（コマンドは文字を別のスレッドでも組む）。行と列に分けた最大値フィルター（同じバイトで 1 画素あたり 2 × 大きさ）にすれば速くなるが、今回はしていない。→ 2026-11-15 に分けた（下の「test_fukidashi の ASan の重さ」。同じバイト）。
+- **箱の角のしっぽで線が切れる（fukidashi@1 の不具合。リードの決めで直した）**: しっぽの付け根（輪郭の内側にある辺）の端が、箱の角の外に出ると、その外の部分は線の無い縁になっていた。付け根の端が輪郭の外にあるときは、その端だけを中心線の方へ、輪郭のすぐ内側（輪郭までの 0.9）まで寄せる。~~付け根の端が内側にあるしっぽ（角から離れたしっぽすべて）は前と同じ計算で、同じ点になる。~~ **（この一文は誤り。レビュー 3 の P1-1）**: この直しは角に限らず、付け根の端が輪郭の外に出るしっぽすべて（細い楕円・カプセル・多角形の幅の広いしっぽ、電気・叫びの谷、波の谷）を寄せていて、前は閉じていたしっぽの絵も変えていた（レビューの 1,152 本のうち 189 本）。下の「レビュー 3 の直し」で、前の作りで線が開いていたしっぽだけを寄せるようにした。**直す前**（レビューの表、600 dpi の切れ目の大きさ）: 30×24 なし、40×30 は ±3° で 6 px、44×36 は −6°〜+3° で 13 px、50×46 は ±6° で 28 px（約 1.2 mm）、60×40 は −6°〜+3° で 19 px、80×30 は −3° で 4 px。幅 6 mm のしっぽの 24×18 は −11°〜+8°、8 mm は −15°〜+11°。**直した後**: 試験 `aTailAtABoxCornerClosesItsLine`（四角・角 1 mm の四角・角丸の 0・1・3 mm と既定・太い線・ペン × くさび・まっすぐ・ギザギザ × レビューの 8 つの大きさ × 4 つの角 × 角の向きの ±15° を 1.5° ごと = 24 × 672 枚: どれも線が閉じている）。**動いた控え**: 無し。見本の 2 冊（前の種類の本・今風の見本）にも PSD の見本・plain_lines にも角へ向かうしっぽは無く、どの絵の sha256 も変わらなかった（試験で確かめた）。見本の絵: `fukidashi2/fix/fix-box-corner-tail-before.png`・`-after.png`（作業用の場所）。
+- **見落とされていた性質の試験**（レビューの 7）: 二つの解像度で同じ筆・同じしずく（上）、角の間の短い筆（上）、二重線と太い線のしずく（上）、本体の幅に近い太さのしずく（上）、描く側の値の収め方（上）、ペンと切れ込み・手で描いた形・消しゴム・消えるしっぽ（`thePensLineWithANotchAPathCutsAndAFade`）、1200 dpi のペンとしずく（`thePenAndTheDripsAt1200Dpi`）、記号の文字の極端な縦横比と 5・6 以外の数（`theLettersFitASymbolOfAnyShape`: 9 つの記号 × 6 つの箱 × 150・600 dpi）、つないだフキダシでトーンの違う行（上）、0.1 より薄い・0.5 より濃い白黒のトーン（上）、スマートオブジェクトの中の文字レイヤー（`theAdditionsInsideContentsAndOnManyThreads`）、スレッドの数（同じ: 8 回、4 つずつ並べて、控えと同じ sha256）。
+- **ふるえるハートの切れ込み（自分の見本で見つけた。群 1 の不具合）**: `wave_mm` のハートは、切れ込みの両側で外へ押した波が切れ込みで交わって、線が X の形（長い 2 本の先）になっていた（どの解像度でも。ペンの有無に依らない）。今は、内へ曲がる角（形が言う角のうち、輪郭が内へ折れる所。ハートの切れ込みだけ）から 1 波のあいだで波を 0 まで静める（`clean::waved` の `corners`）。外へ曲がる角（四角・角丸・多角形・ひし形の角、ハートの先）は前と同じ波で、同じ点になる（試験で同じ点を確かめた。だから前の版の本は動かない）。試験: `aTremblingHeartsCleftDoesNotCrossItself`（300・600・1200 dpi × 波 0.2・0.3・0.6 mm × 線 0.3・0.7 mm とペン: 切れ込みのいちばん下 0.6 mm のインクの幅が 1 mm 未満。直す前は 1.4〜4.9 mm。直す前の版で落ちることを確かめた）。
+- **ペンの線のいちばん細い所**: 1 画素から 1.5 画素にした（線の太さがそれより細ければその太さ）。2 つの細った端が鋭い角で会う所で、薄すぎる画素が残らないように（300 dpi のギザギザのしっぽで線が切れて見えた）。
+- **変わった控え**: 追加の見本（tests/data/fukidashi/pins/additions_pages.json）の 2 ページ（ペン）と 3 ページ（しずく）の sha256（筆の角・しずくの mm の決め）、1 ページ（記号）の sha256（ふるえるハートの切れ込み）。150・600 dpi とも。追加の見本の保存のバイト（additions_project.json）は同じ。4 ページ（塗り）は同じ。手を入れる前の版の控え（pages.json・classic_project.json・clean_project.json）は同じ。
+- **変えた既存の試験の期待値（緩めていない）**: test_fukidashi の自分の試験のうち、ペンの最小の太さを 1.5 画素にしたので、強弱の試験の期待値を「1.5 画素か計算の太さの大きい方」に、入り抜きの試験の線を 8 から 12 画素に（0.15 倍が 1.5 画素を超えるように）、四角の角の太さを 1.2 から 1.5 に。test_fukidashi_service の断りの文の期待値を新しい文に（6 行）、足りなかった行を足した。
+- **確かめたこと**: 下の「群 2」の「確かめたこと」にまとめた。
+
+### 群 2（画面とエージェント）— 2026-11-14
+- **種類のメニュー**（app/lettering.cpp の `kinds()`。5 つのメニュー: ページ → 台詞 → フキダシの形、フキダシの右クリック、台詞パネル、文字ツールの設定、ストーリーエディター）: 多角形の次に「ハート（甘い声）」「星（はしゃぐ声・きらめき）」「花（やわらかい声）」「ひし形（冷たいひとこと）」。commands.json に 4 つ（menu の項目は名前で並ぶ。名前のある操作の数は 823 のまま: 種類の項目は数に入らない）。種類を記号へ（記号から）変えると、同じ取り消し 1 回の中で箱を言葉に合わせて作り直す（`refit_for_kind` の `own_shape` に記号）。
+- **寸法**（app/lettering.cpp）: `measure`・`box_size` が style を受け取る。記号は `service::letter::measure_styled`（先の数・深さを style から）。しずくのある台詞は箱をその分だけ高く（`drip_growth`: `drip_mm`、30 まで、体の 1.5 倍まで。描かない種類は 0。描く長さは `drip_height`: 箱の 0.6 まで。レビュー 3 の P3-2）。文字ツールで置く台詞・打ち直し・種類を変えたときに使う。種類を変えたとき、しずくのある台詞は本体の真ん中を保つ。
+- **パレット**（app/balloon_palette.cpp。32 → 49）: 強弱の線・G ペン風・筆風・G ペンの叫び（ペン）、したたる・ベタホラー・溶ける四角・ふるえホラー（しずく）、ハート・星・きらめき・花・ひし形（記号）、トーン・グラデトーン・トーンの叫び・濃いグラデ（中のトーン。どれも白黒で印刷に残る濃さ。色のグラデーションはパレットに入れていない: 白黒の原稿で使われないように）。`balloon_look_keys()` に追加の 11 個（あとで別の形を当てると消える）。しずくのある形を当てると箱がその分高くなり（本体はそのまま）、しずくの無い形を当てると低くなる。手で描いたフキダシにしずくの形を当てると「手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）」（しずくの鍵は書かない。しずくだけの形なら何もせず「手で描いたフキダシには、しずくは付きません」。レビュー 3 の P3-1）。絵は今までどおり、見せたときに少しずつ描く。
+- **台詞パネル**（app/story_panel.cpp。選択ツールの設定の欄）: 線の強弱・太い側の向き（強弱があるとき）・入り抜き・筆の運び（入り抜きがあるとき）、しずくの長さ・しずくの数・しずくの太さ・「しずくの並びを変える」（長さがあるとき）、星の先・花びらの数（星と花）、中のトーン・トーンの線数・トーンの柄・先の濃さ（トーンがあるとき）・濃くなる向き（先の濃さがあるとき）、「中の色のグラデーション…」（設定してあれば「…を外す」）。どれも 1 回の取り消し。しずくの長さは `edit_line` と、箱の高さの `move_line` を 1 回で送る。トーンは `fill_tone` をまるごと書く（角度・`radial`・`inset_mm` は今の値を残す）。見せる行: ペンは点線の囲み・フラッシュ・フキダシの無い種類で隠す。しずくはそれに加えて手で描いた形で隠す。トーンと色のグラデーションはフキダシの無い種類で隠す。星の「トゲの長さ」は星の既定 0.38 を見せる。ツールチップ: 中のトーンに「600 dpi の白黒の原稿では、60 線なら 4〜90%、85 線なら 7〜85% が点として印刷に残ります…解像度が低いほど薄い側が狭く、350 dpi・60 線なら 9% から…点検で知らせます」（レビュー 3 の P3-5 で 600 dpi と書いた）、色のグラデーションに「カラーの原稿向け…白黒の原稿では…「先の濃さ」を使います」。
+- **エージェント**: MCP の `apply_ops` の説明に記号 4 つと追加の鍵（白黒の範囲、`fill_gradient` はカラー向け、記号の箱の目安）、`propose_lines` の説明に記号も。道具の input schema は変えていない（ハッシュの試験は同じ）。手引き（native/resources/studio/guide/SKILL.md の「フキダシの形を選ぶ」の表に 8 行と注意 2 つ、drawing.md の種類と追加の鍵）を integrations/ の 2 か所へ同じバイトで写した。docs/AGENT.md に追加の鍵。
+- **試験**: test_gui_fukidashi に 3 つ（`theSymbolsAreKindsAndThePaletteHasTheAdditions`・`aPresetOfTheAdditionsRestylesALine`・`eachAdditionSettingWritesItsKey`）と、見本の画面（パレットの追加・種類のメニュー・追加の行のあるパネル。明るい色と暗い色）。test_mcp_api_e2e に `anAgentsBalloonAdditions`。
+- **変えた既存の試験の期待値（緩めていない）**: test_gui_fukidashi の種類の数 17 → 21、パレットの形の数の上限 34 → 52（49 になった）。test_gui_lines の種類の数 17 → 21（2 か所）、既定に戻すと消える鍵の数は群 1 で 52 → 63。commands.json に 4 行（画面のメニューから作り直した。test_gui_prefs の commandsJsonIsTheMenus）。
+- **確かめたこと**（Linux Release、関係する試験だけ。2 つずつ、ビルドは -j3）: 関係する 50 の試験（フキダシ・書体・型・PSD・保存・MCP・画面）を 3fce9b84 で流して 49 が通った。落ちた 1 つは test_fukidashi の `thePensLineWithANotchAPathCutsAndAFade` で、試験が 1200 dpi で絵の外の画素を読んでいた（自分の試験の誤り。絵を 100 mm の高さにし、画素を読む関数は絵の外で失敗にした）。直した後 test_fukidashi は 537 通過・0 失敗・0 スキップ（685 秒）。パレットの絵を直した後に test_gui_fukidashi（14）と test_gui_lines を流して通過。ログの SKIP は前からのものだけ（test_save_e2e の 16: リリースのビルドに障害の注入が無い、test_perf_render の 1: 環境変数で PSD を渡すとき）。FAIL は無い。手を入れる前の版の控え（pages.json・classic/clean_project.json）・PSD の控え・plain_lines は動いていない。
+- **自分の見本で見つけて直したもの**: (1) ふるえるハートの切れ込みの X（上の「群 1 のレビューの直し」）。(2) パレットの「きらめき」の絵で、文字（4 mm）が深い星に入らず 3 列になって線の上にはみ出していた。深い星（`spike_depth` 0.5 以上）の絵は箱を 30 × 30 mm、文字を 2.4 mm にして 1 列で星の中に入れた（56 dpi と 2 倍の画面で確かめた）。
+- **速さ**（静かな機械で 3 回。test_perf_render の ten_balloons_with_the_additions_at_600dpi。B4・600 dpi に 10 個、同じ回の「何も足さない 10 個」との差。形だけの 1 個あたり）: 元（何も足さない）は 1 枚を最初から 777〜921 ms（前の記録 680 ms）、形だけ 37〜45 ms/個。ペン −10〜−5 ms、しずく −7〜−5 ms、記号 −8〜−4 ms（どれも揺れの中で差は見えない）、色のグラデーション −5〜−3 ms、点のトーン ＋4〜＋10 ms、濃くなる点 ＋7〜＋20 ms、線の内側を白く ＋8〜＋22 ms、濃くなる線 ＋2〜＋10 ms、15° の細かい格子 ＋10〜＋29 ms、繰り返さない粗い格子 ＋41〜＋56 ms、全部 ＋37〜＋44 ms。1 枚では、トーンの 10 個で ＋2.1〜2.9 秒。そのほとんどは文字の白い縁で、トーンを付けずに文字に縁取りだけ付けても同じ（＋2.6 秒）。`genko render` で測ると縁は 10 本で ＋0.3 秒。
+- **残り**: (1) ~~白い縁の速さ（P3-7。分けた最大値フィルター）~~ → 2026-11-15 に分けた（下）。(2) 60 線・600 dpi の 60〜75% の白い点（上）。(3) Windows のビルド。(4) 見本の絵を利用者に見てもらう（ハートの形、しずくの太さと長さ、筆のくびれ、星の先の丸み、パレットの絵）。(5) `border_mm` に上限が無いことの重さ（前から。太い線の二重線のハートが 22 秒だったのは 2026-11-15 に直した: レビュー 3 の P3-4、下。線の太さそのものに上限が無いことは変えていない）。(6) 記号をネームの計画に入れるかは、決めのとおり入れていない。(7) ふるえる線に `pen_swell` を付けると、太い側の内の縁に点の並びの小さな段（1200 dpi で 0.05 mm ほど）と、波ごとの太さの段が見える（群 1 から。解像度で変わらない）。直していない。
+
+### レビュー 3 の直し（読み取りだけのレビュー combined-review3 とリードの決め。同じブランチ、997f9d40 の上）— 2026-11-14
+- **P1-1 しっぽの付け根を寄せる範囲**（`render/text/balloon_clean.cpp` の `tail`）: 前の作り（付け根をそのまま。`made_tail(…, draw_in=false)`）で作って、その付け根の端が輪郭の外に出ていて、しかも**線が開いている**ときだけ、寄せた作り（`draw_in=true`。直す前の HEAD の作り）を使う。寄せても開いたままなら前の作りのまま。「開いている」は幾何で決める（`line_gap`・`base_open`）: しっぽとつなぎの線の無い辺（付け根・つなぎの脇）の点のうち、組の縁にある点（片側にしか塗りが無い）が、線のリボン（輪郭としっぽの横の縁の上の部分から線の幅。角は丸く、ほかの形で切られた端は丸く、付け根の端は四角: `ribbon_plane` と同じ）から、線の幅の 1/100 より離れている。幅の比で決めるので、どの解像度でも同じ答え。ペンの線（fukidashi@2。前の本には無い）は筆の端が細るので、端が外に出れば寄せる（`TailSpec::pen`）。
+  - **試験** `aTailIsMadeAsBeforeUnlessItsLineWasOpen`: 前の 8 種類（吹き出し・雲・叫び・カプセル・電気・多角形・角丸・波 0.4 mm の吹き出し）× 4 つの箱（40×12・20×10・30×30・12×40）× しっぽの幅（既定・6・9 mm）× 12 の向き = 1,152 本。どのしっぽも、形の点（`balloon::shape_trace`）が前の作り（`clean::TailBasesAsBeforeForTest`）と同じか、前は開いていて（塗りの画素が紙の画素の 2 画素以内。300 dpi か、髪の毛ほどのひびなら 1200 dpi）今は閉じている（300 dpi）。レビューの名指しの電気 30×30 の 0°・120°・300°、波の吹き出し 40×12 の 0°・180° は同じ点。寄せたのは 129 本（吹き出し 16・雲 6・叫び 11・カプセル 10・電気 32・多角形 16・角丸 22・波 16）。試験は直す前の作り（端が外なら必ず寄せる）で落ちることを確かめた（名指しのしっぽと、前は閉じていたしっぽで）。
+  - **前の版との突き合わせ**（試験の外。レビューの実行ファイル `/tmp/fk2rev/bin/genko-new` と今の版で、同じ 1,152 本の本を 300 dpi で描いて比べた）: 1,024 本は画素まで同じ。変わった 128 本はどれも前の作りで線が開いていたもの（外から塗りつぶして中まで届く（明るさ 200 以上）のが 114 本。残り 14 本は、300 dpi では 1 画素に届かないひび・切れ目（1200 dpi で見える）と、下の電気の 4 本）。
+  - 箱の角のしっぽ（`aTailAtABoxCornerClosesItsLine`、24 行 × 672 枚）は今も全部閉じる。
+  - **前からの不具合（直していない）**: 電気 20×10 に 9 mm のしっぽ（0°・30°・180°・210°）は、稲妻のしっぽが描く範囲（箱と先の 4 mm 外）からはみ出て切れている。付け根は直ったが、切れ目はそのまま（前も今も開いている）。
+- **P3-1**: 手で描いたフキダシにしずくの見本を当てても、しずくの鍵を書かない（`preset_style_change`）。本は fukidashi@2 を名乗らない。しずくだけの見本なら何もしない（取り消しも増えない）。
+- **P3-2**: `lettering::drip_height(kind, style, box_h)` は描く側と同じ（`drip_mm`・30・箱の 0.6 の小さい方）。`drip_growth(kind, style, body_h)` は箱を伸ばす長さ（`drip_mm`・30・体の 1.5 倍の小さい方。伸ばした箱で描く長さがちょうどそれ）。台詞パネルのしずくの長さは描かれる長さを見せ（op で 25 mm と書かれた 37 mm の箱は 22.2）、体の 1.5 倍より長くは書かない（体 12 mm に 25 → 18 を書き、箱は 30 mm）。
+- **P3-3**: `refit_for_kind` が、形を言葉に合わせない種類の変更（と同じ種類）でも、しずくの分だけ箱を伸ばし縮める（上を保つ）。種類のメニューでフラッシュ・点線の囲みにすると箱が縮み、戻すと伸びる。どれも 1 回の取り消し。パレットも同じ関数を通る（前のパレットだけの計算は消した）。
+- **P3-4**: ~~直していない（上の P2-4 の項に記録）~~ → 2026-11-15 に直した（下の「test_fukidashi の ASan の重さ」）。
+- **P3-5**: 台詞パネルのツールチップ・MCP `apply_ops` の説明・手引き（SKILL.md・drawing.md と integrations の 2 か所の写し。同じバイト）に「600 dpi の白黒の原稿では」と、解像度が低いほど薄い側が狭いこと（350 dpi・60 線なら 9% から）。入力のスキーマは同じ。
+- **P3-6**: 書体の知らせの帯の文（`BandWords`）は Tab で入れる（出たときも、クリックでもキーを取らない）。入っているあいだ、上下の矢印と PageUp/PageDown は帯の文を送る（窓のショートカットに取られない）。
+- **P3-7**: 効果・手書きの書体の縦の括弧でゴシックで描くものは、PSD の文字レイヤーでもその字だけゴシックのラン（`tategaki.cpp` の `column_path`。本文とルビの字）。絵は同じ。そういう括弧の無い本の PSD は同じバイト（PSD の控えは動いていない）。
+- **変えた既存の試験の期待値（緩めていない）**: test_gui_fukidashi `aPresetOfTheAdditionsRestylesALine` の手描きの所: 「したたる」は何もしない（`false`、文「手で描いたフキダシには、しずくは付きません」、op 無し）に、「線と塗りだけ当てました」は「ベタホラー」で確かめる（黒い塗りが付き、しずくの鍵が無く、fukidashi@2 を名乗らない）。前の期待値はしずくの鍵を書く振る舞いのものだった。
+- **確かめたこと**（Linux Release、関係する試験だけ。2 つずつ、ビルドは -j3）: test_fukidashi（全部。545 項目、箱の角の 24 行と新しい 1,152 本の試験も。控え pages.json・additions_pages.json・PSD の控え・plain_lines は動いていない）、test_fukidashi_service、test_gui_fukidashi、test_gui_lines、test_gui_fonts、test_gui_layout、test_psd_text、test_contract_psd_text、test_contract_psd、test_psd_smart、test_contract_psd_smart、test_render_page、test_ruby_render、test_contract_render_cli、test_mcp_api_e2e（スキーマのハッシュも）、test_mcp_connection、test_cli_e2e が合格。test_font_faces は 511 通過・1 失敗: `aFileThatCouldNotBeReadIsAskedForAgain` が、読めなくしたファイルを root（この容器）が読めてしまう前提の所で落ちる（環境のため。今回の変更とは関係しない）。PSD の 2 本は最初に環境（`GENKO_PYREF`）を入れずに流して落ち、入れて流し直して合格。
+
+### test_fukidashi の ASan の重さ（ステージ出口の ASan で時間切れ。同じブランチ、e5c2c0f3 の上）— 2026-11-15
+- **起きたこと**: 出口の ASan（2 つずつ）で test_fukidashi が落ちた。1 回目は `aThickDoubleLineWithDripsIsNotSlow` が QtTest の 1 関数 5 分の上限に、それだけで流し直した 2 回目（関数の上限 1,700 秒）は ctest の 1,800 秒に、どちらもその関数の中で届いた。
+- **遅かった所と訳**（gdb で止めて見た。perf は無い）:
+  - 帯の覆い（`path_raster::Rasterizer::band`）。厳密な面積の塗り分けは、行の中で辺どうしが交わる所ごとに段を分ける。線が形の曲がりより太いと、帯（`clean::ribbon_plane`）は線分ごとの箱と角ごとの楔に分けて描かれ（数千枚）、その辺どうしが何十万回も交わる。段ごとに行のすべての辺から選び直し、`std::stable_sort`（毎回一時の領域を取る）、葉ごとに辺の並びを写していた。ASan ではその取り・写し・関数の呼び出しがほとんど。
+  - ハートが雲の 4 倍だった訳: ハートは先の丸み（箱の短い方の半分の 5%。38×13.5 mm で 0.34 mm）と平たい丸みの端が線（2.5 mm）より細かく曲がるので、**1 本目の線**の帯から切れ切れになる（輪郭も細かい: 600 dpi で約 1,500 の線分、3,000 枚）。雲は山と山の継ぎ目が角（円盤）で、山の丸みは線より大きいので、1 本目は 1 枚の帯。二重線の内側の 2 本の帯（3 本分・4 本分の幅）はどちらの形でも切れ切れ。
+  - ほかの関数の重さの多くは試験の側: `closed_round`（線が閉じているか）が絵の外側を全部（600 dpi・140×120 mm なら 940 万画素）、画素ごとの関数呼び出しで塗っていた。箱の角のしっぽ（24 行 × 672 枚）の 1 行が 571 秒。
+  - 追加の見本の 4 ページ目（トーンの上の文字）は、文字の白フチの Pillow の MaxFilter（画素ごとに大きさ² 個を並べる。30 px の縁なら 3,721 個）。
+- **直したこと**（どれも前と同じ画素）:
+  - `render/path_raster.cpp`（`Rasterizer::band`・`sort_band`・`draw`・`render_into`）: 切れ目のあいだに届く辺を一度だけ選び（`span`）、段はそこから選ぶ。並べ替えは前の段の並びから動かすだけ（中ほどの値、同じなら辺の番号の順: 前の stable_sort と同じ順。数でない値があれば前のまま）。葉の写しと一時の領域を無くし、内外の判定・draw・行の足し上げを呼び出しの無い同じ式に。段の分け方・足す順・式は前と同じ。
+  - 二重線の内側の線（`render/text/balloon_clean.cpp` の新しい `ribbon_covers`、`balloons.cpp` の `shape_masks`）: 縁から 3 本分の帯が、塗りのどの画素もまるごと覆うときは、内側の線は 0 なので 2 本の帯を描かない。覆うと言えるのは、帯が切れ切れに描かれる走りだけ（箱・楔・円盤は縁からその距離の内をすべて覆う。1 枚の帯は内へ折れる所で確かでない）、四角い端が無く、どの画素の真ん中も、縁の点から画素づたいに測った距離（まっすぐの距離より短くならない）で 3 本分から 2 画素ほど引いた内にあるとき。前の計算の内側の線は、そういう形では最大 4×10⁻⁷（8 bit で 0）だった。
+  - 白フチ（`render/text/lettering.cpp` の `outlined`）: 最大値を行と列に分けた（`max_square`。van Herk・Gil・Werman で画素あたり 3 回。端は外へ繰り返す: Pillow の ImagingExpand と同じ。3 未満・偶数の大きさは前の Pillow の道のまま）。上の P3-7 の残り。
+  - `render/text/balloons.cpp` の `composite`・`as_image`・`shape_masks` の画素の繰り返し: 同じ式のまま生のポインターに（最適化しないビルドの添字ごとの呼び出しを無くす）。
+- **試験で変えたこと（確かめる中身は同じ）**: `closed_round` を内の点から塗るように。白どうしのつながりに向きは無いので「外の縁の白が内の点に届く」と「内の点の白が外の縁に届く」は同じ答え。行の白の続きごとに進む。ほかの試験の中身・数・解像度・許し・比（`drip_ms <= base_ms * 3 + 3000` も）は変えていない。リード・レビューの名指しの場合（1,152 本のしっぽ、しずくの速さの試験のハート）もそのまま。
+- **上限**（`native/tests/CMakeLists.txt`）: test_fukidashi の TIMEOUT 1,800 → 7,200 秒（測った時間と訳をそこに書いた）、遅い試験の決まり（関数の上限は上限 − 100 秒）に入れた。速くしても、箱の角のしっぽの 16,128 枚（1,008 秒）とほかで、ASan では 1,800 秒に届く（2 つずつで 1,971 秒）。いちばん長い関数は `aMalformedStyleStillDraws`（1,300 ページ。174 秒）で、混んだ機械では 5 分に近づく。
+- **確かめたこと**:
+  - 同じ画素: 前の HEAD（e5c2c0f3）の描画のライブラリーと今のとで、20 種類 × 3 つの大きさ × 9 つの形（二重線・太い線・しっぽ・点線・しずくとペンとトーン、150・300 dpi）の 540 枚と、しずくの速さの試験の 6 枚（600 dpi）の sha256 がどれも同じ（試験の外の一時の関数で）。白フチは乱数の 300 枚（縁 1〜35 px）で Pillow の道と同じバイト。控え（pages.json・additions_pages.json・PSD の控え・plain_lines）は動いていない（試験で）。
+  - ASan（`build/linux-asan`、2 つずつ、ビルドは -j3）: test_fukidashi（ctest で 1,971 秒、545 項目すべて合格）、test_fukidashi_service、test_gui_fukidashi、test_path_raster、test_render_page、test_masks、test_psd_text、test_contract_psd_text、test_psd_smart、test_ruby_render、test_contract_render_cli、test_gui_lines が合格。Release は場所が無く（ビルドを消した）流していない。
+- **ASan の時間**（秒。前は e5c2c0f3、今はこの直しの後。どちらも ASan の別の試験を横で流しながら。前の 2 つの約は、同じ絵を一時の関数で描いた時間と、24 行のうち 1 行の時間から）:
+
+| 関数 | 前 | 今 |
+|---|---:|---:|
+| `aTailAtABoxCornerClosesItsLine`（24 行） | 約 13,700（1 行 571） | 1,008 |
+| `aThickDoubleLineWithDripsIsNotSlow` | 約 2,600（雲 224＋253、ハート 975＋1,142） | 139 |
+| `aTileOfTheAdditionsIsThePageCutThere` | 673 | 222 |
+| `aMalformedStyleStillDraws` | 323 | 174 |
+| `thePensLineClosesRoundItsBalloon` | 345 | 20 |
+| `aWideDripStaysInItsBalloon` | 334 | 36 |
+| `dripsNeverOpenTheLine` | 133 | 12 |
+| `aTileIsThePageCutThere` | 123 | 67 |
+| `theLettersOfABookOfBeforeKeepTheirSize` | 99 | 27 |
+| `theLettersOfABookOfBeforeAreTheSamePixels` | 85 | 38 |
+| 全体 | 約 18,900（1,800 では終わらない） | 1,988（ctest で 1,971） |
+
+- **残り**: 切れ切れの帯の塗り分けは今も「交わりの数 × 辺の数」（同じ画素のまま減らせるのは手間だけ）。太い線のハートの 1 本目は ASan・600 dpi で 1 個 61 秒（前は 975 秒）。線の太さに上限が無いことはそのまま。
+
+## 書体の追加（F1: ファイル・ライセンス・一覧）— 2026-11-14、2026-11-15 に main に統合
+
+### 利用者の決定（2026-11-13）
+- 「書体も足りない気がするのですよね」「フォント追加は、任せます 使えるものであれば可能な限り追加してください」。同梱の日本語書体がまんがには少ない。追加する書体の選び方は任せる。使えるものはできるだけ多く入れる。
+
+### F1 でしたこと（ブランチ `native/fonts`。C++・.qrc・CMake には触れていない。ビルドもしていない）
+- `native/resources/fonts/` に書体ファイルを 40 個足した（合計 157.5 MB。既存の 6 個と合わせて 46 個・177.9 MB。画面用の IBM Plex Sans JP は別）。どれも元のファイルのまま（改変なし・名前も元のまま）。
+- ライセンス文は書体ごとに `native/resources/fonts/licenses/`（OFL は `<書体>-OFL.txt`、littlelimit の 2 書体は `k8x12-LICENSE.txt`・`misaki-LICENSE.txt`）。`THIRD_PARTY.md` の「同梱フォント・アイコン」に 3 行足した。
+- 一覧は `native/resources/fonts/FONTS.json`（genko-fonts@1）。46 書体それぞれに、ファイル・sha256・書体名・太さ・**アプリ用の短いキーの案**・画面に出す日本語名・用途の区分（台詞・ナレーション・叫び・丸ゴシック・かわいい・手書き・筆・ホラー・機械・効果音・その他）・かなが揃っているか・漢字の数（JIS 第 1・第 2 水準、常用）と `kanji: full|partial|none`・縦書きの対応（GSUB の vert／vrt2、vhea・vmtx）・ライセンス・著作権表示・予約フォント名・出典（コミットや ZIP の sha256）・改変の有無。
+- 見本（コミットしない。Pillow で描いた。Genko はビルドしていない）: 作業用の `fonts-work/samples/genko-fonts-01.png`〜`04.png`。書体に無い字は赤い×の箱で出す（別の書体で埋めない）。全ページを目で見て、崩れる書体が無いことを確かめた。
+
+### 選んだ決まり
+1. ライセンス: SIL OFL 1.1 か、同じだけ自由なもの（アプリへの同梱と、出力の商用利用をはっきり許すもの）。出典に置かれたライセンス文を読んで確かめる。「個人利用のみ無料」や独自の条件、IPA フォントライセンスは入れない。
+2. 出典: google/fonts の 1 つのコミット（`b78877b777ed3a18a1b431b0df7d8ee3f84c2e5f`）。取ったファイルは、そのコミットの木の blob の ID と照らした。既存の 6 個も同じコミットのファイルと 1 バイトも違わない。google/fonts に無いものは、作者の配布サイトから取れて、そこでライセンスを読めたものだけ（okoneya.jp の源暎 2 書体、littlelimit.net のドット 2 書体）。
+3. まんがでの使い道が違う書体を選ぶ。似た書体は入れない。1 つの書体の太さは 1〜2 個まで。
+4. 技術: FreeType 2.14 で開ける静的な TrueType。可変フォントは入れていない（自分で静的に切り出したものも無い）。かな・約物・英数字・漢字の揃い方を数えて `FONTS.json` に書く。かなだけ・漢字が一部だけの飾り書体も入れるが、印を付ける。
+5. 大きさ: 12 MB を超えるファイルは入れない（しっぽり明朝 B1・しっぽりアンチック B1 を外した）。
+
+### 入れた書体（キーの案 → ファイル）
+- 台詞: `antique_genei` GenEiAntiqueNv6-M（源暎アンチック。アンチゴチ 1 ファイル）、`antique_shippori` ShipporiAntique-Regular、`antigothic_medium`・`antigothic_bold` ZenKakuGothicAntique（アンチゴチ 1 ファイル）、`antique_zen` ZenAntique-Regular、`gothic_regular` ZenKakuGothicNew-Regular、`gothic_seed` LINESeedJP-Bold
+- ナレーション: `mincho_shippori` ShipporiMincho-Regular、`mincho_hina` HinaMincho-Regular、`klee` KleeOne-SemiBold（教科書体）
+- 叫び: `gothic_black` ZenKakuGothicNew-Black、`gothic_kiwami` GenEiKiwamiGo（源暎きわみゴ）、`mincho_black` ZenOldMincho-Black、`mincho_tokumin` KaiseiTokumin-ExtraBold
+- 丸ゴシック: `maru_regular` ZenMaruGothic-Regular、`maru_black` ZenMaruGothic-Black
+- かわいい・ポップ: `pop_mochiy` MochiyPopOne、`pop_rocknroll` RocknRollOne、`cute_hachimaru` HachiMaruPop、`cute_kiwi` KiwiMaru-Medium、`mincho_decol` KaiseiDecol-Medium、`cute_cherry` CherryBombOne（かなだけ）、`cute_daruma` DarumadropOne（かなだけ）
+- 手書き: `hand_kurenaido` ZenKurenaido、`marker_yusei` YuseiMagic、`hand_slackside` SlacksideOne（かなだけ）
+- 筆: `brush_syuku` YujiSyuku、`brush_boku` YujiBoku、`brush_potta` PottaOne
+- ホラー: `horror_tegomin` NewTegomin、`horror_chokoku` Chokokutai（かなだけ）
+- 機械・ドット: `dot16` DotGothic16、`dot12` k8x12、`dot8` misaki_gothic_2nd、`stick` Stick、`techno_monomaniac` MonomaniacOne（かなだけ）
+- 効果音: `sfx_outline` RampartOne（立体の袋文字）、`sfx_inline` TrainOne（漢字は第 1 水準だけ）、`sfx_aoboshi` AoboshiOne（かなだけ）
+- その他: `narrow_lubrifont` WDXLLubrifontJPN（長体。10.3 MB）
+
+### 字の揃い方で気を付ける所（どれも `FONTS.json` に書いてある）
+- 漢字が無い（`kanji: none`）: cute_cherry・cute_daruma・hand_slackside・horror_chokoku・techno_monomaniac・sfx_aoboshi。漢字が一部（`partial`）: sfx_inline（第 1 水準 2,965 字だけ。常用は 2,106／2,136）。
+- 全角の「！」「？」が無い: cute_daruma・hand_slackside・techno_monomaniac（半角の `!` `?` はある）。sfx_aoboshi は「『』」と単独の「゛゜」が無い。
+- 「ゔ」が無い: dot12・dot8・narrow_lubrifont（「ヴ」はある）。単独の「゛゜」が無い: 既存の sfx（デラゴシック）、pop_mochiy。
+- 「―」（U+2015）と「～」（U+FF5E）: ZEN の各書体としっぽりアンチックなどは持たないが、アプリの似た字への置き換え（fonts.cpp の kLookalike。― → —、～ → 〜）で出る。置き換えた後も無い約物は `punctuation_missing_after_lookalike`。
+- 縦書き: dot12・dot8 は vert も vhea・vmtx も無い。cute_daruma は vert はあるが vhea・vmtx が無い。ほかは vert・vrt2・vhea・vmtx を持つ。
+- しっぽりアンチックは第 2 水準が 4 字足りない（3,386／3,390。`full` の扱い）。
+- dot12・dot8 は輪郭のほかに埋め込みビットマップ（EBDT／EBLC）を持つ。
+
+### いまの読み込み方（F2 の前提）
+- 文字入れの 6 書体は `native/resources/genko_text.qrc`（接頭辞 `/genko/text`、別名がキー）を `qt_add_big_resources` で `genko_render` に組み込んでいる（`native/src/render/CMakeLists.txt`）。`render/draw.cpp` の `with_text_font`・`bundled_bytes` が `:/genko/text/<キー>` をまるごとメモリへ読む（上限 256 MB）。ファイルのパスを書けば外のフォントも使える（`fonts.cpp` の `face_of`）。
+- キーの一覧はソースに直に書いてある: `render/text/fonts.cpp`（kBundled。合成の antique もここ）、`render/draw.cpp` の `bundled_text_font`、`formats/psd_text.cpp` の `bundled_font`、`render/psd_type.cpp`（PSD のフォント名）、`core/ops_book.cpp`（ops の検査）、`app/lettering.cpp` の `bundled_fonts()`（GUI の一覧と日本語名）、`service/lint.cpp`（名前）、`api/cli.cpp`（doctor の「bundled font missing」）。
+
+### F2 がすること
+1. **置き方を決める（勧め: 追加の 40 個はファイルとして導入する）**。157.5 MB を `qt_add_big_resources` で `genko_render` に組み込むと、それを静的に結ぶ実行物（本体・CLI・試験の実行物それぞれ）が同じだけ大きくなり、ビルドの場所も配布物も膨らむ。既存の 6 個と pillow_default はいまのまま組み込み（基準画像・試験が変わらない）、追加分は `share/genko-studio/fonts/`（Windows は実行物の隣）へ `install(FILES …)` し、キー → ファイルは `FONTS.json`（これも導入する）から引くのがよい。開発中・試験では、ソースの `native/resources/fonts/` を見る道（既存の資源の探し方に合わせる）が要る。組み込みを選ぶなら .qrc に 40 行足すだけで済むが、大きさを測ってから決めること。
+2. キーを登録する: 上の「キーの一覧」の全箇所と `docs/ops.schema.json`（フォントの説明があれば）。キーは案なので、変えるなら `FONTS.json` も直す。
+3. 合成の書体: 既定の `antique`（かな mincho・ほか gothic）は変えない（既存の本の見た目が変わるため）。アンチゴチ 1 ファイルの書体（antique_genei・antigothic_medium・antigothic_bold）は合成が要らない。かなだけ・漢字が一部の書体は、`FONTS.json` の `composite_suggestions`（例: cute_cherry のかな＋maru_black の漢字、horror_chokoku＋mincho_black）のように、漢字側を似た太さの書体にした合成のキーとして出すのがよい。
+4. 無い字の代わり: いまの `Fonts::path_for` は「書体の相方 → gothic → sfx」の順。`kanji: none|partial` の書体と、全角「！？」の無い書体で、代わりの書体が黙って混ざる。合成の相方を決めるか、GUI・lint で「この書体は漢字を持たない」と知らせる。全角「！？」→ 半角への置き換えを kLookalike に足すかも決める。
+5. GUI: `bundled_fonts()` の一覧を、`FONTS.json` の `categories` の順の区分ごとに分けて出す（47 個を 1 列に並べない）。日本語名は `name_ja`、使い道は `use_ja`。見本の絵を出すなら Genko で描き直す。
+6. 配布物と試験: `native/package/sbom.cmake` の `fonts` の行（書体名の列。源暎は OFL-1.1、k8x12・美咲は `LicenseRef-…`）、`native/tests/package/test_package.cpp` の `licenses/fonts` の `*-OFL.txt` の数（いま 7 → **39**。F1 でファイルを足したので、この試験は F2 で直すまで落ちる）と `k8x12-LICENSE.txt`・`misaki-LICENSE.txt` の確認、`THIRD_PARTY.md` の「まだ登録していない」の書き換え、導入するフォントの数・sha256 の試験（`FONTS.json` と照らす）、doctor の検査。
+7. 手引き: `docs/AGENT.md`（249 行目あたりの書体の説明）、`native/resources/studio/guide/SKILL.md`（42〜43 行目あたりのジャンルごとの勧め）、`integrations/*/genko-manga/SKILL.md` に、区分ごとの使い分けを足す（例: ホラーの台詞 horror_tegomin、機械の声 dot16・stick、叫び gothic_black・gothic_kiwami・mincho_black、手紙・心の声 klee、時代もの brush_syuku）。
+8. 縦書き・ルビ・ふちどりで 46 書体が崩れないかを、Genko の描画で見る（F1 の見本は横組みだけ）。PSD への書き出し（psd_type のフォント名）も足す。
+
+### 入れなかったもの
+- **欲しいが取れなかった**: 源界明朝・装甲明朝・廻想体（フロップデザイン。flopdesign.com がこの環境からの取得に 403 を返す。ホラーの本命）、自家製 Rounded M+・源柔ゴシック（jikasei.me に繋がらない）、OSDN に置かれたもの（osdn.net に繋がらない）。
+- **ライセンス文を出典で確かめられなかった・条件が合わない**: M PLUS Rounded 1c（google/fonts のその書体の場所に OFL.txt が無い）、IPA フォントライセンスのもの（IPAex、やさしさアンチック、GL-アンチックなど。決まりにより入れない）、独自の「フリー」条件の書体（衡山毛筆フォント、青柳衡山、玉ねぎ楷書激、けいふぉんと、あんずもじ、851 チカラヅヨク、ニコモジ、ラノベ POP、g_コミックホラーなど。条件を読んで確かめていない。入れていない）。
+- **技術**: M PLUS 1 Code・Kapakana・Noto Sans JP・Noto Serif JP・Murecho・M PLUS 1／2（可変フォントだけ。M PLUS 1 Code は全角「！？」も無い。Kapakana は「。「」！？」が無い）、源暎ラテゴ・ラテミン（TTC だけ。予約フォント名があるので切り出すなら改名が要る）、Rock 3D・Shizuru・Palette Mosaic（全角の「！？…」などが多く欠ける）。
+- **似ているので外した**: Zen Antique Soft、Shippori Antique B1（13.1 MB）、Shippori Mincho B1（15.2 MB）、Yuji Mai、Klee One Regular、Kosugi・Kosugi Maru（Apache-2.0）、BIZ UDGothic・BIZ UDMincho、Kaisei Opti・Kaisei HarunoUmi、M PLUS 1p（第 2 水準が一部）、Sawarabi Gothic・Mincho、Tsukimi Rounded、Otomanopee One、びぜんアンチック、源暎ぽっぷる、棘丸ゴシック、k8x12L・k8x12S・美咲ゴシック・美咲明朝。
+- **足りない区分**: 本物の毛筆（行書・草書）と、かすれ・にじみの強いホラー書体は、決まりに合うものが取れる所に無かった。利用者が持つフォントは、いまもファイルのパスで使える。
+
+### F2 群 1（F2-A: 解決と描画。ブランチ `native/fonts-f2`、main da6acebd に F1 の 2 コミットを載せた上）— 2026-11-14
+
+（この節は群 1 を終えたときの記録。その後のレビューの直しで変わった所は、下の「F2 群 1 のレビューの直し」が正しい。ここでは、変わった行に〔直し〕と書いて直してある。）
+
+#### 決めたこと（リードの決定 D1〜D12。利用者の言葉は「フォント追加は、任せます 使えるものであれば可能な限り追加してください」）
+- 前からの 6 書体はプログラムに組み込んだまま（.qrc は触らない）。追加の 40 書体はファイルで置き、`FONTS.json` を一覧として `genko_core` に組み込む。
+- キーは F1 の案のまま。本に新しい鍵は足さない。追加の書体を使っているあいだだけ `fonts@1` を名乗る。
+- 書体ファイルが無いときは、その種類のいつもの書体で描いて知らせる（豆腐にしない）。
+- かなだけの書体は、同じキーの中に相方を持つ。全角の「！？」が無い書体は、書体ごとに半角へ置き換える。
+- 追加の書体だけ、字の有無を cmap で決める。前からの 6 書体と、パスで指した書体ファイルは 1 ビットも変えない。
+- 新しい本の既定の書体は変えない。ノンブルは前からの 7 つのまま。MCP の説明文は変えない。
+- **前の本との違いは 1 つだけ受け入れた（D2）**: `fonts@1` を持たない前の本が、たまたま追加のキーと同じ名前（例: `gothic_black`）を `font` に書いていたら、今の版はその書体で描き、次の保存で `fonts@1` を付ける。配布した版が無いので受け入れた。開いたときに 1 度知らせるのは群 3（一覧は `core::fonts::named_unannounced`）。
+- 追加の書体の絵の基準に Python・Pillow は使わない（利用者の決まり）。この Linux のビルドが描いた値を固定した。
+
+#### 作ったもの
+- `native/resources/fonts/FONTS.json`: `status` を `storage`（`embedded`／`file`）と `feature`（null／`fonts@1`）に替え、`fallback`（相方のキー）、`lookalike`（「！？」の置き換え。3 書体だけ）、`vertical.presentation_forms`（縦のかっこの字形を全部持つか。試験で測った値）を足した。`composite_suggestions` は `fallback` に畳んで消した。`counts` の `existing`・`new`・`bytes_new` は `embedded`・`file`・`bytes_file` に替えた。
+- `native/src/core/font_catalog.{hpp,cpp}`（＋ `font_catalog_data.cpp.in`、`core/CMakeLists.txt`）: 一覧を 1 バイトも変えずに組み込む。`core::fonts::` の `entries()`（46）・`categories()`（11）・`find(key)`・`added(key)`・`by_postscript(name)`・`named(doc)`・`uses_feature(doc)`・`named_unannounced(doc)`・`catalog()`・`catalog_text()`・`kFontsFeature`。
+- `native/src/render/font_files.{hpp,cpp}`: 追加の書体のファイル。見る場所は `<プログラムのあるフォルダー>/../share/genko-studio/fonts` の 1 か所だけ（環境変数なし）。`dir()`・`set_dir_for_testing()`・`path(key)`・`present(key)`（〔直し〕入っているか: 普通のファイルで、大きさと SHA-256 が一覧と同じ。最初の 1 回がファイルを読む。答えはプロセスの間ずっと同じ）・`file_there(key)`（〔直し〕大きさの合うファイルがあるか。stat 1 回）・`bytes(key)`（読み切って閉じる。共有。最近使った順に 64 MB まで）・`missing()`・`verify(hashes)`・`cached_bytes()`・`clear_cache()`。
+- `render/text/fonts.{hpp,cpp}`: `Face` に `fallback` と `own(font)`。`face_of`・`face_exists` は「前からのキー → 追加のキー（入っているとき）→ ファイルのパス → 既定」。追加のキーはパスとしては決して読まない。`path_for` は「その書体 → もう半分 → 相方 → gothic → sfx」。`normalize` は書体ごとの置き換えも見る。`has_glyph` は追加の書体では cmap。
+- `render/draw.{hpp,cpp}`: `TrueTypeFont::strict_cmap()`。`TrueTypeFonts`・`font_bytes` は追加のキーを `font_files::bytes` から開く（`with_text_font`・`text_font`＝ノンブルの道は触っていない）。
+- `render/text/tategaki.cpp`: 縦のかっこの字形は、追加の書体では cmap にあるときだけ使う（無ければかっこを回す）。相方で描いたルビの字は `font_fallback` にしない。
+- `formats/psd_text.cpp`・`render/psd_type.{hpp,cpp}`: 追加の書体は一覧の PostScript 名で書き出し、読み込みではその名前をキーに戻す（書体ファイルは読まない）。相方の字は `font_fallback` にしない。
+- `storage/writer.cpp`・`reader.cpp`: `fonts@1`（使っているあいだだけ。読み手は知っている拡張として読む）。
+- `formats/checks.cpp`: `font_not_installed`（警告）。〔直し〕文と、見る場所（台詞のほかに文字の属性・ルビ・文字レイヤー・本のいつもの書体）は下の「レビューの直し」のとおり。追加の 40 キーだけ。
+- `native/src/api/CMakeLists.txt`: `genko` をビルドした後、ビルドの木に `<genko のフォルダー>/../share/genko-studio/fonts` を作る（Unix は `native/resources/fonts` へのリンク、Windows はコピー）。
+- 文書: `docs/cpp-migration/schema-v4.md` の §3 の表に `fonts@1`、末尾に「書体」の節。
+- 試験: `native/tests/unit/test_font_catalog.cpp`（95 項目）、`native/tests/unit/test_font_faces.cpp`（452 項目。40 書体それぞれ）、`test_psd_text.cpp` に 3 項目。固定した値は `native/tests/fixtures/render/font-faces-f2.json`（書体ごとに、字のマスクの箱・大きさ・進み幅・SHA-256 と、縦・横・「ルビ＋ふちどり＋極太」の文字組の SHA-256。`GENKO_FONT_FACES_PIN=<ファイル>` で書き直せる）。漢字の数え方の表は `native/tests/data/fonts/kanji-sets.json`（JIS 第 1・第 2 水準と常用漢字。`tools/migration/font_kanji_sets.py` が EUC-JP の表と Unihan 17.0.0 の kJoyoKanji から作る。符号位置の表だけで、描画の基準ではない）。どちらも MANIFEST に sha256 を足した。
+
+#### 群 2・群 3 が使えるもの
+- 書体の一覧と区分: `core::fonts::entries()`・`categories()`・`find()`。画面に出す名前は `Entry::label`、使い道は `use`、区分は `category`、漢字は `kanji`（full／partial／none）、相方は `fallback`。前からの 7 つは今までの一覧（`lettering::bundled_fonts()`・`lint::bundled_fonts()`）のまま。
+- ファイルがあるか: 〔直し〕下の「レビューの直し」の「いつ何を呼んでよいか」を見ること（画面のスレッドでは `file_there`。`present` は 1 書体を読む。`missing()`・`verify(true)` は 40 個を読むので、画面のスレッドと起動では呼ばない）。
+- 試験は `render::font_files::set_dir_for_testing(GENKO_REPO_ROOT "/native/resources/fonts")` を呼ぶ（呼ばない試験の実行物では 40 書体とも「無い」）。フォルダーを替えたら `render::text::clear_layout_cache()` も呼ぶ。
+- 見本の絵は、台詞（`style.font` にキー）を `render::text::text_layout`・`render_page` に渡せば、紙面と同じに描ける（相方の漢字も出る）。
+- 前の本がたまたま追加のキーを名指ししているか: `core::fonts::named_unannounced(doc)`（開いた直後に呼ぶ）。
+- 群 2 に残したもの: `GenkoPackage.cmake`（40 ファイルと `FONTS.json` の導入）・`sbom.cmake`・`THIRD_PARTY.md`（「まだ登録していない」の書き換え）・`test_package` の残り、doctor、`lint` の `unknown_font`（いまは追加の 40 キーを「見つからない」と言う）、`inspect target=fonts`、`wording.cpp`、`headless_server.cpp` の `font_path` の閉じ込め（キーをパスに変えてしまう）、手引き。
+- 群 3 に残したもの: 書体のパレット、文字パネル・字形パネル・ルビの書体・見つからないフォントの画面、`note_missing_glyphs`（相方で描く字を「無い字」と言わないようにする）、開いたときの D2 の知らせ、ファイルが無いことの知らせ（画面）。
+
+#### 計画と変えた所
+1. **hand_slackside の相方を `hand` から `marker_yusei` にした**。相方は追加の書体に限ることにした（試験で守る）。理由は下の「前からの書体の不具合」: 前からの書体は Pillow の流儀で読むので、縦のかっこが豆腐になる字があり、それを前の本のために変えられない。太さもマーカー同士で合う。
+2. **追加の書体の絵の基準は Pillow ではなく、この Linux のビルドの値**（利用者の決まり。計画の D10 の後半のとおり）。`tools/migration/font_faces_reference.py` は作っていない。
+3. **`font_not_installed` の検査を群 1 に入れた**（計画では群 2。リードの依頼文が群 1 の目標に挙げていたため）。`lint`・doctor・`wording.cpp` は群 2 のまま。
+4. **`uses_feature` は `bible.lettering.*.font` を見ない**。この鍵は project.json に無い（スタジオの bible）。自動の文字入れがそこから台詞の `style.font` に写すので、台詞の側で数える。
+5. `FONTS.json` の `counts` の鍵の名前を替えた（上のとおり）。
+6. `font_bytes`・`State::file` は追加のキーを名前のまま受ける（`Face.kana`・`other`・`fallback` に入るのはキーそのもの。パスにはしない）。レイアウトの覚え書きの鍵にパスが入らない。
+
+#### 測って分かったこと（計画が「読んだだけで確かめていない」とした所）
+- **(a) 字の箱で有無を決める流儀の読み違い**: ドットの書体（dot16・dot12・dot8）では 0 件。代わりに、源暎きわみゴ 1,074 字、Yusei Magic 652 字、Monomaniac One 8 字、Rampart One 6 字、Slackside One 6 字、ほか 5 書体で 1 字ずつ（かな・約物・英数字・JIS 第 1・第 2 水準の 6,700 字ほどを 32 px で見た数）が「無い字」と読まれる。cmap で決めないと、源暎きわみゴのかなの半分ほどが前からのゴシックで描かれていた。試験 `hasGlyphFollowsTheCmap` が数を固定している。
+- **(b) 縦のかっこの字形**: 6 書体が一部か全部を持たない（cute_daruma・hand_slackside・techno_monomaniac は ︵︶﹇﹈、sfx_aoboshi は 10 個、dot12・dot8 は 14 個全部）。cmap を見ないと、その 6 書体の縦のかっこは豆腐になっていた。いまは横のかっこを回して描く。
+- 40 書体とも U+FFFF の字は持たない。半角の `!` `?` `0` は 40 書体とも持つ（「！？」を 1 マスに並べるのに使う）。
+- ドットの書体は、作られた大きさ（k8x12 は 12 px、美咲は 8 px）で、書体が持つビットマップで描く（画素は 0 か 255 だけ）。k8x12 の字の幅は 8 px。ふちどりと太字は輪郭から描く。
+- OpenType の文字組（type@1 の記録）の縦: 38 書体で「「」が vert の字形に替わる。k8x12・美咲は cmap のまま。40 書体とも下へ進む（cute_daruma も）。
+- ビルドの木の `genko`（リンクの先の書体）で、追加の書体の台詞が描けることを、試験が `genko render` で確かめている。install.sh のリンク越しは群 2 の `test_package` で確かめる。
+- **確かめていないもの**: Windows・MSVC のビルド、ASan、ZEN 角ゴシックアンチックの漢字が ZEN 角ゴシック New と同じ輪郭かどうか、配布物の大きさ。
+
+#### 前からの書体の不具合（見つけただけで、直していない。直すと前の本の絵が変わる）
+- 前からの `sfx`（デラゴシック）は、縦書きの『』（）()【】［］〈〉《》を「無い字」の箱（□に斜線）で描く。`hand`（よもぎ）は ［］ を箱で描く。縦のかっこの字形を持たないのに、「字を描いた大きさ」だけで有無を決めているため（Python の版と同じ）。「」だけは無事。見本の 1 枚目（`fonts-150-plain-1.png` の左上）に出ている。直すかどうかは利用者・リードの判断（既存の本の絵が変わるので、この群では触っていない）。
+- 横組みの最後の行の `_` が切れる（見本の札で気づいた。前からの書体でも同じ）。調べていない。
+
+#### 直した既存の試験（緩めていない）
+- `native/tests/package/test_package.cpp`: `licenses/fonts` の `*-OFL.txt` の数を 7 → 39、`k8x12-LICENSE.txt`・`misaki-LICENSE.txt` があること、ファイルは 41 個。F1 でライセンス文を足してから落ちていた検査。ほかの既存の試験の期待値は 1 つも変えていない。
+- `test_psd_text.cpp` には項目を足しただけ。
+
+#### 確かめたこと（Linux Release。関係する試験だけ。全体は流していない）
+- 新しい試験: test_font_catalog 95／95、test_font_faces 452／452、test_psd_text の新しい 3 項目。
+- 関係する既存の試験（どれも合格）: test_storage、test_model、test_command_bus、test_render_page（font-glyphs・ノンブルの絵・MANIFEST）、test_ruby、test_ruby_render、test_psd_text、test_fukidashi、test_fukidashi_service、test_type_text、test_type_styles、test_shaping、test_material_stamp、test_pcraft、test_service、test_ledger_service_a・b・c、test_contract_type・opentype・type_styles・type_fonts・storage・render_cli・psd_text・psd・pcraft・pipeline・export・materials、test_cli_e2e、test_save_e2e、test_migrate_e2e、test_ops_e2e、test_gui_lines、test_gui_ruby、test_gui_type、test_gui_type_panels、test_gui_fukidashi、test_gui_book、test_gui_ledger_a、test_perf_render、test_package。
+- SKIP: 自分の試験には無い。前からあるもの: test_save_e2e の 16 項目と test_migrate_e2e の 1 項目（Release に故障の注入が無い）、test_perf_render の 1 項目（`GENKO_PERF_GROUPS_PSD` が無い）。
+- 見本の絵（コミットしない）: 作業用の `fonts-f2/`。47 書体（前からの 7 つと追加の 40）を、縦書きの台詞をフキダシの中・ルビ付き・ふちどりの 3 通りで 150 dpi の紙面に（各 3 枚）、8 書体を 600 dpi で、書体ファイルが 1 つも無いパソコンでの同じ紙面を 3 枚。`GENKO_FONTS_OUT=<フォルダー>` を付けて test_font_faces を流すと書き直せる。
+
+#### 残り・気を付けること
+- かなだけの 3 書体（cute_daruma・hand_slackside・techno_monomaniac）は、かなが小さめ・細めに作られていて、相方の漢字のほうが大きく見える。書体ごとの大きさの合わせは入れていない（見本を見て決めること）。
+- 〔直し〕書体ファイルが同じ大きさの別物に差し替わっていたら、「入っていない」として扱う（レビューの直しで SHA-256 まで見るようにした）。
+- 〔直し〕`docs/cpp-migration/SPEC.md` の書体の節は群 2・3 の終わりに足した（FONT-01）。
+- Windows のビルドの木では書体をコピーする（157 MB）。
+
+### F2 群 1 のレビューの直し（同じブランチ。リードの 2 コミット bc4de561 の上）— 2026-11-14
+
+読むだけのレビュー（P1 は無し、P2 が 4、P3 が 8）と、リードの決定のとおりに直した。前からの 6 書体と、パスで名指しした書体ファイルの絵は 1 ビットも変えていない。
+
+#### 直したこと（それぞれに試験。どれも `test_font_faces`）
+- **P2-1 スタイルの語**（「！？」を半角に置き換える 3 書体で、「！」「？」を含む語に付けたスタイルが黙って外れていた）: 追加の書体のときだけ、スタイルの語も書体の置き換えで読み替えてから探す（`lettering.cpp` の `style_runs_of`）。`aShoutedWordWithMarksKeepsItsStyle`。
+- **P2-2 中身の確かめ**（大きさが同じで中身が違うファイルを黙って描いていた）: 「入っている」は大きさと SHA-256 の両方。最初に読むときに確かめ、答えはプロセスの間変えない。違えば「入っていない」（いつもの書体と知らせ）。`aFileOfTheSameSizeButOtherContentIsNotInstalled`。
+- **P2-3 知らせる場所**: `font_not_installed` を、台詞の `style.font` のほかに、文字の属性の書体・ルビの書体・文字レイヤーの記録・本のいつもの書体（`font_path`。最初のページに 1 つ）でも出す。相方のファイルだけ無いときは `font_partner_not_installed`。書体ごとにページに 1 つ。`theMissingFaceIsSaidWhereverItIsNamed`。
+- **P2-4 文**: 1 つの言い方（「…描いた（アプリを入れ直すと元の書体で描ける）」）、英字 4 字以上の続き・キー・製品名の英字を出さない。何で描いたか（アンチック・極太の書体・本文の書体）を種類ごとに正しく言う。英字の長い 2 つの名前は一覧の `name_ja` を日本語にし、元の名前は `name_original` に残した（gothic_seed「ラインシード B」、narrow_lubrifont「滑油字（長体）」）。`everyLabelAndWarningReadsInJapanese`。
+- **P3-1 異体字の印**: 追加の書体で、異体字の印（VS）が付いた字は、元の字で書体を決める。書体に無い印は描かない（豆腐にしない）。`aLetterWithASelectorGoesWhereTheLetterGoes`。
+- **P3-2 フォルダーの決め方**: 場所は起動のとき、アプリを作ったスレッドで 1 度だけ決める（`font_files::prime()`。`genko`・画面・印刷の入口で呼ぶ）。追加のキーをファイルの名前として探す道は無い。`theProgramFindsTheFacesBesideItself`。
+- **P3-3 読む量と、動かしている途中の変化**: 読むのは一覧の大きさ＋1 バイトまで。覚えは 64 MB まで。読み直すたびに中身を確かめ、違う・消えたときは、その書体をそこから「入っていない」にする（`generation()` が進み、文字組の覚えの鍵に入る。進むまでは鍵は前と同じ）。描いている途中で失った書体は、その 1 回だけ前からのゴシックで描く。`aFileThatChangesWhileGenkoRuns`、`theAddedFacesAreNotReadUntilAsked`。
+- **P3-4 `face_index`**: 追加の書体に残っていた `face_index` は読まない（追加の書体は 1 ファイル 1 書体）。`aFaceNumberLeftOnAnAddedFaceIsNotRead`。
+- **P3-6 ビルドの木の手順**: `native/cmake/GenkoDevFonts.cmake` と独立したターゲット `genko_dev_fonts`（リンクを張る。張れなければコピー。古いものだけ写し直す）。`genko` のビルドの後に走り、試験の支えのライブラリーがこれに依る。`theBuildTreeStepLinksOrCopies`。
+- **P3-7 試験の穴**: 上の各項目のほか、前の本が 1 バイトも変わらずに保存されることを、書体を足す前の版（2026-11-13 の配布物）が書いた `native/tests/data/fonts/book_before/project.json` と比べる（`aBookOfBeforeIsWrittenToTheSameBytes`）。`test_psd_text` は項目ごとに書体のフォルダーを元に戻す。
+- **P3-5 は直していない（分かっている限り）**: 1 つの文字（type@1）の中で追加の書体と前からの書体を文字ごとに混ぜたとき、「！？」の置き換えは段落の書体で決まる。文字ごとの書体で決めるには前からの書体の組み方に手を入れることになるので、決定のとおり書き残すだけにした。
+
+#### いつ何を呼んでよいか（`render::font_files`）
+- `file_there(key)`: stat 1 回。画面のスレッドで呼んでよい（`inspect` の `available`、`lint`、パレットの「ファイルなし」、開いたときの知らせ）。前に「中身が違う」と分かった書体には false。
+- `present(key)`: 入っているか。最初の 1 回はその 1 ファイルを読む（数 MB と SHA-256）。描く道・検査・選んだ書体の確かめに使う。パレットは別のスレッドで呼ぶ。
+- `bytes(key)`: 描く道だけ。`missing()`・`verify(true)`: 40 個を全部読む。`genko doctor` と試験だけ。画面のスレッドと起動では呼ばない。
+- 試験の実行物は、ビルドの木の `<genko のフォルダー>/../share/genko-studio/fonts` ではなく自分の横を探すので、追加の書体を使う試験は `set_dir_for_testing(<リポジトリ>/native/resources/fonts)` を呼ぶ（替えたら `render::text::clear_layout_cache()` も）。終わりに `set_dir_for_testing(std::nullopt)` で戻す。
+
+#### 変えた期待値（緩めていない）
+- `test_font_faces` の `font_not_installed` の文（P2-4 の言い方に）。`replace_fonts` が追加のキーを「見つからないフォント」に挙げる、という群 1 の期待は、群 2 で「挙げない」に変えた（下）。
+- 項目の数: test_font_catalog 96、test_font_faces 505（群 1 の終わりは 95・452）。
+
+#### 確かめたこと
+- 関係する試験 42 本が合格（1,751 項目。失敗 0。SKIP は前からの 17 項目: test_save_e2e の 16 と test_migrate_e2e の 1、Release に故障の注入が無いため）。
+
+### F2 群 2（F2-B: 配布・サービス・手引き）— 2026-11-14
+
+#### 作ったもの
+- **配布物**: `native/cmake/GenkoPackage.cmake` が `FONTS.json` を読んで、`storage: file` の 40 個と一覧を `share/genko-studio/fonts/` に入れる（40 個でなければ構成で止まる）。`native/package/sbom.cmake` に 3 つのパッケージ: `fonts-lettering`（OFL の 36 個）、`fonts-genei`（源暎の 2 個）、`fonts-littlelimit`（k8x12・美咲の 2 個。`LicenseRef-LittleLimit-Free`。ライセンス文を SBOM に入れる）。`THIRD_PARTY.md` の 3 行を「入れてある」に書き換えた。`native/package/README-ja.md` に書体の説明。
+- **`genko doctor`**: 40 個の有無・大きさ・SHA-256 を見て、違うものを `problems` に挙げる（`lettering font missing|of another size|changed: <キー> (<ファイル>) in <フォルダー>`。コマンドラインの英語の報告で、画面には出ない）。
+- **`lint`**: 追加のキーを知っている書体として扱う。ファイルが無ければ `font_not_installed`（警告。「書体「…」のファイルがこのパソコンに無い（アンチックで描かれる）」、手がかり「アプリを入れ直すと元の書体で描ける」）。
+- **`inspect target=fonts`**（`service/briefs.cpp`）: `bundled` は前からの 7 行（前と同じ）＋追加の 40 行 `{key, label, category, use, kanji, fallback?, available}`。`categories` を足した。`note` は前のまま。
+- **HTTP の `font_path`**（`api/headless_server.cpp`）: 追加のキーはキーのまま受け取る（作業フォルダーの下のパスに直さない）。
+- **`replace_fonts`**（`render/ops_type_fonts.cpp`）: 追加のキーは「見つからないフォント」に数えない。尋ねる op の答えに、そういう書体があるときだけ `not_installed: [{font, label}]`。
+- **PSD の書き出し**（`formats/psd_export.cpp`・`psd_text.cpp`）: ファイルが無くても、本が名指しした書体の PostScript 名で書く。`font_warnings` がその名前を挙げる。
+- **手引き**: `native/resources/studio/guide/SKILL.md` と、同じバイトの写し `integrations/hermes/genko-manga/SKILL.md`・`integrations/claude-code/skills/genko-manga/SKILL.md`、`docs/AGENT.md`。使い道ごとの書体の表、かなだけの書体と相方、極太の書体の使い方、`available` の見方。
+- **`service/wording.cpp`**: 足していない（この群で増えた、投げる英語の文が無い）。
+- **MCP**: 道具の入力の形（inputSchema）と説明文は変えていない（`test_mcp_api_e2e` の合計の検査が合格）。承認の流れに触っていない。
+
+#### 配布物の大きさ（Linux x86_64。2026-11-14 に測った。導入したフォルダーを `tar -czf` で固めた値）
+- 群 3 まで入れた最後のビルド: tar.gz **162,044,123 バイト**、展開して 333,658,732 バイト、うち `share/genko-studio/fonts` が 157,645,644 バイト（40 個と一覧で 41 ファイル）、`bin/genko` が 86,348,600 バイト。
+- 群 2 の終わりに測った値: tar.gz 161,843,212 バイト、展開して 333,534,836 バイト。
+- 書体を足す前の記録: tar.gz 75,199,411 バイト。増えたのは 87 MB ほど（書体は固めてもあまり縮まない）。
+- Windows の zip と macOS は測っていない。
+
+#### 変えた期待値（緩めていない）
+- `test_package`: SBOM の行の表に上の 3 つのパッケージ。ライセンスのファイルの数（OFL 39・LICENSE 2・合わせて 41）は群 1 で直したまま。導入したプログラムで doctor・`inspect fonts` を流す所は、別の利用者のホームで行う（片付けの検査が、試した人のホームに残るものを見るため）。
+- `test_psd_text` の `without.fonts`: ファイルが無いときも、名指しした追加の書体の名前が入る（上の PSD の決まり）。
+- `test_font_faces`: `replace_fonts` は追加のキーを挙げず、`not_installed` に入れる。
+
+#### 試験
+- 新しい試験: `native/tests/unit/test_font_service.cpp`（`inspectListsTheSevenThenTheForty`・`lintKnowsTheAddedFaces`・`replaceAllNeverStripsAnAddedFace`・`psdNamesTheFaceAskedForWithoutItsFile`）、`test_mcp_api_e2e` の `httpApiKeepsAnAddedFacesKey`、`test_package` の `theLetteringFontsAreInstalledAsFetched`・`theInstalledProgramFindsEveryFace`（導入した `genko` が 40 書体を見つけ、描いた絵が変わり、ファイルを消す・中身を変えると doctor が言う。install.sh のリンク越しは別の利用者のホームから）。
+- 関係する試験 20 本が合格（496 項目、SKIP 0）: test_font_catalog・test_font_faces・test_font_service・test_psd_text・test_mcp_api_e2e（全部）・test_ledger_service_a・b・c・test_gui_ledger_a・b・c・test_gui_type_panels・test_gui_output ほか。test_package（8）も合格。
+
+### F2 群 3（F2-C: 画面）— 2026-11-14
+
+#### 作ったもの
+- **ドック「書体」**（`app/font_palette.{hpp,cpp}`、`app/main_window_fonts.cpp`）: ウィンドウ → 書体、ページ → 台詞 → 書体のパレットを開く（`act_font_palette`。名前のある操作は 822 → 823）、文字ツールの設定の「ほかの書体…」。台詞のタブの隣、初めは閉じている、配置と一緒に覚える。
+  - 一覧: 区分の見出し 11 と書体 47（アンチックが最初）。行は「名前 → 知っておくこと（かなだけ（漢字は…）・漢字は一部（残りは…）・ファイルなし）→ 見本」の縦並び（`FaceRow` という行の描き手。ドックが狭いので、見本の横に名前を置くと名前が頭の 3 字で切れた）。
+  - 見本: `render::text::text_layout` で「あア漢字！」（4.6 mm、96 dpi）を描いたもの。文字の色は画面の文字の色（明るい・暗いを切り替えると塗り直す）。
+  - 遅らせ方: 窓を開いただけでは書体ファイルを読まず、見本も作らない。初めて見せてから、画面の合間に 1 つずつ。追加の書体のファイルは、見本の前に別のスレッド（QtConcurrent）で 1 つずつ読んで確かめる（相方も）。画面のスレッドは組むだけ。測った値: 47 個で 1.3 秒ほど、1 つの見本が画面を止めるのは長くて 40 ms ほど（別のスレッドにする前は 150〜190 ms）。
+  - 検索: 名前・使い道・区分・キー・元の名前。空白で区切ると全部を含むもの。
+  - 選ぶ: クリックは、このページの台詞を選んでいて文字ツールを持っていなければその台詞に（`edit_line` 1 つ。同じなら何もしない）、そうでなければ次に置く台詞に（本は変えない。文字ツールの「書体」にその 1 つだけ足す）。右クリックで 選んだ台詞・次に置く台詞・選んだルビ・この本のいつもの書体。
+  - この本のいつもの書体: `set_meta` の `font_path`。文字ツールの「書体」の最初の行が「いつもの書体（名前）」と言う。
+  - ファイルが無い書体: 淡い色と「ファイルなし」、選べない（選ぶと言うだけ）。選ぶときは `present` で中身まで確かめる。
+- **開いたときの知らせ**（`MainWindow::note_fonts_on_open`）: ページの上の帯（`fonts_band()`。閉じるまで出ている。「この知らせを閉じる」で消え、その本ではもう出ない。別の本のタブに移ると隠れ、戻ると出る）。言うのは 2 つ: 本が使っている書体のファイルが無いこと、`fonts@1` を持たない前の本が名前で書いていた書体をこの版から付属の書体で描くこと（D2）。ページを読んでいる途中の本は、読み終わってから調べる（後のページの文字レイヤーも数える）。
+- **前からの一覧**（レビューの P3-8）: 文字パネルの書体の一覧は、7 つの後に区分ごとの 40 書体を名前で並べる（`type_panels.cpp`。Qt に書体を登録しない）。`qt_family` は、追加の書体をパスの書体と同じに「見せている 1 つだけ登録し、次で外す」。ルビの書体と文字パネルは、キーでなく名前を見せる。`note_missing_glyphs` は相方で描く字を「無い字」と言わない。
+- **見つからないフォント**: 「見つからないフォントを解決…」「すべての見つからないフォントを置換」は、付属の書体をファイルが無いだけで置き換えず、そのことを言う。
+- `native/src/core/data/commands.json`: 2 行増えた（ウィンドウの「書体」、ページ → 台詞の「書体のパレットを開く」）。
+
+#### 計画と変えた所
+1. **開いたときの知らせを、状態行でなくページの上の帯にした**。状態行は 1 行で、名前を挙げた文が窓の幅で切れた（見本の絵で分かった）。帯は読み取り専用の帯と同じ作り。
+2. **見本は画面のスレッドで組む**（ファイルを読んで確かめるのだけ別のスレッド）。重いのは読むほうで、組むのは 1 つ 40 ms までだったので、組むのまで別のスレッドには出していない。
+3. **行を縦並びにした**（上のとおり）。
+4. 文字ツールの「書体」は 7 つのまま。パレットで選んだ追加の書体は、その 1 つだけを 8 行目に足す（次を選ぶと入れ替わる）。
+
+#### 変えた期待値（緩めていない）
+- `test_gui_actions`: 名前のある操作の数 822 → 823（`act_font_palette`）。
+- `test_gui_lines` の `commandsAsPythonsWindowHasThem`: ページ → 台詞 の並びに「書体のパレットを開く」（フキダシのパレットの次）。
+- `commands.json`（`test_gui_prefs` の `commandsJsonIsTheMenus` が比べる表）: 上の 2 行。
+
+#### 試験
+- 新しい試験 `native/tests/gui/test_gui_fonts.cpp`（18 項目）: 一覧と見出し・行の作り、見せるまで何も読まない・作らない（別のスレッドで 40 個を読むこと）、見本が紙面の描き方と同じ画素、検索、選んだ台詞に 1 回で、次の台詞に、かなだけの印、ファイルが無い書体（大きさだけ同じ別物も）、前からの一覧、文字パネルが Qt に書体を足さない、本のいつもの書体、ルビ、配置、開いたときの知らせ（何も言わない本・D2・ファイルなし・別の本との行き来・閉じる）、読んでいる途中の本、見つからないフォント、明るい・暗い、読む言葉が全部日本語（英字 4 字以上の続き・キー無し、です・ます）。
+- `GENKO_FONTS_GUI_OUT=<フォルダー>` を付けて流すと、画面の絵を書く（明るい・暗いそれぞれ: 窓、パレット、印の付いた行、一覧の終わり、検索、文字ツールの設定、ファイルが無いときの知らせとパレット、前の本の知らせ）。作業用の `fonts-f2/gui/` に 18 枚。紙面の見本 36 枚（`fonts-f2/`）も最後のビルドで書き直した（前からの `sfx`・`hand` のかっこの不具合が出ている 1 枚目もそのまま）。
+- **確かめたこと（最後のビルド。Linux Release、2 本ずつ）**: 関係する試験 35 本が合格（1,334 項目。失敗 0、SKIP 0）: test_gui_fonts・test_gui_actions・test_gui_prefs・test_gui_lines・test_gui_type_panels・test_gui_type・test_gui_ruby・test_gui_fukidashi・test_gui_book・test_gui_layout・test_gui_workspace・test_gui_look・test_gui_studio・test_gui_view・test_gui_ledger_a・b・c・test_gui_output・test_gui_file・test_gui_smart・test_gui_tool_presets・test_gui_styles・test_cli_e2e・test_control_channel・test_font_faces（505）・test_font_catalog（96）・test_font_service・test_psd_text・test_contract_prefs・test_mcp_api_e2e・test_service・test_ledger_service_a・b・c・test_package。1 回目に落ちたのは test_gui_lines のメニューの並び 1 つ（上の「変えた期待値」）。
+- 同じ最後のビルドで、描画・保存・Python との照らし合わせの 17 本も流した（612 項目。失敗 0、SKIP 0）: test_render_page・test_storage・test_model・test_command_bus・test_type_text・test_type_styles・test_ruby_render・test_pcraft、test_contract_psd_text・psd・type・type_fonts・export・pcraft・storage・render_cli・pipeline。
+
+#### 残り・確かめていないもの
+- Windows・MSVC・macOS のビルドと配布物、ASan、Debug。Windows のビルドの木では書体をコピーする（157 MB）。
+- 実機の画面（高 DPI、タッチ）での見本の見え方。試験は offscreen。
+- P3-5（上）。かなだけの 3 書体のかなの大きさ（合わせていない）。
+- 前からの `sfx`・`hand` の縦のかっこの不具合と、横組みの最後の行の `_` が切れること（どちらも前から。触っていない）。
+- 全体の試験は流していない（関係する試験だけ。決まりのとおり）。
+
+### 利用者の決定（2026-11-14）: 括弧の四角と、新しい本のいつもの書体
+- 利用者の言葉: 「両方おすすめどおりで」。
+- **括弧の四角を直す**: これまでの書体のうち、効果音用（`sfx`、デラゴシック）は （）『』【】［］〈〉《》() を、手書き風（`hand`、よもぎ）は ［］ を、字の無い印の四角で描いていた（前からの不具合。書体の見本 fonts-150-plain-1.png の左上）。その書体に無い括弧だけをゴシックで描く。四角が出ていた既存のページは四角が括弧に変わる（利用者が受け入れた違い）。それ以外の字・それ以外の書体は画素も保存も変えない。
+- **新しく作る本のいつもの書体を源暎アンチック（`antique_genei`）にする**: 替わるのは新しく作る本だけ。既存の本（`font_path` の無い本を含む）は今のまま（いつもの書体はアンチック）。書体のファイルが無い環境では、知らせを出してこれまでのアンチックで描く（F2 の決まりのまま）。
+- 実装はフキダシの追加（群 1 の直しと群 2）の後に、同じ枝で行う。
+
+### 括弧の四角と新しい本のいつもの書体の実装（ブランチ `native/fonts-fukidashi2`。4920f827 の上）— 2026-11-14
+
+上の「利用者の決定（2026-11-14）」の 2 つを入れた。設計は SPEC FONT-01 の「利用者の決定（2026-11-14）」、schema-v4「書体」。
+
+#### 括弧の四角
+- **原因**（cmap で確かめた）: 横組みの括弧はどちらの書体にもある。四角になっていたのは**縦組みだけ**。縦組みは括弧を縦書き用の字形（︵ など）に替えて、その書体で描く。前からの書体は字の有無を字の箱の大きさで見る（`has_drawn_glyph`）ので、字形の無い書体では「字の無い印」の四角を字として描いていた。cmap に縦書き用の字形が無いのは、効果音（デラゴシック）の『』（）()【】［］〈〉《》（﹃﹄︵︶︻︼﹇﹈︿﹀︽︾）と、手書き風（よもぎ）の［］（﹇﹈）だけ。「」の字形（﹁﹂）はどちらにもある。ゴシック・明朝・丸ゴシック・勢い（レゲエ）は 16 の字形を全部持つ。
+- **直し**: `render/text/tategaki.cpp` の `column_font`。縦組みのマス（本文とルビ）を描く書体を選ぶとき、前からの書体（`gothic`・`mincho`・`maru`・`hand`・`sfx`・`sfx_pop`）で、その括弧の縦書き用の字形が cmap に無ければ、同じ大きさのゴシック（`gothic`）で描く（ゴシックの縦の行と同じ絵）。追加の 40 書体（cmap で見て、無ければ回す。前のまま）・書体ファイル・横組み・ほかの字は変えない。
+- ~~PSD の文字レイヤーの書体の名前（`SetChar::font`）と、ルビの代わりの書体の知らせ（`note_font`）は前のまま（その括弧も書体の名前で書く）。~~ レビュー 3 の P3-7 で、PSD の文字レイヤーはその括弧だけゴシックのランにした（`SetChar::font` とルビの字の書体が描く書体: `column_path`）。ルビの代わりの書体の知らせ（`note_font`）は前のまま。本の保存のバイトは変わらない。そういう括弧の無い本の PSD も 1 バイトも変わらない。
+- 見本: 作業用の `fonts-decisions/before/`・`after/`（`brackets-{sfx,hand,gothic}-{down,across}.png` 300 dpi、`sheet-fonts-150-plain-1.png`）。変わったのは `sfx`・`hand` の縦だけ（横とゴシックはバイトまで同じ）。`GENKO_FONTS_OUT` で test_font_faces が書く。
+
+#### 新しい本のいつもの書体
+- `core::fonts::kNewBookFace`（`antique_genei`）と `core::fonts::make_new_book(doc)`（`font_path` を源暎アンチックに、`features` に `fonts@1`。保存前の本も「前の版の本」と見なされないように）。
+- 呼ぶ所（人が本を新しく作る道すべて）: 画面の新規…の漫画の原稿（`NewProjectDialog::create`）と画像（`create_image`）、窓の無題の本（`app::untitled_book`: 起動のとき、すべてを閉じた後）、`genko new`（`--image` も）、HTTP `/v1/new`、`StudioService::create_project`（MCP の `create_project`、`genko studio init`）。
+- 呼ばない所: ファイルから開いた本（`genko new --from`・開く…・PSD・PCraft）、本の写し、スマートオブジェクトの中身、アクションのコンタクトシートとパノラマの結果、`core::new_episode` そのもの（試験とほかの道が使う。変えると既存の本の道まで変わる）。
+- 画面: 文字ツールの「書体」の最初の行は「いつもの書体（源暎アンチック）」、2 行目に「アンチック」、パレットの源暎アンチックの行は「この本のいつもの書体」（F2 の仕組みのまま。新しい本の窓には書体の選び方が無い）。
+- ファイルが無いとき: F2 の決まりのまま、アンチックで描き（前からの本と 1 画素も違わない）、検査は最初のページに `font_not_installed`、画面は帯で知らせる。
+- **帯の高さ**（直した）: 帯の文を、折り返した高さの箱（`BandWords`。足りないときは 2 行まで縮み、残りはスクロール）に入れた。書体のファイルが無い新しい本を小さい画面（1024×640 の 125 % 以上）で承認箱と一緒に開くと、帯が台詞の文の高さだけページを押し出し、ページが窓の外に出ていた（test_gui_layout `theWindowsFitEveryScreen` の main-studio。試験のプログラムの横には書体のフォルダーが無いので、そこでは新しい本はいつもファイルが無い）。広い窓では前と同じ高さ。
+
+#### 変えた期待値（緩めていない。どれも「新しい本は源暎アンチックと fonts@1 を持つ」から）
+- test_contract_color_model・test_contract_channels・test_contract_image_ops: `genko new` の本の `features` の期待に `fonts@1` を入れた（「何も無い」は `["fonts@1"]`、`["color-mode@1", "color-model@1"]` は `fonts@1` を足して、`["channels@1"]` も同じ）。
+- test_psd_text の CLI の本（`make_cli_book`）: 絵の値（Python の image way の 4 ページ）の本はいつもの書体が無い本なので、`genko new` の後で `set_meta {font_path: ""}` を当ててから同じ ops を当てる（PSD の値は変えていない）。
+- test_layout_ideas `submitNameSavesAsBeforeK1`（k1_probe.inc）: 8362d5fc の本と比べるため、`font_path: "antique_genei"` と `fonts@1` を 8362d5fc の書き方（空・無し）に戻してから SHA-256 を取る（値は変えていない。その前に、本が源暎アンチックを持っていることを確かめる）。
+- test_package `theInstalledProgramFindsEveryFace`: 「40 書体のどれも名指ししない本」として使う本を、`genko new` の後でいつもの書体を空に戻す（その本が源暎アンチックで作られたことも確かめる）。
+- 括弧の直しで動いた既存の期待値は無い（効果音・手書き風の縦の括弧を固定していた試験は無かった。書体の見本 fonts-150-*-1.png の左上 2 つは変わる）。
+
+#### 足した試験
+- test_font_faces: `bracketsOfBeforeTheFontLacksDownAreTheGothics`（cmap で欠けている字形を数える: 効果音 14・手書き風 2・ほかの前からの書体 0。縦の行で、その括弧のマスだけが変わり、ゴシックの行の同じマスと同じ絵。ほかの画素は括弧を「」に替えた行と同じ。横はその書体の括弧そのもの）、`theFacesOfBeforeDrawWhatTheyDrew`（効果音・手書き風の縦・横・ルビとふちどり、横の括弧、効果音の種類の行、手書き風の字形のある括弧の縦: 直す前のビルドで取った 10 の値）、`aNewBookIsInGeneiAntiqueABookOfBeforeInAntique`、`aNewBookWithoutItsFaceFileIsInAntiqueAndSaid`。
+- test_font_catalog: `aNewBookStartsInGeneiAntique`（保存して読み直し、もう一度書いて同じバイト）、`aBookWithNoUsualFaceKeepsNone`（`font_path` が空・無い本は空のまま、同じバイト）。前の本が同じバイトで保存されることは、前からの `aBookOfBeforeIsWrittenToTheSameBytes`。
+- test_cli_e2e `aNewBookStartsInGeneiAntique`（`genko new`・`--image`・`genko studio init`。`--from` は変えない。`apply` の後も同じ）、test_mcp_api_e2e `aBookMadeThroughMcpStartsInGeneiAntique`（`create_project` と `apply_ops` の後）と `httpApiKeepsAnAddedFacesKey` の `/v1/new`、test_gui_fonts `aNewBookStartsInGeneiAntique`（新規の漫画・画像、窓の無題の本、ファイルが無いときの帯の文）。
+
+#### 確かめたこと（Linux Release、2 本ずつ）
+- 関係する試験 95 本が合格（3,051 項目。失敗 0。SKIP 19 はどれも Release に故障の差し込みが無いための前からのもの: test_save_e2e・test_app_e2e・test_gui_save・test_migrate_e2e）: 書体（test_font_faces・test_font_catalog・test_font_service・test_psd_text）、描画と保存（test_render_page・test_storage・test_type_text・test_type_styles・test_ruby_render・test_command_bus・test_fukidashi・test_fukidashi_service）、e2e（test_cli_e2e・test_mcp_api_e2e・test_save_e2e・test_ops_e2e・test_migrate_e2e・test_refusals_e2e・test_app_e2e・test_control_channel）、サービス（test_service・test_studio_ops・test_layout_ideas・test_ledger_service_a〜c・test_ai_link・test_paper・test_style_presets・test_retouch）、照らし合わせ 37 本（test_contract_*。`genko new` を使うものすべてと、書体・PSD の文字・描画の照らし合わせ）、画面 28 本（test_gui_fonts・layout・book・lines・type・type_panels・ruby・file・save・studio・ledger_a〜c・actions・look・prefs・ai・anim・carried・smart・smart_contents・output・view・styles・tool_presets・workspace・fukidashi・shapes）。続けて test_package（8 項目）も合格。
+- 1 回目に落ちたのは 7 本: 上の「変えた期待値」の 5 本、test_gui_layout（上の帯の高さ。直した）、test_ledger_service_b（手引きを書き換えたのにプログラムに組み込んだ手引きが古いビルドのままだった。ビルドし直して合格）。
+
+#### 残り・確かめていないもの
+- Windows・MSVC・macOS、ASan、Debug。全体の試験。
+- パスで名指しした書体ファイルが縦書き用の字形を持たないときは、前のまま（字の無い印の四角が出ることがある）。決定は前からの書体についてだけなので変えていない。
+- 帯は、とても狭い窓（1024×640 の 200 %、承認箱あり）では「この知らせを閉じる」が欠けて見えることがある（帯の幅が窓を広げないようにしたため。文は全部スクロールで読める）。
+- 新しい本の画面の絵（`GENKO_FONTS_GUI_OUT`）は撮り直していない。
+
+### F2 2 回目のレビューの直し（ブランチ `native/fonts-fukidashi2`。フキダシの追加 群 1 の 279ed84f の上）— 2026-11-14
+
+読むだけの 2 回目のレビュー（直しの回・群 2・群 3。P1 無し、P2 が 1、P3 が 18）を、リードの決定のとおりに直した。レビューが実行で確かめた「40 書体を使わない本は、2026-11-13 の配布物とバイトも画素も同じ」は保っている（`aBookOfBeforeIsWrittenToTheSameBytes`、Python との照らし合わせの試験、test_render_page）。フキダシのコードと試験には触っていない（`checks.cpp` は書体の所だけ）。
+
+#### 直したこと（番号はレビューのもの。かっこは守る試験）
+- **P2-1 いつもの書体がある本でアンチックを選ぶ**: 本に `font_path` があるあいだ、文字ツールの「書体」に「アンチック」（`antique`）の行を足す（`tool_settings.cpp` の `show_usual`・`show_face`）。パレットでアンチックを次の台詞に選ぶとこの行になり、置いた台詞は `style.font: "antique"`。パレットの最初の行は「アンチック」で、「この本のいつもの書体」は、いまのいつもの書体の行に出る（`FontPalette::set_usual`）。（test_gui_fonts `antiqueForTheNextLineInABookWithItsOwnUsualFace`・`theBooksUsualFaceIsSetAndShown`）
+- **P3-1 doctor**: 40 個は stat だけ。SHA-256 まで読むのは本が名指しした書体だけ。名指しした書体の問題は `problems`（`ok: false`）、ほかは `installation`（`ok` は変えない。問題があるときだけの鍵）。書体を使わない本の doctor は 0.03 秒（レビューが測った 0.94 秒から）。（test_package `theInstalledProgramFindsEveryFace`）
+- **P3-2 検査の穴**: 文字スタイルから来る書体（`core::type_text::resolve_chars`）、ページが見せるスマートオブジェクトの中身の文字レイヤー（入れ子も）、本のいつもの書体の相方。相方の警告は、その言葉に相方が描く字があるときだけ（その書体の cmap で見る）。中身・大きさが違うファイルは「ファイルが無いか、壊れているため」（`font_files::damaged`）。（test_font_faces `theMissingFaceIsSaidThroughStylesContentsAndTheUsualFace`・`everyLabelAndWarningReadsInJapanese`・`aFileOfTheSameSizeButOtherContentIsNotInstalled`）
+- **P3-3 見本の先読み**: 別のスレッドは `bytes()` を呼び、見本を組むまで中身を持つ。`font_files` は、覚えから外した中身でも、まだ誰かが持っていれば読み直さずにそれを渡す。画面の倍率が変わったら先読みもやり直す。ドックをしまうと作るのを止める。（test_gui_fonts `aScreenOfAnotherScaleMakesTheSamplesAgain`・`theDockOrTheWindowClosedWhileAFileIsRead`、test_font_faces `bytesAreSharedAndBounded`）
+- **P3-4 いつもの書体の表示**: 本が変わるたびに追いかける（`on_book_changed` → `show_usual_face`）。取り消し・やり直し・`set_meta` で変わる。（`theBooksUsualFaceIsSetAndShown`）
+- **P3-5 ルビ**: `StoryPanel::set_chosen_ruby_font` は「ルビを選んでいない・同じ書体・変えられなかった・変えた」を返す。変えたときだけ「…にしました」。（`aChosenRubyTakesTheFace`・`aRefusedRubyPickIsNotSaidAsDone`）
+- **P3-6 キーが見える所**: 字形パネルの書体の名前、PSD の書き出しの窓の注意書き。（`openingTheFontListAddsNoAddedFaceToQt`・`thePsdNoteNamesTheFaceNotItsKey`）
+- **P3-7 名前を 1 つに**: 前からの 6 つは文字ツールの名前（ゴシック・明朝・丸ゴシック・手書き風・極太（効果音）・勢い（効果音））。パレットの行だけ「ゴシック（ZEN角ゴシック B）」「極太（効果音・デラゴシック）」と書体の名前を添える（`lettering::FaceRow::row`、`lettering::face_name`）。（`thePaletteListsTheFacesByCategory`）
+- **P3-8 文**: 帯の 2 つの文（「この本が使っている書体…その文字は代わりの書体（台詞はアンチック）で描いています…」「この本が指定している書体…は、前の版には無かったためアンチックで描いていました。この版からはその書体で描くので、見た目が変わります」）、検査の相方の文（「書体「X」の漢字などを受け持つ書体「Y」のファイルが…無いため、その字はゴシックで描いた…」）、`lint`（効果音は「極太の書体で描かれる」）、`FONTS.json` の `use_ja` 3 つから「1 ファイル」を外した。「この原稿」は「この本」に。（`everyWordReadsInJapanese`、test_font_service `lintKnowsTheAddedFaces`）
+- **P3-9 状態行で切れる文**: 書体の文は `MainWindow::say_of_fonts` を通る。状態行に収まればそこに、収まらなければ帯に全部出して、状態行は「書体の知らせを、ページの上に出しました」（それも収まらなければ何も言わない）。出した後で状態行が狭くなったときも帯へ移す（`refit_fonts_sentence`）。置き換えの長い文は帯（`tell_of_fonts`）。選んだときの文は短くした。（`noSentenceIsCutInTheStatusLine`: 窓を開いたままの幅 784・1300・760 で、47 書体 × 3 通り）
+- **P3-10 帯のボタン**: 帯は `fontsBand`（枠）・`fontsBandText`（文）・`fontsBandClose`（ボタン「この知らせを閉じる」。キーボードで押せる）。（`whatIsSaidWhenABookIsOpened`）
+- **P3-11 開いたときの中身の確かめ**: 本が名指しした書体は、開いたときに別のスレッドで `present`（中身まで）。大きさだけ同じ別物も帯に出る。（同上）
+- **P3-12 読めなかったファイル**: 開けない・読み切れない・無いは、2 度試して、その 1 回だけ「入っていない」（覚えない）。中身が違うものだけ、プロセスの間ずっと。答えが変わるたびに `generation()` が進み、描いたものを描き直す。読めない間は検査が警告する。（test_font_faces `aFileThatCouldNotBeReadIsAskedForAgain`）
+- **P3-13 構成で止める**: `native/cmake/GenkoFontList.cmake`（`genko_font_files`）。一覧の書体ファイルが無ければ、配布物の構成とビルドの木の手順が、ファイルの名前を言って止まる。（`aMissingFontFileStopsTheConfigure`）
+- **P3-14 ビルドの木の写し**: 書体は大きさだけで比べ、一覧は中身が違うときだけ写す（時刻は見ない）。（`theBuildTreeStepLinksOrCopies`）
+- **P3-15 PSD の相方**: ファイルが無いとき、漢字が無い書体の漢字は相方の名前で書く（`detail::asked_font`）。**漢字が一部の書体（`sfx_inline` の 1 つ）は直せない**: どの漢字を持つかは書体ファイルが無いと分からないので、全部の字がその書体の名前になる。書き出しの窓の注意書きがそう言う。（test_font_service `psdNamesTheFaceAskedForWithoutItsFile`、test_psd_text `aPartnersLettersAreNotWarned`）
+- **P3-16 置き換えの答え**: `map` が追加のキーを名指ししたら、答えに `kept: [{font, label, why}]`。（test_font_service `replaceAllNeverStripsAnAddedFace`）
+- **P3-17 試験**: `if` 付きの確かめを外した（HTTP の入れ子、字形パネル）。足りなかった場合を足した（上の各項目）。配布物の 2 項目を Linux だけのブロックから出した（中身に Linux だけのものは無い。**Windows では流していない**）。0 ミリ秒のタイマーの数え方に寄りかかる確かめは、画面の出来事を回す前に見るようにした。
+- **P3-18**: SPEC の「1 画素も違わない」は、本にいつもの書体が無いときだけ、と書き直した。
+
+#### 前の節から変わった所（上の群 1〜3 の節を読むときに）
+- 「答えはプロセスの間ずっと同じ」は、中身が違うファイルだけ。無い・読めないは毎回見る（P3-12）。
+- `genko doctor` は 40 個を全部は読まない（P3-1）。`verify(true)`・`missing()` を呼ぶのは試験だけになった。
+- 開いたときの知らせの文、選んだときの文、検査の相方の文は、上の P3-8・P3-9 のもの。帯は `QLabel` でなく枠＋文＋ボタン。
+- パレットの最初の行は「アンチック（いつもの書体）」でなく「アンチック」＋「この本のいつもの書体」。
+- `set_chosen_ruby_font` は `bool` でなく `StoryPanel::RubyFace`。
+
+#### 変えた期待値（緩めていない）
+- test_font_faces: 相方の警告の文と、出る数（漢字が一部の書体は、持っている漢字だけの言葉では出ない）。`bytesAreSharedAndBounded`（持っている人がいれば、その中身が返る）。中身が違うファイルの警告の文。
+- test_font_service: `lint` に効果音の 1 件。PSD の書体の並びに相方（`MochiyPopOne-Regular`）。
+- test_psd_text `without.fonts`: 相方の `ZenOldMincho-Black` が入る（P3-15）。
+- test_package: doctor の決まり（P3-1）。
+- test_gui_fonts: 文・行の名前・帯の作り（P3-7〜P3-10）。本にいつもの書体があるとき、文字ツールの「書体」は 8 行。
+- 前からの本で、いつもの書体が前からの 6 つのキーのとき、文字ツールの最初の行は「いつもの書体（明朝）」のように、その書体の名前になる（前は「（アンチック）」。レビューの P3-4 のとおり、前より正しい）。書体ファイルのパスのときは「いつもの書体（書体ファイル）」。
+
+#### 確かめたこと（最後のビルド。Linux Release、2 本ずつ）
+- 関係する試験 58 本が合格（2,424 項目。失敗 0、SKIP 0）: test_font_faces（508）・test_font_catalog（96）・test_font_service・test_psd_text・test_package・test_mcp_api_e2e・test_cli_e2e・test_gui_fonts（24 項目）と、画面の 20 本（lines・type_panels・type・ruby・fukidashi・output・actions・prefs・look・book・layout・workspace・studio・view・file・smart・tool_presets・styles・ledger_a〜c）、test_service・test_ledger_service_a〜c・test_contract_prefs・test_control_channel、描画と保存（test_render_page・test_storage・test_model・test_command_bus・test_type_text・test_type_styles・test_ruby・test_ruby_render・test_pcraft・test_smart・test_psd_smart・test_fukidashi・test_fukidashi_service）、照らし合わせ（test_contract_psd_text・psd・type・type_fonts・export・pcraft・storage・render_cli・pipeline・smart）。
+- 配布物（導入したフォルダーを `tar -czf`）: tar.gz 162,123,887 バイト、展開して 333,850,689 バイト、書体のフォルダー 157,645,649 バイト、`bin/genko` 86,540,552 バイト（フキダシの追加 群 1 の分も入った値）。
+- 画面の絵（作業用の `fonts-f2/gui/` に 22 枚。`GENKO_FONTS_GUI_OUT`）: 前の 18 枚を作り直し、窓を開いたままの幅での 2 通り（置き換えの長い文が帯に全部出ているもの、選んだときの文が帯に出ているもの）を明るい・暗いで足した。
+
+#### 直していないもの・確かめていないもの
+- 漢字が一部の書体の、ファイルが無いときの PSD の名前（P3-15 の残り。上）。
+- Windows・MSVC・macOS（配布物の 2 項目、ビルドの木の写し、`QtConcurrent` の先読み、0 ミリ秒のタイマー）、ASan、Debug。全体の試験。
+- 読めないファイルの試験（権限を外して開けなくする所）は Unix だけ。
+- 状態行で切れるのは、書体の文だけ直した。アプリのほかの文は、窓を開いたままの幅（状態行 286 px）では今も切れる（前から）。
+
+## 今風のフキダシ（fukidashi@1。SPEC BALLOON-01）— 2026-11-13、2026-11-14 に main に統合
 
 ### 利用者の決定（2026-11-13）
 - 「吹き出しが少しいびつに見える」「いびつにせずに今風の漫画の吹き出しを各種作って置けるように」。続けて「手描き風は消して良いです」、すでにある本のフキダシは「全部を今風に描く」。
@@ -177,7 +688,7 @@
   - ASan の試験を 4 並列にした回: test_cli_e2e が落ちた。原因は memory cgroup の上限（14 GB）で、試験が起こした genko の子プロセスを OOM killer が止めた（dmesg の記録あり。プロセスを起こす e2e の試験が同時に走り、ASan の genko が 14 個、各 1 GB で並んだ）。製品の不具合ではない。**ASan の試験は 2 並列まで**（4 並列は使わない）。
   - 2 並列に戻した回は lead が止めた: test_fukidashi の sampleSheets と test_gui_fukidashi の screenshots（見本の絵の書き出し）が、GENKO_FUKIDASHI_OUT が無いと QSKIP していた。監査は ASan の SKIP を一つも認めないので、走り切っても不合格になる。4 並列の回のログを「続きから」の読み方（試験ごとの結末）で読んで分かった。絵の書き出しを試験の項目から外し、フォルダを指定した回の cleanupTestCase で書く（6b2f5411。test_gui_color の画面の絵と同じやり方。監査は変えていない）。ASan で 2 本を、指定なし（72・11 項目、SKIP 0）と指定あり（絵 40 枚が書かれる）で確かめた。
 - 次から気を付けること: 開発中の関係する試験（V1）は ctest の合否しか見ていなかったので、足した QSKIP に気付かなかった。試験に QSKIP を足したら、出口の前に関係する試験のログで `SKIP` を見る。
-- test_fx_lens は ASan で 1 本 51〜75 分かかり（今回 3,054 秒）、ASan の所要時間の 3 割前後を占める。分ければ並列が効き、止まったときのやり直しも短くなる（未着手。利用者に相談する）。
+- test_fx_lens は ASan で 1 本 51〜75 分かかっていた（今回 3,054 秒。ASan の所要時間の 3 割前後）。**直した（2a998875、利用者の決定 2026-11-14）**: 遅いのはフィルターではなく試験の補助だった。`pixel()` が呼ぶたびに ColorRasterView を作り、view は作るときに float の画像の全サンプルを検査するので、画像を回るループが画素の数だけ全体の検査を繰り返していた（theSameLookAtEveryResolution が Release で 79 秒のうち 73 秒）。ループの外で view を 1 つ作って読む。読む値・比べ方・許容値は同じ。Release で 79 秒 → 3.5 秒。実行ファイルは分けていない。RUN_SERIAL と制限時間はそのまま。ASan での時間は次の出口で測る。ほかのフィルター系の重い項目（test_fx everyKindAsASmartFilter、test_smart_filters likeRasterizeAndFilterRaster、test_precision_merge_controls a4HighPrecision600dpi など）は実際に描いている時間で、同じ無駄ではない。
 
 ### 試験の「続きから」（validation_run.py --resume）— 利用者の決定 2026-11-14
 - 利用者の決定: 「「続きから」を入れてください」「他の試験でも同様のようなテストがあれば変更してください」。機械の再起動と環境が原因の失敗で、ASan の全体の試験を最初からやり直すことが 1 日に 3 回続いた（合わせて約 5 時間）。

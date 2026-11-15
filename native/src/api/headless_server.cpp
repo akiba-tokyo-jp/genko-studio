@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "api/tokens.hpp"
+#include "core/font_catalog.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
@@ -173,7 +174,10 @@ Json confine_ops(const fs::path& root, const Json& ops) {
         if (op.contains("path") && core::py_truthy(op["path"]) && (reads_path || op["path"].is_string())) {
             op["path"] = core::path_to_utf8(confine(root, Json(core::py_str(op["path"]))));
         }
-        if (op.contains("font_path") && core::py_truthy(op["font_path"])) {
+        // (fonts@1: the key of one of the forty added faces is a face's name, not a file's: left as it is — every other
+        // value, the seven keys of before among them, is a path kept inside --root as it always was)
+        if (op.contains("font_path") && core::py_truthy(op["font_path"]) &&
+            !(op["font_path"].is_string() && core::fonts::added(op["font_path"].get_ref<const std::string&>()))) {
             op["font_path"] = core::path_to_utf8(confine(root, Json(core::py_str(op["font_path"]))));
         }
         if (name == Json("import_pages") && op.contains("from") && core::py_truthy(op["from"])) {
@@ -660,6 +664,7 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
             throw core::Error("exists", "a book is there already: " + core::path_to_utf8(dest / "project.json") + " (/v1/new never writes over a book)");
         }
         core::Document doc = core::new_episode(title, core::Num(episode), static_cast<int>(std::clamp<std::int64_t>(pages, -1, 100000)), spec);
+        core::fonts::make_new_book(doc);  // (源暎アンチック: 利用者の決定 2026-11-14)
         storage::ProjectLock lock(dest, actor);
         lock.try_acquire();
         if (exists()) throw core::Error("exists", "a book is there already: " + core::path_to_utf8(dest / "project.json"));

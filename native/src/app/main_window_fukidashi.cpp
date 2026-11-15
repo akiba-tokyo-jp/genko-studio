@@ -90,7 +90,10 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
                 after[name] = value;
             }
         }
-        return lettering::refit_for_kind(l, frame_by_id(l.frame_id), preset->kind, after);
+        // (fukidashi@2: drips that come or go with the look — the box as much taller or shorter, its top kept: the body,
+        // the box less the drips, stays the size it was; a balloon drawn by hand has none)
+        Json box = lettering::refit_for_kind(l, frame_by_id(l.frame_id), preset->kind, after);
+        return box;
     };
     // (the lines joined with it: one balloon, drawn with its first line's inside and line — each takes the look)
     std::vector<JoinedLine> joined;
@@ -103,6 +106,11 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
     }
     const Json ops = preset_restyle_ops(*preset, *line, fitted(*line), joined);
     const QString name = QString::fromUtf8(preset->name);
+    const bool drips = preset->style.contains("drip_mm");
+    if (ops.empty() && drawn && drips) {  // (drawn by hand, and the look nothing but its drips: nothing to give it)
+        flash(QStringLiteral("手で描いたフキダシには、しずくは付きません"), 4000);
+        return false;
+    }
     if (ops.empty()) {  // (that look already: no edit, no step of 取り消し)
         flash(QStringLiteral("選んだ台詞のフキダシは、もう「%1」です").arg(name), 4000);
         return false;
@@ -111,7 +119,8 @@ bool MainWindow::restyle_with_balloon_preset(const QString& key) {
     if (!apply_ops(ops)) return false;
     canvas_->selected_line_id = id;
     on_line_selected(id, false);
-    flash(drawn  ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻す で取り消せます）").arg(name)
+    flash(drawn && drips ? QStringLiteral("手で描いたフキダシには、しずくは付きません（線と塗りだけ当てました）")
+          : drawn        ? QStringLiteral("手で描いたフキダシは形をそのままに、線と塗りを「%1」にしました（元に戻す で取り消せます）").arg(name)
           : many ? QStringLiteral("つないだフキダシをまとめて「%1」にしました（元に戻す で取り消せます）").arg(name)
                  : QStringLiteral("選んだ台詞のフキダシを「%1」にしました（元に戻す で取り消せます）").arg(name),
           4000);

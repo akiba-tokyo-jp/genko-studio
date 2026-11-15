@@ -1,0 +1,521 @@
+{
+  "version": 4,
+  "min_reader": 4,
+  "writer": {
+    "app": "genko-native",
+    "version": "0.1.0"
+  },
+  "book_id": "659caa08027d47a9b7fdb3248286ed4f",
+  "features": [
+    "ruby-layout@1"
+  ],
+  "revision": 2,
+  "title": "前の本",
+  "episode": 1,
+  "binding": "right",
+  "start_side": null,
+  "strict_gates": false,
+  "autosave": false,
+  "font_path": "mincho",
+  "page_locks": {},
+  "brush": {
+    "rgb": [
+      20,
+      20,
+      20
+    ],
+    "width_mm": 0.35,
+    "stabilize": 0,
+    "taper": false,
+    "curve": "linear"
+  },
+  "spec": {
+    "width_mm": 210,
+    "height_mm": 297,
+    "dpi": 600,
+    "bleed_mm": 3,
+    "inner_margin_mm": 10,
+    "expression": "mono",
+    "preset": "a4-mono"
+  },
+  "bible": {
+    "plot": "",
+    "characters": [],
+    "constraints": []
+  },
+  "tickets": [],
+  "studio": {},
+  "pages": [
+    {
+      "id": "pg_7e1d56618c4f",
+      "index": 1,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "579867a3b406",
+          "rect": {
+            "x": 13.0,
+            "y": 13.0,
+            "width": 184.0,
+            "height": 271.0
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [],
+          "panel": null
+        }
+      ],
+      "layers": [
+        {
+          "id": "1683672bcc73",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "2841583fb701",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "1c5cec8b01cd",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true
+        },
+        {
+          "id": "8c2d73f24a9f",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {}
+    },
+    {
+      "id": "pg_2c5f08c77f39",
+      "index": 2,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "65db83ead6f4",
+          "rect": {
+            "x": 13.0,
+            "y": 13.0,
+            "width": 184.0,
+            "height": 271.0
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [],
+          "panel": null
+        }
+      ],
+      "layers": [
+        {
+          "id": "f75e6bc8f14a",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "e15a49bc968b",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "e145e97bc211",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true
+        },
+        {
+          "id": "db48eaa49947",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {}
+    }
+  ],
+  "story": [
+    {
+      "id": "a1",
+      "page_index": 1,
+      "text": "いつもの\n書体だ！？",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "box",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [
+        [
+          "書体",
+          "しょたい"
+        ]
+      ],
+      "path": null
+    },
+    {
+      "id": "a2",
+      "page_index": 1,
+      "text": "ゴシックで\n言うよ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 80.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "rounded",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "gothic",
+        "size_mm": 5.0
+      }
+    },
+    {
+      "id": "a3",
+      "page_index": 1,
+      "text": "明朝の語り",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 130.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "none",
+      "tail": null,
+      "wrap": "horizontal",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "mincho"
+      }
+    },
+    {
+      "id": "a4",
+      "page_index": 1,
+      "text": "まるで\nだめだ！",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 100.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "shout",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style_runs": [
+        [
+          "だめだ！",
+          {
+            "scale": 1.4
+          }
+        ]
+      ],
+      "style": {
+        "font": "maru",
+        "weight": "bold"
+      }
+    },
+    {
+      "id": "a5",
+      "page_index": 1,
+      "text": "手書きの\nメモ（仮）",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 80.0,
+      "y_mm": 100.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "box",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "hand"
+      }
+    },
+    {
+      "id": "a6",
+      "page_index": 1,
+      "text": "ドーン",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 130.0,
+      "y_mm": 100.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "sfx",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null
+    },
+    {
+      "id": "a7",
+      "page_index": 1,
+      "text": "ババッ",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 170.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "sfx",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "sfx_pop",
+        "outline_mm": 0.4
+      }
+    },
+    {
+      "id": "b1",
+      "page_index": 2,
+      "text": "アンチックと\n名指しする",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "box",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "antique"
+      }
+    },
+    {
+      "id": "b2",
+      "page_index": 2,
+      "text": "無い書体の\nファイル",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 80.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "box",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "/no/such/font.otf"
+      }
+    },
+    {
+      "id": "b3",
+      "page_index": 2,
+      "text": "知らない名前",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 130.0,
+      "y_mm": 30.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "none",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [],
+      "path": null,
+      "style": {
+        "font": "no_such_face"
+      }
+    },
+    {
+      "id": "b4",
+      "page_index": 2,
+      "text": "ルビの書体",
+      "speaker": "",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 30.0,
+      "y_mm": 100.0,
+      "w_mm": 40.0,
+      "h_mm": 50.0,
+      "balloon": "rounded",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [
+        [
+          "ルビ",
+          "るび"
+        ]
+      ],
+      "ruby_spans": [
+        {
+          "start": 0,
+          "end": 2,
+          "base": "ルビ",
+          "ruby": "るび",
+          "font": "maru"
+        }
+      ],
+      "path": null
+    }
+  ]
+}

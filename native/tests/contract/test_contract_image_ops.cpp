@@ -80,7 +80,7 @@ private slots:
         QVERIFY2(done.value("ok", false), done.dump().c_str());
         const std::string lifted = layer_of(project(book), 0, "pic")["asset"].get<std::string>();
         QVERIFY(lifted != before);
-        QVERIFY(!project(book).contains("features") || project(book)["features"].empty());  // (an op's settings: nothing stored of its own)
+        QCOMPARE(project(book)["features"], Json::array({"fonts@1"}));  // (an op's settings: nothing stored of its own; fonts@1 is the new book's usual face, 2026-11-14)
         Json undone = genko({QStringLiteral("undo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, undone.dump().c_str());
         QCOMPARE(layer_of(project(book), 0, "pic")["asset"].get<std::string>(), before);

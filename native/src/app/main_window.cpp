@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QResizeEvent>
@@ -28,6 +29,7 @@
 #include <QMenu>
 #include <QScreen>
 #include <QScrollBar>
+#include <QKeyEvent>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -72,6 +74,7 @@
 #include "app/workspace.hpp"
 #include "app/colours.hpp"
 #include "service/wording.hpp"
+#include "core/font_catalog.hpp"
 #include "core/video.hpp"
 #include "service/control.hpp"
 #include "core/actor.hpp"
@@ -95,6 +98,55 @@ using core::Json;
 namespace {
 
 QString qpath(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
+
+// fonts@1: the words of the band above the page, in a scrolling box as tall as they are wrapped at its width — and, in a
+// window too short or too narrow for them and the page (a small screen with its docks: a book made new whose face's file is not on the
+// computer), no taller than the room it is given, two lines at the least, the rest scrolled to (never pushing the page
+// out of the window). Reached with Tab — never taking the keys when it is shown, nor when clicked —, its words scroll
+// with the arrow keys and PageUp/PageDown (review 3, P3-6).
+class BandWords : public QScrollArea {
+public:
+    explicit BandWords(QLabel* words) : words_(words) {
+        setObjectName(QStringLiteral("fontsBandWords"));
+        setAccessibleName(QStringLiteral("書体の知らせの文"));
+        setFrameShape(QFrame::NoFrame);
+        setWidgetResizable(true);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setFocusPolicy(Qt::TabFocus);
+        setWidget(words);
+        viewport()->setAutoFillBackground(false);
+        words->setAutoFillBackground(false);
+    }
+    QSize sizeHint() const override {
+        const int w = viewport()->width();  // (before it is laid out: the words' own wrapping)
+        return QSize(QScrollArea::sizeHint().width(), (w > 40 ? words_->heightForWidth(w) : words_->sizeHint().height()) + 2 * frameWidth());
+    }
+    QSize minimumSizeHint() const override {
+        return QSize(4 * words_->fontMetrics().horizontalAdvance(QChar(0x3042)),
+                     std::min(sizeHint().height(), 2 * words_->fontMetrics().lineSpacing() + 2 * frameWidth()));
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QScrollArea::resizeEvent(event);
+        if (event->size().width() != event->oldSize().width()) updateGeometry();  // (wrapped again: another height)
+    }
+    bool event(QEvent* event) override {
+        // (the keys it scrolls with are its own while it has them — not the window's next page or the canvas's nudges)
+        if (event->type() == QEvent::ShortcutOverride) {
+            const auto* key = static_cast<QKeyEvent*>(event);
+            if (key->modifiers() == Qt::NoModifier && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down || key->key() == Qt::Key_PageUp ||
+                                                       key->key() == Qt::Key_PageDown)) {
+                event->accept();
+                return true;
+            }
+        }
+        return QScrollArea::event(event);
+    }
+
+private:
+    QLabel* words_;
+};
 
 // A book opened in a window: its first page read and shown first, the other pages read meanwhile (SPEC PERF-01).
 Session::Options opening_options() {
@@ -168,13 +220,19 @@ QString Document::title() const {
                                          QString::fromStdString(book.episode.repr()));
 }
 
+core::Document untitled_book() {
+    core::Document doc = core::new_episode("無題", core::Num(std::int64_t{1}), 8, core::PageSpec::a4_mono());
+    core::fonts::make_new_book(doc);
+    return doc;
+}
+
 // --- the window ------------------------------------------------------------------------------------------------------
 
 MainWindow::MainWindow(std::shared_ptr<Session> session) {
     setWindowTitle(QStringLiteral("Genko Studio"));
     look::fit_to_screen(this, QSize(1280, 800), false);  // (a small screen, or a large display scaling: within the screen)
     session_ = session ? std::move(session)
-                       : std::make_shared<Session>(core::new_episode("無題", core::Num(1), 8, core::PageSpec::a4_mono()), std::nullopt);
+                       : std::make_shared<Session>(untitled_book(), std::nullopt);
     documents_.push_back(Document{session_});
     connect(session_.get(), &Session::statusChanged, this, &MainWindow::maybe_backup);  // (each book's saves: バックアップ)
     documents::add(this);
@@ -350,8 +408,32 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
         session_->write_recovery_copy();
         flash(QStringLiteral("復旧用のコピーを書いています（設定フォルダーの recovery）"), 3000);
     });
+    // (fonts@1: what is said of the book's faces when it is opened — main_window_fonts.cpp)
+    // (its words wrapped, and a button to put it away — reached with the keys as any button, review 2 P3-10)
+    fonts_band_ = new QFrame;
+    fonts_band_->setObjectName(QStringLiteral("fontsBand"));
+    {
+        auto* row = new QHBoxLayout(fonts_band_);
+        row->setContentsMargins(8, 4, 8, 4);
+        row->setSpacing(12);
+        fonts_band_text_ = new QLabel;
+        fonts_band_text_->setObjectName(QStringLiteral("fontsBandText"));
+        fonts_band_text_->setWordWrap(true);
+        fonts_band_text_->setTextFormat(Qt::RichText);
+        fonts_band_close_ = new QPushButton(QStringLiteral("この知らせを閉じる"));
+        fonts_band_close_->setObjectName(QStringLiteral("fontsBandClose"));
+        connect(fonts_band_close_, &QPushButton::clicked, this, [this] { close_fonts_notice(); });
+        fonts_band_words_ = new BandWords(fonts_band_text_);
+        row->addWidget(fonts_band_words_, 1);
+        row->addWidget(fonts_band_close_, 0, Qt::AlignTop);
+    }
+    // (nor wider: the band takes the page's width, whatever its words and button would ask — a narrow window is not made
+    // wider than its screen by it)
+    fonts_band_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    fonts_band_->hide();
     column->addWidget(unported_);
     column->addWidget(read_only_);
+    column->addWidget(fonts_band_);
     column->addWidget(failure_bar_);
     // (PC5 H-c: the canvas alone in the middle — the tabs' way, as before — or the cells of ウィンドウ → アレンジ around it)
     doc_area_ = new DocArea(canvas_);
@@ -710,6 +792,12 @@ void MainWindow::connect_session() {
     session_links_.push_back(connect(s, &Session::notice, this, [this](const QString& message, bool error) {
         flash(wording::error(message), 6000, error);
     }));
+    // (fonts@1: what is said of the book's faces when it is opened — looked at once a book, after the window has shown
+    // it; another book's band is not this one's)
+    if (fonts_band_ != nullptr) fonts_band_->hide();
+    QTimer::singleShot(0, this, [this, weak = std::weak_ptr<Session>(session_)] {
+        if (const auto opened = weak.lock(); opened && !closed_) note_fonts_on_open(opened);
+    });
 }
 
 void MainWindow::disconnect_session() {
@@ -861,6 +949,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
     if (closed_) return;
     const core::Document& b = book();
     if (page_index_ >= static_cast<int>(b.pages.size())) page_index_ = std::max(0, static_cast<int>(b.pages.size()) - 1);
+    if (font_palette_ != nullptr) show_usual_face();  // (fonts@1: the book's usual face, as the book now has it)
     if (change.why == BookChange::Why::Undo || change.why == BookChange::Why::Redo) perf::event("undo_shown_model");
     if (change.why == BookChange::Why::Undo) blend_baked_.clear();  // (PC4 E5, review P3-9: lines put back are asked about again)
     if (pages_->count() != static_cast<int>(b.pages.size())) {

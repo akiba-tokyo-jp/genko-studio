@@ -111,6 +111,28 @@ const Json& style_get(const Json& style, const char* key) {
     return it == style.end() ? none : *it;
 }
 
+// 括弧の四角を直す（利用者の決定 2026-11-14）: the font a cell of a column is drawn with — the font of the face for it,
+// except a bracket whose vertical form a bundled font of before lacks in its cmap (the effects face's デラゴシック has no
+// ︵︶﹃﹄︻︼﹇﹈︿﹀︽︾, the hand face's よもぎ no ﹇﹈), which glyph() would draw as that font's "no glyph" box: the bundled
+// Gothic draws it, as a Gothic column draws it (its vertical form, in the same em). Every other letter, every other
+// font of before (they have every vertical form), every added face (strict cmap: their brackets are turned, as before)
+// and every font file keep their font.
+// (the font file it is: a bundled font's name or a file's path — "gothic" for such a bracket. A PSD's editable text names
+// it, so that the bracket edited in Photoshop is drawn as it is here: review 3, P3-7)
+std::string column_path(Fonts& fonts, const Face& face, std::u32string_view cell, std::int64_t size) {
+    std::string path = fonts.path_for(face, cell);
+    const auto form = vertical_form(cell);
+    if (!form) return path;
+    const TrueTypeFont& font = fonts.truetype(path, size);
+    if (font.strict_cmap() || font.glyph_index(*form) != 0) return path;
+    static constexpr std::array<std::string_view, 6> kOfBefore{"gothic", "mincho", "maru", "hand", "sfx", "sfx_pop"};
+    if (std::find(kOfBefore.begin(), kOfBefore.end(), path) == kOfBefore.end()) return path;
+    return "gothic";
+}
+const TrueTypeFont& column_font(Fonts& fonts, const Face& face, std::u32string_view cell, std::int64_t size) {
+    return fonts.truetype(column_path(fonts, face, cell, size), size);
+}
+
 }  // namespace
 
 Rgb rgb_tuple(const Json& value) {
@@ -616,7 +638,14 @@ Image blank(std::int64_t w, std::int64_t h) {
 }
 
 // _has_glyph(font, char): the font draws it larger than a speck
+// (fonts@1: an added face must have it in its cmap too — what a font draws for a letter it lacks, its "no glyph" box, is
+// larger than a speck as well, and a bracket's vertical form would be that box: the bracket is turned instead)
 bool has_drawn_glyph(const TrueTypeFont& font, std::u32string_view ch) {
+    if (font.strict_cmap()) {
+        for (const char32_t c : ch) {
+            if (font.glyph_index(c) == 0) return false;
+        }
+    }
     const auto box = font.getmask2(ch).first.getbbox();
     return box && box->x1 - box->x0 > 1 && box->y1 - box->y0 > 1;
 }
@@ -680,7 +709,18 @@ Image placed(Image raw, std::u32string_view drawn, std::int64_t em, bool rotate)
 
 }  // namespace
 
-Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+std::u32string drawable(std::u32string_view letter, const TrueTypeFont& font) {
+    std::u32string out(letter);
+    if (!font.strict_cmap() || out.size() < 2) return out;
+    std::erase_if(out, [&](char32_t c) { return is_vs(c) && font.glyph_index(c) == 0; });
+    return out.empty() ? std::u32string(letter) : out;
+}
+
+Image glyph(std::u32string_view cell, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+    // (fonts@1: in an added face a variation selector the font has no glyph for is not drawn — the letter alone, as the
+    // font draws it, not the letter and a "no glyph" box)
+    const std::u32string letter = drawable(cell, font);
+    const std::u32string_view ch(letter);
     bool rotate = member(kRotateCw, ch);
     std::u32string drawn(ch);
     const auto form = vertical_form(ch);
@@ -828,7 +868,7 @@ void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, const
     if (notes == nullptr || letter.empty() || py_isspace(letter)) return;
     if (!fonts.has_glyph(used, letter)) {
         notes->push_back(RubyNote{"glyph_missing", span, utf8(letter)});
-    } else if (used != face.kana && used != face.other) {
+    } else if (!face.own(used)) {  // (fonts@1: a letter in the face's partner is the face's own, not a stand-in)
         notes->push_back(RubyNote{"font_fallback", span, utf8(letter)});
     }
 }
@@ -1014,7 +1054,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
                 set.size = size;
                 set.weight = weight_level(style_get(style, "bold"));
                 set.rgb = rgb;
-                set.font = fonts.path_for(face, sideways ? std::u32string_view(U"A") : across ? std::u32string_view(U"0") : std::u32string_view(cell));
+                set.font = sideways ? fonts.path_for(face, U"A") : across ? fonts.path_for(face, U"0") : column_path(fonts, face, cell, size);
                 set.tcy = across;
                 set.sideways = sideways;
                 const double w = sideways ? turned.at(i).width() : static_cast<double>(size);
@@ -1033,7 +1073,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             if (!across && args.opentype_cell) chosen = args.opentype_cell(letter_at[i], cell, size, rgb, thick);
             const Image image = chosen ? std::move(*chosen)
                                 : across ? tcy_glyph(cell, font_for(U"0", size), size, rgb, thick)
-                                         : glyph(cell, font_for(cell, size), size, rgb, thick);
+                                         : glyph(cell, column_font(fonts, face, cell, size), size, rgb, thick);
             composite_at(out, image, cx + floordiv(widths[c] - size, 2), y);
             if (marked.contains({c, row})) {
                 draw_mark(out, static_cast<double>(cx + widths[c]) + static_cast<double>(mark_w) / 2,
@@ -1076,11 +1116,11 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             const std::string used = fonts.path_for(set.face, letter);
             note_font(fonts, set.face, letter, used, span.span, args.notes);
             if (args.draw_ruby) {
-                composite_at(out, glyph(letter, fonts.font(set.face, std::max<std::int64_t>(8, size), letter), size, args.fill), rx, top + i * step);
+                composite_at(out, glyph(letter, column_font(fonts, set.face, letter, std::max<std::int64_t>(8, size)), size, args.fill), rx, top + i * step);
             }
             where.reading += letter;
             where.letters.push_back(PointD{static_cast<double>(rx), static_cast<double>(top + i * step)});
-            where.fonts.push_back(used);
+            where.fonts.push_back(column_path(fonts, set.face, letter, std::max<std::int64_t>(8, size)));  // (the font it is drawn in)
         }
         where.spacing = static_cast<double>(step - size);
         where.fill = args.fill;
@@ -1114,7 +1154,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
                                       core::py_round_int(centre - static_cast<double>(ruby_w * count) / 2)));
         for (std::int64_t i = 0; i < count && args.draw_ruby; ++i) {
             const std::u32string ch(1, span.ruby[static_cast<std::size_t>(i)]);
-            composite_at(out, glyph(ch, font_for(ch, std::max<std::int64_t>(8, ruby_w)), ruby_w, args.fill), rx, top + i * ruby_w);
+            composite_at(out, glyph(ch, column_font(fonts, face, ch, std::max<std::int64_t>(8, ruby_w)), ruby_w, args.fill), rx, top + i * ruby_w);
         }
     }
     return out;

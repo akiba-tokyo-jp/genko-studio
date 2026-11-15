@@ -445,6 +445,37 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("wave_mm must be between 0 and 3", "フキダシの線の震えは 0〜3 mm です"));
         r.push_back(rule(R"(spike_alt must be between 0 and 0\.8)", "トゲの長短の差は 0〜0.8 です"));
         r.push_back(rule(R"(dash_mm must be between 0\.2 and 10)", "破線の 1 本の長さは 0.2〜10 mm です"));
+        // (fukidashi@2, SPEC BALLOON-02: before the rules that read any "style <key>: …" and "<key> must be …" — a key's
+        // name is not shown)
+        r.push_back(rule(R"(pen_swell must be between 0 and 0\.9)", "フキダシの線の強弱は 0〜0.9 です"));
+        r.push_back(rule("pen_angle must be between 0 and 360", "線の太い側の向きは 0〜360 度です"));
+        r.push_back(rule("pen_taper must be between 0 and 1", "線の入り抜きは 0〜1 です"));
+        r.push_back(rule("pen_strokes must be between 1 and 8", "フキダシの線を何筆で描くかは 1〜8 です"));
+        r.push_back(rule("drip_mm must be between 0 and 30", "しずくの長さは 0〜30 mm です"));
+        r.push_back(rule("drips must be between 1 and 24", "しずくの数は 1〜24 です"));
+        r.push_back(rule(R"(drip_width_mm must be between 0\.3 and 10)", "しずくの太さは 0.3〜10 mm です"));
+        r.push_back(rule("drip_seed must be between 0 and 999999", "しずくの並びの番号は 0〜999999 です"));
+        r.push_back(rule("points must be between 4 and 12", "星の先と花びらの数は 4〜12 です"));
+        r.push_back(rule(R"(fill_tone density must be between 0 and 0\.9)", "フキダシの中のトーンの濃さは 0〜0.9（90%）です"));
+        r.push_back(rule("fill_tone lpi must be between 20 and 85", "フキダシの中のトーンの線数は 20〜85 です"));
+        r.push_back(rule("fill_tone pattern must be dot or line", "フキダシの中のトーンの柄は、点か線から選びます"));
+        r.push_back(rule("fill_tone needs a density", "フキダシの中のトーンには濃さが要ります"));
+        r.push_back(rule("fill_tone angle must be between 0 and 90", "フキダシの中のトーンの角度は 0〜90 度です"));
+        r.push_back(rule("fill_tone dir must be between -360 and 360", "フキダシの中のトーンが濃くなる向きは −360〜360 度です"));
+        r.push_back(rule("fill_tone inset_mm must be between 0 and 5", "フキダシの中のトーンを線から離す幅は 0〜5 mm です"));
+        r.push_back(rule("(?:style fill_tone: )?fill_tone .*|style fill_tone: .*", "フキダシの中のトーンの指定が正しくありません"));
+        r.push_back(rule("fill_gradient to must be three numbers from 0 to 255", "フキダシの中のグラデーションの先の色は、0〜255 の数 3 つで指定します"));
+        r.push_back(rule("fill_gradient dir must be between -360 and 360", "フキダシの中のグラデーションの向きは −360〜360 度です"));
+        r.push_back(rule("(?:style fill_gradient: )?fill_gradient .*|style fill_gradient: .*", "フキダシの中のグラデーションの指定が正しくありません"));
+        r.push_back(rule("style pen_swell: .*", "フキダシの線の強弱は数で指定します"));
+        r.push_back(rule("style pen_angle: .*", "線の太い側の向きは数で指定します"));
+        r.push_back(rule("style pen_taper: .*", "線の入り抜きは数で指定します"));
+        r.push_back(rule("style pen_strokes: .*", "フキダシの線を何筆で描くかは整数で指定します"));
+        r.push_back(rule("style drip_mm: .*", "しずくの長さは数で指定します"));
+        r.push_back(rule("style drips: .*", "しずくの数は整数で指定します"));
+        r.push_back(rule("style drip_width_mm: .*", "しずくの太さは数で指定します"));
+        r.push_back(rule("style drip_seed: .*", "しずくの並びの番号は整数で指定します"));
+        r.push_back(rule("style points: .*", "星の先と花びらの数は整数で指定します"));
         r.push_back(rule("the ruler is fixed.*", "この定規は固定されています（先に固定を外します）"));
         r.push_back(rule("this ruler has no line to draw.*", "この定規には描ける線がありません（向きだけの定規です）"));
         r.push_back(rule("unknown feature .*", "その字形の指定（フォントの機能）は使えません"));

@@ -82,6 +82,10 @@ std::vector<RubySpan> ruby_spans(const std::vector<Column>& cols, const std::vec
 std::set<std::pair<std::size_t, std::size_t>> emphasis_cells(const std::vector<Column>& cols,
                                                              const std::vector<std::u32string>& runs);
 
+// fonts@1: a letter with its variation selectors as it is drawn in the font: in an added face (TrueTypeFont::strict_cmap)
+// without the selectors the font has no glyph for — the letters are set one glyph a code point, so such a selector would
+// be the font's "no glyph" box beside its letter —; in any other font as it is, as always.
+std::u32string drawable(std::u32string_view letter, const TrueTypeFont& font);
 // glyph(char, font, em, fill, bold), tcy_glyph(cell, …), latin_glyph(word, …): RGBA pictures of one cell.
 Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);
 Image tcy_glyph(std::u32string_view cell, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);

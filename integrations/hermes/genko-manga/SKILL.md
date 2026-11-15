@@ -39,10 +39,24 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
   - `lettering`: 作品に合う文字の設定。種類（speech・thought・shout・whisper・narration・sfx・title）ごとに `font`（`inspect` の fonts の key）・`scale`（大きさの倍率）・`weight`。
     ジャンルと雰囲気で選ぶ。空なら台詞と同じ書体。叫びは 1.3 倍・太字、ささやきは 0.8 倍が既定。例:
     - 少年・青年・アクション: 叫び `gothic`、心の声 `maru`、ナレーション `mincho`。
-    - シリアス・ミステリー: ナレーション `mincho`、心の声 `antique`（台詞と同じ）で静かに。
+    - シリアス・ミステリー: ナレーション `mincho`、心の声は書かずに台詞と同じ書体で静かに。
     - ギャグ・コメディ: 叫び `sfx_pop` か `gothic`、ツッコミも `gothic`、心の声 `maru`、ナレーション `maru`。
     - かわいい・日常・恋愛: 台詞 `maru`、心の声 `hand`、ナレーション `maru`。
-    `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。叫びは太い書体（`gothic`）を選び、`bold` までにする。
+    書体はほかにもある（`inspect` の fonts の `bundled`。`category` と `use` に使い道がある）。場面で選ぶ:
+    - ふつうの台詞: `antique_genei`（新しく作る本のいつもの書体）・`antique`（前からの本のいつもの書体）・`antigothic_bold`
+    - 小声・注記: `gothic_regular`・`antigothic_medium`・`maru_regular`
+    - 叫び: `gothic_black`・`gothic_kiwami`・`mincho_black`（重い）・`maru_black`（元気）
+    - 心の声・語り: `mincho`・`mincho_shippori`・`mincho_hina`・`klee`
+    - ホラー: `horror_tegomin`・`horror_chokoku`（かなだけ）
+    - 機械・ゲーム: `dot16`・`stick`・`dot12`・`dot8`
+    - かわいい・ギャグ: `pop_mochiy`・`pop_rocknroll`・`cute_hachimaru`
+    - 手書き: `hand`・`hand_kurenaido`・`marker_yusei`
+    - 時代もの: `brush_syuku`・`brush_boku`
+    - 効果音: `sfx`・`sfx_pop`・`sfx_outline`・`sfx_inline`・`brush_potta`
+    - 欄外: `narrow_lubrifont`
+    `kanji` が `none`・`partial` の書体は、持っていない漢字を `fallback` の書体で描く。`available` が false の書体は、このパソコンに書体のファイルが無く、アンチックで描かれる。
+    `create_project` で作った本のいつもの書体（`font` を決めていない台詞の書体）は `antique_genei`（源暎アンチック）。前からの本はアンチックのまま。
+    `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。声を重くしたいときは、太い書体（`gothic_black`・`gothic_kiwami`・`mincho_black`）を選び、`weight` は `bold` までにする。
   - 人物の `look.clothes_value`: 服の印刷の仕方（`beta` 黒ベタ・`tone` トーン・`white` 白）。報告した人物の範囲に、どのコマでも同じに効く（黒い服が灰色になったりベタになったりしない）。
   - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
@@ -219,7 +233,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
-- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・capsule・rounded・box・polygon・cloud・thought・shout・electric・flash・whisper・narration・dotted_box・tone_box・fancy_box・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
+- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・capsule・rounded・box・polygon・cloud・thought・shout・electric・flash・whisper・narration・dotted_box・tone_box・fancy_box・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop と、`inspect` の fonts にあるほかの書体、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
 
 ## フキダシの形を選ぶ
 
@@ -240,10 +254,20 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
 | ふるえる声・おびえた声 | `speech`（`rounded`・`box`・`capsule` でも） | `wave_mm: 0.4`（0〜3。線が細かく波打つ） |
 | コマの外にいる人の声 | 元の形のまま | `tails: [{to, kind: "inward"}]`（フキダシに切れ込むしっぽ。`to` はフキダシの中、話し手のいる側の縁の近く） |
 | 重い声・不気味な声（ベタに白抜き） | `speech`・`shout`・`flash` | `fill_rgb: [0, 0, 0]`、`line_rgb: [0, 0, 0]`、`rgb: [255, 255, 255]` |
+| 甘い声・好きな気持ち | `heart` | 箱はほぼ正方形（横÷縦 0.95〜1.35）。言葉の縦横のおよそ 2 倍 |
+| はしゃぐ声・うれしい声 | `star` | `points` 4〜12（先の数。既定 5）、`spike_depth`（先の深さ。既定 0.38）。言葉の縦横のおよそ 2〜2.4 倍 |
+| きらめくひとこと（キラッ） | `star` | `points: 4`、`spike_depth: 0.6` |
+| やわらかい声・明るい気持ち | `flower` | `points` 4〜12（花びらの数。既定 6） |
+| 冷たいひとこと・テレパシー・機械の声 | `diamond` | `corner_mm: 0` で尖った角。言葉の縦横のおよそ 2 倍 |
+| ホラー・溶けるような声 | 元の形のまま（`speech`・`box` など） | `drip_mm`（しずくの長さ 0〜30。箱の下のその分がしずくになるので、箱をその分だけ高くする）、`drips`（数）、`drip_width_mm`（太さ）、`drip_seed`（並び。番号を変えると別の並び）。ベタにすると黒いしずく |
+| 手描きの勢い・G ペンや筆の線 | どの形でも | `pen_swell`（強弱 0〜0.9。0.5 くらい）、`pen_taper`（入り抜き 0〜1。0.6 くらい）、`pen_angle`（太い側の向き。既定 45 で右下）、`pen_strokes`（丸い形を何筆で描くか） |
+| 暗い気持ち・沈んだ声・回想 | どの形でも | `fill_tone: {density, to}`（中のトーン。`to` で濃さが変わるグラデーションのトーン。例 `{density: 0.05, to: 0.5}`） |
 
 - 強調は `double: true`（二重線）か `border_mm`（線の太さ。0 で線なし）。しっぽの付け根の丸みは `fillet_mm`（0〜20。0 で角）。
 - しっぽは話し手の口へ向ける（`to`）。曲げるときは `via`。2 人が同時に言う台詞は `tails` に 2 本。
 - 人が画面で選ぶ「フキダシ」パレットの形も、同じ `balloon`・`style`・`tails` の組み合わせでできている。
+- 600 dpi の白黒の原稿では、中のトーンは 60 線（`lpi`）なら濃さ 0.04〜0.9、85 線なら 0.07〜0.85 にする（薄すぎると点が飛び、濃すぎると白がつぶれる。解像度が低いほど薄い側が狭く、350 dpi・60 線なら 0.09 から。外れると点検 `balloon_tone_light`・`balloon_tone_dark` が知らせる）。グラデーションにするのは `fill_tone` の `to`。`fill_gradient`（塗りの色のなめらかなグラデーション）はカラーの原稿向けで、白黒の原稿では印刷のときに白か黒になる。
+- 形に関係のない鍵は受け取って何もしない（楕円の `points`、手で描いた形の `drip_mm` など）。記号の形はネームの計画の `balloon` には書けない。ネームのあとで `edit_line` で変える。
 
 ## 人と同じ道具で描く・直す
 

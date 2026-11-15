@@ -1,5 +1,6 @@
 #include "app/lettering.hpp"
 
+#include <QFileInfo>
 #include <QRegularExpression>
 
 #include <algorithm>
@@ -11,6 +12,8 @@
 #include <optional>
 #include <tuple>
 
+#include "core/font_catalog.hpp"
+#include "core/fukidashi.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -248,6 +251,10 @@ const std::vector<std::pair<QString, QString>>& kinds() {
         {"rounded", "角丸"},
         {"box", "四角"},
         {"polygon", "多角形（機械の声）"},
+        {"heart", "ハート（甘い声）"},  // (fukidashi@2: the symbols)
+        {"star", "星（はしゃぐ声・きらめき）"},
+        {"flower", "花（やわらかい声）"},
+        {"diamond", "ひし形（冷たいひとこと）"},
         {"cloud", "雲（もくもく）"},
         {"thought", "心の声（泡つき）"},
         {"shout", "叫び（トゲ）"},
@@ -285,6 +292,72 @@ const std::vector<std::pair<QString, QString>>& bundled_fonts() {
     return list;
 }
 
+const std::vector<std::pair<QString, QString>>& face_categories() {
+    static const std::vector<std::pair<QString, QString>> list = [] {
+        std::vector<std::pair<QString, QString>> out;
+        for (const core::fonts::Category& c : core::fonts::categories()) out.emplace_back(qs(c.id), qs(c.label));
+        return out;
+    }();
+    return list;
+}
+
+const std::vector<FaceRow>& catalog_faces() {
+    static const std::vector<FaceRow> list = [] {
+        std::vector<FaceRow> out;
+        const auto name_of = [](const std::string& key) {
+            const core::fonts::Entry* e = core::fonts::find(key);
+            return e != nullptr ? qs(e->label) : qs(key);
+        };
+        for (const auto& [id, category] : face_categories()) {
+            if (id == QLatin1String("dialogue")) {  // (the face a line takes when no face is said anywhere: first of all)
+                FaceRow usual;
+                usual.key = QStringLiteral("antique");
+                usual.label = QStringLiteral("アンチック");
+                usual.row = usual.label;
+                usual.category = id;
+                usual.use = QStringLiteral("かなは明朝、漢字はゴシック。まんがの台詞のいつもの書体");
+                usual.search = (usual.label + QLatin1Char(' ') + usual.key + QLatin1Char(' ') + usual.use + QLatin1Char(' ') + category).toLower();
+                out.push_back(std::move(usual));
+            }
+            for (const core::fonts::Entry& e : core::fonts::entries()) {
+                if (qs(e.category) != id) continue;
+                FaceRow row;
+                row.key = qs(e.key);
+                row.label = qs(e.label);
+                row.row = row.label;
+                if (!e.added) {  // (one of the six of before: the name the text tool shows, the font's own in brackets)
+                    for (const auto& [key, name] : bundled_fonts()) {
+                        if (key == row.key) row.label = name;
+                    }
+                    row.row = row.label.endsWith(QStringLiteral("）")) ? row.label.chopped(1) + QStringLiteral("・") + qs(e.label) + QStringLiteral("）")
+                                                                     : row.label + QStringLiteral("（") + qs(e.label) + QStringLiteral("）");
+                }
+                row.category = id;
+                row.use = qs(e.use);
+                row.added = e.added;
+                if (e.kanji == "none") row.mark = QStringLiteral("かなだけ（漢字は%1）").arg(name_of(e.fallback));
+                else if (e.kanji == "partial") row.mark = QStringLiteral("漢字は一部（残りは%1）").arg(name_of(e.fallback));
+                row.search = (row.row + QLatin1Char(' ') + row.key + QLatin1Char(' ') + qs(e.family) + QLatin1Char(' ') + row.use + QLatin1Char(' ') + category +
+                              QLatin1Char(' ') + row.mark)
+                                 .toLower();
+                out.push_back(std::move(row));
+            }
+        }
+        return out;
+    }();
+    return list;
+}
+
+QString face_label(const QString& font) {
+    for (const auto& [key, label] : bundled_fonts()) {
+        if (key == font) return label;
+    }
+    if (const core::fonts::Entry* e = core::fonts::find(font.toStdString()); e != nullptr && e->added) return qs(e->label);
+    return QFileInfo(font).completeBaseName();
+}
+
+QString face_name(const QString& font) { return font == QLatin1String("antique") ? QStringLiteral("アンチック") : face_label(font); }
+
 const std::vector<std::pair<QString, Json>>& style_tags() {
     static const std::vector<std::pair<QString, Json>> list = {
         {"大", Json{{"scale", 1.4}}},
@@ -320,7 +393,17 @@ std::vector<std::u32string> columns(std::u32string_view text, std::int64_t per_c
     return out;
 }
 
-std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em, int sides) {
+std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std::string_view balloon, double em, int sides, const Json& style) {
+    if (core::is_symbol(balloon)) {
+        // (fukidashi@2: a symbol sized as the service sizes it — its points, its depth from the style; its drips are
+        // box_size's)
+        std::vector<std::string> words;
+        for (const auto& b : breaks) words.push_back(render::text::utf8(b));
+        Json shape = style.is_object() ? style : Json::object();
+        shape.erase("drip_mm");
+        const std::array<double, 2> box = service::letter::measure_styled(words, std::string(balloon), em, shape);
+        return {box[0], box[1]};
+    }
     if (one_of(balloon, {"capsule", "polygon"})) {
         // (fukidashi@1: sized as the auto-lettering sizes them — service::letter::measure, the one formula)
         std::vector<std::string> words;
@@ -359,19 +442,45 @@ std::pair<double, double> measure(const std::vector<std::u32string>& breaks, std
     return {text_w + 2 * pad, text_h + 2 * pad};
 }
 
-std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm, int sides) {
+std::pair<double, double> box_size(const std::string& text, std::string_view balloon, bool vertical, double max_h_mm, double max_w_mm, int sides,
+                                   const Json& style) {
     const double em = kEmMm;
     const std::u32string words = render::text::u32(text);
     double w = 0, h = 0;
     if (vertical) {
-        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (one_of(balloon, {"speech", "thought", "shout", "whisper", "capsule", "polygon"}) ? 1.5 : 1.1)));
+        const bool hugged = one_of(balloon, {"speech", "thought", "shout", "whisper", "capsule", "polygon"}) || core::is_symbol(balloon);
+        const std::int64_t fits = core::py_trunc_int((max_h_mm * 0.75) / (em * (hugged ? 1.5 : 1.1)));
         const std::int64_t per = std::max<std::int64_t>(2, std::min<std::int64_t>(fits, balloon == "sfx" ? 4 : 7));  // (a manga column: about 7)
-        std::tie(w, h) = measure(columns(words, per), balloon, em, sides);
+        std::tie(w, h) = measure(columns(words, per), balloon, em, sides, style);
     } else {
         const std::int64_t per = std::max<std::int64_t>(4, core::py_trunc_int((max_w_mm * 0.8) / em));
-        std::tie(h, w) = measure(columns(words, per), balloon, em, sides);  // (the same box turned: rows across, characters along)
+        std::tie(h, w) = measure(columns(words, per), balloon, em, sides, style);  // (the same box turned: rows across, characters along)
     }
+    h += drip_growth(balloon, style, h);  // (fukidashi@2: the drips below the body — the body is the box the words were measured for)
     return {core::py_round(core::py_min(w, max_w_mm), 2), core::py_round(core::py_min(h, max_h_mm), 2)};
+}
+
+namespace {
+
+// style.drip_mm for a kind that draws drips, 30 at most (0: none)
+double drips_asked(std::string_view balloon, const Json& style) {
+    if (!style.is_object() || one_of(balloon, {"dotted_box", "flash", "picture", "sfx", "none"})) return 0.0;
+    const auto drip = style.find("drip_mm");
+    if (drip == style.end() || !drip->is_number()) return 0.0;
+    const double mm = core::to_float(*drip);
+    return mm > 0 ? core::py_min(mm, 30.0) : 0.0;
+}
+
+}  // namespace
+
+double drip_height(std::string_view balloon, const Json& style, double box_h) {
+    const double asked = drips_asked(balloon, style);
+    return asked > 0 && box_h > 0 ? core::py_round(core::py_min(asked, 0.6 * box_h), 9) : 0.0;  // (as core::drip_reach)
+}
+
+double drip_growth(std::string_view balloon, const Json& style, double body_h) {
+    const double asked = drips_asked(balloon, style);
+    return asked > 0 && body_h > 0 ? core::py_min(asked, 1.5 * body_h) : 0.0;
 }
 
 Json place_new(const core::Document& doc, const core::Page& page, const core::Frame& frame, const std::string& text, const std::string& balloon,
@@ -399,22 +508,32 @@ int sides_of(const Json& style) {
 Json refit(const core::StoryLine& line, const core::Frame* frame, const std::string& text, const std::string& balloon, bool vertical) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style));
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(line.style), line.path && !line.path->empty() ? Json() : line.style);
     const Num right = line.x_mm + line.w_mm;
     return Json{{"x_mm", core::py_round((right - Num(w)).value(), 2)}, {"y_mm", line.y_mm.json()}, {"w_mm", w}, {"h_mm", h}};
 }
 
 Json refit_for_kind(const core::StoryLine& line, const core::Frame* frame, const std::string& kind, const Json& style_after) {
     const std::string was = line.balloon.empty() ? std::string("speech") : line.balloon;
-    const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon"; };
-    if (was == kind || !(own_shape(was) || own_shape(kind))) return Json();
+    const auto own_shape = [](const std::string& k) { return k == "capsule" || k == "polygon" || core::is_symbol(k); };
     if (line.path && !line.path->empty()) return Json();              // (drawn by hand: its box is its outline's)
     if (!render::text::shape_of(line).empty()) return Json();         // (a point or box text: not set in a balloon)
+    const double was_drip = drip_height(was, line.style, line.h_mm.value());
+    if (was == kind || !(own_shape(was) || own_shape(kind))) {
+        // (fukidashi@2: not fitted to the words — the box as much taller or shorter as the drips, its top kept)
+        const double body = line.h_mm.value() - was_drip;
+        const double now_drip = drip_growth(kind, style_after, body);
+        const double h = core::py_round(body + now_drip, 2);
+        if (std::abs(now_drip - was_drip) < 1e-6 || h == line.h_mm.value() || !(h > 1)) return Json();
+        return Json{{"x_mm", line.x_mm.json()}, {"y_mm", line.y_mm.json()}, {"w_mm", line.w_mm.truthy() ? line.w_mm.json() : Json(40.0)}, {"h_mm", h}};
+    }
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 120.0;
-    const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after));
+    const auto [w, h] = box_size(line.text, kind, line.wrap == "vertical", max_h, max_w, sides_of(style_after), style_after);
+    // (about the body's middle — a balloon that drips keeps where its body was, its drips below it)
     const double cx = (line.x_mm + line.w_mm / Num(2)).value();
-    const double cy = (line.y_mm + line.h_mm / Num(2)).value();
+    const double now_drip = drip_height(kind, style_after, h);
+    const double cy = line.y_mm.value() + (line.h_mm.value() - was_drip) / 2 + now_drip / 2;
     const double x = core::py_round(cx - w / 2, 2);
     const double y = core::py_round(cy - h / 2, 2);
     if (x == line.x_mm.value() && y == line.y_mm.value() && w == line.w_mm.value() && h == line.h_mm.value()) return Json();
@@ -425,7 +544,7 @@ Json place_at(double x_mm, double y_mm, const std::string& text, const std::stri
               const Json& style) {
     const double max_h = frame != nullptr ? frame->rect.height.value() - 2 * kMarginMm : 120.0;
     const double max_w = frame != nullptr ? frame->rect.width.value() - 2 * kMarginMm : 160.0;
-    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(style));
+    const auto [w, h] = box_size(text, balloon, vertical, max_h, max_w, sides_of(style), style);
     Num x(x_mm - w / 2);
     Num y(y_mm - h / 2);
     if (frame != nullptr) {

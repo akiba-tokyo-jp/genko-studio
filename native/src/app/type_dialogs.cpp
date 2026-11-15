@@ -376,7 +376,7 @@ void NotationDialog::save() {
 
 // --- 見つからないフォントを解決 -------------------------------------------------------------------------------------------
 
-MissingFontsDialog::MissingFontsDialog(MainWindow* window, const Json& missing) : QDialog(window), missing_(missing) {
+MissingFontsDialog::MissingFontsDialog(MainWindow* window, const Json& missing, const QString& told) : QDialog(window), missing_(missing) {
     setObjectName(QStringLiteral("missing_fonts_dialog"));
     setWindowTitle(QStringLiteral("見つからないフォントを解決"));
     resize(560, 320);
@@ -426,6 +426,12 @@ MissingFontsDialog::MissingFontsDialog(MainWindow* window, const Json& missing) 
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(note);
     layout->addWidget(table, 1);
+    if (!told.isEmpty()) {
+        told_label = new QLabel(told);
+        told_label->setObjectName(QStringLiteral("missing_fonts_told"));
+        told_label->setWordWrap(true);
+        layout->addWidget(told_label);
+    }
     layout->addWidget(buttons);
 }
 

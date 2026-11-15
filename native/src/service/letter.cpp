@@ -331,6 +331,61 @@ std::string shape_for(const std::vector<std::string>& breaks, const Json& given,
     return columns == 1 && longest >= 5 ? std::string("capsule") : std::string("speech");
 }
 
+namespace {
+
+// The words' block (w, h mm): its columns `em` wide and kLeading apart, as tall as the longest.
+std::array<double, 2> block_size(const std::vector<std::string>& breaks, double em) {
+    std::size_t count = 0;
+    std::size_t longest = 0;
+    for (const std::string& b : breaks) {
+        if (b.empty()) continue;
+        ++count;
+        longest = std::max(longest, text::length(b));
+    }
+    if (count == 0) {
+        count = 1;
+        longest = 1;
+    }
+    const double n = static_cast<double>(count);
+    return {em * n + em * kLeading * (n - 1), em * static_cast<double>(longest)};
+}
+
+// fukidashi@2: a symbol's box round a block of words (measure_styled) — of the shapes the symbol reads at (w / h from
+// `narrow` to `flat`, thirteen of them), the smallest that holds the block with the fit's pad in the room the symbol
+// leaves its letters, 2% to spare for the steps the renderer's fit moves them by.
+std::array<double, 2> symbol_box(const std::string& kind, double text_w, double text_h, double em, int points, double inner) {
+    const double fit = em * kFitPad;
+    const double block_a = (text_w + 2 * fit) / 2;
+    const double block_b = (text_h + 2 * fit) / 2;
+    const int n = points != 0 ? std::clamp(points, 4, 12) : (kind == "flower" ? 6 : 5);
+    const double in = inner > 0 ? std::clamp(inner, 0.4, 0.95) : 0.62;
+    const double narrow = kind == "heart" ? 0.95 : kind == "diamond" ? 0.6 : 0.85;
+    const double flat = kind == "heart" ? 1.35 : kind == "diamond" ? 1.8 : 1.2;
+    std::array<double, 2> best{0.0, 0.0};
+    for (int step = 0; step <= 12; ++step) {
+        const double shape = narrow + (flat - narrow) * step / 12.0;
+        // (the symbol of a box `shape` times as wide as high: made as much bigger or smaller as its room needs to hold
+        // the block, four times over — the block is moved up or down by shares of the box, so the box is the one it is
+        // moved in)
+        double b = 2 * block_b;
+        bool made = true;
+        for (int pass = 0; pass < 4 && made; ++pass) {
+            const double a = b * shape;
+            std::vector<std::array<double, 2>> room;
+            for (const render::text::clean::P& p : render::text::clean::symbol_room(kind, render::text::clean::Box{-a, -b, a, b}, n, in)) room.push_back({p.x, p.y});
+            made = room.size() >= 3;
+            if (made) b *= render::text::symbol_gauge(room, a, b, block_a, block_b);
+        }
+        if (!made) continue;
+        const std::array<double, 2> box{2 * b * shape * 1.02, 2 * b * 1.02};
+        if (best[0] == 0.0 || box[0] * box[1] < best[0] * best[1]) best = box;
+    }
+    if (best[0] == 0.0) return {2 * block_a, 2 * block_b};
+    return best;
+}
+
+}  // namespace
+
 std::array<double, 2> measure(const std::vector<std::string>& breaks, const std::string& balloon, double em, int sides) {
     std::vector<std::string> cols;
     for (const std::string& b : breaks) {
@@ -371,10 +426,51 @@ std::array<double, 2> measure(const std::vector<std::string>& breaks, const std:
         const double grow = polygon_room(sides);
         return {(text_w + 2 * fit) * grow, (text_h + 2 * fit) * grow};
     }
+    if (core::is_symbol(balloon)) return symbol_box(balloon, text_w, text_h, em, 0, 0.0);  // (fukidashi@2: the kind's own points)
     double pad = in(balloon, {"none", "aside"}) ? 0.0 : em / 4;
     if (in(balloon, {"dotted_box", "tone_box", "fancy_box"})) pad *= 3;
     if (balloon == "electric") return {(text_w + 2 * pad) / 0.76, (text_h + 2 * pad) / 0.76};
     return {text_w + 2 * pad, text_h + 2 * pad};
+}
+
+double symbol_room(const std::string& kind, int points, double inner) {
+    // (the symbol of a square box: how far past its room's sides the corners of a block as big as the box lie — the same
+    // for a box of any shape, the symbol being stretched with it. 2% is left for the steps the renderer's fit moves the
+    // letters by. The outlines come from render/libm_float and sqrt alone: the same bits everywhere)
+    const double half = 1000.0;
+    const int n = points != 0 ? std::clamp(points, 4, 12) : (kind == "flower" ? 6 : 5);
+    const double in = inner > 0 ? std::clamp(inner, 0.4, 0.95) : 0.62;
+    std::vector<std::array<double, 2>> room;
+    for (const render::text::clean::P& p : render::text::clean::symbol_room(kind, render::text::clean::Box{-half, -half, half, half}, n, in)) {
+        room.push_back({p.x, p.y});
+    }
+    if (room.size() < 3) return 1.0;
+    return render::text::symbol_gauge(room, half, half) * 1.02;
+}
+
+std::array<double, 2> measure_styled(const std::vector<std::string>& breaks, const std::string& balloon, double em, const Json& style) {
+    const auto number = [&style](std::string_view key) {
+        if (!style.is_object()) return 0.0;
+        const auto found = style.find(key);
+        if (found == style.end() || !found->is_number()) return 0.0;
+        return found->is_number_integer() ? static_cast<double>(found->get<std::int64_t>()) : found->get<double>();
+    };
+    std::array<double, 2> box{0.0, 0.0};
+    if (core::is_symbol(balloon)) {
+        const double points = number("points");
+        const double depth = number("spike_depth");
+        const auto [text_w, text_h] = block_size(breaks, em);
+        box = symbol_box(balloon, text_w, text_h, em, points >= 4 && points <= 12 ? static_cast<int>(points) : 0,
+                         depth > 0 ? 1 - core::py_max(0.05, core::py_min(0.6, depth)) : 0.0);
+    } else {
+        const double sides = number("sides");
+        box = measure(breaks, balloon, em, sides >= 5 && sides <= 12 ? static_cast<int>(sides) : 0);
+    }
+    // (the drips run below the body: the box that much taller — core::drip_reach takes them off again, up to 0.6 of the
+    // box's height)
+    const double drip = number("drip_mm");
+    if (drip > 0 && !in(balloon, {"dotted_box", "flash", "picture", "sfx", "none", "aside"})) box[1] += core::py_min(drip, 30.0);
+    return box;
 }
 
 double polygon_room(int sides) {
@@ -421,10 +517,10 @@ std::string fits(const Box& rect, const std::string& balloon, std::size_t others
         const double ends = 2 * fit + 2 * (radius - std::sqrt(radius * radius - corner * corner));
         chars = py_floordiv(room_h - ends, em);
         cols = py_floordiv((room_w - 2 * fit - em * 0.6) + em * kLeading, em * (1 + kLeading));
-    } else if (balloon == "polygon") {
-        // (as measure sizes it: the words' block with the fit's pad, polygon_room times as big)
+    } else if (balloon == "polygon" || core::is_symbol(balloon)) {
+        // (as measure sizes it: the words' block with the fit's pad, polygon_room — a symbol: symbol_room — times as big)
         const double fit = em * kFitPad;
-        const double grow_by = polygon_room(0);
+        const double grow_by = balloon == "polygon" ? polygon_room(0) : symbol_room(balloon);
         chars = py_floordiv(room_h / grow_by - 2 * fit, em);
         cols = py_floordiv((room_w / grow_by - 2 * fit) + em * kLeading, em * (1 + kLeading));
     } else {

@@ -11,11 +11,14 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string_view>
 
 #include "core/error.hpp"
+#include "core/fukidashi.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -29,6 +32,7 @@
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/memo.hpp"
+#include "render/tones.hpp"
 
 namespace genko::render::text {
 
@@ -90,11 +94,22 @@ using clean::P;
 
 double clamp01(double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); }
 
+// Each value of `a` times the same of `b` (as many: planes of one region). (A plain loop: it runs over every pixel of a
+// group's region, and an unoptimized build calls through every subscript.)
+void times(std::vector<float>& a, const std::vector<float>& b) {
+    float* const to = a.data();
+    const float* const by = b.data();
+    for (std::size_t i = 0, n = a.size(); i < n; ++i) to[i] *= by[i];
+}
+
 // A plane of coverage as an "L" picture (0..255, rounded to the nearest).
 Image as_image(const clean::Plane& plane) {
     std::string bytes(plane.values.size(), '\0');
-    for (std::size_t i = 0; i < plane.values.size(); ++i) {
-        bytes[i] = static_cast<char>(static_cast<std::uint8_t>(clamp01(static_cast<double>(plane.values[i])) * 255.0 + 0.5));
+    const float* const values = plane.values.data();
+    char* const out = bytes.data();
+    for (std::size_t i = 0, n = plane.values.size(); i < n; ++i) {
+        const double v = static_cast<double>(values[i]);  // (clamp01, written out)
+        out[i] = static_cast<char>(static_cast<std::uint8_t>((v < 0 ? 0.0 : (v > 1 ? 1.0 : v)) * 255.0 + 0.5));
     }
     return Image::frombytes("L", Size{plane.width, plane.height}, bytes);
 }
@@ -124,8 +139,15 @@ struct Body {
     P centre;
     double least = 0.0;  // (its narrow half size)
     bool smooth = false;
+    bool soft = false;   // (no corner anywhere: smooth, or smooth but for its trembling — a drip's join with it is rounded)
     std::string kind;
+    clean::Contour corners;  // (fukidashi@2: its corners as the pen sees them — where one stroke ends and the next begins)
 };
+
+// fukidashi@2: a corner of a box, or of a rounded balloon, rounded by less than this (style.corner_mm) is still a corner
+// to the pen — a stroke ends there —; rounded by as much or more (and the rounded balloon's own roundness) it is part of
+// one smooth line.
+constexpr double kPenCornerMm = 2.0;
 
 Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box, const Box& region, int dpi) {
     Body body;
@@ -138,7 +160,16 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         for (const core::Point& p : *line.path) {
             outline.push_back({static_cast<double>(px(p.x.value(), dpi) - region.x0), static_cast<double>(px(p.y.value(), dpi) - region.y0)});
         }
-        if (core::py_truthy(at(lst, "path_curve"))) outline = clean::smooth_closed(outline);
+        if (core::py_truthy(at(lst, "path_curve"))) {
+            outline = clean::smooth_closed(outline);
+        } else {  // (drawn as given: its points that turn by more than 30° are its corners)
+            const std::size_t n = outline.size();
+            for (std::size_t i = 0; n >= 3 && i < n; ++i) {
+                const P a = outline[(i + n - 1) % n], b = outline[i], c = outline[(i + 1) % n];
+                const double in = clean::distance(a, b), on = clean::distance(b, c);
+                if (in > 1e-9 && on > 1e-9 && ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (in * on) < 0.8660254037844387) body.corners.push_back(b);
+            }
+        }
         body.outline = outline;
         body.guide = std::move(outline);
         body.smooth = true;
@@ -147,18 +178,24 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
     if (box.x1 - box.x0 < 1 || box.y1 - box.y0 < 1) return body;  // (a box of no pixel: nothing is drawn of it)
     // (style.corner_mm: 0 is square corners; not set, the kind's own)
     const double corner = at(lst, "corner_mm").is_number() ? core::to_float(at(lst, "corner_mm")) / 25.4 * dpi : -1.0;
+    // (the pen's corners of a box: its own when its corners are square or rounded by less than kPenCornerMm)
+    const bool cornered = at(lst, "corner_mm").is_number() && core::to_float(at(lst, "corner_mm")) < kPenCornerMm;
     if (kind == "rounded") {
-        body.outline = core::py_truthy(at(lst, "squircle")) ? clean::squircle(box) : clean::rounded(box, corner >= 0 ? corner : body.least * 0.6);
+        clean::Contour corners;
+        body.outline = core::py_truthy(at(lst, "squircle")) ? clean::squircle(box) : clean::rounded(box, corner >= 0 ? corner : body.least * 0.6, &corners);
+        if (cornered) body.corners = std::move(corners);
         body.smooth = true;
     } else if (square(kind)) {
-        body.outline = clean::rounded(box, corner >= 0 ? corner : 0.0);
+        clean::Contour corners;
+        body.outline = clean::rounded(box, corner >= 0 ? corner : 0.0, &corners);
+        if (corner < 0 || cornered) body.corners = std::move(corners);
         body.smooth = true;
     } else if (kind == "capsule") {
         body.outline = clean::rounded(box, body.least);
         body.smooth = true;
     } else if (kind == "polygon") {
         const std::int64_t sides = int_or_zero(at(lst, "sides"));
-        body.outline = clean::polygon(box, sides == 0 ? 8 : static_cast<int>(sides), corner >= 0 ? corner : body.least * 0.14);
+        body.outline = clean::polygon(box, sides == 0 ? 8 : static_cast<int>(sides), corner >= 0 ? corner : body.least * 0.14, &body.corners);
         body.smooth = true;
     } else if (kind == "cloud") {
         const double rx = box.rx(), ry = box.ry();
@@ -166,7 +203,7 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         const double keep = 1 - bump / core::py_max(1.0, body.least);
         std::int64_t n = int_or_zero(at(lst, "bumps"));
         if (n == 0) n = std::max<std::int64_t>(8, core::py_trunc_int(core::kPi * (rx + ry) * keep / (bump * 1.4)));
-        body.outline = clean::cloud(box, static_cast<int>(n));
+        body.outline = clean::cloud(box, static_cast<int>(n), &body.corners);
         body.guide = clean::scaled_about(clean::ellipse(box), body.centre, 0.8);
     } else if (kind == "shout") {
         const double rx = box.rx(), ry = box.ry();
@@ -182,6 +219,7 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
             for (std::int64_t i = 0; i < count; ++i) jitter.push_back(rng.uniform(-0.5, 0.5) * depth * 2 * amount);
         }
         body.outline = clean::burst(box, static_cast<int>(spikes), depth, alt, jitter);
+        body.corners = body.outline;  // (every point and every valley)
         body.guide = clean::scaled_about(clean::ellipse(box), body.centre, (1 - depth) * 0.97);
     } else if (kind == "electric") {
         const double rx = box.rx(), ry = box.ry();
@@ -189,17 +227,36 @@ Body body_of(const core::StoryLine& line, const Json& lst, const clean::Box& box
         if (teeth == 0) teeth = std::max<std::int64_t>(14, core::py_trunc_int((rx + ry) / core::py_max(3.0, body.least / 4)));
         const double depth = core::py_max(0.04, core::py_min(0.4, float_or(at(lst, "spike_depth"), 0.12)));
         body.outline = clean::sawtooth(box, static_cast<int>(teeth), depth);
+        body.corners = body.outline;
         body.guide = clean::scaled_about(clean::squircle(box), body.centre, (1 - depth) * 0.97);
+    } else if (kind == "heart") {  // (fukidashi@2: the symbols)
+        body.outline = clean::heart(box, corner, &body.corners);
+        body.smooth = true;
+    } else if (kind == "diamond") {
+        body.outline = clean::diamond(box, corner, &body.corners);
+        body.smooth = true;
+    } else if (kind == "star") {
+        const int points = core::symbol_points(line);
+        const double inner = core::star_inner(line);
+        body.outline = clean::star(box, points, inner, corner, &body.corners);
+        body.guide = clean::star_guide(box, points, inner);
+        body.centre = clean::star_centre(box, points, inner);  // (an odd star's points stand round a middle below its box's)
+    } else if (kind == "flower") {
+        const int petals = core::symbol_points(line);
+        body.outline = clean::flower(box, petals, &body.corners);
+        body.guide = clean::flower_guide(box, petals);
     } else {  // speech, thought, whisper, flash
         body.outline = clean::ellipse(box);
         body.smooth = true;
     }
     if (body.guide.empty()) body.guide = body.outline;
+    body.soft = body.smooth;
     if (body.smooth && kind != "flash") {
         const double wave = wave_px(lst, line, dpi);
         if (wave > 0) {  // (a trembling outline: its tails leave the outline it trembles about, with a corner)
-            body.outline = clean::waved(body.outline, wave, core::py_max(wave * 7, 2.4 / 25.4 * dpi));
+            body.outline = clean::waved(body.outline, wave, core::py_max(wave * 7, 2.4 / 25.4 * dpi), body.corners);
             body.smooth = false;
+            body.corners.clear();  // (a trembling outline is one line all the way round)
         }
     }
     return body;
@@ -342,6 +399,465 @@ std::vector<clean::Contour> flash_spokes(const std::vector<clean::Box>& boxes, d
     return spokes;
 }
 
+// --- fukidashi@2 (SPEC BALLOON-02): a tone, and a blend, inside the outline --------------------------------------------
+
+// How far along a tone that grows darker, or a blend of two colours, a place of the group's region lies (0..1): along
+// a direction across the group's boxes, or from their middle outward (1 on the ellipse of their bounds).
+struct Ramp {
+    bool radial = false;
+    double cx = 0.0, cy = 0.0;
+    double ux = 0.0, uy = 1.0;
+    double length = 1.0;
+    double rx = 1.0, ry = 1.0;
+    double at(double x, double y) const {
+        if (radial) {
+            const double dx = (x - cx) / rx, dy = (y - cy) / ry;
+            return clamp01(std::sqrt(dx * dx + dy * dy));
+        }
+        return clamp01(((x - cx) * ux + (y - cy) * uy) / length + 0.5);
+    }
+};
+
+// The ramp over the boxes of a group (region pixels): `degrees` the way it runs (0 to the right, 90 down the page; the
+// float sine and cosine, the same bits everywhere).
+Ramp ramp_over(const std::vector<clean::Box>& boxes, double degrees, bool radial) {
+    Ramp ramp;
+    if (boxes.empty()) return ramp;
+    double x0 = boxes.front().x0, y0 = boxes.front().y0, x1 = boxes.front().x1, y1 = boxes.front().y1;
+    for (const clean::Box& b : boxes) {
+        x0 = core::py_min(x0, b.x0);
+        y0 = core::py_min(y0, b.y0);
+        x1 = core::py_max(x1, b.x1);
+        y1 = core::py_max(y1, b.y1);
+    }
+    ramp.radial = radial;
+    ramp.cx = (x0 + x1) / 2;
+    ramp.cy = (y0 + y1) / 2;
+    ramp.rx = core::py_max(1.0, (x1 - x0) / 2);
+    ramp.ry = core::py_max(1.0, (y1 - y0) / 2);
+    const auto a = static_cast<float>(degrees * (core::kPi / 180.0));
+    ramp.ux = static_cast<double>(libm::cosf(a));
+    ramp.uy = static_cast<double>(libm::sinf(a));
+    // (straight down, up or across: the float sine of a half turn is not quite 0 — a ramp down the page is the same
+    // all along a row)
+    if (std::fabs(ramp.ux) < 1e-6) ramp.ux = 0.0;
+    if (std::fabs(ramp.uy) < 1e-6) ramp.uy = 0.0;
+    ramp.length = core::py_max(1.0, std::fabs(ramp.ux) * (x1 - x0) + std::fabs(ramp.uy) * (y1 - y0));
+    return ramp;
+}
+
+// A number of a tone's or a blend's settings, kept within its range (the reader does not check a book's styles: what
+// is not a number is the default).
+double setting(const Json& spec, std::string_view key, double fallback, double least, double most) {
+    const Json& value = at(spec, key);
+    if (!value.is_number()) return fallback;
+    const double v = core::to_float(value);
+    if (!(v == v)) return fallback;
+    return core::py_max(least, core::py_min(most, v));
+}
+
+// style.fill_tone: a screentone inside the outline, in the line's colour — dots, or lines, on the lattice the tone
+// layers screen with (render/tones' screen_vector: whole pixels, lined up with the page), each pixel's coverage its
+// exact area.
+struct ToneSpec {
+    double density = 0.0;
+    double to = 0.0;
+    bool graded = false;  // (it grows from `density` to `to` along its ramp)
+    bool lines = false;
+    double lpi = 60.0;
+    double angle = 45.0;
+    double dir = 90.0;
+    bool radial = false;
+    double inset_mm = 0.0;
+};
+
+std::optional<ToneSpec> tone_spec(const Json& st) {
+    const Json& spec = at(st, "fill_tone");
+    if (!spec.is_object()) return std::nullopt;
+    if (!fill_tone_draws(st)) return std::nullopt;  // (nothing to draw: as if it were not there — a tone box keeps its own)
+    ToneSpec tone;
+    tone.density = setting(spec, "density", 0.0, 0.0, 0.9);
+    tone.graded = at(spec, "to").is_number();
+    tone.to = tone.graded ? setting(spec, "to", tone.density, 0.0, 0.9) : tone.density;
+    tone.lines = at(spec, "pattern") == Json("line");
+    tone.lpi = setting(spec, "lpi", 60.0, 20.0, 85.0);
+    tone.angle = setting(spec, "angle", 45.0, 0.0, 90.0);
+    tone.dir = setting(spec, "dir", 90.0, -360.0, 360.0);
+    tone.radial = core::py_truthy(at(spec, "radial"));
+    tone.inset_mm = setting(spec, "inset_mm", 0.0, 0.0, 5.0);
+    return tone;
+}
+
+constexpr int kToneLevels = 64;       // (a tone that grows darker: this many steps of density)
+constexpr std::int64_t kToneTile = 512;  // (a lattice that repeats within this many pixels is drawn once and laid like tiles)
+
+// floor(a / b) for b > 0, and the remainder that goes with it (0 .. b − 1).
+std::int64_t floor_div(std::int64_t a, std::int64_t b) {
+    const std::int64_t q = a / b;
+    return (a % b != 0 && a < 0) ? q - 1 : q;
+}
+std::int64_t floor_mod(std::int64_t a, std::int64_t b) { return a - floor_div(a, b) * b; }
+
+// How much of a pixel lies on the near side of a straight edge: `s` the edge's distance past the pixel's middle,
+// (a, b) the edge's unit normal made positive, a ≥ b. The exact area.
+double edge_share(double s, double a, double b) {
+    const double s1 = (a - b) / 2, s2 = (a + b) / 2;
+    if (s <= -s2) return 0.0;
+    if (s >= s2) return 1.0;
+    if (s < -s1) return (s + s2) * (s + s2) / (2 * a * b);
+    if (s > s1) return 1.0 - (s2 - s) * (s2 - s) / (2 * a * b);
+    return 0.5 + s / a;
+}
+
+// The radius of a tone's dots, in cells, for the dots to cover `density` of the page: a circle of that area — and, above
+// π / 4, where a dot meets the four beside it, the bigger circle whose part that is its own alone has that area (from a
+// table, a line between its entries: no arc cosine at drawing time).
+double dot_radius(double density) {
+    if (!(density > 0)) return 0.0;
+    static constexpr double kDense[][2] = {{0.7853981633974483, 0.5},  {0.80, 0.5052724328106947}, {0.82, 0.5135272122633895}, {0.84, 0.5227962158058063},
+                                           {0.86, 0.5331141606423667}, {0.88, 0.5446096225474605}, {0.90, 0.5575069513285796}};
+    if (density <= kDense[0][0]) return std::sqrt(density / core::kPi);
+    for (std::size_t k = 1; k < std::size(kDense); ++k) {
+        if (density <= kDense[k][0]) {
+            const double t = (density - kDense[k - 1][0]) / (kDense[k][0] - kDense[k - 1][0]);
+            return kDense[k - 1][1] + (kDense[k][1] - kDense[k - 1][1]) * t;
+        }
+    }
+    return kDense[std::size(kDense) - 1][1];
+}
+
+// One period of a dot lattice (m, n) with dots of `radius`: `side` × `side` pixels of coverage, 0..255, from the page's
+// corner. Remembered (a balloon's tone at one density is one of them; a tone that grows darker, up to 64).
+detail::Memo<std::string>& remembered_tone_tiles() {
+    static detail::Memo<std::string> memo(1024, 48LL * 1024 * 1024);
+    return memo;
+}
+
+// The dot of cell (i, j) of the lattice: its middle on the page (the middle of the tone layers' cell: a pixel's middle
+// is its index and a half).
+P dot_middle(std::int64_t i, std::int64_t j, std::int64_t m, std::int64_t n) {
+    return {(static_cast<double>(i) + 0.5) * static_cast<double>(m) - (static_cast<double>(j) + 0.5) * static_cast<double>(n) + 0.5,
+            (static_cast<double>(i) + 0.5) * static_cast<double>(n) + (static_cast<double>(j) + 0.5) * static_cast<double>(m) + 0.5};
+}
+
+// The cells of the lattice whose dots (of at most `reach`) can touch the box (x0, y0, x1, y1): the range of i and of j.
+std::array<std::int64_t, 4> cells_over(double x0, double y0, double x1, double y1, std::int64_t m, std::int64_t n, double reach) {
+    const double norm = static_cast<double>(m * m + n * n);
+    double u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+    bool first = true;
+    for (const double x : {x0 - reach, x1 + reach}) {
+        for (const double y : {y0 - reach, y1 + reach}) {
+            const double u = (x * static_cast<double>(m) + y * static_cast<double>(n)) / norm;
+            const double v = (-x * static_cast<double>(n) + y * static_cast<double>(m)) / norm;
+            if (first) u0 = u1 = u, v0 = v1 = v, first = false;
+            u0 = core::py_min(u0, u), u1 = core::py_max(u1, u), v0 = core::py_min(v0, v), v1 = core::py_max(v1, v);
+        }
+    }
+    return {static_cast<std::int64_t>(std::floor(u0)) - 1, static_cast<std::int64_t>(std::ceil(u1)) + 1, static_cast<std::int64_t>(std::floor(v0)) - 1,
+            static_cast<std::int64_t>(std::ceil(v1)) + 1};
+}
+
+std::shared_ptr<const std::string> tone_tile(std::int64_t m, std::int64_t n, std::int64_t side, double radius) {
+    const std::optional<std::string> key = detail::memo_key(Json::array({"tone", m, n, side, radius}));
+    if (key) {
+        if (auto found = remembered_tone_tiles().get(*key)) return found;
+    }
+    std::vector<clean::Contour> dots;
+    if (radius > 0) {
+        const auto [i0, i1, j0, j1] = cells_over(0.0, 0.0, static_cast<double>(side), static_cast<double>(side), m, n, radius + 1);
+        for (std::int64_t j = j0; j <= j1; ++j) {
+            for (std::int64_t i = i0; i <= i1; ++i) {
+                const P c = dot_middle(i, j, m, n);
+                if (c.x < -radius - 1 || c.y < -radius - 1 || c.x > static_cast<double>(side) + radius + 1 || c.y > static_cast<double>(side) + radius + 1) continue;
+                dots.push_back(clean::circle(c, radius));
+            }
+        }
+    }
+    const clean::Plane plane = clean::union_plane(dots, static_cast<int>(side), static_cast<int>(side));
+    auto bytes = std::make_shared<std::string>(plane.values.size(), '\0');
+    for (std::size_t k = 0; k < plane.values.size(); ++k) {
+        (*bytes)[k] = static_cast<char>(static_cast<std::uint8_t>(clamp01(static_cast<double>(plane.values[k])) * 255.0 + 0.5));
+    }
+    if (key) remembered_tone_tiles().put(*key, bytes, static_cast<std::int64_t>(bytes->size()) + 64);
+    return bytes;
+}
+
+// The tone over the region, cut to where the group lies (`cover`): `ramp` in the region's pixels, (ox, oy) the region's
+// corner on the page.
+// (`edge`: nothing, or the line's reach at each pixel when white is left inside it — the tone is taken away there. What
+// comes back is the tone cut to the group: a byte a pixel, 0..255.)
+std::string tone_bytes(const ToneSpec& tone, const Ramp& ramp, Size size, int dpi, std::int64_t ox, std::int64_t oy, const std::vector<float>& cover,
+                       const std::vector<float>* edge) {
+    const auto w = static_cast<std::size_t>(size.width);
+    const auto h = static_cast<std::size_t>(size.height);
+    std::string out(w * h, '\0');
+    if (!(tone.density > 0) && !(tone.graded && tone.to > 0)) return out;
+    // (a pixel of the tone: its share of ink × how much of it the group covers, less the line's reach)
+    const auto put = [&](std::size_t at, double share) {
+        double v = share * static_cast<double>(cover[at]);
+        if (edge != nullptr) v *= 1.0 - static_cast<double>((*edge)[at]);
+        out[at] = static_cast<char>(static_cast<std::uint8_t>(clamp01(v) * 255.0 + 0.5));
+    };
+    // (only where the group lies — `cover` —: the rows and columns it reaches)
+    std::size_t x_from = w, x_to = 0, y_from = h, y_to = 0;
+    for (std::size_t y = 0; y < h; ++y) {
+        const float* row = cover.data() + y * w;
+        std::size_t first = 0;
+        while (first < w && row[first] <= 0.0f) ++first;
+        if (first == w) continue;
+        std::size_t last = w;
+        while (last > first && row[last - 1] <= 0.0f) --last;
+        x_from = std::min(x_from, first), x_to = std::max(x_to, last);
+        y_from = std::min(y_from, y), y_to = y + 1;
+    }
+    if (x_from >= x_to) return out;
+    const std::pair<int, int> vector = tones::screen_vector(dpi, tone.lpi, tone.angle);
+    const std::int64_t m = std::abs(vector.first), n = std::abs(vector.second);
+    const std::int64_t norm = m * m + n * n;
+    const double pitch = std::sqrt(static_cast<double>(norm));
+    const auto density_at = [&](double x, double y) {  // (a place of the region)
+        return tone.graded ? tone.density + (tone.to - tone.density) * ramp.at(x, y) : tone.density;
+    };
+    if (tone.lines) {
+        // stripes along the lattice's (m, n), a cell apart, each density × the cell thick: every pixel's share of the
+        // stripe it lies on and of the two beside it
+        const double na = static_cast<double>(std::max(m, n)) / pitch, nb = static_cast<double>(std::min(m, n)) / pitch;
+        for (std::size_t y = y_from; y < y_to; ++y) {
+            const std::int64_t py = static_cast<std::int64_t>(y) + oy;
+            for (std::size_t x = x_from; x < x_to; ++x) {
+                if (cover[y * w + x] <= 0.0f) continue;
+                const std::int64_t px = static_cast<std::int64_t>(x) + ox;
+                const double half = density_at(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5) * pitch / 2;
+                if (!(half > 0)) continue;
+                // (how far across its cell the pixel's middle lies, from the stripe's middle line: −pitch / 2 .. pitch / 2)
+                const double s = (static_cast<double>(floor_mod(-px * n + py * m, norm)) / static_cast<double>(norm) - 0.5) * pitch;
+                double share = 0.0;
+                for (const double d : {s - pitch, s, s + pitch}) share += edge_share(d + half, na, nb) - edge_share(d - half, na, nb);
+                put(y * w + x, clamp01(share));
+            }
+        }
+        return out;
+    }
+    const auto radius_of = [&](double density) { return pitch * dot_radius(density); };
+    const auto level_of = [&](double t) { return std::min(kToneLevels - 1, static_cast<int>(t * kToneLevels)); };
+    const auto level_density = [&](int level) { return tone.density + (tone.to - tone.density) * (static_cast<double>(level) + 0.5) / kToneLevels; };
+    // (a cell's density: at its dot's middle, in the region's pixels)
+    const auto cell_level = [&](std::int64_t i, std::int64_t j) {
+        const P c = dot_middle(i, j, m, n);
+        return level_of(ramp.at(c.x - static_cast<double>(ox), c.y - static_cast<double>(oy)));
+    };
+    const std::int64_t common = std::gcd(m, n);
+    const std::int64_t side = norm / std::max<std::int64_t>(1, common);  // (the lattice repeats every `side` pixels, both ways)
+    if (side <= kToneTile) {
+        std::array<std::shared_ptr<const std::string>, kToneLevels> tiles{};
+        const auto tile_of = [&](int level) -> const std::string& {
+            auto& tile = tiles[static_cast<std::size_t>(level)];
+            if (!tile) tile = tone_tile(m, n, side, radius_of(tone.graded ? level_density(level) : tone.density));
+            return *tile;
+        };
+        for (std::size_t y = y_from; y < y_to; ++y) {
+            const std::int64_t py = static_cast<std::int64_t>(y) + oy;
+            const std::size_t row = static_cast<std::size_t>(floor_mod(py, side)) * static_cast<std::size_t>(side);
+            for (std::size_t x = x_from; x < x_to; ++x) {
+                if (cover[y * w + x] <= 0.0f) continue;
+                const std::int64_t px = static_cast<std::int64_t>(x) + ox;
+                // (the cell the pixel's middle lies in: whole numbers, as the tone layers count them)
+                const int level = tone.graded ? cell_level(floor_div(px * m + py * n, norm), floor_div(-px * n + py * m, norm)) : 0;
+                const auto v = static_cast<unsigned char>(tile_of(level)[row + static_cast<std::size_t>(floor_mod(px, side))]);
+                put(y * w + x, static_cast<double>(v) / 255.0);
+            }
+        }
+        return out;
+    }
+    // (a coarse lattice that does not repeat soon: the region's own dots, each drawn where it lies)
+    const double most = radius_of(core::py_max(tone.density, tone.to));
+    const double fx = static_cast<double>(ox), fy = static_cast<double>(oy);
+    const double bx0 = static_cast<double>(x_from), by0 = static_cast<double>(y_from), bx1 = static_cast<double>(x_to), by1 = static_cast<double>(y_to);
+    const auto [i0, i1, j0, j1] = cells_over(fx + bx0, fy + by0, fx + bx1, fy + by1, m, n, most + 1);
+    std::vector<clean::Contour> dots;
+    for (std::int64_t j = j0; j <= j1; ++j) {
+        for (std::int64_t i = i0; i <= i1; ++i) {
+            const P c = dot_middle(i, j, m, n);
+            const double radius = radius_of(tone.graded ? level_density(cell_level(i, j)) : tone.density);
+            if (!(radius > 0)) continue;
+            const P local{c.x - fx, c.y - fy};
+            if (local.x < bx0 - radius - 1 || local.y < by0 - radius - 1 || local.x > bx1 + radius + 1 || local.y > by1 + radius + 1) continue;
+            dots.push_back(clean::circle(local, radius));
+        }
+    }
+    const clean::Plane drawn = clean::union_plane(dots, size.width, size.height);
+    for (std::size_t y = y_from; y < y_to; ++y) {
+        for (std::size_t x = x_from; x < x_to; ++x) {
+            if (cover[y * w + x] > 0.0f) put(y * w + x, static_cast<double>(drawn.values[y * w + x]));
+        }
+    }
+    return out;
+}
+
+// --- fukidashi@2 (SPEC BALLOON-02): drips ---------------------------------------------------------------------------------
+
+// One drip of a line's balloon as its plan says it, in millimetres: where its upright line stands (from the left of the
+// body's box), half its width, and how far down its tip lies (from the top of the body's box); `longest`: the one that
+// runs down to the box's foot.
+struct Drip {
+    double x_mm = 0.0;
+    double half_mm = 0.0;
+    double tip_mm = 0.0;
+    bool longest = false;
+};
+
+// Where the upright line at x leaves a closed outline below `from_y` (the y of the lowest crossing); nothing when x
+// does not lie inside the outline there.
+std::optional<double> leaves_below(const clean::Contour& outline, const std::vector<double>& lengths, double x, double from_y, double far_below) {
+    if (!clean::inside(outline, {x, from_y})) return std::nullopt;
+    const P on = clean::point_at(outline, lengths, clean::facing(outline, lengths, {x, from_y}, {x, far_below}));
+    if (std::fabs(on.x - x) > 0.01 || on.y <= from_y) return std::nullopt;
+    return on.y;
+}
+
+// The bounds of an outline (x0, y0, x1, y1).
+std::array<double, 4> bounds_of(const clean::Contour& outline) {
+    std::array<double, 4> b{outline.front().x, outline.front().y, outline.front().x, outline.front().y};
+    for (const P& p : outline) {
+        b[0] = core::py_min(b[0], p.x), b[1] = core::py_min(b[1], p.y);
+        b[2] = core::py_max(b[2], p.x), b[3] = core::py_max(b[3], p.y);
+    }
+    return b;
+}
+
+// The drips of a line's balloon (style.drip_mm and drips, drip_width_mm, drip_seed): which there are, where and how
+// long — worked out from the line's millimetres alone, on its balloon made a hundred pixels to the millimetre, so that
+// every resolution draws the same drips. They stand in equal slots across the middle of the outline its tails leave from
+// — 0.8 of its width, 0.9 for a square kind —, as many as style.drips (not said: one every 3.2 widths, 3 to 16), each as
+// wide as style.drip_width_mm (not said: 7% of the body's width, 1.2 to 4 mm), never wider than 0.9 of its slot or 0.3
+// of the body. What differs from drip to drip comes from Python's random.Random(drip_seed) alone — the seed the line
+// holds —, drawn in one order: first which slot of the middle third holds the longest drip, then for each slot how far
+// off its slot's middle it stands (±0.3 of a slot), how long it is (0.25 to 1 of the reach), how wide (0.7 to 1.3 of the
+// width), and whether it is there at all (four in five are). A drip the outline has no foot for where it stands, or the
+// balloon is too thin to hold, is left out — but the longest is always there: where its own slot cannot hold it, it
+// hangs from the outline's middle.
+std::vector<Drip> drip_plan(const core::StoryLine& line, const Json& lst) {
+    std::vector<Drip> plan;
+    const double reach_mm = core::drip_reach(line);
+    if (!(reach_mm > 0)) return plan;
+    const std::array<double, 4> body_mm = core::body_box(line);
+    const double mm = 100.0;  // (pixels a millimetre here)
+    const clean::Box box{0.0, 0.0, body_mm[2] * mm, body_mm[3] * mm};
+    if (!(box.x1 >= 1) || !(box.y1 >= 1)) return plan;
+    const Body body = body_of(line, lst, box, Box{0, 0, 1, 1}, 2540);
+    if (body.outline.size() < 3 || body.guide.size() < 3) return plan;
+    const double foot = box.y1 + reach_mm * mm;
+    const double reach = reach_mm * mm;
+    const std::array<double, 4> guide = bounds_of(body.guide);
+    const Json& border = at(lst, "border_mm");
+    const double line_width = (border.is_number() ? core::py_max(0.0, core::py_min(30.0, core::to_float(border))) : 0.35) * mm;
+    const double body_w = box.x1 - box.x0;
+    const double usual = at(lst, "drip_width_mm").is_number() ? setting(lst, "drip_width_mm", 2.0, 0.3, 10.0) * mm
+                                                              : core::py_max(1.2 * mm, core::py_min(4.0 * mm, body_w * 0.07));
+    const double span = (guide[2] - guide[0]) * (square(body.kind) ? 0.9 : 0.8);
+    if (!(span > 0)) return plan;
+    // (a half up from the nearest whole number is the next one, whatever the last bit of the division says)
+    const auto count = static_cast<std::int64_t>(at(lst, "drips").is_number() ? setting(lst, "drips", 3.0, 1.0, 24.0)
+                                                                              : core::py_max(3.0, core::py_min(16.0, std::floor(span / (3.2 * usual) + 0.5 + 1e-9))));
+    const auto seed = static_cast<std::int64_t>(setting(lst, "drip_seed", 0.0, 0.0, 999999.0));
+    core::PyRandom rng(seed);
+    const std::int64_t third = count / 3;
+    const std::int64_t longest = third + static_cast<std::int64_t>(rng.random() * static_cast<double>(std::max<std::int64_t>(1, count - 2 * third)));
+    const double slot = span / static_cast<double>(count);
+    const double middle = (guide[0] + guide[2]) / 2;
+    const double first = middle - span / 2;
+    const std::vector<double> guide_lengths = clean::lengths_of(body.guide);
+    const std::vector<double> outline_lengths = clean::lengths_of(body.outline);
+    const double from_y = (guide[1] + guide[3]) / 2;
+    // (how far inside the balloon its sides begin, at the coarsest: a line and a third of a millimetre, half as much
+    // again to spare)
+    const double depth = (line_width * 3 + 0.35 * mm) * 1.5;
+    for (std::int64_t k = 0; k < count; ++k) {
+        const double off = rng.uniform(-0.3, 0.3);
+        const double share = rng.uniform(0.25, 1.0);
+        const double wide = rng.uniform(0.7, 1.3);
+        const bool there = rng.random() >= 0.2 || k == longest;
+        if (!there) continue;
+        const double half = core::py_max(0.05 * mm, core::py_min(usual * wide / 2, core::py_min(slot * 0.45, body_w * 0.15)));
+        // (where it stands: its own place in its slot — and, the longest only, the outline's middle when that cannot hold it)
+        for (const double x : {first + (static_cast<double>(k) + 0.5 + off) * slot, middle}) {
+            const std::optional<double> root = leaves_below(body.outline, outline_lengths, x, from_y, foot + 10);
+            const std::optional<double> left = leaves_below(body.guide, guide_lengths, x - half, from_y, foot + 10);
+            const std::optional<double> right = leaves_below(body.guide, guide_lengths, x + half, from_y, foot + 10);
+            bool fits = root && left && right;
+            double tip = 0.0;
+            if (fits) {
+                const double clear = core::py_max(*root, core::py_max(leaves_below(body.outline, outline_lengths, x - half, from_y, foot + 10).value_or(*root),
+                                                                      leaves_below(body.outline, outline_lengths, x + half, from_y, foot + 10).value_or(*root))) +
+                                     half * 0.3;
+                tip = core::py_min(foot, core::py_max(k == longest ? foot : *root + reach * share, clear + 1.2 * half));
+                fits = tip - clear >= 0.1 * mm && clean::inside(body.outline, {x - half, *left - depth}) && clean::inside(body.outline, {x + half, *right - depth});
+            }
+            if (fits) {
+                plan.push_back(Drip{x / mm, half / mm, tip / mm, k == longest});
+                break;
+            }
+            if (k != longest) break;
+        }
+    }
+    return plan;
+}
+
+// What was drawn of a plan's drip at a resolution (the same units as the plan's: fukidashi@2's traces, for the tests).
+struct DripDrawn {
+    double x_mm = 0.0;
+    double half_mm = 0.0;
+    double tip_mm = 0.0;
+};
+
+// The plan's drips added to the group's shapes at this resolution: each a finger (clean::drip) that hangs from the body's
+// outline at the plan's place — on a pixel's middle, so an upright drip is its own mirror image on the page — down to the
+// plan's tip (the longest: the box's foot `foot`), its sides beginning a little inside the balloon, its join with a
+// balloon without corners rounded (the joins stop short of a corner).
+void add_drips(std::vector<clean::Shape>& shapes, const std::vector<Drip>& plan, const Body& body, const clean::Box& box, double foot, double line_width,
+               double nominal, int dpi, std::vector<DripDrawn>* drawn) {
+    if (plan.empty() || body.outline.size() < 3 || body.guide.size() < 3) return;
+    if (!(foot - box.y1 >= 1)) return;
+    const double mm = dpi / 25.4;
+    const std::array<double, 4> guide = bounds_of(body.guide);
+    const std::vector<double> guide_lengths = clean::lengths_of(body.guide);
+    const std::vector<double> outline_lengths = clean::lengths_of(body.outline);
+    const double from_y = (guide[1] + guide[3]) / 2;
+    for (const Drip& one : plan) {
+        const double half = core::py_max(1.0, one.half_mm * mm);
+        const double x = box.x0 + std::floor(one.x_mm * mm) + 0.5;
+        const std::optional<double> root = leaves_below(body.outline, outline_lengths, x, from_y, foot + 10);
+        const std::optional<double> left = leaves_below(body.guide, guide_lengths, x - half, from_y, foot + 10);
+        const std::optional<double> right = leaves_below(body.guide, guide_lengths, x + half, from_y, foot + 10);
+        if (!root || !left || !right) continue;  // (a pixel off the outline's foot at this resolution)
+        // (it is a finger from where both its sides have left the outline — on a slope its upper side runs straight
+        // down to there —, a little past it: the outline crosses its side, not a corner of it)
+        const double clear = core::py_max(*root, core::py_max(leaves_below(body.outline, outline_lengths, x - half, from_y, foot + 10).value_or(*root),
+                                                              leaves_below(body.outline, outline_lengths, x + half, from_y, foot + 10).value_or(*root))) +
+                             core::py_max(1.5, half * 0.3);
+        const double tip = one.longest ? foot : core::py_min(foot, core::py_max(box.y0 + one.tip_mm * mm, clear + 1.0));
+        const double length = tip - clear;
+        if (!(length >= 1)) continue;
+        // (its sides begin a little inside the balloon — less if the balloon is thin there)
+        double depth = core::py_max(2.0, line_width * 3 + 2);
+        bool held = false;
+        for (int attempt = 0; attempt < 4 && !held; ++attempt) {
+            held = clean::inside(body.outline, {x - half, *left - depth}) && clean::inside(body.outline, {x + half, *right - depth});
+            if (!held) depth /= 2;
+        }
+        if (!held) continue;
+        clean::Shape finger = clean::drip(x, clear, *left - depth, *right - depth, half, length);
+        if (finger.points.size() < 3) continue;
+        if (drawn != nullptr) drawn->push_back(DripDrawn{(x - box.x0) / mm, half / mm, (tip - box.y0) / mm});
+        // (its join with the balloon rounded, as liquid gathers before it runs — a finger slimmer than a line and a half
+        // either side has none: the join would be bigger than the drip)
+        if (body.soft && one.half_mm * mm >= nominal * 1.5) {
+            for (clean::Shape& join : clean::drip_joins(body.outline, finger.points, core::py_max(line_width * 1.5, half * 0.9))) shapes.push_back(std::move(join));
+        }
+        shapes.push_back(std::move(finger));
+    }
+}
+
 // --- one group's shapes (_paint_shapes) ------------------------------------------------------------------------------
 
 using Tails = std::vector<std::pair<const core::StoryLine*, Json>>;
@@ -354,9 +870,14 @@ struct Masks {
     double opacity = 1.0;
     std::vector<std::int64_t> paper;
     Image cover;
-    Image tone;  // (empty unless tone_box)
+    Image tone;  // (empty unless tone_box, or — fukidashi@2 — the line has a tone inside: style.fill_tone)
     std::vector<std::int64_t> line_rgb;
     Image band;
+    // (fukidashi@2, style.fill_gradient: the fill's colour runs from `paper` to `blend_to` along the ramp, in the
+    // region's pixels)
+    bool blend = false;
+    std::vector<std::int64_t> blend_to;
+    Ramp ramp;
 };
 
 std::vector<std::int64_t> colour_of(const Json& value, const std::vector<std::int64_t>& fallback) {
@@ -376,12 +897,46 @@ double line_width(const Json& st, int dpi) {
     return width >= 1.5 ? std::floor(width + 0.5) : 1.0;
 }
 
-Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::vector<std::array<std::int64_t, 4>>& boxes,
-                  const Tails& tails, const Box& region, int dpi, const Json& st) {
+// fukidashi@2: the pen a group's line is drawn with — style.pen_swell (0..0.9) and pen_angle (the way the heavy side
+// faces: 0 to the right, 90 down the page; 45 when not said), pen_taper (0..1) and pen_strokes (1..8; 2 when not said) —,
+// or nothing: an even line. A dotted box and a flash have no line to swell.
+std::optional<clean::Pen> pen_of(const Json& st, std::string_view kind, double width, int dpi) {
+    if (kind == "dotted_box" || kind == "flash") return std::nullopt;
+    const double swell = setting(st, "pen_swell", 0.0, 0.0, 0.9);
+    const double taper = setting(st, "pen_taper", 0.0, 0.0, 1.0);
+    if (!(swell > 0) && !(taper > 0)) return std::nullopt;
+    clean::Pen pen;
+    pen.width = width;
+    pen.swell = swell;
+    pen.taper = taper;
+    const auto a = static_cast<float>(setting(st, "pen_angle", 45.0, 0.0, 360.0) * (core::kPi / 180.0));
+    pen.heavy = {static_cast<double>(libm::cosf(a)), static_cast<double>(libm::sinf(a))};
+    pen.strokes = static_cast<int>(setting(st, "pen_strokes", 2.0, 1.0, 8.0));
+    pen.step = core::py_max(2.0, 0.5 / 25.4 * dpi);
+    // (the line's own width, before it was made whole pixels: what the strokes' rules count in)
+    const Json& border = at(st, "border_mm");
+    pen.nominal = core::py_max(0.25, (border.is_number() ? core::to_float(border) : 0.35) / 25.4 * dpi);
+    return pen;
+}
+
+// A group's shapes as they are made for a region at a resolution: each line's balloon, the joins of joined balloons,
+// the tails with their joins, the thought's bubbles, and last — from `drips_from` — the drips' fingers and their joins;
+// with each balloon's body, its box (`locals`: the body's — the line's box less its drips' reach; `whole_boxes`: the
+// line's own), the fading tails, the corners the pen's strokes end at, and the drips as drawn.
+struct Built {
+    std::vector<clean::Shape> shapes;
+    std::size_t drips_from = 0;
+    std::vector<Body> bodies;
+    std::vector<clean::Box> locals;
+    std::vector<clean::Box> whole_boxes;
+    std::vector<std::pair<clean::Box, P>> fades;
+    clean::Contour corners;
+    std::vector<DripDrawn> drips;
+};
+
+Built build_shapes(const std::vector<const core::StoryLine*>& lines, const std::vector<std::array<std::int64_t, 4>>& boxes, const Tails& tails,
+                   const Box& region, int dpi, double width) {
     const std::int64_t rx0 = region.x0, ry0 = region.y0;
-    const Size size{region.width(), region.height()};
-    const double width = line_width(st, dpi);
-    const std::string kind = kind_of(*lines.front());
     const auto local = [&](const std::array<std::int64_t, 4>& b) {
         return clean::Box{static_cast<double>(b[0] - rx0), static_cast<double>(b[1] - ry0), static_cast<double>(b[2] - rx0),
                           static_cast<double>(b[3] - ry0)};
@@ -391,12 +946,19 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
                  static_cast<double>(px(number(core::subscript(point, 1)), dpi) - ry0)};
     };
     // the group's shapes: each line's balloon, then their tails, the joins and the bubbles
-    std::vector<clean::Shape> shapes;
-    std::vector<Body> bodies;
-    std::vector<clean::Box> locals;
-    std::vector<std::pair<clean::Box, P>> fades;
+    Built built;
+    std::vector<clean::Shape>& shapes = built.shapes;
+    std::vector<Body>& bodies = built.bodies;
+    std::vector<clean::Box>& locals = built.locals;
+    std::vector<std::pair<clean::Box, P>>& fades = built.fades;
+    std::vector<clean::Box>& whole_boxes = built.whole_boxes;
     for (std::size_t i = 0; i < lines.size(); ++i) {
-        locals.push_back(local(boxes[i]));
+        whole_boxes.push_back(local(boxes[i]));
+        locals.push_back(whole_boxes.back());
+        if (core::drip_reach(*lines[i]) > 0) {  // (fukidashi@2: the body's foot raised; the drips run down to the box's)
+            const std::array<double, 4> body = core::body_box(*lines[i]);
+            locals.back().y1 = core::py_max(locals.back().y0 + 1, core::py_min(locals.back().y1, static_cast<double>(px(body[1] + body[3], dpi) - ry0)));
+        }
         bodies.push_back(body_of(*lines[i], style_of(*lines[i]), locals.back(), region, dpi));
         shapes.push_back(clean::whole(bodies.back().outline));
     }
@@ -422,6 +984,8 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         }
         for (clean::Shape& join : joins) shapes.push_back(std::move(join));
     }
+    // (fukidashi@2: drawn with the pen — the group's line, its first line's style)
+    const bool pen = !lines.empty() && width > 0 && pen_of(style_of(*lines.front()), kind_of(*lines.front()), width, dpi).has_value();
     for (const auto& [line, tail] : tails) {
         const std::size_t index = static_cast<std::size_t>(std::find(lines.begin(), lines.end(), line) - lines.begin());
         const clean::Box& box = locals[index];
@@ -455,6 +1019,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
                                            : std::string_view("wedge");
         spec.depth = core::py_max(base * 0.5, width * 3 + 2);
         spec.line = width;
+        spec.pen = pen;
         if (bent) {  // 折れ線のしっぽ
             for (const Json& v : core::iterate(*vias)) spec.bends.push_back(at_px(v));
         } else {
@@ -475,10 +1040,41 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         }
         clean::Tail made = clean::tail(body.outline, body.guide, body.centre, spec);
         if (spec.kind == "inward") made.shape.owner = static_cast<int>(index);
+        built.corners.insert(built.corners.end(), made.corners.begin(), made.corners.end());
         shapes.push_back(std::move(made.shape));
         for (clean::Shape& join : made.joins) shapes.push_back(std::move(join));
         if (tail_style == "fade") fades.emplace_back(box, tip);
     }
+
+    for (const Body& body : bodies) built.corners.insert(built.corners.end(), body.corners.begin(), body.corners.end());
+    built.drips_from = shapes.size();
+    for (std::size_t i = 0; i < lines.size(); ++i) {  // (fukidashi@2: the drips)
+        if (locals[i].y1 < whole_boxes[i].y1) {
+            const Json lst = style_of(*lines[i]);
+            // (the line's own width, before it was made whole pixels: a drip slimmer than it by the millimetre is so at every resolution)
+            const Json& border = at(lst, "border_mm");
+            const double nominal = (border.is_number() ? core::py_max(0.0, core::to_float(border)) : 0.35) / 25.4 * dpi;
+            add_drips(shapes, drip_plan(*lines[i], lst), bodies[i], locals[i], whole_boxes[i].y1, width, nominal, dpi, &built.drips);
+        }
+    }
+    return built;
+}
+
+Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::vector<std::array<std::int64_t, 4>>& boxes,
+                  const Tails& tails, const Box& region, int dpi, const Json& st) {
+    const std::int64_t rx0 = region.x0, ry0 = region.y0;
+    const Size size{region.width(), region.height()};
+    const double width = line_width(st, dpi);
+    const std::string kind = kind_of(*lines.front());
+    const Built built = build_shapes(lines, boxes, tails, region, dpi, width);
+    const std::vector<clean::Shape>& shapes = built.shapes;
+    const std::vector<clean::Box>& locals = built.locals;
+    const std::vector<clean::Box>& whole_boxes = built.whole_boxes;
+    const std::vector<std::pair<clean::Box, P>>& fades = built.fades;
+    // (fukidashi@2: a balloon that drips has its second line, the white a tone leaves inside its line and a tone box's
+    // margin along its body and its tails alone — a drip's finger is too slim to hold them, and following it costs a
+    // great deal for a thick line: the shapes without the drips, their edge and where they lie)
+    const bool dripping = built.drips_from < shapes.size();
 
     // their coverage: the fill is their union; the line, what lies within its width of the union's edge
     const clean::Plane fill = clean::fill_plane(shapes, size.width, size.height);
@@ -493,25 +1089,66 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     }
     const auto within = [&](double reach) {
         clean::Plane plane = clean::ribbon_plane(runs, reach, size.width, size.height, !dashes);
-        for (std::size_t i = 0; i < count; ++i) plane.values[i] *= fill.values[i];
+        times(plane.values, fill.values);
+        return plane;
+    };
+    std::vector<clean::Shape> body_shapes;
+    std::vector<clean::Run> body_runs;
+    clean::Plane body_fill;
+    if (dripping) {
+        body_shapes.assign(shapes.begin(), shapes.begin() + static_cast<std::ptrdiff_t>(built.drips_from));
+        if (dashes) {
+            const double on = core::py_max(width, mm_px(at(st, "dash_mm"), dpi, 1.1 / 25.4 * dpi));
+            body_runs = clean::edge_runs(clean::dashed(body_shapes, on, core::py_max(width * 1.2, on * 0.6)));
+        } else {
+            body_runs = clean::edge_runs(body_shapes);
+        }
+        body_fill = clean::fill_plane(body_shapes, size.width, size.height);
+    }
+    // (what lies within `reach` of the edge of the balloons and their tails — the drips aside —, inside them)
+    const auto within_body = [&](double reach, bool round_ends) {
+        if (!dripping) return within(reach);
+        clean::Plane plane = clean::ribbon_plane(body_runs, reach, size.width, size.height, round_ends);
+        times(plane.values, body_fill.values);
         return plane;
     };
     std::vector<float> band(count, 0.0f);
     std::vector<float> inner = fill.values;  // (the fill inside the line: kept solid under a fading tail)
     if (width > 0) {
-        band = within(width).values;
-        for (std::size_t i = 0; i < count; ++i) inner[i] = fill.values[i] - band[i];
+        if (const std::optional<clean::Pen> pen = pen_of(st, kind, width, dpi)) {
+            // (fukidashi@2: the pen's line — its width swelling on one side, its strokes thinning toward their ends; a
+            // dashed outline keeps its dashes and takes the swell alone)
+            clean::Pen with = *pen;
+            with.chain = !dashes;
+            with.corners = built.corners;
+            clean::Plane plane = clean::pen_plane(clean::pen_runs(runs, shapes, with), size.width, size.height);
+            times(plane.values, fill.values);
+            band = std::move(plane.values);
+        } else {
+            band = within(width).values;
+        }
+        const float* const filled = fill.values.data();
+        const float* const line = band.data();
+        float* const in = inner.data();
+        for (std::size_t i = 0; i < count; ++i) in[i] = filled[i] - line[i];
     }
     const auto lighter = [&](const std::vector<float>& more) {
-        for (std::size_t i = 0; i < count; ++i) band[i] = std::max(band[i], more[i]);
+        float* const line = band.data();
+        const float* const other = more.data();
+        for (std::size_t i = 0; i < count; ++i) line[i] = line[i] < other[i] ? other[i] : line[i];  // (std::max)
     };
     if (width > 0 && (core::py_truthy(at(st, "double")) || kind == "fancy_box")) {
-        // a second line inside the first: two widths in, one width wide
-        const clean::Plane outer = within(width * 4);
-        const clean::Plane closer = within(width * 3);
-        std::vector<float> second(count);
-        for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
-        lighter(second);
+        // a second line inside the first: two widths in, one width wide — none in a shape that is everywhere within
+        // three widths of its edge (a thick line round a slim heart or cloud: the two ribbons, each in thousands of
+        // pieces, would both cover all of it)
+        const bool none = clean::ribbon_covers(dripping ? body_runs : runs, width * 3, !dashes, dripping ? body_fill : fill);
+        if (!none) {
+            const clean::Plane outer = within_body(width * 4, !dashes);
+            const clean::Plane closer = within_body(width * 3, !dashes);
+            std::vector<float> second(count);
+            for (std::size_t i = 0; i < count; ++i) second[i] = std::max(0.0f, outer.values[i] - closer.values[i]);
+            lighter(second);
+        }
     }
     std::vector<float> cover = fill.values;
     if (!fades.empty()) {  // 消えるしっぽ: its outline and fill thin away toward the tip
@@ -541,11 +1178,40 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
         const Json& covering = at(st, "fill_opacity");
         if (!covering.is_null() && core::to_float(covering) < 1) out.opacity = core::py_max(0.0, core::to_float(covering));
     }
-    if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
-        const clean::Plane edge = clean::ribbon_plane(clean::edge_runs(shapes), core::py_max(2.0, static_cast<double>(px(1.0, dpi))), size.width, size.height);
+    if (const std::optional<ToneSpec> tone = tone_spec(st)) {
+        // (fukidashi@2: a tone inside any outline — the tails and the joined balloons with it, being cut to where the
+        // group lies —, clear of the line by inset_mm when that is said)
+        // (inset_mm is measured from the line's even width — a pen's heavy side takes some of it —, along the balloons
+        // and their tails: a drip's finger has the tone up to its line)
+        clean::Plane edge;
+        if (tone->inset_mm > 0) {
+            edge = clean::ribbon_plane(dripping ? clean::edge_runs(body_shapes) : clean::edge_runs(shapes), width + tone->inset_mm / 25.4 * dpi, size.width, size.height);
+            if (dripping) {
+                for (std::size_t i = 0; i < count; ++i) edge.values[i] *= body_fill.values[i];
+            }
+        }
+        out.tone = Image::frombytes("L", size, tone_bytes(*tone, ramp_over(whole_boxes, tone->dir, tone->radial), size, dpi, rx0, ry0, cover,
+                                                              tone->inset_mm > 0 ? &edge.values : nullptr));
+    } else if (kind == "tone_box") {  // (a light dot tone laid inside, under the words)
+        clean::Plane edge = clean::ribbon_plane(dripping ? clean::edge_runs(body_shapes) : clean::edge_runs(shapes), core::py_max(2.0, static_cast<double>(px(1.0, dpi))),
+                                                size.width, size.height);
+        if (dripping) {
+            for (std::size_t i = 0; i < count; ++i) edge.values[i] *= body_fill.values[i];
+        }
         clean::Plane dots = clean::union_plane(tone_dots(size, dpi, rx0, ry0), size.width, size.height);
         for (std::size_t i = 0; i < count; ++i) dots.values[i] *= cover[i] * (1.0f - edge.values[i]);
         out.tone = as_image(dots);
+    }
+    if (const Json& blend = at(st, "fill_gradient"); out.fill && blend.is_object() && at(blend, "to").is_array() && at(blend, "to").size() >= 3 &&
+                                                     std::all_of(at(blend, "to").begin(), at(blend, "to").begin() + 3, [](const Json& c) { return c.is_number(); })) {
+        // (fukidashi@2: the fill a blend from its own colour to another — three numbers, each kept within 0..255; anything
+        // else is no blend)
+        out.blend = true;
+        out.blend_to.clear();
+        for (std::size_t c = 0; c < 3; ++c) {
+            out.blend_to.push_back(static_cast<std::int64_t>(core::py_max(0.0, core::py_min(255.0, core::to_float(at(blend, "to")[c])))));
+        }
+        out.ramp = ramp_over(whole_boxes, setting(blend, "dir", 90.0, -360.0, 360.0), core::py_truthy(at(blend, "radial")));
     }
     out.line_rgb = colour_of(at(st, "line_rgb"), kOutline);
     clean::Plane plane;
@@ -594,12 +1260,39 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     const bool all = from == Box{0, 0, masks.cover.width(), masks.cover.height()};
     const Image cover_part = all ? masks.cover : masks.cover.crop(from);
     const Image band_part = all ? masks.band : masks.band.crop(from);
+    double paper[3] = {255.0, 255.0, 255.0};
+    double line[3] = {0.0, 0.0, 0.0};
+    double first_paper[3] = {255.0, 255.0, 255.0};  // (fukidashi@2, a blend: the colours its ramp begins and ends in)
+    double last_paper[3] = {255.0, 255.0, 255.0};
+    for (std::size_t c = 0; c < 3; ++c) {
+        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
+        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
+        first_paper[c] = paper[c];
+        last_paper[c] = c < masks.blend_to.size() ? static_cast<double>(std::clamp<std::int64_t>(masks.blend_to[c], 0, 255)) : paper[c];
+    }
+    // (the fill's colour at a pixel of the part: the blend is worked out from the pixel's place in the group's region, so a
+    // part of the page is the page cut there)
+    const auto blended = [&](std::size_t i, double* colour) {
+        const double t = masks.ramp.at(static_cast<double>(from.x0 + static_cast<int>(i % static_cast<std::size_t>(w))) + 0.5,
+                                       static_cast<double>(from.y0 + static_cast<int>(i / static_cast<std::size_t>(w))) + 0.5);
+        for (std::size_t k = 0; k < 3; ++k) colour[k] = first_paper[k] + (last_paper[k] - first_paper[k]) * t;
+    };
     if (mode != "RGB" && mode != "RGBA") {
         // (any other kind of picture: the fill through what it covers inside the line, then the line)
         if (masks.fill) {
             const double k = masks.opacity;
             const Image inside = chops::subtract(cover_part, band_part).point([k](int v) { return static_cast<int>(static_cast<double>(v) * k + 0.5); });
-            image.paste(Ink::tuple(masks.paper), to, &inside);
+            if (masks.blend) {
+                std::string colours(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 3, '\0');
+                for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); ++i) {
+                    double colour[3];
+                    blended(i, colour);
+                    for (std::size_t c = 0; c < 3; ++c) colours[i * 3 + c] = static_cast<char>(static_cast<std::uint8_t>(clamp01(colour[c] / 255.0) * 255.0 + 0.5));
+                }
+                image.paste(Image::frombytes("RGB", Size{w, h}, colours), to, &inside);
+            } else {
+                image.paste(Ink::tuple(masks.paper), to, &inside);
+            }
         }
         if (!masks.tone.empty()) {
             const Image tone = all ? masks.tone : masks.tone.crop(from);
@@ -613,22 +1306,23 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     const std::string tone = masks.tone.empty() ? std::string() : (all ? masks.tone : masks.tone.crop(from)).tobytes();
     const std::size_t bands = mode == "RGBA" ? 4 : 3;
     std::string pixels = image.crop(to).tobytes();
-    double paper[3] = {255.0, 255.0, 255.0};
-    double line[3] = {0.0, 0.0, 0.0};
-    for (std::size_t c = 0; c < 3; ++c) {
-        if (c < masks.paper.size()) paper[c] = static_cast<double>(std::clamp<std::int64_t>(masks.paper[c], 0, 255));
-        if (c < masks.line_rgb.size()) line[c] = static_cast<double>(std::clamp<std::int64_t>(masks.line_rgb[c], 0, 255));
-    }
     const auto count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    // (the masks and the pixels as plain bytes: the loop below is every pixel the group covers)
+    const unsigned char* const band_at = reinterpret_cast<const unsigned char*>(band.data());
+    const unsigned char* const cover_at = reinterpret_cast<const unsigned char*>(cover.data());
+    const unsigned char* const tone_at = reinterpret_cast<const unsigned char*>(tone.data());
+    const bool toned = !tone.empty();
+    char* const pixel_at = pixels.data();
     for (std::size_t i = 0; i < count; ++i) {
-        const auto band8 = static_cast<unsigned char>(band[i]);
-        const auto cover8 = static_cast<unsigned char>(cover[i]);
+        const unsigned char band8 = band_at[i];
+        const unsigned char cover8 = cover_at[i];
         if (band8 == 0 && cover8 == 0) continue;
-        if (tone.empty() || tone[i] == '\0') {  // (most of a balloon: all line, or all fill — the colour itself)
+        if (masks.blend && band8 != 255) blended(i, paper);  // (the fill's colour here)
+        if (!toned || tone_at[i] == 0) {  // (most of a balloon: all line, or all fill — the colour itself)
             const bool all_line = band8 == 255;
-            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0;
+            const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0 && !masks.blend;
             if (all_line || all_fill) {
-                char* whole = &pixels[i * bands];
+                char* whole = pixel_at + i * bands;
                 const double* colour = all_line ? line : paper;
                 for (std::size_t k = 0; k < 3; ++k) whole[k] = static_cast<char>(static_cast<std::uint8_t>(colour[k]));
                 if (bands == 4) whole[3] = static_cast<char>(static_cast<std::uint8_t>(255));
@@ -639,11 +1333,11 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
         const double b = static_cast<double>(band8) / 255.0;
         const double c = static_cast<double>(cover8) / 255.0;
         const double inside = c > b ? c - b : 0.0;
-        const double t = tone.empty() ? 0.0 : std::min(inside, static_cast<double>(static_cast<unsigned char>(tone[i])) / 255.0);
+        const double t = !toned ? 0.0 : std::min(inside, static_cast<double>(tone_at[i]) / 255.0);
         const double w_line = b + t;
         const double w_paper = masks.fill ? (inside - t) * masks.opacity : 0.0;
         const double w_under = 1.0 - w_line - w_paper;
-        char* p = &pixels[i * bands];
+        char* p = pixel_at + i * bands;
         if (bands == 3) {
             for (std::size_t k = 0; k < 3; ++k) {
                 const double v = static_cast<double>(static_cast<unsigned char>(p[k])) * w_under + paper[k] * w_paper + line[k] * w_line;
@@ -951,6 +1645,161 @@ Pt thought_trail(const core::StoryLine& line, const Panels* panels) {
 
 }  // namespace balloon
 
+// --- a group's frame, and its traces ----------------------------------------------------------------------------------
+
+namespace {
+
+// What a group's shapes are worked out from: each line's box (px), the tails drawn (a thought without one trails its
+// bubbles down and away), and the region they need — the boxes, the tails' tips and bends, 4 mm round them (px of the
+// page; not yet cut to the page).
+struct GroupFrame {
+    std::vector<std::array<std::int64_t, 4>> boxes;
+    Tails tails;
+    std::int64_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+
+GroupFrame group_frame(const std::vector<const core::StoryLine*>& lines, int dpi, const Panels* panels) {
+    GroupFrame frame;
+    std::vector<std::array<std::int64_t, 4>>& boxes = frame.boxes;
+    for (const core::StoryLine* ln : lines) boxes.push_back(box_px(*ln, dpi));
+    Tails& tails = frame.tails;
+    for (const core::StoryLine* ln : lines) {
+        if (no_tail(kind_of(*ln))) continue;
+        for (Json& t : balloon::tails_of(*ln)) tails.emplace_back(ln, std::move(t));
+    }
+    for (const core::StoryLine* ln : lines) {  // a thought without a speaker still trails its bubbles, down and away
+        if (kind_of(*ln) == "thought" && balloon::tails_of(*ln).empty()) {
+            const Pt to = balloon::thought_trail(*ln, panels);
+            tails.emplace_back(ln, Json{{"to", Json::array({to[0], to[1]})}});
+        }
+    }
+    std::vector<Json> bends;
+    for (const auto& [ln, t] : tails) {
+        const Json* vias = core::dict_get(t, "vias");
+        if (vias != nullptr && core::py_truthy(*vias)) {
+            for (const Json& v : core::iterate(*vias)) bends.push_back(v);
+            continue;
+        }
+        const Json* via = core::dict_get(t, "via");
+        if (via != nullptr && core::py_truthy(*via)) bends.push_back(*via);
+    }
+    std::vector<std::int64_t> xs;
+    std::vector<std::int64_t> ys;
+    for (const auto& b : boxes) xs.push_back(b[0]);
+    for (const auto& b : boxes) xs.push_back(b[2]);
+    for (const auto& [ln, t] : tails) xs.push_back(px(number(core::subscript(core::subscript(t, "to"), 0)), dpi));
+    for (const Json& v : bends) xs.push_back(px(number(core::subscript(v, 0)), dpi));
+    for (const auto& b : boxes) ys.push_back(b[1]);
+    for (const auto& b : boxes) ys.push_back(b[3]);
+    for (const auto& [ln, t] : tails) ys.push_back(px(number(core::subscript(core::subscript(t, "to"), 1)), dpi));
+    for (const Json& v : bends) ys.push_back(px(number(core::subscript(v, 1)), dpi));
+    const std::int64_t margin = px(4, dpi);
+    frame.x0 = *std::min_element(xs.begin(), xs.end()) - margin;
+    frame.y0 = *std::min_element(ys.begin(), ys.end()) - margin;
+    frame.x1 = *std::max_element(xs.begin(), xs.end()) + margin;
+    frame.y1 = *std::max_element(ys.begin(), ys.end()) + margin;
+    return frame;
+}
+
+}  // namespace
+
+namespace balloon {
+
+std::vector<PenTrace> pen_trace(const std::vector<const core::StoryLine*>& group, int dpi) {
+    std::vector<PenTrace> out;
+    if (group.empty()) return out;
+    const std::string kind = kind_of(*group.front());
+    if (kind == "sfx" || kind == "none" || kind == "picture") return out;
+    const Json st = style_of(*group.front());
+    const double width = line_width(st, dpi);
+    const std::optional<clean::Pen> pen = width > 0 ? pen_of(st, kind, width, dpi) : std::nullopt;
+    if (!pen) return out;
+    const GroupFrame frame = group_frame(group, dpi, nullptr);
+    const Box region{static_cast<int>(std::max<std::int64_t>(0, frame.x0)), static_cast<int>(std::max<std::int64_t>(0, frame.y0)), static_cast<int>(frame.x1),
+                     static_cast<int>(frame.y1)};
+    const Built built = build_shapes(group, frame.boxes, frame.tails, region, dpi, width);
+    const bool dashes = kind == "whisper" || core::py_truthy(at(st, "dash_mm"));
+    clean::Pen with = *pen;
+    with.chain = !dashes;
+    with.corners = built.corners;
+    std::vector<clean::Run> runs;
+    if (dashes) {
+        const double on = core::py_max(width, mm_px(at(st, "dash_mm"), dpi, 1.1 / 25.4 * dpi));
+        runs = clean::edge_runs(clean::dashed(built.shapes, on, core::py_max(width * 1.2, on * 0.6)));
+    } else {
+        runs = clean::edge_runs(built.shapes);
+    }
+    const double mm = 25.4 / dpi;
+    for (const clean::PenRun& run : clean::pen_runs(runs, built.shapes, with)) {
+        PenTrace trace;
+        trace.closed = run.closed;
+        for (std::size_t i = 0; i < run.points.size(); ++i) {
+            trace.points_mm.push_back({(run.points[i].x + region.x0) * mm, (run.points[i].y + region.y0) * mm});
+            trace.weight.push_back(run.reach[i] / width);
+            trace.stroke_start.push_back(run.stroke_start[i]);
+        }
+        out.push_back(std::move(trace));
+    }
+    return out;
+}
+
+std::vector<DripTrace> drip_trace(const core::StoryLine& line, int dpi) {
+    std::vector<DripTrace> out;
+    const std::string kind = kind_of(line);
+    if (kind == "sfx" || kind == "none" || kind == "picture") return out;
+    const std::vector<const core::StoryLine*> group{&line};
+    const Json st = style_of(line);
+    const GroupFrame frame = group_frame(group, dpi, nullptr);
+    const Box region{static_cast<int>(std::max<std::int64_t>(0, frame.x0)), static_cast<int>(std::max<std::int64_t>(0, frame.y0)), static_cast<int>(frame.x1),
+                     static_cast<int>(frame.y1)};
+    const Built built = build_shapes(group, frame.boxes, frame.tails, region, dpi, line_width(st, dpi));
+    const double mm = 25.4 / dpi;
+    // (from the body's box — the line's box at this resolution — to the page)
+    const double x0 = static_cast<double>(frame.boxes.front()[0]) * mm, y0 = static_cast<double>(frame.boxes.front()[1]) * mm;
+    for (const DripDrawn& drip : built.drips) out.push_back(DripTrace{x0 + drip.x_mm, drip.half_mm, y0 + drip.tip_mm});
+    return out;
+}
+
+std::vector<std::vector<Pt>> shape_trace(const std::vector<const core::StoryLine*>& group, int dpi) {
+    std::vector<std::vector<Pt>> out;
+    if (group.empty()) return out;
+    const std::string kind = kind_of(*group.front());
+    if (kind == "sfx" || kind == "none" || kind == "picture") return out;
+    const GroupFrame frame = group_frame(group, dpi, nullptr);
+    const Box region{static_cast<int>(std::max<std::int64_t>(0, frame.x0)), static_cast<int>(std::max<std::int64_t>(0, frame.y0)), static_cast<int>(frame.x1),
+                     static_cast<int>(frame.y1)};
+    const Built built = build_shapes(group, frame.boxes, frame.tails, region, dpi, line_width(style_of(*group.front()), dpi));
+    for (const clean::Shape& shape : built.shapes) {
+        std::vector<Pt>& points = out.emplace_back();
+        for (const P& p : shape.points) points.push_back({p.x, p.y});
+    }
+    return out;
+}
+
+TonePrint tone_print_range(double dpi, double lpi, bool lines) {
+    TonePrint out;
+    const double pitch = core::py_max(2.0, dpi / core::py_max(1.0, lpi));
+    if (lines) {  // (a stripe, and the white between two, two pixels wide at the least)
+        out.lightest = core::py_min(0.9, 2.0 / pitch);
+        out.darkest = core::py_max(0.0, core::py_min(0.9, 1.0 - 2.0 / pitch));
+        return out;
+    }
+    // (a dot two pixels across at the least; the white left between four dots — as wide as the circle that fits there,
+    // less the 0.6 px the dots gain when the page is made black and white — two pixels at the least)
+    out.lightest = core::py_min(0.9, core::kPi / (pitch * pitch));
+    out.darkest = 0.0;
+    for (int percent = 90; percent >= 0; --percent) {
+        const double density = percent / 100.0;
+        if (pitch * 1.4142135623730951 - 2 * pitch * dot_radius(density) - 0.6 >= 2.0) {
+            out.darkest = density;
+            break;
+        }
+    }
+    return out;
+}
+
+}  // namespace balloon
+
 // --- the groups and the page -----------------------------------------------------------------------------------------
 
 void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
@@ -1006,52 +1855,21 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
         const std::shared_ptr<const Image> stretched = stretched_picture(data.get_ref<const std::string&>(), **picture, placed->second);
         part.image->paste(*stretched, Point{placed->first.x0 - part.origin.x, placed->first.y0 - part.origin.y}, stretched.get());
     }
+    // (fukidashi@2: the letters of the group lie over the tone of its first line, when that draws one — ToneUnder)
+    const ToneUnder tone_under(kind != "picture" && kind != "sfx" && kind != "none" && fill_tone_draws(st));
     if (kind == "picture") {
         for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers, parts);
         return;
     }
     if (kind != "sfx" && kind != "none" && balloons) {
-        std::vector<std::array<std::int64_t, 4>> boxes;
-        for (const core::StoryLine* ln : lines) boxes.push_back(box_px(*ln, dpi));
-        Tails tails;
-        for (const core::StoryLine* ln : lines) {
-            if (no_tail(kind_of(*ln))) continue;
-            for (Json& t : balloon::tails_of(*ln)) tails.emplace_back(ln, std::move(t));
-        }
-        for (const core::StoryLine* ln : lines) {  // a thought without a speaker still trails its bubbles, down and away
-            if (kind_of(*ln) == "thought" && balloon::tails_of(*ln).empty()) {
-                const Pt to = balloon::thought_trail(*ln, panels);
-                tails.emplace_back(ln, Json{{"to", Json::array({to[0], to[1]})}});
-            }
-        }
-        std::vector<Json> bends;
-        for (const auto& [ln, t] : tails) {
-            const Json* vias = core::dict_get(t, "vias");
-            if (vias != nullptr && core::py_truthy(*vias)) {
-                for (const Json& v : core::iterate(*vias)) bends.push_back(v);
-                continue;
-            }
-            const Json* via = core::dict_get(t, "via");
-            if (via != nullptr && core::py_truthy(*via)) bends.push_back(*via);
-        }
-        std::vector<std::int64_t> xs;
-        std::vector<std::int64_t> ys;
-        for (const auto& b : boxes) xs.push_back(b[0]);
-        for (const auto& b : boxes) xs.push_back(b[2]);
-        for (const auto& [ln, t] : tails) xs.push_back(px(number(core::subscript(core::subscript(t, "to"), 0)), dpi));
-        for (const Json& v : bends) xs.push_back(px(number(core::subscript(v, 0)), dpi));
-        for (const auto& b : boxes) ys.push_back(b[1]);
-        for (const auto& b : boxes) ys.push_back(b[3]);
-        for (const auto& [ln, t] : tails) ys.push_back(px(number(core::subscript(core::subscript(t, "to"), 1)), dpi));
-        for (const Json& v : bends) ys.push_back(px(number(core::subscript(v, 1)), dpi));
-        const std::int64_t margin = px(4, dpi);
-        const std::int64_t rx0 = std::max<std::int64_t>(0, *std::min_element(xs.begin(), xs.end()) - margin);
-        const std::int64_t ry0 = std::max<std::int64_t>(0, *std::min_element(ys.begin(), ys.end()) - margin);
-        const std::int64_t rx1 = std::min<std::int64_t>(part.page.width, *std::max_element(xs.begin(), xs.end()) + margin);
-        const std::int64_t ry1 = std::min<std::int64_t>(part.page.height, *std::max_element(ys.begin(), ys.end()) + margin);
+        const GroupFrame frame = group_frame(lines, dpi, panels);
+        const std::int64_t rx0 = std::max<std::int64_t>(0, frame.x0);
+        const std::int64_t ry0 = std::max<std::int64_t>(0, frame.y0);
+        const std::int64_t rx1 = std::min<std::int64_t>(part.page.width, frame.x1);
+        const std::int64_t ry1 = std::min<std::int64_t>(part.page.height, frame.y1);
         if (rx1 > rx0 && ry1 > ry0) {
             const Box region{static_cast<int>(rx0), static_cast<int>(ry0), static_cast<int>(rx1), static_cast<int>(ry1)};
-            paint_shapes(part, lines, boxes, tails, region, dpi, st);
+            paint_shapes(part, lines, frame.boxes, frame.tails, region, dpi, st);
         }
     }
     for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers, parts);
@@ -1127,12 +1945,13 @@ EditableLine editable_line(const core::StoryLine& line, int dpi, const std::opti
 void clear_balloon_cache() {
     clear_layout_cache();
     remembered_masks().clear();
+    remembered_tone_tiles().clear();
     remembered_sheets().clear();
     remembered_stretches().clear();
 }
 
 std::int64_t balloon_cache_bytes() {
-    return layout_cache_bytes() + remembered_masks().used() + remembered_sheets().used() + remembered_stretches().used();
+    return layout_cache_bytes() + remembered_masks().used() + remembered_tone_tiles().used() + remembered_sheets().used() + remembered_stretches().used();
 }
 
 }  // namespace genko::render::text

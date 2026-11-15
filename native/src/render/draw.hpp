@@ -99,6 +99,10 @@ public:
     // PC5 G-b: the glyph id the font's cmap gives a character (0: none), its lines, and its units per em.
     std::uint32_t glyph_index(char32_t ch) const;
     FontLines lines() const;
+    // fonts@1: whether "the font has this letter" is read from its cmap (glyph_index) — true for one of the forty added
+    // faces (core/font_catalog.hpp) —, not from the look of what it draws, Pillow's way, which the fonts of before and a
+    // person's own font files keep bit for bit (text::Fonts::has_glyph, tategaki's brackets).
+    bool strict_cmap() const { return strict_cmap_; }
 
 private:
     friend class TrueTypeFonts;
@@ -108,11 +112,12 @@ private:
     FT_LibraryRec_* library_ = nullptr;
     int size_ = 0;
     std::stop_token stop_;
+    bool strict_cmap_ = false;
 };
 
 // The fonts of one piece of lettering, each opened once at each size (Python's lru_cache'd genko.fonts.truetype): a
 // bundled font by its name ("gothic", "mincho", "maru", "hand", "sfx", "sfx_pop"; their bytes are read once per
-// process) or a font file by its path. FreeType's memory and the fonts' bytes count in the image budget, as
+// process), an added face by its key (fonts@1: its file's bytes, render/font_files) or a font file by its path. FreeType's memory and the fonts' bytes count in the image budget, as
 // text_mask's do. Not for two threads at once.
 class TrueTypeFonts {
 public:
@@ -220,8 +225,8 @@ private:
 bool bundled_font_present(const std::string& name);
 
 // PC5 G-0 (type@1, render/text/shaping): the bytes of a font as TrueTypeFonts opens it — a bundled font's by its name (read
-// once per process and shared), a font file's by its path (read now: NotYetPorted "default_font" or "large_font" as
-// TrueTypeFonts::truetype says).
+// once per process and shared), an added face's by its key (fonts@1: render::font_files::bytes, shared), a font file's by
+// its path (read now: NotYetPorted "default_font" or "large_font" as TrueTypeFonts::truetype says).
 std::shared_ptr<const QByteArray> font_bytes(const std::string& font);
 // PC5 G-d: one face of a font collection (.ttc, .otc) named as a font for TrueTypeFonts, font_bytes and render/text/shaping —
 // its file's name, kFaceMark and the face's number (face 0: the file's name alone). Never written into a book: a record keeps

@@ -115,6 +115,18 @@ std::array<double, 4> pixel(const std::string& raster, std::uint32_t x, std::uin
     return view.pixel(std::size_t(y) * view.width() + x);
 }
 
+// The pixels of one raster, read one after another. (A view checks every sample of a float raster when it is made: pixel()
+// in a loop over a raster checks the whole raster again for each of its pixels — 73 of this test's 79 seconds in a Release
+// build, most of an hour under ASan. The values read are the same.)
+class Pixels {
+public:
+    explicit Pixels(const std::string& raster) : view_(raster) {}
+    std::array<double, 4> operator()(std::uint32_t x, std::uint32_t y) const { return view_.pixel(std::size_t(y) * view_.width() + x); }
+
+private:
+    core::ColorRasterView view_;
+};
+
 std::array<int, 4> eight_px(const std::string& bytes, int w, int x, int y) {
     const std::size_t i = (std::size_t(y) * std::size_t(w) + std::size_t(x)) * 4;
     return {static_cast<unsigned char>(bytes[i]), static_cast<unsigned char>(bytes[i + 1]), static_cast<unsigned char>(bytes[i + 2]),
@@ -321,9 +333,10 @@ private slots:
             const std::string raster = precise(96, 64, px, f32);
             const std::string out = run_precise(raster, "lens_correction", Json::object());
             double err = 0;
+            const Pixels before(raster), after(out);
             for (std::uint32_t y = 0; y < 64; ++y)
                 for (std::uint32_t x = 0; x < 96; ++x)
-                    for (unsigned c = 0; c < 4; ++c) err = std::max(err, std::fabs(pixel(raster, x, y)[c] - pixel(out, x, y)[c]));
+                    for (unsigned c = 0; c < 4; ++c) err = std::max(err, std::fabs(before(x, y)[c] - after(x, y)[c]));
             // (the bicubic at whole places is the pixel itself: 16 bits exact, 32 bits but the float's rounding of the
             // alpha's premultiplying and back)
             QVERIFY2(err <= (f32 ? 1e-6 : 0.0), qPrintable(QString::number(err)));
@@ -623,12 +636,13 @@ private slots:
             const std::string big = run_precise(precise(360, 240, fine, true), kind, params, {}, 3.0);
             const std::string small = run_precise(precise(120, 80, coarse, true), kind, params, {}, 1.0);
             double total = 0;
+            const Pixels of_big(big), of_small(small);
             for (std::uint32_t y = 0; y < 80; ++y)
                 for (std::uint32_t x = 0; x < 120; ++x) {
                     double mean = 0;
                     for (std::uint32_t dy = 0; dy < 3; ++dy)
-                        for (std::uint32_t dx = 0; dx < 3; ++dx) mean += pixel(big, x * 3 + dx, y * 3 + dy)[3] / 9.0;
-                    total += std::fabs(mean - pixel(small, x, y)[3]);
+                        for (std::uint32_t dx = 0; dx < 3; ++dx) mean += of_big(x * 3 + dx, y * 3 + dy)[3] / 9.0;
+                    total += std::fabs(mean - of_small(x, y)[3]);
                 }
             QVERIFY2(total / (120.0 * 80.0) < 0.03, qPrintable(QStringLiteral("%1: %2").arg(QString::fromStdString(kind)).arg(total / 9600.0)));
         }

@@ -29,6 +29,7 @@
 #include "core/balloon_tails.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/fukidashi.hpp"
 #include "core/layer_basics.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
@@ -44,10 +45,11 @@ namespace genko::core {
 namespace {
 
 // balloons.SHAPES and balloons.TAIL_KINDS; fukidashi@1 (SPEC BALLOON-01): the kinds capsule and polygon, the tail
-// kind inward (a notch cut into the balloon)
-constexpr std::array<std::string_view, 18> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
+// kind inward (a notch cut into the balloon); fukidashi@2 (SPEC BALLOON-02): the symbols heart, star, flower, diamond
+constexpr std::array<std::string_view, 22> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
                                                    "electric", "flash", "whisper", "narration", "sfx",      "none",
-                                                   "picture", "dotted_box", "tone_box", "fancy_box", "capsule", "polygon"};
+                                                   "picture", "dotted_box", "tone_box", "fancy_box", "capsule", "polygon",
+                                                   "heart", "star", "flower", "diamond"};
 constexpr std::array<std::string_view, 6> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles", "inward"};
 
 // ops.FEATURES: the OpenType forms a line's style may ask for
@@ -56,7 +58,7 @@ constexpr std::array<std::string_view, 25> kFeatures{"jp78", "jp83", "jp90", "jp
                                                      "ital", "salt", "ss01", "ss02", "ss03", "ss04", "ss05"};
 
 // ops.STYLE_KEYS: each key and the kind of value it keeps, in Python's order (the order its error lists them in)
-enum class Kind { Str, Float, List, Bool, Int, Dict, Points, Tags, Png, Corners, Cuts };
+enum class Kind { Str, Float, List, Bool, Int, Dict, Points, Tags, Png, Corners, Cuts, Tone, Blend };
 
 struct StyleKey {
     std::string_view name;
@@ -79,6 +81,11 @@ constexpr StyleKey kStyleKeys[] = {
     // fukidashi@1 (SPEC BALLOON-01; `hand` above is kept for the books and calls of before, and changes nothing drawn)
     {"corner_mm", Kind::Float},   {"squircle", Kind::Bool},      {"sides", Kind::Int},          {"wave_mm", Kind::Float},
     {"spike_alt", Kind::Float},   {"dash_mm", Kind::Float},
+    // fukidashi@2 (SPEC BALLOON-02): the pen's line, the drips, a star's points and a flower's petals, a tone and a
+    // blend inside the outline
+    {"pen_swell", Kind::Float},   {"pen_angle", Kind::Float},    {"pen_taper", Kind::Float},    {"pen_strokes", Kind::Int},
+    {"drip_mm", Kind::Float},     {"drips", Kind::Int},          {"drip_width_mm", Kind::Float}, {"drip_seed", Kind::Int},
+    {"points", Kind::Int},        {"fill_tone", Kind::Tone},     {"fill_gradient", Kind::Blend},
 };
 
 template <std::size_t N>
@@ -386,6 +393,70 @@ Json style_value(const StyleKey& spec, const Json& value, const PictureCheck& ch
             const Json* angle = get(value, "angle");
             return Json::object({{"rgb_from", from}, {"rgb_to", to}, {"angle", angle != nullptr ? to_float(*angle) : 90.0}});
         }
+        case Kind::Tone: {
+            // (fukidashi@2: a tone inside the outline — {density, lpi?, angle?, pattern?, to?, dir?, radial?, inset_mm?} — in
+            // its normal form: density, lpi, angle and pattern always; to with its dir, radial and inset_mm when given)
+            if (!value.is_object()) throw PyValueError("fill_tone is {density, lpi?, angle?, pattern?, to?, dir?, radial?, inset_mm?}");
+            for (const auto& [name, item] : value.items()) {
+                (void)item;
+                if (!is_one_of(Json(name), {"density", "lpi", "angle", "pattern", "to", "dir", "radial", "inset_mm"})) {
+                    throw PyValueError("fill_tone is {density, lpi?, angle?, pattern?, to?, dir?, radial?, inset_mm?}");
+                }
+            }
+            const auto given = [&value](std::string_view name) {
+                const Json* item = get(value, name);
+                return item != nullptr && !item->is_null() ? item : nullptr;
+            };
+            const Json* density_given = given("density");
+            if (density_given == nullptr) throw OpError("fill_tone needs a density");
+            const double density = to_float(*density_given);
+            if (!(0 <= density && density <= 0.9)) throw OpError("fill_tone density must be between 0 and 0.9");
+            const double lpi = given("lpi") != nullptr ? to_float(*given("lpi")) : 60.0;
+            if (!(20 <= lpi && lpi <= 85)) throw OpError("fill_tone lpi must be between 20 and 85");
+            const double angle = given("angle") != nullptr ? to_float(*given("angle")) : 45.0;
+            if (!(0 <= angle && angle <= 90)) throw OpError("fill_tone angle must be between 0 and 90");
+            const Json pattern = given("pattern") != nullptr ? *given("pattern") : Json("dot");
+            if (!is_one_of(pattern, {"dot", "line"})) throw OpError("fill_tone pattern must be dot or line");
+            Json out = Json::object({{"density", density}, {"lpi", lpi}, {"angle", angle}, {"pattern", pattern}});
+            if (const Json* to = given("to")) {
+                const double end = to_float(*to);
+                if (!(0 <= end && end <= 0.9)) throw OpError("fill_tone density must be between 0 and 0.9");
+                const double dir = given("dir") != nullptr ? to_float(*given("dir")) : 90.0;
+                if (!(-360 <= dir && dir <= 360)) throw OpError("fill_tone dir must be between -360 and 360");
+                out["to"] = end;
+                out["dir"] = dir;
+                if (given("radial") != nullptr && py_truthy(*given("radial"))) out["radial"] = true;
+            }
+            if (const Json* inset = given("inset_mm")) {
+                const double mm = to_float(*inset);
+                if (!(0 <= mm && mm <= 5)) throw OpError("fill_tone inset_mm must be between 0 and 5");
+                if (mm > 0) out["inset_mm"] = mm;
+            }
+            return out;
+        }
+        case Kind::Blend: {
+            // (fukidashi@2: the fill a blend of two colours — {to: [r, g, b], dir?, radial?}, from the fill's own colour —
+            // in its normal form: to, dir, and radial when it is)
+            if (!value.is_object()) throw PyValueError("fill_gradient is {to: [r, g, b], dir?, radial?}");
+            for (const auto& [name, item] : value.items()) {
+                (void)item;
+                if (!is_one_of(Json(name), {"to", "dir", "radial"})) throw PyValueError("fill_gradient is {to: [r, g, b], dir?, radial?}");
+            }
+            const Json* to = get(value, "to");
+            if (to == nullptr || !to->is_array() || to->size() != 3 || !std::all_of(to->begin(), to->end(), [](const Json& c) { return c.is_number(); })) {
+                throw OpError("fill_gradient to must be three numbers from 0 to 255");
+            }
+            const Json colour = int_list3(*to);
+            for (const Json& c : colour) {
+                if (c.get<std::int64_t>() < 0 || c.get<std::int64_t>() > 255) throw OpError("fill_gradient to must be three numbers from 0 to 255");
+            }
+            const Json* dir_given = get(value, "dir");
+            const double dir = dir_given != nullptr && !dir_given->is_null() ? to_float(*dir_given) : 90.0;
+            if (!(-360 <= dir && dir <= 360)) throw OpError("fill_gradient dir must be between -360 and 360");
+            Json out = Json::object({{"to", colour}, {"dir", dir}});
+            if (const Json* radial = get(value, "radial"); radial != nullptr && py_truthy(*radial)) out["radial"] = true;
+            return out;
+        }
         case Kind::List: return int_list3(value);
         case Kind::Str: return py_str(value);
         case Kind::Float: return to_float(value);
@@ -464,6 +535,16 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
         if (key == "wave_mm") must(0 <= number() && number() <= 3, "wave_mm must be between 0 and 3");
         if (key == "spike_alt") must(0 <= number() && number() <= 0.8, "spike_alt must be between 0 and 0.8");
         if (key == "dash_mm") must(0.2 <= number() && number() <= 10, "dash_mm must be between 0.2 and 10");
+        // (fukidashi@2)
+        if (key == "pen_swell") must(0 <= number() && number() <= 0.9, "pen_swell must be between 0 and 0.9");
+        if (key == "pen_angle") must(0 <= number() && number() <= 360, "pen_angle must be between 0 and 360");
+        if (key == "pen_taper") must(0 <= number() && number() <= 1, "pen_taper must be between 0 and 1");
+        if (key == "pen_strokes") must(1 <= number() && number() <= 8, "pen_strokes must be between 1 and 8");
+        if (key == "drip_mm") must(0 <= number() && number() <= 30, "drip_mm must be between 0 and 30");
+        if (key == "drips") must(1 <= number() && number() <= 24, "drips must be between 1 and 24");
+        if (key == "drip_width_mm") must(0.3 <= number() && number() <= 10, "drip_width_mm must be between 0.3 and 10");
+        if (key == "drip_seed") must(0 <= number() && number() <= 999999, "drip_seed must be between 0 and 999999");
+        if (key == "points") must(4 <= number() && number() <= 12, "points must be between 4 and 12");
         out[key] = std::move(kept);
     }
     return out;
@@ -544,6 +625,65 @@ bool inside_polygon(double dx, double dy, double w, double h, std::int64_t sides
     return true;
 }
 
+// fukidashi@2: the same for a diamond and for a star (its corners not rounded: the points at 1 and the valleys at
+// `inner` of the unit circle, the first point straight up, stretched to the box as render/text/balloon_clean's).
+bool inside_diamond(double dx, double dy, double w, double h) { return std::abs(dx) / (w / 2) + std::abs(dy) / (h / 2) < 1.0; }
+
+bool inside_star(double dx, double dy, double w, double h, int points, double inner) {
+    const int n = std::clamp(points, 4, 12);
+    std::vector<std::pair<double, double>> corners;
+    double reach = 0.0, top = 0.0, foot = 0.0;
+    for (int j = 0; j < 2 * n; ++j) {
+        const double r = j % 2 == 0 ? 1.0 : inner;
+        const double angle = -kPi / 2 + kPi * j / n;
+        corners.emplace_back(r * py_cos(angle), r * py_sin(angle));
+        reach = py_max(reach, corners.back().first);
+        top = py_min(top, corners.back().second);
+        foot = py_max(foot, corners.back().second);
+    }
+    for (auto& [x, y] : corners) {
+        x = x / reach * (w / 2);
+        y = -h / 2 + (y - top) / (foot - top) * h;
+    }
+    bool in = false;  // (the star is not convex: by how many of its edges a ray to the right crosses)
+    for (std::size_t k = 0, last = corners.size() - 1; k < corners.size(); last = k++) {
+        const auto [ax, ay] = corners[k];
+        const auto [bx, by] = corners[last];
+        if ((ay > dy) != (by > dy) && dx < (bx - ax) * (dy - ay) / (by - ay) + ax) in = !in;
+    }
+    return in;
+}
+
+// How far below its box's middle a star's own middle lies — the point its points stand round (an odd star's is not its
+// box's): render/text/balloon_clean's star_centre.
+double star_middle(double h, int points, double inner) {
+    const int n = std::clamp(points, 4, 12);
+    double top = 0.0, foot = 0.0;
+    for (int j = 0; j < 2 * n; ++j) {
+        const double y = (j % 2 == 0 ? 1.0 : inner) * py_sin(-kPi / 2 + kPi * j / n);
+        top = py_min(top, y);
+        foot = py_max(foot, y);
+    }
+    return -h / 2 + (0.0 - top) / (foot - top) * h;
+}
+
+// The balloon a line's tails are measured against (w, h and its middle): its box — the body's, for a line that drips
+// (fukidashi@2: the box less the drips' reach) —, a star's middle its own.
+struct TailBody {
+    double w = 0.0, h = 0.0, cx = 0.0, cy = 0.0;
+    double star_dy = 0.0;  // (a star: how far below (cx, cy) its points' middle lies)
+};
+TailBody tail_body(const StoryLine& line) {
+    TailBody body;
+    body.w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
+    body.h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
+    if (drip_reach(line) > 0) body.h = body_box(line)[3];
+    body.cx = line.x_mm.value() + body.w / 2;
+    body.cy = line.y_mm.value() + body.h / 2;
+    if (line.balloon == "star") body.star_dy = star_middle(body.h, symbol_points(line), star_inner(line));
+    return body;
+}
+
 std::int64_t polygon_sides(const StoryLine& line) {
     const Json* sides = line.style.is_object() ? get(line.style, "sides") : nullptr;
     return sides != nullptr && sides->is_number() ? to_int(*sides) : 8;
@@ -554,9 +694,8 @@ std::int64_t polygon_sides(const StoryLine& line) {
 // ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others;
 // fukidashi@1: a capsule and a polygon by their own shape)
 bool tail_hidden(const StoryLine& line, const Json& tip) {
-    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
-    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
-    const double cx = line.x_mm.value() + w / 2, cy = line.y_mm.value() + h / 2;
+    const TailBody body = tail_body(line);
+    const double w = body.w, h = body.h, cx = body.cx, cy = body.cy;
     const double dx = to_float(subscript(tip, 0)) - cx;
     const double dy = to_float(subscript(tip, 1)) - cy;
     const std::string kind = line.balloon.empty() ? std::string("speech") : line.balloon;
@@ -565,6 +704,8 @@ bool tail_hidden(const StoryLine& line, const Json& tip) {
     }
     if (kind == "capsule") return inside_capsule(dx, dy, w, h);
     if (kind == "polygon") return inside_polygon(dx, dy, w, h, polygon_sides(line));
+    if (kind == "diamond") return inside_diamond(dx, dy, w, h);  // (fukidashi@2; a heart and a flower: the box's ellipse, as a cloud)
+    if (kind == "star") return inside_star(dx, dy, w, h, symbol_points(line), star_inner(line));
     return squared(divided(dx, w / 2)) + squared(divided(dy, h / 2)) < 1.0;
 }
 
@@ -573,9 +714,10 @@ namespace {
 // ops._tails_outside: each tail's tip that the balloon now covers moved out past its outline, the same way from its
 // middle (a bigger or moved balloon must not swallow its tail)
 void tails_outside(StoryLine& line, double beyond = 3.0) {
-    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
-    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
-    const double cx = line.x_mm.value() + w / 2, cy = line.y_mm.value() + h / 2;
+    const TailBody body = tail_body(line);
+    // (the way out is counted from the balloon's middle — a star's own, where its tails leave from)
+    const double w = body.w, h = body.h, cx = body.cx, cy = body.cy + body.star_dy;
+    const double star_dy = body.star_dy;
     std::vector<Json> tails = line.tails;  // ([dict(t) for t in line.tails], or the single tail as one)
     if (tails.empty() && line.tail) tails.push_back(Json::object({{"to", point_json(*line.tail)}}));
     bool changed = false;
@@ -601,6 +743,20 @@ void tails_outside(StoryLine& line, double beyond = 3.0) {
                 (in ? inside : outside) = mid;
             }
             edge = outside;
+        } else if (line.balloon == "diamond" || line.balloon == "star") {
+            // (fukidashi@2: the farthest the outline reaches that way — a star is met more than once by a line from its
+            // middle, so the way is walked from outside in)
+            const int points = symbol_points(line);
+            const double inner = star_inner(line);
+            const double far_out = py_hypot(w, h);
+            edge = 0.0;
+            for (int step = 400; step > 0; --step) {
+                const double at = far_out * step / 400;
+                if (line.balloon == "diamond" ? inside_diamond(ux * at, uy * at, w, h) : inside_star(ux * at, star_dy + uy * at, w, h, points, inner)) {
+                    edge = far_out * (step + 1) / 400;
+                    break;
+                }
+            }
         }
         tail["to"] = Json::array({py_round(cx + ux * (edge + beyond), 2), py_round(cy + uy * (edge + beyond), 2)});
         changed = true;

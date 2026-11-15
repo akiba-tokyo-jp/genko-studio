@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <string>
@@ -259,6 +260,40 @@ private slots:
               exits[1], usage, exits[3], leases);
         QCOMPARE(ran_steps, 101);
         QVERIFY(leases >= 2);
+    }
+
+    // 新しい本のいつもの書体（利用者の決定 2026-11-14）: every book the command line makes new — `genko new` (a comic, and
+    // --image), `genko studio init` — starts with 源暎アンチック as its usual face and says fonts@1; a book made of a file
+    // (--from) is not made new and has none. An op applied (the book read and written again) keeps the face.
+    void aNewBookStartsInGeneiAntique() {
+        const QString root = tmp_.path() + "/new-face";
+        QDir().mkpath(root);
+        const auto project = [&](const QString& book) { return genko::core::parse_python_json(genko::test::read_bytes(book + "/project.json")); };
+        const QString comic = root + "/comic.genko", image = root + "/image.genko", studio = root + "/studio.genko", opened = root + "/opened.genko";
+        QCOMPARE(genko_run({"new", comic, "--pages", "2", "--plain"}).exit_code, 0);
+        QCOMPARE(genko_run({"new", image, "--image", "--width", "40", "--height", "30", "--plain"}).exit_code, 0);
+        QCOMPARE(genko_run({"studio", "init", studio, "--pages", "2"}).exit_code, 0);
+        for (const QString& book : {comic, image, studio}) {
+            const Json made = project(book);
+            QCOMPARE(made["font_path"], Json("antique_genei"));
+            QVERIFY2(std::find(made["features"].begin(), made["features"].end(), Json("fonts@1")) != made["features"].end(), made["features"].dump().c_str());
+        }
+        // (a picture opened as a book: no face of its own, as before)
+        const QString png = root + "/one.png";
+        write(png, QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="));
+        const auto from = genko_run({"new", opened, "--from", png, "--plain"});
+        QVERIFY2(from.exit_code == 0, from.out.constData());
+        QCOMPARE(project(opened)["font_path"], Json(""));
+        QVERIFY(project(opened)["features"].dump().find("fonts@1") == std::string::npos);
+        // (read and written again: the face kept)
+        const QString ops = root + "/ops.json";
+        write(ops, R"([{"op": "add_line", "page": 1, "text": "漢字（かんじ）", "x_mm": 40, "y_mm": 40, "w_mm": 20, "h_mm": 40}])");
+        const Json made_revision = project(comic)["revision"];
+        const auto applied = genko_run({"apply", comic, ops});
+        QVERIFY2(applied.exit_code == 0, applied.out.constData());
+        QVERIFY(project(comic)["revision"].get<std::int64_t>() > made_revision.get<std::int64_t>());
+        QCOMPARE(project(comic)["font_path"], Json("antique_genei"));
+        QCOMPARE(project(comic)["features"], Json::array({"fonts@1"}));
     }
 
     // コマ割り K3 (SPEC LAYOUT-01): `genko studio layout-ideas` — the tool layout_ideas from the shell: the same seed

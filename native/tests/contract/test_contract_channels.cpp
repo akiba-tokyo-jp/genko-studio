@@ -100,7 +100,7 @@ private slots:
         QCOMPARE(done["results"].size(), std::size_t{2});
         const std::string alpha_id = done["results"][0]["channel"].get<std::string>();
         Json saved = project(book);
-        QCOMPARE(saved["features"], Json::array({"channels@1"}));
+        QCOMPARE(saved["features"], Json::array({"channels@1", "fonts@1"}));  // (fonts@1: a book `genko new` makes names 源暎アンチック as its usual face — 2026-11-14)
         const Json channels = saved["pages"][0]["channels"];
         QCOMPARE(channels.size(), std::size_t{2});
         QCOMPARE(channels[0]["id"], Json(alpha_id));
@@ -120,7 +120,7 @@ private slots:
         QVERIFY2(exit == 0, undone.dump().c_str());
         saved = project(book);
         QVERIFY(!saved["pages"][0].contains("channels"));
-        QVERIFY(!saved.contains("features") || saved["features"].empty());
+        QCOMPARE(saved["features"], Json::array({"fonts@1"}));  // (fonts@1: a book `genko new` makes names 源暎アンチック as its usual face — 2026-11-14)
         QVERIFY(asset(book, alpha_raster, ".gkir"));  // (kept for the redo)
         Json redone = genko({QStringLiteral("redo"), book, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, redone.dump().c_str());

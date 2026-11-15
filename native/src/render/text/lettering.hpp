@@ -50,6 +50,10 @@ LettersBox letters_box(const core::StoryLine& line);
 // fukidashi@1: how far out of a shape a point lies — 1 on its edge, less inside — the shape about its middle, half
 // sizes a × b: a capsule, or a convex outline given about its middle (a polygon's); an ellipse otherwise.
 double shape_gauge(std::string_view kind, double x, double y, double a, double b, const std::vector<std::array<double, 2>>* outline = nullptr);
+// fukidashi@2: how many times as big a symbol's room (clean::symbol_room, given about the middle of its box of half
+// sizes a × b) must be made to hold a block of half sizes block_a × block_b (not given: the box's own) — the block
+// moved up or down to where it needs the least. For the box's own block, 1 / it is the share of the box the room holds.
+double symbol_gauge(const std::vector<std::array<double, 2>>& room, double a, double b, double block_a = -1.0, double block_b = -1.0);
 
 // ink_rects(image, em): the letters' outline as upright strips (x0, y0, x1, y1) with ink above 40.
 std::vector<std::array<std::int64_t, 4>> ink_rects(const Image& image, std::int64_t em);
@@ -241,6 +245,25 @@ public:
 
 private:
     std::optional<double> was_;
+};
+
+// fukidashi@2 (SPEC BALLOON-02): whether a style's fill_tone draws anything — an object whose density, or the density
+// it grows to, is above 0.
+bool fill_tone_draws(const core::Json& style);
+// The white edge the letters over a tone get follows the tone that is drawn under them: a group of joined balloons has
+// the tone of its first line. While one of these is alive on this thread (draw_group makes one for a group's letters),
+// a line's letters are set as over a tone (true) or not (false), whatever its own style says; with none alive, by the
+// line's own fill_tone (a line drawn by itself is its own group). A tone box's own edge is the line's kind's, as ever.
+class ToneUnder {
+public:
+    explicit ToneUnder(bool toned);
+    ~ToneUnder();
+    ToneUnder(const ToneUnder&) = delete;
+    ToneUnder& operator=(const ToneUnder&) = delete;
+    static std::optional<bool> current();
+
+private:
+    std::optional<bool> was_;
 };
 
 // The letters ("RGBA") over the picture ("RGB" or "RGBA") at `at`, mixed in `gamma` (PhotoCraft's composite_gamma in

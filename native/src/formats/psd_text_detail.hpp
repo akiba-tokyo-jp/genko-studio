@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/font_catalog.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 
@@ -39,6 +40,12 @@ bool type_layer_plain(const core::StoryLine& twin);
 core::StoryLine by_place(const core::StoryLine& line);
 // A PostScript name as the PSD names a font: only A–Z, a–z, 0–9 and . _ + - kept (the text engine's tokens).
 std::string font_token(std::string_view name);
+// fonts@1: the font a text layer names for one letter of a line that asks for an added face whose file is not on this
+// computer (the letters are drawn in the default face; the layer names what the line asks for). The face's own
+// PostScript name — but for a kanji in a face the catalogue says has none (kanji "none"), its partner's: on a computer
+// that has the fonts the kanji is then shown in the face that has it, as Genko draws it there. Nothing else can be
+// told without the font file: a face with some kanji (kanji "partial") names itself for every letter.
+std::string asked_font(const core::fonts::Entry& face, char32_t letter);
 // The PostScript name of a font file Fonts opens (a bundled font's name or a file's path), read from its name table
 // (its file name without the extension when it has none).
 std::string font_name(render::text::Fonts& fonts, const std::string& path);

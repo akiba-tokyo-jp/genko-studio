@@ -20,6 +20,8 @@
 // before the tests read. (Built by this build it is a book of now: its ovals true ellipses in the boxes given.)
 //
 // clean_book: the kinds and tails of now — the sample sheets.
+//
+// additions_book: the four additions of fukidashi@2 (SPEC BALLOON-02), a page each.
 
 namespace genko::test {
 
@@ -323,6 +325,202 @@ inline core::Document clean_book() {
         add(3, "shout", 116, y - 2, 34, 28, "まわる\n叫び", style(Json{{"rotate_deg", -12.0}}));
         add(3, "whisper", 162, y, 30, 24, "ねえ\n聞いて", Json{{"tail", Json::array({186, y + 32})}});
     }
+    return classic_bus().apply(doc, ops, core::Actor("human:作者")).doc;
+}
+
+// fukidashi@2 (SPEC BALLOON-02): the sample of the additions on A4 — page 1 the symbols (a heart, a star, a flower, a
+// diamond: at several shapes of box, with tails, in black), page 2 the pen's line (強弱・入り抜き) on the kinds and their
+// tails, page 3 the drips, page 4 a tone, a tone that grows darker and a blend of colours inside the outlines. Ids A1,
+// A2, … in the order added; the pages' and the book's ids fixed, so a save is the same bytes each time.
+inline core::Document additions_book() {
+    using core::Json;
+    core::Document doc = core::new_episode("フキダシの追加", core::Num(1), 4, core::PageSpec::a4_mono());
+    doc.book_id = "00112233445566778899aabbccddeeff";
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        core::Page& page = doc.edit_page(i);
+        page.id = "pg" + std::to_string(i + 1);
+        for (std::size_t k = 0; k < page.layers.size(); ++k) page.layers[k].id = "ly" + std::to_string(i + 1) + "_" + std::to_string(k);
+        for (std::size_t k = 0; k < page.frames.size(); ++k) page.frames[k].id = "fr" + std::to_string(i + 1) + "_" + std::to_string(k);
+    }
+    Json ops = Json::array();
+    int n = 0;
+    struct Cell {
+        const char* kind;
+        double w, h;
+        const char* text;
+        Json style;
+        Json tails;  // (each tail's points from the cell's middle)
+        bool across = false;
+    };
+    const Json black{{"fill_rgb", Json::array({0, 0, 0})}, {"line_rgb", Json::array({0, 0, 0})}, {"rgb", Json::array({255, 255, 255})}};
+    const auto to = [](double x, double y) { return Json::array({Json{{"to", Json::array({x, y})}}}); };
+    const auto with = [](Json base, const Json& more) {
+        for (const auto& [key, value] : more.items()) base[key] = value;
+        return base;
+    };
+    const auto lay = [&](int page, const std::vector<Cell>& cells, int columns, double pitch_x, double pitch_y) {
+        int at = 0;
+        for (const Cell& cell : cells) {
+            const double cx = 105.0 - pitch_x * (columns - 1) / 2 + (at % columns) * pitch_x;
+            const double cy = 30.0 + (at / columns) * pitch_y;
+            ++at;
+            Json op{{"op", "add_line"}, {"page", page}, {"id", "A" + std::to_string(++n)}, {"balloon", cell.kind}, {"x_mm", cx - cell.w / 2},
+                    {"y_mm", cy - cell.h / 2}, {"w_mm", cell.w}, {"h_mm", cell.h}, {"text", cell.text}};
+            if (!cell.style.empty()) op["style"] = cell.style;
+            if (cell.across) op["wrap"] = "horizontal";
+            if (!cell.tails.empty()) {
+                Json placed = Json::array();
+                for (Json t : cell.tails) {
+                    for (const char* key : {"to", "via"}) {
+                        if (t.contains(key)) t[key] = Json::array({cx + t[key][0].get<double>(), cy + t[key][1].get<double>()});
+                    }
+                    placed.push_back(std::move(t));
+                }
+                op["tails"] = std::move(placed);
+            }
+            ops.push_back(std::move(op));
+        }
+    };
+    const Json none = Json::object();
+    const Json no_tail = Json::array();
+    // --- page 1: the symbols ---
+    lay(1,
+        {
+            {"heart", 32, 30, "すき", none, no_tail},
+            {"heart", 36, 32, "だいすき\nだよ", none, to(22, 22)},
+            {"heart", 40, 28, "ありがとう", none, no_tail, true},
+            {"heart", 26, 34, "ねえ", black, no_tail},
+            {"star", 40, 40, "やった！", none, no_tail},
+            {"star", 44, 44, "キラッ", Json{{"points", 4}, {"spike_depth", 0.6}}, no_tail},
+            {"star", 42, 38, "すごい\nね", Json{{"points", 6}}, to(24, 24)},
+            {"star", 40, 32, "できた！", Json{{"points", 8}, {"spike_depth", 0.25}}, no_tail, true},
+            {"flower", 40, 38, "うれしい\nな", none, no_tail},
+            {"flower", 36, 34, "わあい", Json{{"points", 5}}, to(22, 23)},
+            {"flower", 44, 30, "おはよう", Json{{"points", 8}}, no_tail, true},
+            {"flower", 30, 36, "ふふ", black, no_tail},
+            {"diamond", 36, 36, "了解", none, no_tail},
+            {"diamond", 44, 30, "システム\n起動", none, to(26, 20)},
+            {"diamond", 28, 40, "……", Json{{"corner_mm", 0}}, no_tail},
+            {"diamond", 38, 34, "受信", Json{{"double", true}}, no_tail},
+            {"star", 36, 34, "十二", Json{{"points", 12}, {"spike_depth", 0.2}}, no_tail},
+            {"star", 30, 40, "たて", none, to(-20, 26)},
+            {"heart", 34, 30, "二重", Json{{"double", true}}, no_tail},
+            {"heart", 36, 32, "ふるえ", Json{{"wave_mm", 0.3}}, no_tail},
+            {"star", 38, 36, "ベタの\n星", with(black, Json{{"points", 5}}), no_tail},
+            {"diamond", 36, 34, "ベタ", black, to(24, 22)},
+            {"heart", 36, 32, "破線", Json{{"dash_mm", 1.6}}, no_tail},
+            {"star", 36, 34, "太い線", Json{{"border_mm", 0.8}}, no_tail},
+        },
+        4, 47.0, 43.0);
+    // --- page 2: the pen's line (強弱・入り抜き) ---
+    const auto pen = [](double swell, double taper, Json more = Json::object()) {
+        Json st = Json::object();
+        if (swell > 0) st["pen_swell"] = swell;
+        if (taper > 0) st["pen_taper"] = taper;
+        for (const auto& [key, value] : more.items()) st[key] = value;
+        return st;
+    };
+    lay(2,
+        {
+            {"speech", 36, 30, "強弱\n0.3", pen(0.3, 0), no_tail},
+            {"speech", 36, 30, "強弱\n0.6", pen(0.6, 0), no_tail},
+            {"speech", 36, 30, "強弱\n0.9", pen(0.9, 0), to(22, 22)},
+            {"speech", 36, 30, "向き\n下", pen(0.6, 0, Json{{"pen_angle", 90}}), no_tail},
+            {"speech", 36, 30, "入り抜き\n0.5", pen(0, 0.5), no_tail},
+            {"speech", 36, 30, "入り抜き\n1", pen(0, 1.0), no_tail},
+            {"speech", 36, 30, "ひと筆", pen(0.45, 0.6, Json{{"pen_strokes", 1}}), no_tail},
+            {"speech", 36, 30, "ふた筆", pen(0.45, 0.6, Json{{"pen_strokes", 2}}), to(-22, 22)},
+            {"speech", 36, 30, "四筆", pen(0.45, 0.6, Json{{"pen_strokes", 4}}), no_tail},
+            {"speech", 36, 30, "Gペン", pen(0.5, 0.7, Json{{"border_mm", 0.5}}), to(-22, 22)},
+            {"speech", 36, 30, "筆", pen(0.8, 0.9, Json{{"border_mm", 0.8}, {"pen_strokes", 1}}), to(22, 22)},
+            {"speech", 36, 30, "細い線", pen(0.6, 0.6, Json{{"border_mm", 0.2}}), to(-22, 22)},
+            {"box", 36, 28, "四角", pen(0.5, 0.6), no_tail},
+            {"box", 36, 28, "四角と\nしっぽ", pen(0.5, 0.6), to(10, 20)},
+            {"rounded", 36, 30, "かどまる", pen(0.5, 0.6), to(-24, 22)},
+            {"polygon", 36, 30, "八角", pen(0.5, 0.7), no_tail},
+            {"shout", 40, 34, "叫び！", pen(0.5, 0.8, Json{{"border_mm", 0.5}}), no_tail},
+            {"shout", 40, 34, "叫びと\nしっぽ", pen(0.6, 0.6), to(26, 22)},
+            {"cloud", 38, 32, "もくもく", pen(0.5, 0.6), no_tail},
+            {"cloud", 38, 32, "もくもく", pen(0.6, 0), to(-24, 22)},
+            {"thought", 36, 30, "かんがえ\nごと", pen(0.5, 0.5), to(24, 24)},
+            {"whisper", 36, 30, "ひそひそ", pen(0.7, 0.6), no_tail},
+            {"heart", 36, 32, "すき", pen(0.5, 0.7), no_tail},
+            {"speech", 36, 30, "二重と\n強弱", pen(0.6, 0.5, Json{{"double", true}}), no_tail},
+            {"speech", 44, 26, "つながる", pen(0.5, 0.6, Json{{"group", "p1"}}), to(-14, 20)},
+            {"speech", 46, 30, "ふたつ", pen(0.5, 0.6, Json{{"group", "p1"}}), no_tail},
+            {"speech", 36, 36, "ホラー", with(pen(0.6, 0.5, Json{{"drip_mm", 7}, {"drip_seed", 3}}), Json::object()), no_tail},
+            {"star", 40, 38, "キラ", pen(0.5, 0.7), no_tail},
+        },
+        4, 47.0, 37.0);
+    // --- page 3: the drips (each box its body and, below it, the drips' reach) ---
+    const auto drip = [](double mm, Json more = Json::object()) {
+        Json st{{"drip_mm", mm}};
+        for (const auto& [key, value] : more.items()) st[key] = value;
+        return st;
+    };
+    lay(3,
+        {
+            {"speech", 36, 34, "こわい\nよ", drip(6), no_tail},
+            {"speech", 36, 34, "ならび\n1", drip(6, Json{{"drip_seed", 1}}), no_tail},
+            {"speech", 36, 34, "ならび\n2", drip(6, Json{{"drip_seed", 2}}), to(24, 22)},
+            {"speech", 36, 34, "ならび\n7", drip(6, Json{{"drip_seed", 7}}), no_tail},
+            {"speech", 36, 31, "短い", drip(3), no_tail},
+            {"speech", 36, 40, "長い", drip(12), no_tail},
+            {"speech", 36, 34, "3 本", drip(6, Json{{"drips", 3}}), no_tail},
+            {"speech", 36, 34, "12 本", drip(6, Json{{"drips", 12}, {"drip_width_mm", 1.2}}), no_tail},
+            {"speech", 36, 36, "太い\nしずく", drip(8, Json{{"drip_width_mm", 4}, {"drips", 5}}), no_tail},
+            {"speech", 36, 36, "細い\nしずく", drip(8, Json{{"drip_width_mm", 0.8}}), no_tail},
+            {"box", 36, 32, "溶ける\n四角", drip(7), no_tail},
+            {"rounded", 36, 34, "かどまる", drip(7, Json{{"drip_seed", 4}}), to(-24, 24)},
+            {"speech", 36, 36, "ホラー", with(drip(8, Json{{"drip_seed", 3}}), black), no_tail},
+            {"box", 36, 34, "ベタの\n四角", with(drip(8, Json{{"drip_seed", 5}}), black), no_tail},
+            {"shout", 40, 40, "ぎゃあ", with(drip(8, Json{{"drip_seed", 2}}), black), no_tail},
+            {"speech", 36, 36, "ふるえる\n声", with(drip(8, Json{{"drip_seed", 6}, {"wave_mm", 0.35}}), black), to(24, 24)},
+            {"shout", 40, 40, "叫び", drip(8), no_tail},
+            {"cloud", 38, 38, "もくもく", drip(8, Json{{"drip_seed", 9}}), no_tail},
+            {"capsule", 15, 40, "たてなが", drip(7), no_tail},
+            {"heart", 36, 38, "のろい", drip(7, Json{{"drip_seed", 1}}), no_tail},
+            {"speech", 36, 36, "太い線", drip(8, Json{{"border_mm", 0.8}, {"drip_seed", 11}}), no_tail},
+            {"speech", 36, 36, "トーンと", drip(8, Json{{"drip_seed", 12}, {"fill_tone", Json{{"density", 0.1}, {"to", 0.6}}}}), no_tail},
+            {"polygon", 36, 36, "キカイ", drip(7, Json{{"drip_seed", 13}}), no_tail},
+            {"speech", 36, 36, "二重", drip(7, Json{{"drip_seed", 14}, {"double", true}}), no_tail},
+        },
+        4, 47.0, 43.0);
+    // --- page 4: a tone, a tone that grows darker, and a blend of colours, inside the outlines ---
+    const auto tone = [](Json spec) { return Json{{"fill_tone", std::move(spec)}}; };
+    const auto blend = [](Json spec, Json from = Json()) {
+        Json st{{"fill_gradient", std::move(spec)}};
+        if (!from.is_null()) st["fill_rgb"] = std::move(from);
+        return st;
+    };
+    lay(4,
+        {
+            {"speech", 36, 30, "トーン\n10%", tone(Json{{"density", 0.1}}), no_tail},
+            {"speech", 36, 30, "トーン\n30%", tone(Json{{"density", 0.3}}), to(22, 22)},
+            {"shout", 40, 34, "トーンの\n叫び", tone(Json{{"density", 0.2}}), no_tail},
+            {"cloud", 38, 32, "もやもや", tone(Json{{"density", 0.15}, {"lpi", 42.5}}), to(-24, 22)},
+            {"heart", 38, 34, "ドキ", tone(Json{{"density", 0.2}}), no_tail},
+            {"speech", 36, 30, "線の\nトーン", tone(Json{{"density", 0.2}, {"pattern", "line"}}), no_tail},
+            {"rounded", 36, 30, "横の線", tone(Json{{"density", 0.25}, {"pattern", "line"}, {"angle", 0}, {"lpi", 30}}), no_tail},
+            {"speech", 36, 30, "内側を\n白く", tone(Json{{"density", 0.3}, {"inset_mm", 1.2}}), no_tail},
+            {"speech", 36, 30, "グラデ\nトーン", tone(Json{{"density", 0.0}, {"to", 0.6}}), no_tail},
+            {"shout", 40, 34, "暗い\n叫び", tone(Json{{"density", 0.05}, {"to", 0.7}}), to(26, 22)},
+            {"cloud", 38, 32, "しずむ\n気持ち", tone(Json{{"density", 0.6}, {"to", 0.0}}), no_tail},
+            {"heart", 38, 34, "じわ", tone(Json{{"density", 0.5}, {"to", 0.0}, {"radial", true}}), no_tail},
+            {"speech", 36, 30, "横へ", tone(Json{{"density", 0.0}, {"to", 0.5}, {"dir", 0}}), no_tail},
+            {"box", 36, 28, "線の\nグラデ", tone(Json{{"density", 0.05}, {"to", 0.6}, {"pattern", "line"}, {"angle", 0}}), no_tail},
+            {"speech", 36, 30, "粗い網", tone(Json{{"density", 0.2}, {"lpi", 20}, {"angle", 30}, {"to", 0.5}}), no_tail},
+            {"star", 42, 40, "キラ", tone(Json{{"density", 0.0}, {"to", 0.4}, {"radial", true}}), no_tail},
+            {"speech", 36, 30, "色の\nグラデ", blend(Json{{"to", Json::array({150, 200, 255})}}), no_tail},
+            {"shout", 40, 34, "赤く\nなる", blend(Json{{"to", Json::array({255, 120, 90})}}, Json::array({255, 240, 160})), to(26, 22)},
+            {"cloud", 38, 32, "まんなか\nから", blend(Json{{"to", Json::array({255, 170, 210})}, {"radial", true}}), no_tail},
+            {"heart", 38, 34, "すき", blend(Json{{"to", Json::array({255, 150, 180})}, {"dir", 270}}), no_tail},
+            {"speech", 36, 30, "灰色へ", blend(Json{{"to", Json::array({90, 90, 90})}}), no_tail},
+            {"speech", 44, 30, "つながる", with(tone(Json{{"density", 0.1}, {"to", 0.5}}), Json{{"group", "t1"}}), to(-20, 24)},
+            {"speech", 30, 26, "トーン", with(tone(Json{{"density", 0.1}, {"to", 0.5}}), Json{{"group", "t1"}}), no_tail},
+            {"tone_box", 36, 28, "枠にも", tone(Json{{"density", 0.25}, {"pattern", "line"}}), no_tail},
+        },
+        4, 47.0, 43.0);
     return classic_bus().apply(doc, ops, core::Actor("human:作者")).doc;
 }
 

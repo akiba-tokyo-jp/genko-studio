@@ -11,6 +11,7 @@
 #include <map>
 #include <mutex>
 
+#include "core/font_catalog.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -158,6 +159,14 @@ std::string font_name(render::text::Fonts& fonts, const std::string& path) {
         const std::lock_guard<std::mutex> lock(mutex);
         if (const auto it = known.find(path); it != known.end()) return it->second;
     }
+    // fonts@1: an added face is named as the catalogue names it (its file's own PostScript name, held there: no file read)
+    if (const core::fonts::Entry* entry = core::fonts::find(path); entry != nullptr && entry->added && !entry->postscript.empty()) {
+        std::string name = font_token(entry->postscript);
+        if (name.empty()) name = "Font";
+        const std::lock_guard<std::mutex> lock(mutex);
+        known.emplace(path, name);
+        return name;
+    }
     std::string bytes;
     try {
         (void)fonts.truetype(path, 12);  // (a bundled font's resources are there once it is opened)
@@ -174,11 +183,33 @@ std::string font_name(render::text::Fonts& fonts, const std::string& path) {
     return name;
 }
 
+std::string asked_font(const core::fonts::Entry& face, char32_t letter) {
+    const bool kanji = (letter >= 0x3400 && letter <= 0x4DBF) || (letter >= 0x4E00 && letter <= 0x9FFF) || (letter >= 0xF900 && letter <= 0xFAFF) ||
+                       (letter >= 0x20000 && letter <= 0x3134F);
+    if (kanji && face.kanji == "none" && !face.fallback.empty()) {
+        if (const core::fonts::Entry* partner = core::fonts::find(face.fallback); partner != nullptr && partner->added) return font_token(partner->postscript);
+    }
+    return font_token(face.postscript);
+}
+
 void font_warnings(const core::StoryLine& line, std::int64_t page, const std::optional<std::string>& font_path, render::text::Fonts& fonts,
                    std::vector<std::string>* used, std::vector<Json>& warnings) {
     const auto [face, missing] = render::text::line_face(line, font_path);
     const Json st = render::text::style_of(line);
     if (missing) warnings.push_back(Json{{"page", page}, {"line", line.id}, {"kind", "font_missing"}, {"detail", core::py_str(at(st, "font"))}});
+    // fonts@1: a line in one of the faces Genko comes with whose file is not on this computer — its text layer names the
+    // face it asks for (psd_export: body_text), so that is the font listed for its letters, not the default face's they
+    // are drawn in here
+    const core::fonts::Entry* asked = missing && at(st, "font").is_string() ? core::fonts::find(at(st, "font").get_ref<const std::string&>()) : nullptr;
+    if (asked != nullptr && !asked->added) asked = nullptr;
+    if (asked != nullptr && used != nullptr) {
+        // (its own name, and — for the kanji of a face that has none — its partner's: asked_font)
+        for (const char32_t c : U" " + render::text::u32(line.text)) {
+            if (c == U'\n' || render::text::is_vs(c)) continue;
+            const std::string name = asked_font(*asked, c);
+            if (std::find(used->begin(), used->end(), name) == used->end()) used->push_back(name);
+        }
+    }
     const auto note = [&](const std::string& path) {
         if (used == nullptr) return;
         const std::string name = font_name(fonts, path);
@@ -188,8 +219,8 @@ void font_warnings(const core::StoryLine& line, std::int64_t page, const std::op
     for (const char32_t c : fonts.normalize(face, render::text::u32(line.text))) {
         if (c == U'\n' || render::text::py_isspace(c) || render::text::is_vs(c)) continue;
         const std::string path = fonts.path_for(face, std::u32string(1, c));
-        note(path);
-        if (path != face.kana && path != face.other) elsewhere.push_back(c);
+        if (asked == nullptr) note(path);
+        if (!face.own(path)) elsewhere.push_back(c);  // (fonts@1: the face's partner is its own)
     }
     if (!elsewhere.empty()) {
         warnings.push_back(Json{{"page", page}, {"line", line.id}, {"kind", "font_fallback"}, {"detail", render::text::utf8(elsewhere)}});

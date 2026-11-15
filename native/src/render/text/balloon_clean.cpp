@@ -3,6 +3,7 @@
 #include "render/text/balloon_clean.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 
@@ -232,6 +233,7 @@ Shape patch(P corner, P a, P a_in, P a_to, P b, P b_in, P b_to, double inset) {
     shape.points.push_back(behind);
     shape.stroke.assign(shape.points.size(), 0);
     for (std::size_t i = first; i < last; ++i) shape.stroke[i] = 1;
+    shape.join = true;
     return shape;
 }
 
@@ -327,12 +329,13 @@ Contour ellipse(const Box& box) { return four_fold(quarter_ellipse(box.rx(), box
 
 Contour circle(P centre, double radius) { return four_fold(quarter_ellipse(radius, radius), centre.x, centre.y); }
 
-Contour rounded(const Box& box, double radius) {
+Contour rounded(const Box& box, double radius, Contour* corners) {
     const double rx = box.rx();
     const double ry = box.ry();
     const double r = std::max(0.0, std::min(radius, std::min(rx, ry)));
     Contour quarter;
     quarter.push_back({0.0, -ry});
+    P apex{rx, -ry};  // (the corner of the quarter: itself, or the middle of its rounding)
     if (r <= 0) {
         quarter.push_back({rx, -ry});
     } else {
@@ -340,6 +343,12 @@ Contour rounded(const Box& box, double radius) {
         const std::vector<P> arc = unit_quarter(quarter_depth(r));
         for (std::size_t i = 1; i + 1 < arc.size(); ++i) push(quarter, {rx - r + r * arc[i].x, -ry + r - r * arc[i].y});
         push(quarter, {rx, -ry + r});
+        const std::size_t middle = (arc.size() - 1) / 2;
+        apex = {rx - r + r * arc[middle].x, -ry + r - r * arc[middle].y};
+    }
+    if (corners != nullptr) {
+        const double cx = box.cx(), cy = box.cy();
+        *corners = {{cx + apex.x, cy + apex.y}, {cx + apex.x, cy - apex.y}, {cx - apex.x, cy - apex.y}, {cx - apex.x, cy + apex.y}};
     }
     push(quarter, {rx, 0.0});
     // (a capsule's cap ends on the middle line: the quarter still runs from its top to its right)
@@ -369,7 +378,7 @@ Contour squircle(const Box& box) {
     return four_fold(quarter, box.cx(), box.cy());
 }
 
-Contour polygon(const Box& box, int sides, double radius) {
+Contour polygon(const Box& box, int sides, double radius, Contour* corners_out) {
     const int n = std::clamp(sides, 5, 12);
     const bool odd = n % 2 != 0;
     // (the corners of the right half, a flat side up, on the unit circle: x to the right, y down)
@@ -388,6 +397,7 @@ Contour polygon(const Box& box, int sides, double radius) {
     const double ry = box.ry();
     for (P& c : corners) c = {c.x / reach * rx, -ry + (c.y - top) / (foot - top) * 2 * ry};
     Contour half;
+    std::vector<P> apexes;  // (each corner of the half: itself, or the point of its rounding nearest its middle)
     half.push_back({0.0, -ry});
     for (std::size_t k = 0; k < corners.size(); ++k) {
         const P here = corners[k];
@@ -401,30 +411,45 @@ Contour polygon(const Box& box, int sides, double radius) {
         const double reach_here = std::min(radius * tangent, 0.4 * std::min(distance(before, here), distance(here, after)));
         if (reach_here < 0.25) {
             push(half, here);
+            apexes.push_back(here);
             continue;
         }
         const P from = sub(here, mul(in, reach_here));
         const P to = add(here, mul(out, reach_here));
         push(half, from);
-        round_corner(half, from, here, to, corner_pieces(from, here, to), at_foot ? 0.5 : 1.0);
+        const int pieces = corner_pieces(from, here, to);
+        const std::size_t first = half.size();
+        round_corner(half, from, here, to, pieces, at_foot ? 0.5 : 1.0);
         if (at_foot) half.back().x = 0.0;
+        // (the rounding's points are half[first ..]: the one of its middle — the last, for the corner at the foot)
+        const std::size_t middle = at_foot ? half.size() - 1 : std::min(half.size() - 1, first + static_cast<std::size_t>((pieces + 1) / 2) - 1);
+        apexes.push_back(half[middle]);
     }
     if (!odd) push(half, {0.0, ry});
     const double cx = box.cx();
     const double cy = box.cy();
+    if (corners_out != nullptr) {
+        corners_out->clear();
+        for (const P& a : apexes) {
+            corners_out->push_back({cx + a.x, cy + a.y});
+            if (a.x != 0.0) corners_out->push_back({cx - a.x, cy + a.y});
+        }
+    }
     return two_fold(half, [cx, cy](double x, double y, bool mirrored) { return P{mirrored ? cx - x : cx + x, cy + y}; });
 }
 
-Contour cloud(const Box& box, int bumps) {
-    const int n = std::clamp(bumps, 5, 60);
+namespace {
+
+// Scallops of equal length round an ellipse (`keep` of the box) — a cloud's bumps, a flower's petals —, each `bulge`
+// high against its width, a scallop's middle at the top; stretched to touch the box's four sides. `valleys_out`: where
+// the scallops meet, on the page.
+Contour scalloped(const Box& box, int n, double keep, double bulge, Contour* valleys_out = nullptr) {
     const double rx = box.rx();
     const double ry = box.ry();
     // (the valleys: at equal distances round an ellipse inside the box, a bump's middle at the top)
-    const double keep = 0.86;
     const Contour base = four_fold(quarter_ellipse(rx * keep, ry * keep), 0.0, 0.0);
     const std::vector<double> lengths = lengths_of(base);
     const double total = lengths.back();
-    const double bulge = 0.3;  // (a scallop's height against its width)
     std::vector<P> valleys;
     const bool odd = n % 2 != 0;
     const int count = odd ? (n + 1) / 2 : n / 2;
@@ -465,10 +490,373 @@ Contour cloud(const Box& box, int bumps) {
     const double cx = box.cx();
     const double y0 = box.y0;
     const double high = box.y1 - box.y0;
+    const auto place = [=](double x, double y, bool mirrored) {
+        const double px = x / reach * rx;
+        return P{mirrored ? cx - px : cx + px, y0 + (y - top) / (foot - top) * high};
+    };
+    if (valleys_out != nullptr) {  // (all the way round, clockwise from the first right of the top)
+        valleys_out->clear();
+        for (const P& v : valleys) valleys_out->push_back(place(v.x, v.y, false));
+        for (std::size_t j = valleys.size() - (odd ? 1 : 0); j-- > 0;) valleys_out->push_back(place(valleys[j].x, valleys[j].y, true));
+    }
+    return two_fold(half, place);
+}
+
+// The right half of an outline given by its corners — the first and the last on the middle line x = 0 —, each corner
+// rounded: `reach[i]` of both its sides taken by a curve whose control point is the corner (at most 0.4 of the shorter
+// side; under a quarter of a pixel: the corner as it is). The corners on the middle line are rounded with their mirror
+// image: the half begins and ends on the middle of their curves.
+std::vector<P> rounded_half(const std::vector<P>& corners, const std::vector<double>& reach, std::vector<std::size_t>* apexes = nullptr) {
+    std::vector<P> half;
+    const std::size_t n = corners.size();
+    if (n < 2) return corners;
+    for (std::size_t k = 0; k < n; ++k) {
+        const P here = corners[k];
+        const P before = k == 0 ? P{-corners[1].x, corners[1].y} : corners[k - 1];
+        const P after = k + 1 < n ? corners[k + 1] : P{-corners[n - 2].x, corners[n - 2].y};
+        const double taken = std::min(reach[k], 0.4 * std::min(distance(before, here), distance(here, after)));
+        if (taken < 0.25) {
+            push(half, here);
+            if (apexes != nullptr) apexes->push_back(half.size() - 1);
+            continue;
+        }
+        const P from = sub(here, mul(unit(sub(here, before)), taken));
+        const P to = add(here, mul(unit(sub(after, here)), taken));
+        const int pieces = corner_pieces(from, here, to) * 2;  // (an even number: its middle is a point of it)
+        const int first = k == 0 ? pieces / 2 : 0;
+        const int last = k + 1 == n ? pieces / 2 : pieces;
+        for (int j = first; j <= last; ++j) {
+            const double t = static_cast<double>(j) / static_cast<double>(pieces);
+            const double u = 1 - t;
+            P p{u * u * from.x + 2 * u * t * here.x + t * t * to.x, u * u * from.y + 2 * u * t * here.y + t * t * to.y};
+            if ((k == 0 && j == first) || (k + 1 == n && j == last)) p.x = 0.0;  // (on the middle line)
+            push(half, p);
+            if (apexes != nullptr && j == pieces / 2) apexes->push_back(half.size() - 1);  // (the middle of its rounding)
+        }
+    }
+    return half;
+}
+
+// The places of a two-fold outline that the points `apexes` of its half (of `half_size` points) became: each, and its
+// mirror image when it is not on the middle line.
+Contour folded_corners(const Contour& outline, std::size_t half_size, const std::vector<std::size_t>& apexes) {
+    Contour out;
+    if (half_size < 2) return out;
+    for (const std::size_t i : apexes) {
+        if (i < outline.size()) out.push_back(outline[i]);
+        const std::size_t mirrored = 2 * (half_size - 1) - i;
+        if (i > 0 && i + 1 < half_size && mirrored < outline.size()) out.push_back(outline[mirrored]);
+    }
+    return out;
+}
+
+// A half outline about the middle line (x = 0) made the whole outline, stretched to touch the box's four sides.
+Contour fitted_two_fold(const std::vector<P>& half, const Box& box) {
+    if (half.size() < 2) return {};
+    double reach = 0.0, top = half.front().y, foot = half.front().y;
+    for (const P& p : half) {
+        reach = std::max(reach, p.x);
+        top = std::min(top, p.y);
+        foot = std::max(foot, p.y);
+    }
+    if (!(reach > 0) || !(foot > top)) return {};
+    const double cx = box.cx();
+    const double rx = box.rx();
+    const double y0 = box.y0;
+    const double high = box.y1 - box.y0;
     return two_fold(half, [=](double x, double y, bool mirrored) {
         const double px = x / reach * rx;
         return P{mirrored ? cx - px : cx + px, y0 + (y - top) / (foot - top) * high};
     });
+}
+
+// How much of a corner's two sides a rounding of `radius` takes: radius × the tangent of half the corner's turn.
+double corner_reach(P before, P here, P after, double radius) {
+    const double cosine = std::clamp(dot(unit(sub(here, before)), unit(sub(after, here))), -0.999, 0.999);
+    return radius * std::sqrt((1 - cosine) / (1 + cosine));
+}
+
+// A flower's petals: scallops round an ellipse of 0.6 of the box, each 0.46 of its width high — a little less than half a
+// circle (arc_to draws less than half a circle).
+constexpr double kPetalKeep = 0.6;
+constexpr double kPetalBulge = 0.46;
+
+// A star's corners on the unit circle — its points at 1, its valleys at `inner`, the first point straight up, the
+// right half from the top to the foot (2 × the half-steps: n + 1 corners) — and how they are laid in a box: x by
+// 1 / reach of the half width, y from `top` .. `foot` to the box's height.
+struct StarFrame {
+    std::vector<P> corners;
+    double reach = 1.0;
+    double top = -1.0;
+    double foot = 1.0;
+};
+
+StarFrame star_frame(int points, double inner) {
+    StarFrame frame;
+    const int n = std::clamp(points, 4, 12);
+    const double in = std::clamp(inner, 0.2, 0.95);
+    for (int j = 0; j <= n; ++j) {
+        const double r = j % 2 == 0 ? 1.0 : in;
+        if (j == 0) {
+            frame.corners.push_back({0.0, -r});
+        } else if (j == n) {
+            frame.corners.push_back({0.0, r});
+        } else {
+            const float angle = static_cast<float>(-kPi / 2 + kPi * j / n);
+            frame.corners.push_back({r * static_cast<double>(libm::cosf(angle)), r * static_cast<double>(libm::sinf(angle))});
+        }
+    }
+    frame.reach = 0.0;
+    frame.top = frame.corners.front().y;
+    frame.foot = frame.corners.front().y;
+    for (const P& c : frame.corners) {
+        frame.reach = std::max(frame.reach, c.x);
+        frame.top = std::min(frame.top, c.y);
+        frame.foot = std::max(frame.foot, c.y);
+    }
+    return frame;
+}
+
+// (a star's corner laid in the box, about the box's middle)
+P star_placed(const StarFrame& frame, const Box& box, P unit_point) {
+    return {unit_point.x / frame.reach * box.rx(), -box.ry() + (unit_point.y - frame.top) / (frame.foot - frame.top) * 2 * box.ry()};
+}
+
+// A heart's right half about its middle line, in a square of side 2 (y down): a round lobe — the circle about
+// (0.485, −0.5) of radius 0.515, from the cleft where it meets its mirror image, over its top and its right, to 20°
+// below its middle — and from there a curve that leaves the lobe along it and comes to the point at the foot (0, 1) at
+// 42° from the middle line. `scale_x`, `scale_y`: the size it is made for (how finely its curves are cut).
+std::vector<P> heart_half(double scale_x, double scale_y, double* cleft_y = nullptr) {
+    const double cx = 0.485, cy = -0.5, r = 0.515;
+    const double cleft = cy - std::sqrt(r * r - cx * cx);
+    if (cleft_y != nullptr) *cleft_y = cleft;
+    const int depth = quarter_depth(std::max(scale_x, scale_y) * r) + 1;
+    // (unit vectors from the lobe's middle, clockwise on the page: the cleft, straight up, to the right, 20° below)
+    const P to_cleft = unit({-cx, cleft - cy});
+    const double cos20 = 0.9396926207859084, sin20 = 0.3420201433256687;
+    const P stops[4] = {to_cleft, {0.0, -1.0}, {1.0, 0.0}, {cos20, sin20}};
+    std::vector<P> half;
+    half.push_back({0.0, cleft});
+    for (int piece = 0; piece < 3; ++piece) {
+        std::vector<P> arc{stops[piece], stops[piece + 1]};
+        for (int d = 0; d < depth; ++d) {
+            std::vector<P> next;
+            next.reserve(arc.size() * 2 - 1);
+            for (std::size_t i = 0; i + 1 < arc.size(); ++i) {
+                next.push_back(arc[i]);
+                next.push_back(unit(add(arc[i], arc[i + 1])));
+            }
+            next.push_back(arc.back());
+            arc = std::move(next);
+        }
+        for (std::size_t i = 1; i < arc.size(); ++i) push(half, {cx + r * arc[i].x, cy + r * arc[i].y});
+    }
+    const P from{cx + r * cos20, cy + r * sin20};
+    const P tip{0.0, 1.0};
+    const double sin42 = 0.6691306063588582, cos42 = 0.7431448254773942;
+    const double handle = distance(from, tip) * 0.4;
+    const P c1 = add(from, mul({-sin20, cos20}, handle));
+    const P c2{sin42 * handle, 1.0 - cos42 * handle};
+    const int pieces = std::clamp(static_cast<int>(std::ceil(std::sqrt(std::max(scale_x, scale_y)) * 3)), 12, 96);
+    for (int j = 1; j <= pieces; ++j) {
+        const double t = static_cast<double>(j) / pieces;
+        const double u = 1 - t;
+        const double w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+        push(half, {w0 * from.x + w1 * c1.x + w2 * c2.x + w3 * tip.x, w0 * from.y + w1 * c1.y + w2 * c2.y + w3 * tip.y});
+    }
+    half.back() = tip;
+    return half;
+}
+
+}  // namespace
+
+Contour cloud(const Box& box, int bumps, Contour* corners) {
+    const int n = std::clamp(bumps, 5, 60);
+    return scalloped(box, n, 0.86, 0.3, corners);  // (a scallop's height against its width: 0.3)
+}
+
+// --- fukidashi@2: the symbols --------------------------------------------------------------------------------------------
+
+Contour diamond(const Box& box, double radius, Contour* corners_out) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    const std::vector<P> corners{{0.0, -ry}, {rx, 0.0}, {0.0, ry}};
+    const double r = radius >= 0 ? radius : std::min(rx, ry) * 0.08;
+    std::vector<double> reach;
+    reach.push_back(corner_reach({-rx, 0.0}, corners[0], corners[1], r));
+    reach.push_back(corner_reach(corners[0], corners[1], corners[2], r));
+    reach.push_back(corner_reach(corners[1], corners[2], {-rx, 0.0}, r));
+    std::vector<std::size_t> apexes;
+    const std::vector<P> half = rounded_half(corners, reach, &apexes);
+    Contour outline = fitted_two_fold(half, box);
+    if (corners_out != nullptr) *corners_out = folded_corners(outline, half.size(), apexes);
+    return outline;
+}
+
+Contour star(const Box& box, int points, double inner, double radius, Contour* corners_out) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    const StarFrame frame = star_frame(points, inner);
+    std::vector<P> corners;
+    for (const P& c : frame.corners) corners.push_back(star_placed(frame, box, c));
+    corners.front().x = 0.0;
+    corners.back().x = 0.0;
+    const double least = std::min(rx, ry);
+    const std::size_t n = corners.size();
+    std::vector<double> reach(n, 0.0);
+    for (std::size_t k = 0; k < n; ++k) {
+        const P here = corners[k];
+        const P before = k == 0 ? P{-corners[1].x, corners[1].y} : corners[k - 1];
+        const P after = k + 1 < n ? corners[k + 1] : P{-corners[n - 2].x, corners[n - 2].y};
+        const bool point = k % 2 == 0;
+        if (radius >= 0) {
+            reach[k] = corner_reach(before, here, after, point ? radius : radius / 2);
+        } else if (point) {
+            // (its own: the point cut short by 0.035 of the narrow half — the curve's top lies half the way from the
+            // corner to the middle of where it begins and ends)
+            const double cosine = std::clamp(dot(unit(sub(here, before)), unit(sub(after, here))), -0.999, 0.999);
+            const double half_sine = std::sqrt((1 - cosine) / 2);  // (the sine of half the turn: the cosine of half the point's angle)
+            reach[k] = 2 * least * 0.035 / std::max(0.2, half_sine);
+        } else {
+            reach[k] = corner_reach(before, here, after, least * 0.05);
+        }
+    }
+    std::vector<std::size_t> apexes;
+    const std::vector<P> half = rounded_half(corners, reach, &apexes);
+    Contour outline = fitted_two_fold(half, box);
+    if (corners_out != nullptr) *corners_out = folded_corners(outline, half.size(), apexes);
+    return outline;
+}
+
+P star_centre(const Box& box, int points, double inner) {
+    const StarFrame frame = star_frame(points, inner);
+    const P at = star_placed(frame, box, {0.0, 0.0});
+    return {box.cx() + at.x, box.cy() + at.y};
+}
+
+Contour star_guide(const Box& box, int points, double inner) {
+    const StarFrame frame = star_frame(points, inner);
+    const int n = std::clamp(points, 4, 12);
+    const double in = std::clamp(inner, 0.2, 0.95);
+    // (inside the chords between its valleys: their middles lie at inner × cos(π / n))
+    const double keep = in * static_cast<double>(libm::cosf(static_cast<float>(kPi / n))) * 0.97;
+    const P centre = star_centre(box, points, inner);
+    const double a = keep / frame.reach * box.rx();
+    const double b = keep / (frame.foot - frame.top) * 2 * box.ry();
+    return ellipse(Box{centre.x - a, centre.y - b, centre.x + a, centre.y + b});
+}
+
+Contour flower(const Box& box, int petals, Contour* corners) { return scalloped(box, std::clamp(petals, 4, 12), kPetalKeep, kPetalBulge, corners); }
+
+Contour flower_guide(const Box& box, int petals) {
+    Contour valleys;
+    if (scalloped(box, std::clamp(petals, 4, 12), kPetalKeep, kPetalBulge, &valleys).empty() || valleys.empty()) return {};
+    const double rx = box.rx(), ry = box.ry();
+    double keep = 1.0;
+    for (const P& v : valleys) keep = std::min(keep, hyp((v.x - box.cx()) / rx, (v.y - box.cy()) / ry));
+    return scaled_about(ellipse(box), {box.cx(), box.cy()}, keep * 0.97);
+}
+
+Contour heart(const Box& box, double radius, Contour* corners_out) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    std::vector<P> half = heart_half(rx, ry);
+    // (laid in the box — its lobes' top at the box's top, its point at the foot —, then its point rounded)
+    double reach = 0.0, top = half.front().y;
+    for (const P& p : half) {
+        reach = std::max(reach, p.x);
+        top = std::min(top, p.y);
+    }
+    for (P& p : half) p = {p.x / reach * rx, -ry + (p.y - top) / (1.0 - top) * 2 * ry};
+    const double r = radius >= 0 ? radius : std::min(rx, ry) * 0.05;
+    if (r > 0 && half.size() > 3) {
+        // (the point: the last stretch of its side up to `taken` from it, then a curve to the middle line)
+        const P tip = half.back();
+        const P toward = unit(sub(tip, half[half.size() - 2]));
+        const double cosine = std::clamp(toward.x * toward.x - toward.y * toward.y, -0.999, 0.999);  // (the side against its mirror image)
+        const double taken = std::min(r * std::sqrt((1 - cosine) / (1 + cosine)), 0.2 * ry);
+        while (half.size() > 2 && distance(half.back(), tip) < taken) half.pop_back();
+        const P from = half.back();
+        const P to{-from.x, from.y};
+        const int pieces = corner_pieces(from, tip, to) * 2;
+        for (int j = 1; j <= pieces / 2; ++j) {
+            const double t = static_cast<double>(j) / static_cast<double>(pieces);
+            const double u = 1 - t;
+            push(half, {u * u * from.x + 2 * u * t * tip.x + t * t * to.x, u * u * from.y + 2 * u * t * tip.y + t * t * to.y});
+        }
+        half.back().x = 0.0;
+    }
+    Contour outline = fitted_two_fold(half, box);
+    // (its corners: the cleft, where it begins, and its point — the last of its half)
+    if (corners_out != nullptr && !outline.empty() && half.size() <= outline.size()) *corners_out = {outline.front(), outline[half.size() - 1]};
+    return outline;
+}
+
+Contour symbol_room(std::string_view kind, const Box& box, int points, double inner) {
+    const double rx = box.rx();
+    const double ry = box.ry();
+    const double cx = box.cx();
+    const double cy = box.cy();
+    if (!(rx > 0) || !(ry > 0)) return {};
+    if (kind == "diamond") return {{cx, cy - ry}, {cx + rx, cy}, {cx, cy + ry}, {cx - rx, cy}};
+    if (kind == "star") {
+        const StarFrame frame = star_frame(points, inner);
+        Contour room;
+        const std::size_t n = frame.corners.size();
+        for (std::size_t k = 1; k < n; k += 2) {  // (the valleys of the right half, then their mirror images back up)
+            const P at = star_placed(frame, box, frame.corners[k]);
+            room.push_back({cx + (k + 1 == n ? 0.0 : at.x), cy + at.y});
+        }
+        for (std::size_t k = (n % 2 == 0 ? n - 3 : n - 2); k < n; k -= 2) {
+            const P at = star_placed(frame, box, frame.corners[k]);
+            room.push_back({cx - at.x, cy + at.y});
+            if (k < 2) break;
+        }
+        return room;
+    }
+    if (kind == "flower") {
+        Contour valleys;
+        (void)scalloped(box, std::clamp(points, 4, 12), kPetalKeep, kPetalBulge, &valleys);
+        return valleys;
+    }
+    if (kind == "heart") {
+        double cleft = 0.0;
+        std::vector<P> half = heart_half(rx, ry, &cleft);
+        double reach = 0.0, top = half.front().y;
+        for (const P& p : half) {
+            reach = std::max(reach, p.x);
+            top = std::min(top, p.y);
+        }
+        // (below the cleft's level: the lobes from where they come down past it, the sides, the point)
+        Contour right;
+        bool below = false;
+        for (std::size_t i = 1; i < half.size(); ++i) {
+            const bool down = half[i].y > half[i - 1].y;
+            if (!below && down && half[i].y >= cleft) {
+                const double t = (cleft - half[i - 1].y) / (half[i].y - half[i - 1].y);
+                right.push_back({half[i - 1].x + (half[i].x - half[i - 1].x) * t, cleft});
+                below = true;
+            }
+            if (below) right.push_back(half[i]);
+        }
+        Contour room;
+        const auto place = [&](P p, bool mirrored) {
+            const double px = p.x / reach * rx;
+            return P{mirrored ? cx - px : cx + px, cy - ry + (p.y - top) / (1.0 - top) * 2 * ry};
+        };
+        // (every eighth point is enough for a room)
+        const std::size_t step = std::max<std::size_t>(1, right.size() / 24);
+        Contour kept;
+        for (std::size_t i = 0; i < right.size(); i += step) kept.push_back(right[i]);
+        if (kept.empty() || kept.back().y < 1.0) kept.push_back({0.0, 1.0});
+        for (const P& p : kept) room.push_back(place(p, false));
+        for (std::size_t i = kept.size() - 1; i-- > 0;) room.push_back(place(kept[i], true));
+        return room;
+    }
+    return {};
 }
 
 Contour burst(const Box& box, int spikes, double depth, double alt, const std::vector<double>& jitter) {
@@ -556,7 +944,7 @@ Contour smooth_closed(const Contour& points, double tolerance) {
     return out;
 }
 
-Contour waved(const Contour& closed, double amplitude, double wavelength) {
+Contour waved(const Contour& closed, double amplitude, double wavelength, const Contour& corners) {
     const std::vector<double> lengths = lengths_of(closed);
     const double total = lengths.back();
     if (!(amplitude > 0) || !(total > 0) || !(wavelength > 0)) return closed;
@@ -564,6 +952,21 @@ Contour waved(const Contour& closed, double amplitude, double wavelength) {
     const std::int64_t per = 24;  // (points a wave)
     const std::int64_t count = waves * per;
     const bool clockwise = shoelace(closed) > 0;  // (y down: a positive sum runs clockwise on the page)
+    // (fukidashi@2: the corners that turn in — a heart's cleft —, where along the outline each lies: the wave pushed out
+    // on both sides of such a corner would cross itself there, so it calms to nothing within a wave of it. A corner that
+    // turns out — a box's, a polygon's, a heart's point — keeps its wave as before.)
+    std::vector<double> calm;
+    for (const P& corner : corners) {
+        std::size_t at = 0;
+        for (std::size_t i = 1; i < closed.size(); ++i) {
+            if (distance(closed[i], corner) < distance(closed[at], corner)) at = i;
+        }
+        const double s = lengths[at];
+        const P before = point_at(closed, lengths, s - wavelength / 4);
+        const P after = point_at(closed, lengths, s + wavelength / 4);
+        const double turn = cross(sub(closed[at], before), sub(after, closed[at]));
+        if (clockwise ? turn < 0 : turn > 0) calm.push_back(s);
+    }
     Contour out;
     out.reserve(static_cast<std::size_t>(count));
     const double step = total / static_cast<double>(count);
@@ -574,7 +977,13 @@ Contour waved(const Contour& closed, double amplitude, double wavelength) {
         const P in = clockwise ? inward(along) : mul(inward(along), -1.0);
         // (a crest where the outline begins — its top — so a balloon that is its own mirror image stays one)
         const float phase = static_cast<float>(2 * kPi * static_cast<double>(i % per) / static_cast<double>(per));
-        const double push_out = amplitude * static_cast<double>(libm::cosf(phase));
+        double reach = amplitude;
+        for (const double c : calm) {
+            const double gap = std::fabs(s - c);
+            const double x = std::min(1.0, std::min(gap, total - gap) / wavelength);
+            reach = std::min(reach, amplitude * x * x * (3 - 2 * x));
+        }
+        const double push_out = reach * static_cast<double>(libm::cosf(phase));
         out.push_back(sub(here, mul(in, push_out)));
     }
     return out;
@@ -683,9 +1092,9 @@ P point_along(const Contour& line, std::size_t segment, double along, double rea
     return here;
 }
 
-}  // namespace
-
-Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec) {
+// A tail as tail() makes it; `draw_in` false: every base as it falls (the construction of before 2026-11-14), and
+// `foot_out` then says whether an end of its base lies outside the outline.
+Tail made_tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec, bool draw_in, bool* foot_out) {
     Tail out;
     if (outline.size() < 3 || guide.size() < 3) return out;
     const std::vector<double> guide_lengths = lengths_of(guide);
@@ -805,6 +1214,23 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
         }
         left_side.push_back(spec.tip);
         right_side.push_back(spec.tip);
+        // (its base lies inside the balloon. Beside a corner of a box — or where a narrow outline falls away from a
+        // wide tail — an end of the base, half the tail's width out from its middle line and more, lies outside the
+        // outline, and the stretch of the base outside it is an edge without a line. When that leaves the line open
+        // (tail() decides: base_open), such an end is drawn in toward the middle line, to just inside the outline: its
+        // side then leaves the balloon through the outline beyond, round the corner.)
+        if (foot_out != nullptr) *foot_out = !notch && inside(outline, middle.front()) && (!inside(outline, left_side.front()) || !inside(outline, right_side.front()));
+        if (draw_in && !notch && inside(outline, middle.front())) {
+            for (Contour* side : {&left_side, &right_side}) {
+                if (inside(outline, side->front())) continue;
+                double in = 0.0, out_of_it = 1.0;
+                for (int step = 0; step < 16; ++step) {
+                    const double between = (in + out_of_it) / 2;
+                    (inside(outline, lerp(middle.front(), side->front(), between)) ? in : out_of_it) = between;
+                }
+                side->front() = lerp(middle.front(), side->front(), in * 0.9);
+            }
+        }
         // where its sides leave the balloon's outline: the two ends of its base
         left = first_meeting(left_side, outline, lengths);
         right = first_meeting(right_side, outline, lengths);
@@ -823,6 +1249,16 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
 
     if (left.found) out.left = left.at;
     if (right.found) out.right = right.at;
+    // (fukidashi@2, the pen's corners: its tip, and where a side turns by more than 30° — a bend, a zigzag's steps, a
+    // bolt's. A curved side has none: its points are many and each turns a little)
+    out.corners.push_back(spec.tip);
+    for (const Contour* side : {&left_side, &right_side}) {
+        for (std::size_t i = 1; i + 2 < side->size(); ++i) {
+            const P in = unit(sub((*side)[i], (*side)[i - 1]));
+            const P on = unit(sub((*side)[i + 1], (*side)[i]));
+            if (distance((*side)[i], (*side)[i - 1]) > 1e-9 && distance((*side)[i + 1], (*side)[i]) > 1e-9 && dot(in, on) < 0.8660254037844387) out.corners.push_back((*side)[i]);
+        }
+    }
     if (notch || !(spec.fillet > 0.5) || inside(outline, spec.tip)) return out;  // (a tip inside its balloon: nothing to join)
 
     // the joins: the notch between the outline and each side rounded a little, from the outline round to the side,
@@ -856,6 +1292,108 @@ Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec
     join(left_side, right_side, left, right);
     join(right_side, left_side, right, left);
     return out;
+}
+
+// How far `p` lies from the ribbon `reach` wide either side of a run, as ribbon_plane draws it — round where it turns and
+// at an end cut by another shape, square at an end that is not (a tail's base) —: 0 under it.
+double off_ribbon(const Run& run, P p, double reach) {
+    const std::size_t m = run.points.size();
+    const std::size_t segments = run.closed ? m : (m == 0 ? 0 : m - 1);
+    double least = 1e300;
+    for (std::size_t i = 0; i < segments && least > 0; ++i) {
+        const P a = run.points[i];
+        const P b = run.points[(i + 1) % m];
+        const double span = distance(a, b);
+        if (span < 1e-12) {
+            least = std::min(least, std::max(0.0, distance(p, a) - reach));
+            continue;
+        }
+        const P along = mul(sub(b, a), 1 / span);
+        const double u = dot(sub(p, a), along);
+        const double v = std::fabs(cross(along, sub(p, a)));
+        const bool square_before = !run.closed && i == 0 && !run.cut_first;
+        const bool square_after = !run.closed && i + 1 == segments && !run.cut_last;
+        if ((u < 0 && square_before) || (u > span && square_after)) {
+            least = std::min(least, hyp(u < 0 ? -u : u - span, std::max(0.0, v - reach)));
+        } else {
+            least = std::min(least, std::max(0.0, distance(p, add(a, mul(along, std::clamp(u, 0.0, span)))) - reach));
+        }
+    }
+    return least;
+}
+
+// How far a tail leaves its balloon's line open (in pixels; 0: closed): where an edge of its own that has no line — its
+// base inside the balloon, the sides of a join that lie along the outline and the tail — falls on the group's edge
+// after all (the fill on one side of it only), the farthest it lies from the line drawn there: the ribbon `width` wide
+// inside the fill along the pieces of the outline and the tail's sides on the edge (off_ribbon). Open: the fill meets
+// the paper with no line between — a base end past a box's corner, or past a narrow outline under a wide tail, and the
+// join made where that side runs into the outline; a crack a hair wide where the side's square end and the outline's
+// line just miss each other. A base end in a shallow valley of a burst or a wave's trough lies under the line beside
+// it: closed.
+double line_gap(const Contour& outline, const Tail& made, double width) {
+    if (made.shape.points.size() < 3) return 0.0;
+    double worst = 0.0;
+    std::vector<Shape> shapes{whole(outline), made.shape};
+    for (const Shape& join : made.joins) shapes.push_back(join);
+    const std::vector<Run> runs = edge_runs(shapes);
+    const double step = std::max(0.125, width * 0.05);
+    for (std::size_t si = 1; si < shapes.size(); ++si) {
+        const Shape& shape = shapes[si];
+        const std::size_t n = shape.points.size();
+        if (n < 3) continue;
+        for (std::size_t e = 0; e < n; ++e) {
+            if (shape.stroke[e]) continue;
+            const P from = shape.points[e];
+            const P to = shape.points[(e + 1) % n];
+            const int steps = std::max(1, static_cast<int>(std::ceil(distance(from, to) / step)));
+            const P across = mul(inward(unit(sub(to, from))), std::max(0.01, width * 0.01));
+            for (int k = 0; k < steps; ++k) {
+                const P p = lerp(from, to, (k + 0.5) / steps);
+                // (on the group's edge: the fill on one side of it only — a shape's edge inside the others, or inside
+                // itself where it folds over, is not)
+                const auto filled = [&](P q) {
+                    for (const Shape& other : shapes) {
+                        if (other.points.size() >= 3 && inside(other.points, q)) return true;
+                    }
+                    return false;
+                };
+                bool covered = filled(add(p, across)) && filled(sub(p, across));
+                double gap = covered ? 0.0 : 1e300;
+                for (const Run& run : runs) {
+                    if (!(gap > 0)) break;
+                    gap = std::min(gap, off_ribbon(run, p, width));
+                }
+                worst = std::max(worst, gap);
+            }
+        }
+    }
+    return worst;
+}
+// Open: more than a hundredth of the line's width (in widths, not pixels: a tail is open or closed alike at every
+// resolution; less is the arithmetic's own).
+bool base_open(const Contour& outline, const Tail& made, double width) { return line_gap(outline, made, width) > width * 0.01; }
+
+std::atomic<int> g_bases_as_before{0};  // (tests: every tail's base as it falls, as before 2026-11-14)
+
+}  // namespace
+
+TailBasesAsBeforeForTest::TailBasesAsBeforeForTest() { ++g_bases_as_before; }
+TailBasesAsBeforeForTest::~TailBasesAsBeforeForTest() { --g_bases_as_before; }
+
+// A tail made as before whose line was closed is made as before, point for point: only a tail whose base left the line
+// open (base_open), and whose base drawn in closes it, has the ends of its base drawn in (and a tail of the pen's line,
+// a base end of which lies outside the outline).
+Tail tail(const Contour& outline, const Contour& guide, P centre, const TailSpec& spec) {
+    bool foot_out = false;
+    Tail before = made_tail(outline, guide, centre, spec, false, &foot_out);
+    if (!foot_out || g_bases_as_before.load() > 0) return before;
+    // (fukidashi@2, the pen's line: its strokes thin toward their ends, a base's among them — such a base end is always
+    // drawn in; no book of before has the pen)
+    if (spec.pen) return made_tail(outline, guide, centre, spec, true, nullptr);
+    if (!(spec.line > 0) || !base_open(outline, before, spec.line)) return before;
+    Tail drawn_in = made_tail(outline, guide, centre, spec, true, nullptr);
+    // (a base drawn in that still leaves the line open — a burst's deep teeth across it — mends nothing: as before)
+    return base_open(outline, drawn_in, spec.line) ? before : drawn_in;
 }
 
 std::vector<Contour> bubble_trail(const Contour& guide, P centre, P tip, double radius) {
@@ -915,6 +1453,110 @@ std::vector<Shape> joins_between(const Contour& a, const Contour& b, double reac
         out.push_back(patch(c.at, on_a, a_in, mul(da, -way_a), on_b, b_in, mul(db, -way_b), inset));
     }
     return out;
+}
+
+std::vector<Shape> drip_joins(const Contour& body, const Contour& finger, double reach) {
+    // (as joins_between, but a join stops short of the body's next corner — as a tail's does —, and is left out where
+    // a corner is right there: it never runs round a corner and out of the balloon)
+    std::vector<Shape> out;
+    if (body.size() < 3 || finger.size() < 3 || reach < 0.5) return out;
+    const Bounds ba = bounds_of(body);
+    const Bounds bb = bounds_of(finger);
+    if (ba.x1 < bb.x0 || bb.x1 < ba.x0 || ba.y1 < bb.y0 || bb.y1 < ba.y0) return out;
+    const std::vector<double> la = lengths_of(body);
+    const std::vector<double> lb = lengths_of(finger);
+    const bool a_clockwise = shoelace(body) > 0;
+    const bool b_clockwise = shoelace(finger) > 0;
+    const double limit = std::min(reach, 0.2 * std::min(la.back(), lb.back()));
+    struct Cross {
+        double sa, sb;
+        P at;
+    };
+    std::vector<Cross> crossings;
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        const P a0 = body[i];
+        const P a1 = body[(i + 1) % body.size()];
+        if (std::max(a0.x, a1.x) < bb.x0 || std::min(a0.x, a1.x) > bb.x1 || std::max(a0.y, a1.y) < bb.y0 || std::min(a0.y, a1.y) > bb.y1) continue;
+        for (std::size_t j = 0; j < finger.size(); ++j) {
+            double t = 0.0, u = 0.0;
+            if (!crossing(a0, a1, finger[j], finger[(j + 1) % finger.size()], t, u)) continue;
+            if (t >= 1.0 || u >= 1.0) continue;  // (an end shared by two segments: counted once)
+            const P at = lerp(a0, a1, std::clamp(t, 0.0, 1.0));
+            bool again = false;  // (the same crossing met on two segments that share an end)
+            for (const Cross& c : crossings) again = again || distance(c.at, at) < 1e-6;
+            if (again) continue;
+            crossings.push_back({la[i] + (la[i + 1] - la[i]) * std::max(0.0, t), lb[j] + (lb[j + 1] - lb[j]) * std::max(0.0, u), at});
+        }
+    }
+    for (const Cross& c : crossings) {
+        const double probe = 0.75;
+        const double way_a = inside(finger, point_at(body, la, c.sa + probe)) ? -1.0 : 1.0;
+        const double way_b = inside(body, point_at(finger, lb, c.sb + probe)) ? -1.0 : 1.0;
+        const double sharp = sharpness(unit(sub(point_at(body, la, c.sa + way_a * limit), c.at)), unit(sub(point_at(finger, lb, c.sb + way_b * limit), c.at)));
+        const double span = std::min(limit * sharp, 0.2 * std::min(la.back(), lb.back()));
+        const double on_body = smooth_reach(body, la, c.sa, way_a, span);
+        const double on_finger = std::min(span, on_body * 2);  // (along the finger as far, twice the body's stretch at most)
+        if (on_body < 0.5 || on_finger < 0.5) continue;  // (a corner right there: no join)
+        const P on_a = point_at(body, la, c.sa + way_a * on_body);
+        const P on_b = point_at(finger, lb, c.sb + way_b * on_finger);
+        if (inside(finger, on_a) || inside(body, on_b)) continue;
+        const P da = direction_at(body, la, c.sa + way_a * on_body);
+        const P db = direction_at(finger, lb, c.sb + way_b * on_finger);
+        const P a_in = a_clockwise ? inward(da) : mul(inward(da), -1.0);
+        const P b_in = b_clockwise ? inward(db) : mul(inward(db), -1.0);
+        out.push_back(patch(c.at, on_a, a_in, mul(da, -way_a), on_b, b_in, mul(db, -way_b), std::max(1.5, std::min(on_body, on_finger) * 0.35)));
+    }
+    return out;
+}
+
+Shape drip(double x, double root_y, double left_top, double right_top, double half, double length) {
+    Shape shape;
+    if (!(half > 0) || !(length > 0)) return shape;
+    // its right side, from the root down, as (half width, how far down): then the round end, and the left side its
+    // mirror image
+    std::vector<P> side;
+    side.push_back({half, 0.0});
+    // (a side that changes width between two heights: leaving and arriving straight down)
+    const auto eased = [&](double w0, double y0, double w1, double y1) {
+        if (y1 - y0 < 0.5) return;
+        const int steps = std::clamp(static_cast<int>(std::ceil((y1 - y0) / 2)), 6, 64);
+        const double ym = (y0 + y1) / 2;
+        for (int j = 1; j <= steps; ++j) {
+            const double t = static_cast<double>(j) / steps;
+            const double u = 1 - t;
+            const double b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
+            push(side, {(b0 + b1) * w0 + (b2 + b3) * w1, b0 * y0 + (b1 + b2) * ym + b3 * y1});
+        }
+    };
+    double end = 0.0;     // (the round end's radius)
+    double middle = 0.0;  // (and how far down its middle lies)
+    if (length >= 3.2 * half) {
+        // a neck of 0.6 of the root's width, then a drop of 0.9
+        end = 0.9 * half;
+        middle = length - end;
+        const double neck = 0.6 * half;
+        const double flare = std::min(1.3 * half, middle * 0.35);
+        const double swell = std::max(flare, middle - 1.5 * half);
+        eased(half, 0.0, neck, flare);
+        if (swell > flare) push(side, {neck, swell});
+        eased(neck, swell, end, middle);
+    } else {
+        end = std::min(0.85 * half, length);
+        middle = length - end;
+        eased(half, 0.0, end, middle);
+    }
+    if (side.back().x != end || side.back().y != middle) push(side, {end, middle});
+    const std::vector<P> quarter = unit_quarter(std::max(3, quarter_depth(end)));  // ((sin a, cos a): from straight down the page's right to its foot)
+    shape.points.push_back({x - half, left_top});
+    shape.points.push_back({x + half, right_top});
+    for (const P& p : side) push(shape.points, {x + p.x, root_y + p.y});
+    for (std::size_t i = 1; i < quarter.size(); ++i) push(shape.points, {x + end * quarter[i].y, root_y + middle + end * quarter[i].x});
+    shape.points.back().x = x;  // (its tip, on its line)
+    for (std::size_t i = quarter.size() - 1; i-- > 0;) push(shape.points, {x - end * quarter[i].y, root_y + middle + end * quarter[i].x});
+    for (std::size_t i = side.size(); i-- > 0;) push(shape.points, {x - side[i].x, root_y + side[i].y});
+    shape.stroke.assign(shape.points.size(), 1);
+    shape.stroke[0] = 0;  // (across its top, inside the balloon)
+    return shape;
 }
 
 Shape neck(P from, P to, double width) {
@@ -1022,6 +1664,7 @@ std::vector<Run> edge_runs(const std::vector<Shape>& shapes) {
             run.points = {lerp(a, b, piece.from), lerp(a, b, piece.to)};
             run.cut_first = piece.from > 0.0;
             run.cut_last = piece.to < 1.0;
+            run.shape = static_cast<int>(si);
             made.push_back(std::move(run));
         }
         if (made.size() == 1 && pieces.size() == n && follows(pieces.back(), pieces.front())) {
@@ -1214,6 +1857,477 @@ Plane ribbon_plane(const std::vector<Run>& runs, double reach, int width, int he
         if (round_ends && !run.closed) {
             if (run.cut_first) disc(points.front());
             if (run.cut_last) disc(points.back());
+        }
+    }
+    path_raster::Rasterizer raster;
+    raster.add_component(pieces, core::vector::PathOp::Combine, core::vector::FillRule::NonZero);
+    return rendered(raster, width, height);
+}
+
+bool ribbon_covers(const std::vector<Run>& runs, double reach, bool round_ends, const Plane& inside) {
+    if (!(reach > 0) || runs.empty() || inside.width <= 0 || inside.height <= 0) return false;
+    // (drawn in pieces, ribbon_plane covers all that lies within `reach` of a run — each segment's box, each bend's
+    // wedge or disc, a disc at each cut end — but for its discs' chords: a strip is not so sure where it turns in)
+    std::vector<Contour> lines;
+    for (const Run& run : runs) {
+        Contour points;
+        for (const P& p : run.points) push(points, p);
+        if (run.closed && points.size() > 2 && distance(points.front(), points.back()) < 1e-9) points.pop_back();
+        if (points.size() < 2) continue;
+        if (!run.closed && !(round_ends && run.cut_first && run.cut_last)) return false;
+        if (!folds(points, run.closed, reach)) return false;
+        if (run.closed) points.push_back(points.front());
+        lines.push_back(std::move(points));
+    }
+    if (lines.empty()) return false;
+    // (a run's point within half a diagonal of the middle of the pixel it marks, a pixel's corners within half a diagonal
+    // of its middle, a disc's chords within their sagitta of its circle — and a little more)
+    constexpr float kDiagonal = 1.41421356f;
+    const double angle = (kPi / 2) / static_cast<double>(1 << std::max(3, quarter_depth(reach)));
+    const double most = reach - (kDiagonal + reach * angle * angle / 8 + 0.5);
+    if (!(most > 0)) return false;
+    // (the distance of each pixel's middle from the pixels the runs pass through, along steps of one pixel and of a
+    // diagonal — never less than the straight distance —, in two sweeps; each pixel's own known at the second's)
+    const std::size_t w = static_cast<std::size_t>(inside.width), h = static_cast<std::size_t>(inside.height);
+    std::vector<float> plane(w * h, 1e30f);
+    float* const d = plane.data();
+    for (const Contour& line : lines) {
+        for (std::size_t i = 0; i + 1 < line.size(); ++i) {
+            const P a = line[i], b = line[i + 1];
+            const int steps = std::max(1, static_cast<int>(std::ceil(distance(a, b) * 2)));
+            for (int k = 0; k <= steps; ++k) {
+                const P p = lerp(a, b, static_cast<double>(k) / steps);
+                const double fx = std::floor(p.x), fy = std::floor(p.y);
+                if (fx >= 0 && fy >= 0 && fx < static_cast<double>(w) && fy < static_cast<double>(h)) {
+                    d[static_cast<std::size_t>(fy) * w + static_cast<std::size_t>(fx)] = 0.0f;
+                }
+            }
+        }
+    }
+    const auto least = [](float v, float other) { return other < v ? other : v; };
+    for (std::size_t y = 0; y < h; ++y) {
+        float* const row = d + y * w;
+        const float* const above = y > 0 ? row - w : nullptr;
+        for (std::size_t x = 0; x < w; ++x) {
+            float v = row[x];
+            if (x > 0) v = least(v, row[x - 1] + 1.0f);
+            if (above != nullptr) {
+                v = least(v, above[x] + 1.0f);
+                if (x > 0) v = least(v, above[x - 1] + kDiagonal);
+                if (x + 1 < w) v = least(v, above[x + 1] + kDiagonal);
+            }
+            row[x] = v;
+        }
+    }
+    const float* const covered = inside.values.data();
+    for (std::size_t y = h; y-- > 0;) {
+        float* const row = d + y * w;
+        const float* const below = y + 1 < h ? row + w : nullptr;
+        for (std::size_t x = w; x-- > 0;) {
+            float v = row[x];
+            if (x + 1 < w) v = least(v, row[x + 1] + 1.0f);
+            if (below != nullptr) {
+                v = least(v, below[x] + 1.0f);
+                if (x + 1 < w) v = least(v, below[x + 1] + kDiagonal);
+                if (x > 0) v = least(v, below[x - 1] + kDiagonal);
+            }
+            row[x] = v;
+            if (covered[y * w + x] > 0.0f && !(static_cast<double>(v) <= most)) return false;
+        }
+    }
+    return true;
+}
+
+// --- fukidashi@2: the pen's line -----------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr double kPenJoin = 0.01;       // (two runs whose ends lie this close are one line, px)
+constexpr double kPenCorner = 0.8660254037844387;  // (the cosine of 30°: where two pieces of outline meet at a sharper turn is a corner)
+constexpr double kPenThin = 0.15;       // (a stroke's ends: this share of its width)
+
+double smoothstep(double x) {
+    if (x <= 0) return 0.0;
+    if (x >= 1) return 1.0;
+    return x * x * (3 - 2 * x);
+}
+
+// A chain of runs as one stretch of line: its points in order (the union's inside on its right), closed or not, and
+// where one run of it went on into the next (`joints`: places of the line).
+struct Chain {
+    Contour points;
+    Contour joints;
+    bool closed = false;
+    bool cut_first = false;
+    bool cut_last = false;
+    bool rounded = false;  // (a piece of a rounded join: it meets its neighbours without a corner)
+};
+
+// The runs joined end to start into the outlines they are pieces of. Each run is first turned so that the group's
+// inside lies on its right (a shape's outline runs clockwise on the page with its inside on the right; a shape that is
+// cut out, or runs the other way, is followed backwards).
+std::vector<Chain> chained(const std::vector<Run>& runs, const std::vector<Shape>& shapes, bool join) {
+    std::vector<Chain> pieces;
+    for (const Run& run : runs) {
+        Chain piece;
+        for (const P& p : run.points) push(piece.points, p);
+        piece.closed = run.closed;
+        piece.cut_first = run.cut_first;
+        piece.cut_last = run.cut_last;
+        if (piece.closed && piece.points.size() > 2 && distance(piece.points.front(), piece.points.back()) < 1e-9) piece.points.pop_back();
+        if (piece.points.size() < 2) continue;
+        bool backwards = false;
+        if (run.shape >= 0 && static_cast<std::size_t>(run.shape) < shapes.size()) {
+            const Shape& shape = shapes[static_cast<std::size_t>(run.shape)];
+            backwards = (shoelace(shape.points) < 0) != shape.cut;
+            piece.rounded = shape.join;
+        }
+        if (backwards) {
+            std::reverse(piece.points.begin(), piece.points.end());
+            std::swap(piece.cut_first, piece.cut_last);
+        }
+        pieces.push_back(std::move(piece));
+    }
+    if (!join) return pieces;
+    // each open piece's end goes on into the piece that begins nearest to it, within kPenJoin
+    const std::size_t n = pieces.size();
+    const std::size_t none = n;
+    std::vector<std::size_t> next(n, none), before(n, none);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (pieces[i].closed) continue;
+        std::size_t best = none;
+        double least = kPenJoin;
+        for (std::size_t j = 0; j < n; ++j) {
+            if (pieces[j].closed || before[j] != none) continue;
+            const double d = distance(pieces[i].points.back(), pieces[j].points.front());
+            if (d <= least) {
+                least = d;
+                best = j;
+            }
+        }
+        if (best != none) {
+            next[i] = best;
+            before[best] = i;
+        }
+    }
+    std::vector<Chain> out;
+    std::vector<char> used(n, 0);
+    const auto follow = [&](std::size_t first) {
+        Chain chain;
+        chain.cut_first = pieces[first].cut_first;
+        std::size_t at = first;
+        while (true) {
+            used[at] = 1;
+            for (const P& p : pieces[at].points) push(chain.points, p);
+            chain.cut_last = pieces[at].cut_last;
+            const std::size_t to = next[at];
+            if (to == none) break;
+            // (where two pieces of outline meet: a place a corner may be — unless one of them is a rounded join)
+            if (!pieces[at].rounded && !pieces[to].rounded) chain.joints.push_back(pieces[at].points.back());
+            if (to == first) {
+                chain.closed = true;
+                break;
+            }
+            if (used[to]) break;
+            at = to;
+        }
+        if (chain.closed) {
+            if (chain.points.size() > 2 && distance(chain.points.front(), chain.points.back()) < kPenJoin) chain.points.pop_back();
+            chain.cut_first = chain.cut_last = false;
+        }
+        if (chain.points.size() >= 2) out.push_back(std::move(chain));
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+        if (pieces[i].closed) {
+            used[i] = 1;
+            out.push_back(std::move(pieces[i]));
+        }
+    }
+    for (std::size_t i = 0; i < n; ++i) {  // (the lines that begin somewhere, then the ones that close on themselves)
+        if (!used[i] && before[i] == none) follow(i);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!used[i]) follow(i);
+    }
+    return out;
+}
+
+// Whether a point is one of the places given (within `within` px).
+bool one_of_places(const Contour& places, P p, double within) {
+    for (const P& q : places) {
+        if (std::fabs(q.x - p.x) <= within && std::fabs(q.y - p.y) <= within) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+std::vector<PenRun> pen_runs(const std::vector<Run>& runs, const std::vector<Shape>& shapes, const Pen& pen) {
+    std::vector<PenRun> out;
+    // (the line never opens: a pixel and a half at the least — its width, when it is slimmer —, so that where two thinned
+    // ends meet at a sharp angle no pixel of the line is left too faint to print)
+    const double least = std::min(1.5, pen.width);
+    const double step = std::max(2.0, pen.step);
+    // (the width the strokes' rules count in: the line's own before it is made whole pixels, so that a stroke is thinned
+    // the same at every resolution)
+    const double nominal = pen.nominal > 0 ? pen.nominal : pen.width;
+    for (Chain& chain : chained(runs, shapes, pen.chain)) {
+        Contour& points = chain.points;
+        if (chain.closed && points.size() >= 3) {
+            // (a closed line begins on its light side: where the way against the heavy one, from the middle of what the
+            // line goes round, leaves it — a place of the line itself, the same at every resolution, whatever points it
+            // is cut into and however it trembles. A line without corners has its strokes counted from there.)
+            double area = 0.0, mx = 0.0, my = 0.0;
+            for (std::size_t i = 0; i < points.size(); ++i) {
+                const P a = points[i], b = points[(i + 1) % points.size()];
+                const double c = cross(a, b);
+                area += c;
+                mx += (a.x + b.x) * c;
+                my += (a.y + b.y) * c;
+            }
+            if (std::fabs(area) > 1e-9) {
+                const P middle{mx / (3 * area), my / (3 * area)};
+                const std::vector<double> lengths = lengths_of(points);
+                const Bounds reach = bounds_of(points);
+                const double far_off = (reach.x1 - reach.x0) + (reach.y1 - reach.y0) + 1;
+                const double s = facing(points, lengths, middle, sub(middle, mul(pen.heavy, far_off)));
+                const auto [segment, t] = place_of(lengths, s);
+                Contour from;
+                from.reserve(points.size() + 1);
+                push(from, lerp(points[segment], points[(segment + 1) % points.size()], t));
+                for (std::size_t k = 1; k <= points.size(); ++k) push(from, points[(segment + k) % points.size()]);
+                if (from.size() > 2 && distance(from.front(), from.back()) < 1e-9) from.pop_back();
+                points = std::move(from);
+                // (and where a line without corners would begin its other strokes are points of it too)
+                const int strokes = std::clamp(pen.strokes, 1, 8);
+                if (pen.chain && strokes > 1) {
+                    const std::vector<double> round = lengths_of(points);
+                    const double whole = round.back();
+                    Contour with;
+                    std::size_t next = 1;
+                    for (std::size_t i = 0; i < points.size(); ++i) {
+                        push(with, points[i]);
+                        while (next < static_cast<std::size_t>(strokes) && whole * static_cast<double>(next) / strokes < round[i + 1] - 1e-9) {
+                            const double at = whole * static_cast<double>(next) / strokes;
+                            if (at > round[i] + 1e-9) push(with, lerp(points[i], points[(i + 1) % points.size()], (at - round[i]) / (round[i + 1] - round[i])));
+                            ++next;
+                        }
+                    }
+                    points = std::move(with);
+                }
+            }
+        }
+        // no stretch longer than the step: each cut into equal parts
+        Contour fine;
+        const std::size_t count = points.size();
+        const std::size_t spans = chain.closed ? count : count - 1;
+        for (std::size_t i = 0; i < spans; ++i) {
+            const P a = points[i];
+            const P b = points[(i + 1) % count];
+            const int parts = std::max(1, static_cast<int>(std::ceil(distance(a, b) / step)));
+            for (int k = 0; k < parts; ++k) push(fine, lerp(a, b, static_cast<double>(k) / parts));
+        }
+        if (!chain.closed) push(fine, points.back());
+        if (chain.closed && fine.size() > 2 && distance(fine.front(), fine.back()) < 1e-9) fine.pop_back();
+        const std::size_t n = fine.size();
+        if (n < 2 || (chain.closed && n < 3)) continue;
+        // how far along the line each point lies and the way the line faces at it
+        std::vector<double> along(n + 1, 0.0);
+        const std::size_t segments = chain.closed ? n : n - 1;
+        for (std::size_t i = 0; i < segments; ++i) along[i + 1] = along[i] + distance(fine[i], fine[(i + 1) % n]);
+        const double total = along[segments];
+        std::vector<P> outward(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            const bool first = !chain.closed && i == 0;
+            const bool last = !chain.closed && i + 1 == n;
+            const P in = first ? unit(sub(fine[1], fine[0])) : unit(sub(fine[i], fine[(i + n - 1) % n]));
+            const P on = last ? in : unit(sub(fine[(i + 1) % n], fine[i]));
+            const P way = unit(add(in, on));
+            outward[i] = {way.y, -way.x};  // (the inside is on the line's right)
+        }
+        // (the point `by` along the line from point i — back for a negative `by` —, as far as the line goes)
+        const auto walked = [&](std::size_t i, double by) {
+            double s = along[i] + by;
+            if (chain.closed) {
+                s = std::fmod(s, total);
+                if (s < 0) s += total;
+            } else {
+                s = std::clamp(s, 0.0, total);
+            }
+            std::size_t k = static_cast<std::size_t>(std::upper_bound(along.begin(), along.begin() + static_cast<std::ptrdiff_t>(segments) + 1, s) - along.begin());
+            k = k == 0 ? 0 : k - 1;
+            if (k >= segments) k = segments - 1;
+            const double span = along[k + 1] - along[k];
+            return lerp(fine[k], fine[(k + 1) % n], span > 0 ? (s - along[k]) / span : 0.0);
+        };
+        // the corners, where one stroke ends and the next begins: the corners the shapes say are theirs (the pen's
+        // `corners` — a box's, a star's points and valleys, a tail's tip: the same at every resolution, however their
+        // rounding is cut into points), where two pieces of outline meet at a turn of more than 30° (a tail without a
+        // rounded join, a drip on a burst: the turn measured a step either side of the place, not between two points),
+        // and an open line's two ends. Corners nearer each other than the line is wide are one.
+        std::vector<std::size_t> corners;
+        if (pen.chain) {
+            const double window = std::min(step, total / 4);
+            for (std::size_t i = 0; i < n; ++i) {
+                bool corner = !chain.closed && (i == 0 || i + 1 == n);
+                if (!corner && one_of_places(pen.corners, fine[i], 2 * kPenJoin)) corner = true;
+                if (!corner && window > 0 && one_of_places(chain.joints, fine[i], 2 * kPenJoin)) {
+                    const P in = unit(sub(fine[i], walked(i, -window)));
+                    const P on = unit(sub(walked(i, window), fine[i]));
+                    corner = dot(in, on) < kPenCorner;
+                }
+                if (!corner) continue;
+                if (!corners.empty() && along[i] - along[corners.back()] < nominal) {
+                    if (!chain.closed && i + 1 == n) corners.back() = i;  // (the line's end is kept: the corner just before it is not)
+                    continue;
+                }
+                corners.push_back(i);
+            }
+            if (chain.closed && corners.size() > 1 && total - along[corners.back()] + along[corners.front()] < nominal) corners.pop_back();
+        }
+        // the strokes: where each begins (a place along the line), in order; the last ends where the first begins
+        // (closed) or at the line's end
+        std::vector<double> starts;
+        for (const std::size_t i : corners) starts.push_back(along[i]);
+        if (pen.chain && chain.closed && starts.empty()) {
+            // (no corner: so many equal strokes from where the line begins — its light side)
+            const int strokes = std::clamp(pen.strokes, 1, 8);
+            for (int k = 0; k < strokes; ++k) starts.push_back(total * k / strokes);
+        }
+        // each stroke: from its start to the next (the last of a closed line: round to the first), and how thin its
+        // two ends are — 0.15 of the width for a stroke of eight widths or more, the whole width for one of four or
+        // less, evenly between; where two strokes meet, the thinner of the two
+        struct Stroke {
+            double from = 0.0, to = 0.0;
+            double thin_from = 1.0, thin_to = 1.0;
+        };
+        std::vector<Stroke> strokes;
+        if (pen.chain && pen.taper > 0 && !starts.empty() && total > 0) {
+            for (std::size_t k = 0; k < starts.size(); ++k) {
+                Stroke stroke;
+                stroke.from = starts[k];
+                if (k + 1 < starts.size()) {
+                    stroke.to = starts[k + 1];
+                } else if (chain.closed) {
+                    stroke.to = starts.front() + total;
+                } else {
+                    break;  // (an open line's last corner is its end)
+                }
+                const double length = stroke.to - stroke.from;
+                const double own = kPenThin + (1 - kPenThin) * std::clamp((8 * nominal - length) / (4 * nominal), 0.0, 1.0);
+                stroke.thin_from = stroke.thin_to = own;
+                strokes.push_back(stroke);
+            }
+            // (an open stretch is a piece of line that goes on under what covers its ends: not thinned there)
+            if (!chain.closed && !strokes.empty()) {
+                strokes.front().thin_from = 1.0;
+                strokes.back().thin_to = 1.0;
+            }
+            for (std::size_t k = 0; k < strokes.size(); ++k) {
+                const bool wraps = chain.closed && strokes.size() > 1;
+                if (k + 1 < strokes.size() || wraps) {
+                    Stroke& after = strokes[(k + 1) % strokes.size()];
+                    const double thin = std::min(strokes[k].thin_to, after.thin_from);
+                    strokes[k].thin_to = thin;
+                    after.thin_from = thin;
+                }
+            }
+        }
+        PenRun run;
+        run.closed = chain.closed;
+        run.round_first = chain.cut_first;
+        run.round_last = chain.cut_last;
+        run.points = fine;
+        run.reach.assign(n, pen.width);
+        run.stroke_start.assign(n, 0);
+        for (const std::size_t i : corners) run.stroke_start[i] = 1;
+        if (corners.empty() && pen.chain && chain.closed) {
+            for (const double start : starts) {
+                const std::size_t at = static_cast<std::size_t>(std::lower_bound(along.begin(), along.begin() + static_cast<std::ptrdiff_t>(n), start - 1e-9) - along.begin());
+                if (at < n) run.stroke_start[at] = 1;
+            }
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            double thin = 1.0;
+            if (!strokes.empty()) {
+                // (the stroke the point lies in; a closed line's points before its first start lie in its last stroke)
+                double s = along[i];
+                if (chain.closed && s < strokes.front().from - 1e-9) s += total;
+                const Stroke* in = &strokes.back();
+                for (const Stroke& stroke : strokes) {
+                    if (s >= stroke.from - 1e-9 && s <= stroke.to + 1e-9) {
+                        in = &stroke;
+                        if (s < stroke.to - 1e-9) break;  // (a point on a corner: the stroke that begins there, the same thinness)
+                    }
+                }
+                const double zone = pen.taper * (in->to - in->from) / 2;
+                const double from_start = s - in->from, to_end = in->to - s;
+                if (zone > 0) {
+                    thin = from_start <= to_end ? in->thin_from + (1 - in->thin_from) * smoothstep(from_start / zone)
+                                                : in->thin_to + (1 - in->thin_to) * smoothstep(to_end / zone);
+                }
+            }
+            const double heavy = 1 + pen.swell * dot(outward[i], pen.heavy);
+            run.reach[i] = std::max(least, pen.width * heavy * thin);
+        }
+        out.push_back(std::move(run));
+    }
+    return out;
+}
+
+Plane pen_plane(const std::vector<PenRun>& runs, int width, int height) {
+    // each stretch between two points its own four-cornered piece — as wide at each end as the line is there —, each
+    // bend's outer side a wedge (a disc where the bend is too sharp for one), all the same way round: their union has
+    // no fold, however tightly the line turns or its width changes
+    std::vector<std::vector<path_raster::XY>> pieces;
+    const std::vector<P> quarter_unit = unit_quarter(4);
+    std::vector<P> quarter;
+    for (const P& u : quarter_unit) quarter.push_back({u.x, -u.y});
+    const Contour ring = four_fold(quarter, 0.0, 0.0);
+    const auto piece = [&](Contour made) {
+        if (std::fabs(shoelace(made)) < 1e-12) return;
+        if (shoelace(made) > 0) std::reverse(made.begin(), made.end());
+        pieces.push_back(as_xy(made));
+    };
+    const auto disc = [&](P at, double reach) {
+        Contour points;
+        for (const P& u : ring) points.push_back({at.x + u.x * reach, at.y + u.y * reach});
+        piece(std::move(points));
+    };
+    for (const PenRun& run : runs) {
+        const Contour& points = run.points;
+        const std::size_t n = points.size();
+        if (n < 2 || run.reach.size() != n) continue;
+        const std::size_t segments = run.closed ? n : n - 1;
+        for (std::size_t i = 0; i < segments; ++i) {
+            const std::size_t j = (i + 1) % n;
+            const P a = points[i];
+            const P b = points[j];
+            if (distance(a, b) < 1e-9) continue;
+            const P across = inward(unit(sub(b, a)));
+            piece({add(a, mul(across, run.reach[i])), add(b, mul(across, run.reach[j])), sub(b, mul(across, run.reach[j])), sub(a, mul(across, run.reach[i]))});
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!run.closed && (i == 0 || i + 1 == n)) continue;
+            const P here = points[i];
+            const double reach = run.reach[i];
+            const P to = unit(sub(points[(i + 1) % n], here));
+            const P n0 = inward(unit(sub(here, points[(i + n - 1) % n])));
+            const P n1 = inward(to);
+            const P sum = add(n0, n1);
+            const double length = hyp(sum.x, sum.y);
+            const double cosine = length > 1e-9 ? dot(mul(sum, 1 / length), n0) : 0.0;
+            if (cosine > 1 - 1e-9) continue;  // (straight on: nothing to fill)
+            if (cosine * kMitre < 1.0) {
+                disc(here, reach);
+                continue;
+            }
+            const double side = dot(n0, to) > 0 ? -1.0 : 1.0;  // (the bend's outer side)
+            piece({here, add(here, mul(n0, side * reach)), add(here, mul(sum, side * reach / (length * cosine))), add(here, mul(n1, side * reach))});
+        }
+        if (!run.closed) {
+            if (run.round_first) disc(points.front(), run.reach.front());
+            if (run.round_last) disc(points.back(), run.reach.back());
         }
     }
     path_raster::Rasterizer raster;

@@ -104,6 +104,26 @@ public:
     QDoubleSpinBox* dash = nullptr;
     QComboBox* tail_kind = nullptr;
     QDoubleSpinBox* tail_fillet = nullptr;
+    // fukidashi@2 (SPEC BALLOON-02): the pen's line (強弱 and the way its heavy side faces, 入り抜き and the strokes a
+    // smooth outline is drawn in), the drips (how long — the box grows with them, the body kept —, how many, how wide,
+    // and another arrangement), a star's points or a flower's petals, the tone inside (how dark, the screen, its pattern,
+    // how dark it grows to and which way: the whole fill_tone written at once) and the blend of colours inside. Each
+    // shown only where it does something; each change one step of 取り消し.
+    QDoubleSpinBox* pen_swell = nullptr;
+    QSpinBox* pen_angle = nullptr;
+    QDoubleSpinBox* pen_taper = nullptr;
+    QSpinBox* pen_strokes = nullptr;
+    QDoubleSpinBox* drip_length = nullptr;
+    QSpinBox* drip_count = nullptr;
+    QDoubleSpinBox* drip_width = nullptr;
+    QPushButton* drip_seed = nullptr;
+    QSpinBox* points = nullptr;
+    QSpinBox* tone_density = nullptr;
+    QSpinBox* tone_lpi = nullptr;
+    QComboBox* tone_pattern = nullptr;
+    QSpinBox* tone_to = nullptr;
+    QSpinBox* tone_dir = nullptr;
+    QPushButton* fill_blend = nullptr;
     QFormLayout* style_form = nullptr;
     QCheckBox* path_curve = nullptr;
     QDoubleSpinBox* ruby_scale = nullptr;
@@ -124,6 +144,12 @@ public:
     QComboBox* layer_order = nullptr;
     QPushButton* reset = nullptr;
 
+    // 書体 (fonts@1): the chosen ruby's face set from the 書体 palette (an edit_line of the line's rubies). What came of
+    // it: no ruby of the chosen line is chosen in the list; the ruby is in that face already (nothing done); the change
+    // was not made (refused, the book read-only — said where it was refused); done.
+    enum class RubyFace { NoRuby, Same, Refused, Done };
+    RubyFace set_chosen_ruby_font(const QString& key);
+
 private:
     std::vector<const core::StoryLine*> lines() const;
     // The chosen line's words and lettering shown (never throws: what cannot be shown is logged, the rest is shown).
@@ -143,6 +169,12 @@ private:
     void set_tail_kind();
     void set_tail_fillet();
     void show_shape_rows(const core::StoryLine& l);
+    // fukidashi@2: the drips' length (with the box's height in the same step), another arrangement, the tone inside
+    // (the whole object), the blend of colours (asked, or taken off).
+    void set_drip_length();
+    void next_drip_arrangement();
+    void set_tone();
+    void pick_blend();
     void pick_gradient();
     void pick_outline_colour();
     void reset_style();

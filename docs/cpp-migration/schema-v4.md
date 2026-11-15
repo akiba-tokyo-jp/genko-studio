@@ -86,6 +86,8 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 
 | `komawari@1` | コマ割り K1 | コマの `"over": true`（ほかのコマの上に重なる。差し込み・重ね）。SPEC LAYOUT-01、この文書の「コマの重ね」 |
 | `fukidashi@1` | 今風のフキダシ B1 | 台詞（と文字レイヤーの記録）の種類 `capsule`・`polygon`、スタイルの鍵 `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽの `"kind": "inward"` と `fillet_mm`。SPEC BALLOON-01、この文書の「フキダシ」 |
+| `fukidashi@2` | フキダシの追加 群 1 | 台詞（と文字レイヤーの記録）の種類 `heart`・`star`・`flower`・`diamond`、スタイルの鍵 `pen_swell`・`pen_angle`・`pen_taper`・`pen_strokes`・`drip_mm`・`drips`・`drip_width_mm`・`drip_seed`・`points`・`fill_tone`・`fill_gradient`。SPEC BALLOON-02、この文書の「フキダシの追加」 |
+| `fonts@1` | 書体の追加 F2 | 追加の 40 書体のキー（`antique_genei`・`gothic_kiwami`・`dot16` など。`native/resources/fonts/FONTS.json` の `storage` が `file` の書体）を、台詞の `style.font`・ルビの `font`・文字（type@1）の文字属性の `font`・文字スタイルの `font`・本の `font_path` のどれかが名指ししているあいだ。この文書の「書体」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -592,3 +594,35 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - **拡張 `fukidashi@1`**: 台詞か文字レイヤーの記録が、種類 `capsule`・`polygon`、`style` の `corner_mm`・`squircle`・`sides`・`wave_mm`・`spike_alt`・`dash_mm`、しっぽ（`tails[]`）の `"kind": "inward"` か `fillet_mm` のどれかを持つあいだ、`features` に加える。無くなれば外す。知らない読み手は、未知の拡張として読み取り専用で開く。
 - **台詞の `style` の鍵**（どれも任意。null で消す）: `corner_mm`（数。0〜50）、`squircle`（真偽）、`sides`（整数。5〜12）、`wave_mm`（数。0〜3）、`spike_alt`（数。0〜0.8）、`dash_mm`（数。0.2〜10）。**しっぽ**: `kind` に `inward`、`fillet_mm`（数。0〜20。0 も書く）。
 - **前からの鍵**: `hand`・`wobble` は今までどおり読み書きする。フキダシの描く形は変えない（`hand: false` は文字を箱そのものの真の楕円に収める。`wobble` は波の輪郭として描く。SPEC BALLOON-01）。`border_mm: 0` は線なし（前の本の 0 は上の 3 で 0.01 になる）。`corner_mm: 0` は四角い角。
+
+## フキダシの追加（fukidashi@2。SPEC BALLOON-02、フキダシの追加 群 1。利用者の決定 2026-11-14）
+
+- **新しい一番上の鍵は無い。読み替えも無い**（`balloon_geometry` は 2 のまま）。足すのは台詞（と文字レイヤーの記録）の種類 4 つと、`style` の鍵 11 個だけ。どれも持たない台詞は前と同じバイトで書く。
+- **拡張 `fukidashi@2`**: 台詞か文字レイヤーの記録（スマートオブジェクトの中身のページの台詞も）が、種類 `heart`・`star`・`flower`・`diamond` か、`style` の `pen_swell`・`pen_angle`・`pen_taper`・`pen_strokes`・`drip_mm`・`drips`・`drip_width_mm`・`drip_seed`・`points`・`fill_tone`・`fill_gradient` のどれかを持つあいだ、`features` に加える（鍵があるかどうかで決める）。無くなれば外す。知らない読み手（fukidashi@1 までの版も）は、未知の拡張として読み取り専用で開く。`fukidashi@1` の条件は変えない。両方を持つ本は両方を書く。
+- **台詞の `style` の鍵**（どれも任意。null で消す。op は範囲の外を断る。読み手は確かめず、描くときに範囲へ収める）:
+  - `pen_swell`（数。0〜0.9）、`pen_angle`（数。0〜360。無ければ 45）、`pen_taper`（数。0〜1）、`pen_strokes`（整数。1〜8。無ければ 2）。
+  - `drip_mm`（数。0〜30）、`drips`（整数。1〜24）、`drip_width_mm`（数。0.3〜10）、`drip_seed`（整数。0〜999999。無ければ 0）。
+  - `points`（整数。4〜12。星は無ければ 5、花は 6）。
+  - `fill_tone`: `{"density": 数 0〜0.9, "lpi": 数 20〜85, "angle": 数 0〜90, "pattern": "dot" | "line", "to"?: 数 0〜0.9, "dir"?: 数 −360〜360, "radial"?: true, "inset_mm"?: 数 0〜5}`。鍵はこの順。op は `density`・`lpi`・`angle`・`pattern` を必ず書き（無ければ 60・45・`"dot"`）、`to` があるときだけ `to` と `dir`（無ければ 90）、真のときだけ `radial`、0 より大きいときだけ `inset_mm` を書く。
+  - `fill_gradient`: `{"to": [r, g, b]（整数 0〜255）, "dir": 数 −360〜360（無ければ 90）, "radial"?: true}`。
+- **箱の意味**: `drip_mm` を持つ台詞の `x_mm`〜`h_mm` は、本体としずくを合わせた箱。本体は下を `min(drip_mm, 0.6 × h_mm)`（小数 9 桁）だけ上げた箱で、文字の箱（検査の指摘の `box` も）はそこから作る。手で描いた輪郭（`path`）と、`dotted_box`・`flash`・`picture`・`sfx`・`none` では `drip_mm` は何もしない。
+- **しずくの並び**は `drip_seed` だけで決まる（台詞の id も場所も使わない）。同じ台詞はどの版でも同じ絵になるので、決まりを変えるときは鍵か拡張の名前を変える。
+- **当てはまらない組み合わせ**（楕円の `points`、`sfx` の `fill_tone` など）は、そのまま読み書きして、描くときに無視する。
+
+## 書体（fonts@1。SPEC FONT-01、書体の追加 F2。利用者の決定 2026-11-13）
+
+- **新しい鍵は無い**。書体は今までどおり、ただの文字列で名指しする: 台詞の `style.font`、ルビ（`ruby_spans[]`）の `font`、文字（type@1）の文字属性の `font`（`native_type.char`・`runs[].char`、文字レイヤーの記録も同じ）、本の文字スタイル（`type_styles` の `char.font`）、本のいつもの書体（一番上の `font_path`）。値は、前からの 7 つのキー（`antique`・`gothic`・`mincho`・`maru`・`hand`・`sfx`・`sfx_pop`）、追加の 40 書体のキー、書体ファイルのパスのどれか。
+- **キーの一覧**は `native/resources/fonts/FONTS.json`（genko-fonts@1。プログラムに 1 バイトも変えずに組み込む: `core/font_catalog`）。各書体の `storage`（`embedded`: プログラムに組み込んだ前からの 6 書体。`file`: 配布物の `share/genko-studio/fonts/` に置く追加の 40 書体）、`feature`（`fonts@1` か null）、`fallback`（漢字が無い・一部だけの書体の相方のキー。無ければ null）、`lookalike`（全角の「！」「？」を持たない書体だけ。`{"！": "!", "？": "?"}`）、`vertical.presentation_forms`（縦書き用のかっこの字形を全部持つか）。キーは小文字の英数字と `_` だけ（パスにも、Windows の装置名にもならない）。キーは一字一句で比べる。
+- **拡張 `fonts@1`**: 上のどこかが追加の 40 書体のキーを名指ししているあいだ、`features` に加える。無くなれば外す。前からの 7 つのキー・書体ファイルのパス・誰も知らない名前では加えない。ノンブルの書体（`nombre.font`）は前からの 7 つのままで、数えない。加えるかどうかは一覧だけで決まり、保存するパソコンに書体ファイルがあるかどうかでは変わらない。持たない原稿は今と同じバイトで書く。
+- **知らない読み手**（fonts@1 より前の版）は、未知の拡張として読み取り専用で開く（前の版は、知らない書体名を黙っていつもの書体で描くため）。
+- **読み手**は書体ファイルを見ない。ファイルが無いパソコンでも、本は書き込みできる形で開き、そのまま保存できる（鍵は変えない）。
+- **描き方**: 追加の書体のキーは、前からのキーの次・ファイルのパスより先に引く（キーと同じ名前のファイルがあっても、キーが勝つ。キーをファイルの名前として探すことは無い）。書体ファイルは `<プログラムのあるフォルダー>/../share/genko-studio/fonts/<ファイル名>` の 1 か所だけを見る（環境変数や作業フォルダーでは変わらない）。**入っている**とは、普通のファイルで、大きさが一覧の `bytes` と同じで、中身の SHA-256 が一覧の `sha256` と同じこと（最初に使うときに 1 度読んで確かめる。読み直すたびにもう 1 度確かめる）。大きさが同じで中身が違えば、そのプロセスの間「入っていない」。ファイルが無い・開けない・読み切れない（2 度試す）ときは、その 1 回だけ「入っていない」で、次にもう 1 度見る。**入っていないとき**は、その台詞を種類のいつもの書体（台詞はアンチック、効果音は極太、文字レイヤーは本文の書体）で描く。本にいつもの書体（`font_path`）が無ければ、書体を名指ししていない同じ台詞と 1 画素も違わない。
+- **入っていないときの検査**（`checks`。どれも警告。書体ごとにページに 1 つ。文は日本語名で言い、キーは出さない）: `font_not_installed`（台詞の `style.font`・文字属性とそれが従う文字スタイル・ルビ・文字レイヤーの記録・ページが見せるスマートオブジェクトの中身の文字レイヤー・本のいつもの書体 `font_path` のどれかが名指しした書体が入っていない。本のいつもの書体は最初のページに 1 つ）、`font_partner_not_installed`（書体はあるが、相方が入っていない。その言葉に相方が描く字があるときだけ。その字はゴシックで描く。本のいつもの書体の相方も、最初のページに 1 つ）。理由は「ファイルがこのパソコンに無いため」か、何かはあるが書体のファイルでないとき「ファイルが無いか、壊れているため」。`lint` は `font_not_installed`（警告。効果音は「極太の書体で描かれる」、ほかは「アンチックで描かれる」）を出し、追加の 40 キーを「知らない書体」とは言わない。
+- **相方**: `fallback` を持つ書体は、自分に無い字（漢字など）を相方の書体で描く。順は「その書体 → 相方 → 前からのゴシック → 効果音の書体」。相方で描いた字は、代わりの書体で描いた字としては数えない（PSD 書き出しの `font_fallback`、ルビの `ruby_font_fallback` を出さない）。相方のファイルが無いときは相方なしで描く（検査 `font_partner_not_installed`）。相方は追加の書体に限る。
+- **字の有無**: 追加の 40 書体は、書体の cmap にその字があるかで決める。前からの 6 書体と、パスで名指しした書体ファイルは、今までどおり（字の箱が「無い字」の箱と同じかで決める）。縦書きのかっこは、縦書き用の字形が cmap にあればそれを、無ければ横書きのかっこを 90 度回して描く。前からの書体で縦書き用の字形を cmap に持たないもの（効果音 `sfx` の『』（）()【】［］〈〉《》、手書き風 `hand` の［］）は、その括弧だけをゴシック（`gothic`）の縦書き用の字形で描く（利用者の決定 2026-11-14。前は書体の「字の無い印」の四角を描いていた。保存のバイトは変わらない）。
+- **新しい本のいつもの書体**（利用者の決定 2026-11-14）: 人が新しく作る本（画面の新規…・窓の無題の本・`genko new`・`/v1/new`・`create_project`・`genko studio init`）は、一番上の `font_path` を `"antique_genei"` にし、`features` に `fonts@1` を入れて書く。新しい鍵は無い。既存の本（`font_path` が無い・空の本を含む）は変えない（いつもの書体はアンチック）。
+- **前の本で、たまたま追加のキーと同じ名前を `font` に書いていた台詞**（fonts@1 を持たない本）: 今の版はその書体で描き、次の保存で `fonts@1` を加える（利用者の決定 2026-11-14。配布した版が無いので受け入れる）。開いたときに 1 度知らせるための一覧は `core::fonts::named_unannounced`。
+- **PSD**: 書き出しは、追加の書体を一覧の PostScript 名（`postscript_name`）で名指しする（フォントは埋め込まない）。書き出すパソコンに書体ファイルが無くても、本が名指しした書体の名前で書く（絵はいつもの書体で描いたもの。`font_warnings` がその名前を挙げる）。そのとき、漢字が無い書体（`kanji: none`）の漢字は相方の PostScript 名で書く（漢字が一部の書体は、全部の字をその書体の名前で書く: 書体ファイル無しでは、どの漢字を持つか分からない）。読み込みは、その PostScript 名を追加の書体のキーに戻す（書体ファイルは読まない）。
+- **見つからないフォントの置き換え**（`replace_fonts`・画面の「すべての見つからないフォントを置換」）: 追加の 40 キーは、ファイルがこのパソコンに無くても「見つからないフォント」に数えない（本から消さない。入れ直せば元の書体で描ける）。尋ねる op の答えは、そういう書体があるときだけ `not_installed: [{font, label}]` を足す。`map` が追加のキーを名指ししたときは従わず、答えに `kept: [{font, label, why}]` を足す（名指ししたときだけ）。
+- **エージェントへの一覧**（`inspect` の `target: "fonts"`）: `bundled` は前からの 7 行（前と同じ）の後に追加の 40 行 `{key, label, category, use, kanji, fallback?, available}`。`available` は、このパソコンにその大きさのファイルがあるか。`categories` は区分の `{id, label}`。HTTP の `font_path` は、追加のキーならキーのまま（パスに直さない）。MCP の道具の入力の形（inputSchema）は変えていない。
+- **配布物**: 40 個の書体ファイルと `FONTS.json` を `share/genko-studio/fonts/` に置く（`GenkoPackage.cmake`。一覧が 40 個でない・一覧の書体ファイルが 1 つでも無いと、構成で止まる: `cmake/GenkoFontList.cmake`）。SBOM のパッケージは `fonts-lettering`（OFL の 36 個）・`fonts-genei`（源暎の 2 個。OFL）・`fonts-littlelimit`（k8x12・美咲の 2 個。`LicenseRef-LittleLimit-Free`）。`genko doctor` は 40 個があるか・大きさが合うかを見て、その本が名指しした書体だけ SHA-256 まで読む。本が名指しした書体の問題は `problems`（`ok: false`）、ほかは `installation`（本の `ok` は変えない。問題があるときだけの鍵）。

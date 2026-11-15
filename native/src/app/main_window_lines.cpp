@@ -122,6 +122,7 @@ void MainWindow::build_line_menus(QMenu* pages) {
     lines->addAction(action("act_line_type"));
     lines->addAction(action("act_balloon_pen"));
     lines->addAction(action("act_balloon_palette"));  // (フキダシのパレットを開く: main_window_fukidashi.cpp)
+    lines->addAction(action("act_font_palette"));  // (書体のパレットを開く: main_window_fonts.cpp)
     lines->addSeparator();
     lines->addAction(action("act_line_edit"));
     lines->addAction(action("act_line_wrap"));
