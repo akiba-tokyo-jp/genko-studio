@@ -30,6 +30,8 @@
 #include "core/mesh3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/persp3d.hpp"
+#include "core/pose_checks.hpp"
+#include "core/pose_library.hpp"
 #include "core/prim3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -142,7 +144,18 @@ Json body_of(const Json& raw) {
     return out;
 }
 
-// _hand_pose: a pose name, or each finger's curl
+// figures@1 (SPEC FIGURE-02): a hand's fan of the fingers and turn of the thumb (0..1 each, to 3 places), kept only
+// when given (null: not given)
+void shape_keys(const Json& from, Json& into) {
+    for (const char* key : {"spread", "thumb"}) {
+        const Json* v = core::dict_get(from, key);
+        if (v == nullptr || v->is_null()) continue;
+        if (!v->is_number() || !std::isfinite(core::to_float(*v))) throw OpError("spread and thumb are numbers from 0 to 1");
+        into[key] = core::py_round(py_max(0.0, py_min(1.0, core::to_float(*v))), 3);
+    }
+}
+
+// _hand_pose: a pose name, or each finger's curl (figures@1: and the fingers' spread and the thumb's turn)
 Json hand_pose(const Json& pose) {
     if (pose.is_string() && core::is_one_of(pose, {"open", "relaxed", "fist", "point", "peace", "grip"})) return pose;
     if (pose.is_array() && pose.size() == 5) {
@@ -167,7 +180,9 @@ Json hand_pose(const Json& pose) {
         }
         Json rounded = Json::array();
         for (const double c : mesh3d::hand_curls(pose)) rounded.push_back(core::py_round(c, 3));
-        return Json::object({{"pose", base}, {"curls", std::move(rounded)}});
+        Json out = Json::object({{"pose", base}, {"curls", std::move(rounded)}});
+        shape_keys(pose, out);
+        return out;
     }
     throw OpError(hand_poses_message());
 }
@@ -216,6 +231,87 @@ void figure_preset(Json& prim, const std::string& name) {
     const Json* hands = get(*data, "hands");
     prim["hands"] = truthy(hands) ? core::py_dict(*hands) : Json::object();
     prim["preset"] = name;
+    prim.erase("pose_id");  // (figures@1: the library's pose is no longer what it shows)
+}
+
+// --- the pose library (SPEC FIGURE-02, figures@1) ------------------------------------------------------------------
+
+// hold: {l, r: prop} (what each hand holds — drawn from G5 on; kept now), merged into the figure's; null takes a side's away
+void hold_into(Json& prim, const Json& raw) {
+    if (!raw.is_object()) throw OpError("hold is {l, r: " + join(core::pose_library::kProps) + "}");
+    Json held = prim.contains("hold") && prim["hold"].is_object() ? prim["hold"] : Json::object();
+    for (const auto& [side, prop] : raw.items()) {
+        if (side != "l" && side != "r") throw OpError("hold is {l, r: " + join(core::pose_library::kProps) + "}");
+        if (prop.is_null()) {
+            held.erase(side);
+            continue;
+        }
+        if (!prop.is_string() || !core::pose_library::is_prop(prop.get_ref<const std::string&>())) {
+            throw OpError("a hand holds one of " + join(core::pose_library::kProps));
+        }
+        held[side] = prop;
+    }
+    if (held.empty()) {
+        prim.erase("hold");
+    } else {
+        prim["hold"] = std::move(held);
+    }
+}
+
+// pose_id: the library's pose (mirrored when the id ends in ~m, or `mirror`), its joints and hands put in place of the
+// figure's as a preset's are, its id kept (pose_id) and what its hands hold (hold); the preset said before is gone.
+void library_pose(Json& prim, const Json& id_value, bool mirror) {
+    const std::string id = id_value.is_string() ? id_value.get<std::string>() : core::py_str(id_value);
+    const std::optional<Json> pose = core::pose_library::resolve(id, mirror);
+    if (!pose) throw OpError("no pose " + id + " (figure_poses lists them)");
+    prim["joints"] = joints_of((*pose)["joints"]);
+    prim["hands"] = hands_of((*pose)["hands"]);
+    prim["pose_id"] = (*pose)["id"];
+    if (pose->contains("hold")) {
+        prim["hold"] = (*pose)["hold"];
+    } else {
+        prim.erase("hold");
+    }
+    prim.erase("preset");
+}
+
+// mirror without a pose_id: the figure's own pose left and right (its id, when it has one, the mirror's)
+void mirror_figure(Json& prim) {
+    for (const char* key : {"joints", "hands", "hold"}) {
+        if (const Json* v = core::dict_get(prim, key); v != nullptr && !v->is_object()) throw OpError(std::string(key) + " is not an object");
+    }
+    const Json turned = core::pose_library::mirrored(prim);
+    for (const char* key : {"joints", "hands", "hold"}) {
+        if (turned.contains(key)) prim[key] = turned[key];
+    }
+    if (const Json* id = core::dict_get(prim, "pose_id"); id != nullptr && id->is_string()) {
+        std::string name = id->get<std::string>();
+        const std::string_view suffix = core::pose_library::kMirror;
+        if (name.size() > suffix.size() && name.ends_with(suffix)) {
+            name.resize(name.size() - suffix.size());
+        } else {
+            name += suffix;
+        }
+        prim["pose_id"] = name;
+    }
+    prim.erase("preset");
+}
+
+// keep: pelvis (the figure's pos stays) or ground (its lowest point stays: pos moved along y by as much as the new pose
+// raises or lowers it — its feet stay on the floor)
+bool keeps_ground(const Json& op) {
+    const Json* keep = get(op, "keep");
+    if (keep == nullptr || keep->is_null()) return false;
+    if (core::py_equals(*keep, Json("pelvis"))) return false;
+    if (core::py_equals(*keep, Json("ground"))) return true;
+    throw OpError("keep is pelvis or ground");
+}
+
+void keep_ground(Json& prim, double lowest_before) {
+    const double drop = lowest_before - core::pose_checks::lowest(prim);
+    Json pos = prim["pos"];
+    pos[1] = core::py_round(core::to_float(pos[1]) + drop, 4);
+    prim["pos"] = std::move(pos);
 }
 
 // threeops._find: the first prim with the id, of one of the kinds
@@ -330,7 +426,18 @@ void add_figure(OpContext& c) {
     prim["joints"] = Json::object();
     prim["hands"] = Json::object();
     if (const Json* focal = get(c.op, "focal_mm"); truthy(focal)) prim["focal_mm"] = py_max(20.0, core::to_float(*focal));
-    if (const Json* preset = get(c.op, "preset"); truthy(preset)) figure_preset(prim, core::py_str(*preset));
+    const bool ground = keeps_ground(c.op);
+    const double standing = ground ? core::pose_checks::lowest(prim) : 0.0;  // (the figure as it stands, before its pose)
+    const Json* pose_id = get(c.op, "pose_id");
+    if (const Json* preset = get(c.op, "preset"); truthy(preset)) {
+        if (truthy(pose_id)) throw OpError("give preset or pose_id, not both");
+        figure_preset(prim, core::py_str(*preset));
+    }
+    if (truthy(pose_id)) {
+        library_pose(prim, *pose_id, truthy(get(c.op, "mirror")));
+    } else if (truthy(get(c.op, "mirror"))) {
+        mirror_figure(prim);
+    }
     if (const Json* joints = get(c.op, "joints"); truthy(joints)) {
         const Json given = joints_of(*joints);
         for (const auto& [k, v] : given.items()) prim["joints"][k] = v;
@@ -338,6 +445,11 @@ void add_figure(OpContext& c) {
     if (const Json* hands = get(c.op, "hands"); truthy(hands)) {
         const Json given = hands_of(*hands);
         for (const auto& [k, v] : given.items()) prim["hands"][k] = v;
+    }
+    if (const Json* hold = get(c.op, "hold"); hold != nullptr && !hold->is_null()) hold_into(prim, *hold);
+    if (ground) {
+        core::require_finite(prim);
+        keep_ground(prim, standing);
     }
     Page& page = c.doc.edit_page(pi);
     for (const Json& p : page.prims) {
@@ -384,6 +496,7 @@ void pose_figure(OpContext& c) {
             const Json* pose = core::dict_get(prim, "pose");
             prim["curls"] = hand_pose(Json::object({{"pose", truthy(pose) ? *pose : Json("relaxed")}, {"curls", *curls}}))["curls"];
         }
+        shape_keys(c.op, prim);  // (figures@1)
         for (const char* key : {"rot", "pos"}) {
             if (const Json* v = get(c.op, key); v != nullptr && !v->is_null()) prim[key] = vec(*v, 3, key);
         }
@@ -391,7 +504,22 @@ void pose_figure(OpContext& c) {
         page.prims[at] = std::move(prim);
         return;
     }
-    if (const Json* preset = get(c.op, "preset"); truthy(preset)) figure_preset(prim, core::py_str(*preset));
+    const bool ground = keeps_ground(c.op);
+    double before = 0.0;
+    if (ground) {
+        core::require_finite(prim);
+        before = core::pose_checks::lowest(prim);
+    }
+    const Json* pose_id = get(c.op, "pose_id");
+    if (const Json* preset = get(c.op, "preset"); truthy(preset)) {
+        if (truthy(pose_id)) throw OpError("give preset or pose_id, not both");
+        figure_preset(prim, core::py_str(*preset));
+    }
+    if (truthy(pose_id)) {
+        library_pose(prim, *pose_id, truthy(get(c.op, "mirror")));
+    } else if (truthy(get(c.op, "mirror"))) {
+        mirror_figure(prim);
+    }
     if (const Json* set = get(c.op, "set_joints")) {
         static const Json kNone = Json::object();
         prim["joints"] = joints_of(core::py_truthy(*set) ? *set : kNone);
@@ -423,6 +551,7 @@ void pose_figure(OpContext& c) {
         for (const auto& [k, v] : given.items()) merged[k] = v;
         prim["hands"] = std::move(merged);
     }
+    if (const Json* hold = get(c.op, "hold"); hold != nullptr && !hold->is_null()) hold_into(prim, *hold);
     for (const char* key : {"rot", "pos"}) {
         if (const Json* v = get(c.op, key); v != nullptr && !v->is_null()) prim[key] = vec(*v, 3, key);
     }
@@ -430,6 +559,11 @@ void pose_figure(OpContext& c) {
     if (const Json* height_value = get(c.op, "height_mm"); truthy(height_value)) {
         height = core::to_float(*height_value);
         prim["size"] = Json::array({*height / 2, *height, *height / 4});
+    }
+    if (ground) {
+        if (height) require_finite_value(*height, "height_mm");
+        core::require_finite(prim);
+        keep_ground(prim, before);
     }
     if (const Json* drag_value = get(c.op, "drag"); truthy(drag_value)) {
         const Json drag = core::py_dict(*drag_value);
@@ -447,6 +581,7 @@ void pose_figure(OpContext& c) {
             for (const auto& [joint, values] : joints->items()) merge_into(dict_at(dict_at(prim, "joints"), joint), values);
         }
         prim.erase("preset");
+        prim.erase("pose_id");  // (figures@1: dragged, it is the person's own pose)
     }
     if (height) require_finite_value(*height, "height_mm");
     core::require_finite(prim);
@@ -474,6 +609,7 @@ void add_head_or_hand(OpContext& c, bool head) {
         if (!core::is_one_of(Json(pose), {"open", "relaxed", "fist", "point", "peace", "grip"})) throw OpError(hand_poses_message());
         prim["side"] = side;
         prim["pose"] = pose;
+        shape_keys(c.op, prim);  // (figures@1)
     }
     Page& page = c.doc.edit_page(pi);
     attach_frame(page, c.op, prim);
