@@ -7,12 +7,14 @@
 // read by import_psd onto a B4 colour page: the whole page and a 512 x 512 part, from nothing. Where this build draws
 // groups (groups@1), also the same page with its groups made plain folders again, as builds before groups read them.
 // And (fukidashi@1, SPEC BALLOON-01) ten balloons of now on a B4 page at 600 dpi.
+// And (SPEC FIGURE-01) the smooth 3D figure: made from nothing, traced, and drawn on a page for the proof.
 
 #include <QtTest>
 
 #include <QElapsedTimer>
 #include <QFile>
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <thread>
@@ -21,6 +23,8 @@
 #include "core/color_model.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/mesh3d.hpp"
+#include "core/prim3d.hpp"
 #include "core/model.hpp"
 #include "core/pynum.hpp"
 #include "core/pyrandom.hpp"
@@ -115,6 +119,11 @@ Document deep_file_page(int w, int h) {
 
 class TestPerfRender : public QObject {
     Q_OBJECT
+
+    // (FIGURE-01's bounds: about four times the times measured on the reference machine, Release)
+    static constexpr qint64 kFigureBuildMs = 600;  // (measured 119–147 ms)
+    static constexpr qint64 kFigureTraceMs = 40;   // (measured 7–9 ms)
+    static constexpr qint64 kFigurePageMs = 800;   // (measured 150–191 ms)
 
 private slots:
     void f1_page_at_350dpi() {
@@ -385,6 +394,56 @@ private slots:
                   static_cast<double>(shapes - base_shapes) / 10.0);
             QVERIFY(!cold.image.empty());
         }
+    }
+
+    // FIGURE-01 (a bound of its own, from the times measured when it was made: docs/cpp-migration/HANDOFF.md): the smooth
+    // figure (body, head, two hands; preset walk, 120 mm) made from nothing, its outlines traced at 40 dpi (as
+    // trace_prims) and at 16 dpi (the screen's), and a B4 page with it drawn for the proof at 150 dpi from nothing.
+    void smooth_figure() {
+        using genko::core::Json;
+        namespace mesh3d = genko::core::mesh3d;
+        Json prim = Json::object({{"id", "f"}, {"kind", "figure"}, {"pos", Json::array({128, 180, 0})}, {"size", Json::array({60, 120, 30})},
+                                  {"rot", Json::array({0, 0.6, 0})}, {"body", Json::object({{"sex", "female"}})}, {"hands", Json::object()}});
+        Json joints = Json::object();
+        for (const auto& [k, v] : mesh3d::figure_presets().at("walk").items()) joints[k] = v;
+        prim["joints"] = joints;
+        qint64 most_build = 0;
+        qint64 most_trace = 0;
+        for (int run = 0; run < 3; ++run) {
+            mesh3d::clear_caches();
+            QElapsedTimer timer;
+            timer.start();
+            const auto model = mesh3d::model_of(prim);
+            const qint64 build = timer.elapsed();
+            timer.restart();
+            const auto lines = genko::core::prim3d::trace(prim, nullptr);
+            const qint64 trace = timer.elapsed();
+            timer.restart();
+            const auto screen = genko::core::prim3d::edges(prim, nullptr);
+            const qint64 edges = timer.elapsed();
+            qInfo("the smooth figure: made in %lld ms (%zu points, %zu triangles), traced at 40 dpi in %lld ms (%zu lines), at 16 dpi in %lld ms",
+                  static_cast<long long>(build), model->mesh.v.size(), model->tris.size(), static_cast<long long>(trace), lines.size(),
+                  static_cast<long long>(edges));
+            most_build = std::max(most_build, build);
+            most_trace = std::max(most_trace, trace);
+            QVERIFY(!lines.empty() && !screen.empty());
+        }
+        Document doc = genko::core::new_episode("人形", genko::core::Num(1), 1, genko::core::PageSpec::b4_comic());
+        doc.edit_page(0).numero = false;
+        doc.edit_page(0).prims = Json::array({prim});
+        render::RenderOptions proof;
+        proof.mode = "proof";
+        mesh3d::clear_caches();
+        render::clear_render_caches();
+        QElapsedTimer timer;
+        timer.start();
+        const render::RenderResult page = render::render_page(*doc.pages[0], 150, proof, &doc);
+        const qint64 drawn = timer.elapsed();
+        qInfo("a B4 page with the figure for the proof at 150 dpi, from nothing: %lld ms", static_cast<long long>(drawn));
+        QVERIFY(!page.image.empty());
+        QVERIFY2(most_build < kFigureBuildMs, qPrintable(QString::number(most_build)));
+        QVERIFY2(most_trace < kFigureTraceMs, qPrintable(QString::number(most_trace)));
+        QVERIFY2(drawn < kFigurePageMs, qPrintable(QString::number(drawn)));
     }
 
     void small_picture_of_200_lines() {

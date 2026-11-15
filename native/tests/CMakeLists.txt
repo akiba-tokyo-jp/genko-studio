@@ -68,6 +68,9 @@ genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genk
 genko_test(test_tones_effects SOURCES unit/test_tones_effects.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # 3D (M3-C): the ops, their refusals, Undo and saving, the pose library, the guides drawn.
 genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# The smooth figure, head and hands (SPEC FIGURE-01): closed, within budget, the same bytes on every run and thread, the
+# body numbers, the outlines; GENKO_FIGURE_OUT=<folder> writes the contact sheets.
+genko_test(test_figure_mesh SOURCES unit/test_figure_mesh.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
 # The ops of M3-A1 (layers, masks, pixels, fills, areas, paper).
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
