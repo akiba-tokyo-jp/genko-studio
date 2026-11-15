@@ -2295,12 +2295,61 @@ Fonts& SpeakerFonts::fonts() {
     return *fonts_;
 }
 
+namespace {
+
+// The largest of each `size` (odd) values along a line of `n` from `in` (a step of `in_step` apart), the line's ends
+// repeated outwards, into `out` (`out_step` apart) — the window's halves of blocks of `size`, each block's running
+// largest from its start and from its end (van Herk, Gil and Werman: three looks a value whatever the size).
+void line_max(const unsigned char* in, std::size_t in_step, std::size_t n, std::size_t size, unsigned char* out, std::size_t out_step,
+              std::vector<unsigned char>& from_start, std::vector<unsigned char>& from_end) {
+    const std::size_t r = size / 2, m = n + 2 * r;
+    from_start.resize(m);
+    from_end.resize(m);
+    unsigned char* const g = from_start.data();
+    unsigned char* const h = from_end.data();
+    for (std::size_t t = 0; t < m; ++t) {  // (the line laid out with its ends repeated, `r` each side)
+        const std::size_t at = t < r ? 0 : (t - r < n ? t - r : n - 1);
+        g[t] = in[at * in_step];
+    }
+    for (std::size_t block = 0; block < m; block += size) {
+        const std::size_t end = block + size < m ? block + size : m;
+        h[end - 1] = g[end - 1];
+        for (std::size_t t = end - 1; t-- > block;) h[t] = g[t] > h[t + 1] ? g[t] : h[t + 1];
+        for (std::size_t t = block + 1; t < end; ++t) g[t] = g[t] > g[t - 1] ? g[t] : g[t - 1];
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const unsigned char a = h[i], b = g[i + size - 1];
+        out[i * out_step] = a > b ? a : b;
+    }
+}
+
+// The largest value in the `size` × `size` square round each pixel of an "L" picture, its edges repeated outwards:
+// Image.filter(ImageFilter.MaxFilter(size)) — the same pixels (the largest of a square is the largest of its rows'
+// largest) —, in a row pass and a column pass instead of a sort of size² values at every pixel (a halo of 30 px at 600 dpi:
+// 3,721 values a pixel).
+Image max_square(const Image& grey, int size) {
+    if (size < 3 || (size & 1) == 0) return grey.filter(Filter::max_filter(size));  // (a size Pillow's way has its own answer for)
+    const std::size_t w = static_cast<std::size_t>(grey.width()), h = static_cast<std::size_t>(grey.height());
+    const std::string pixels = grey.tobytes();
+    const auto* const in = reinterpret_cast<const unsigned char*>(pixels.data());
+    std::string rows(pixels.size(), '\0'), out(pixels.size(), '\0');
+    auto* const across = reinterpret_cast<unsigned char*>(rows.data());
+    auto* const result = reinterpret_cast<unsigned char*>(out.data());
+    std::vector<unsigned char> from_start, from_end;
+    const auto k = static_cast<std::size_t>(size);
+    for (std::size_t y = 0; y < h; ++y) line_max(in + y * w, 1, w, k, across + y * w, 1, from_start, from_end);
+    for (std::size_t x = 0; x < w; ++x) line_max(across + x, w, h, k, result + x, w, from_start, from_end);
+    return Image::frombytes("L", grey.size(), out);
+}
+
+}  // namespace
+
 Image outlined(const Image& text, std::int64_t grow, const Rgb& colour) {
     const Image alpha = text.split()[3];
     const std::int64_t pad = grow + 1;
     Image padded = Image::create("L", {static_cast<int>(alpha.width() + 2 * pad), static_cast<int>(alpha.height() + 2 * pad)}, 0);
     padded.paste(alpha, Point{static_cast<int>(pad), static_cast<int>(pad)});
-    const Image halo = padded.filter(Filter::max_filter(static_cast<int>(halo_filter(grow))));
+    const Image halo = max_square(padded, static_cast<int>(halo_filter(grow)));
     Image out = Image::create("RGBA", padded.size(), Ink::with_alpha(colour, 0));
     out.putalpha(halo);
     Image body = Image::create("RGBA", padded.size(), Ink{0, 0, 0, 0});

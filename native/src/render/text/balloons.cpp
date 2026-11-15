@@ -97,8 +97,11 @@ double clamp01(double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); }
 // A plane of coverage as an "L" picture (0..255, rounded to the nearest).
 Image as_image(const clean::Plane& plane) {
     std::string bytes(plane.values.size(), '\0');
-    for (std::size_t i = 0; i < plane.values.size(); ++i) {
-        bytes[i] = static_cast<char>(static_cast<std::uint8_t>(clamp01(static_cast<double>(plane.values[i])) * 255.0 + 0.5));
+    const float* const values = plane.values.data();
+    char* const out = bytes.data();
+    for (std::size_t i = 0, n = plane.values.size(); i < n; ++i) {
+        const double v = static_cast<double>(values[i]);  // (clamp01, written out)
+        out[i] = static_cast<char>(static_cast<std::uint8_t>((v < 0 ? 0.0 : (v > 1 ? 1.0 : v)) * 255.0 + 0.5));
     }
     return Image::frombytes("L", Size{plane.width, plane.height}, bytes);
 }
@@ -1291,16 +1294,22 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
     const std::size_t bands = mode == "RGBA" ? 4 : 3;
     std::string pixels = image.crop(to).tobytes();
     const auto count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    // (the masks and the pixels as plain bytes: the loop below is every pixel the group covers)
+    const unsigned char* const band_at = reinterpret_cast<const unsigned char*>(band.data());
+    const unsigned char* const cover_at = reinterpret_cast<const unsigned char*>(cover.data());
+    const unsigned char* const tone_at = reinterpret_cast<const unsigned char*>(tone.data());
+    const bool toned = !tone.empty();
+    char* const pixel_at = pixels.data();
     for (std::size_t i = 0; i < count; ++i) {
-        const auto band8 = static_cast<unsigned char>(band[i]);
-        const auto cover8 = static_cast<unsigned char>(cover[i]);
+        const unsigned char band8 = band_at[i];
+        const unsigned char cover8 = cover_at[i];
         if (band8 == 0 && cover8 == 0) continue;
         if (masks.blend && band8 != 255) blended(i, paper);  // (the fill's colour here)
-        if (tone.empty() || tone[i] == '\0') {  // (most of a balloon: all line, or all fill — the colour itself)
+        if (!toned || tone_at[i] == 0) {  // (most of a balloon: all line, or all fill — the colour itself)
             const bool all_line = band8 == 255;
             const bool all_fill = band8 == 0 && cover8 == 255 && masks.fill && masks.opacity >= 1.0 && !masks.blend;
             if (all_line || all_fill) {
-                char* whole = &pixels[i * bands];
+                char* whole = pixel_at + i * bands;
                 const double* colour = all_line ? line : paper;
                 for (std::size_t k = 0; k < 3; ++k) whole[k] = static_cast<char>(static_cast<std::uint8_t>(colour[k]));
                 if (bands == 4) whole[3] = static_cast<char>(static_cast<std::uint8_t>(255));
@@ -1311,11 +1320,11 @@ void composite(Image& image, const Box& to, const Masks& masks, const Box& from)
         const double b = static_cast<double>(band8) / 255.0;
         const double c = static_cast<double>(cover8) / 255.0;
         const double inside = c > b ? c - b : 0.0;
-        const double t = tone.empty() ? 0.0 : std::min(inside, static_cast<double>(static_cast<unsigned char>(tone[i])) / 255.0);
+        const double t = !toned ? 0.0 : std::min(inside, static_cast<double>(tone_at[i]) / 255.0);
         const double w_line = b + t;
         const double w_paper = masks.fill ? (inside - t) * masks.opacity : 0.0;
         const double w_under = 1.0 - w_line - w_paper;
-        char* p = &pixels[i * bands];
+        char* p = pixel_at + i * bands;
         if (bands == 3) {
             for (std::size_t k = 0; k < 3; ++k) {
                 const double v = static_cast<double>(static_cast<unsigned char>(p[k])) * w_under + paper[k] * w_paper + line[k] * w_line;

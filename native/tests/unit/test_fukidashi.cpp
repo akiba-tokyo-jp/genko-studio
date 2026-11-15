@@ -132,25 +132,38 @@ std::array<int, 2> ink_size(const Image& image) {
 
 
 // Whether a line drawn dark on a white picture closes round `inside` (x, y): the white that reaches the picture's edge
-// does not reach it (four ways from pixel to pixel; `dark`: below this is line).
+// does not reach it (four ways from pixel to pixel; `dark`: below this is line). Walked from `inside` — the same
+// answer as from the edge (a way between two white pixels goes both ways), over the balloon's inside rather than the
+// whole picture round it —, in plain loops (an unoptimized build walks millions of pixels).
 bool closed_round(const Grey& g, int inside_x, int inside_y, int dark = 128) {
-    std::vector<char> seen(static_cast<std::size_t>(g.w) * static_cast<std::size_t>(g.h), 0);
-    std::vector<std::pair<int, int>> stack;
-    const auto visit = [&](int x, int y) {
-        if (x < 0 || y < 0 || x >= g.w || y >= g.h) return;
-        char& mark = seen[static_cast<std::size_t>(y) * static_cast<std::size_t>(g.w) + static_cast<std::size_t>(x)];
-        if (mark != 0 || g.at(x, y) < dark) return;
-        mark = 1;
-        stack.emplace_back(x, y);
-    };
-    for (int x = 0; x < g.w; ++x) visit(x, 0), visit(x, g.h - 1);
-    for (int y = 0; y < g.h; ++y) visit(0, y), visit(g.w - 1, y);
+    if (inside_x < 0 || inside_y < 0 || inside_x >= g.w || inside_y >= g.h) throw std::out_of_range("a pixel off the picture");
+    const std::size_t w = static_cast<std::size_t>(g.w), h = static_cast<std::size_t>(g.h);
+    const unsigned char* const v = reinterpret_cast<const unsigned char*>(g.v.data());
+    const std::size_t start = static_cast<std::size_t>(inside_y) * w + static_cast<std::size_t>(inside_x);
+    if (v[start] < dark) return true;  // (on the line itself: the white from the edge never reaches it)
+    // (a row's run of white at a time: from a pixel as far left and right as the white goes, then the runs above and below it)
+    std::vector<char> seen(w * h, 0);
+    std::vector<std::size_t> stack{start};
     while (!stack.empty()) {
-        const auto [x, y] = stack.back();
+        const std::size_t i = stack.back();
         stack.pop_back();
-        visit(x + 1, y), visit(x - 1, y), visit(x, y + 1), visit(x, y - 1);
+        if (seen[i] != 0) continue;
+        const std::size_t y = i / w, row = y * w;
+        std::size_t left = i - row, right = left;
+        while (left > 0 && seen[row + left - 1] == 0 && v[row + left - 1] >= dark) --left;
+        while (right + 1 < w && seen[row + right + 1] == 0 && v[row + right + 1] >= dark) ++right;
+        if (left == 0 || right + 1 == w || y == 0 || y + 1 == h) return false;  // (the white of the edge, reached)
+        for (std::size_t x = left; x <= right; ++x) seen[row + x] = 1;
+        for (const std::size_t next : {row - w, row + w}) {
+            bool in_run = false;
+            for (std::size_t x = left; x <= right; ++x) {
+                const bool white = seen[next + x] == 0 && v[next + x] >= dark;
+                if (white && !in_run) stack.push_back(next + x);
+                in_run = white;
+            }
+        }
     }
-    return seen[static_cast<std::size_t>(inside_y) * static_cast<std::size_t>(g.w) + static_cast<std::size_t>(inside_x)] == 0;
+    return true;
 }
 
 // A line's balloon alone (no letters) on a white picture of `w_mm` × `h_mm` at `dpi`.

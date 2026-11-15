@@ -480,9 +480,10 @@ void Rasterizer::render_into(const PixelBox& box, float* out) const {
             band(from, to, box.x0, st, 0);
         }
         float sum = 0.0f;
+        const float* const acc = st.acc.data();
         for (std::size_t x = 0; x < w; ++x) {
-            sum += st.acc[x];
-            row_out[x] = std::clamp(sum, 0.0f, 1.0f);
+            sum += acc[x];
+            row_out[x] = sum < 0.0f ? 0.0f : (1.0f < sum ? 1.0f : sum);  // (std::clamp, written out)
         }
     }
 }
