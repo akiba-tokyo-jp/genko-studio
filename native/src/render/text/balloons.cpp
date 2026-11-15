@@ -94,6 +94,14 @@ using clean::P;
 
 double clamp01(double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); }
 
+// Each value of `a` times the same of `b` (as many: planes of one region). (A plain loop: it runs over every pixel of a
+// group's region, and an unoptimized build calls through every subscript.)
+void times(std::vector<float>& a, const std::vector<float>& b) {
+    float* const to = a.data();
+    const float* const by = b.data();
+    for (std::size_t i = 0, n = a.size(); i < n; ++i) to[i] *= by[i];
+}
+
 // A plane of coverage as an "L" picture (0..255, rounded to the nearest).
 Image as_image(const clean::Plane& plane) {
     std::string bytes(plane.values.size(), '\0');
@@ -1081,7 +1089,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     }
     const auto within = [&](double reach) {
         clean::Plane plane = clean::ribbon_plane(runs, reach, size.width, size.height, !dashes);
-        for (std::size_t i = 0; i < count; ++i) plane.values[i] *= fill.values[i];
+        times(plane.values, fill.values);
         return plane;
     };
     std::vector<clean::Shape> body_shapes;
@@ -1101,7 +1109,7 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
     const auto within_body = [&](double reach, bool round_ends) {
         if (!dripping) return within(reach);
         clean::Plane plane = clean::ribbon_plane(body_runs, reach, size.width, size.height, round_ends);
-        for (std::size_t i = 0; i < count; ++i) plane.values[i] *= body_fill.values[i];
+        times(plane.values, body_fill.values);
         return plane;
     };
     std::vector<float> band(count, 0.0f);
@@ -1114,15 +1122,20 @@ Masks shape_masks(const std::vector<const core::StoryLine*>& lines, const std::v
             with.chain = !dashes;
             with.corners = built.corners;
             clean::Plane plane = clean::pen_plane(clean::pen_runs(runs, shapes, with), size.width, size.height);
-            for (std::size_t i = 0; i < count; ++i) plane.values[i] *= fill.values[i];
+            times(plane.values, fill.values);
             band = std::move(plane.values);
         } else {
             band = within(width).values;
         }
-        for (std::size_t i = 0; i < count; ++i) inner[i] = fill.values[i] - band[i];
+        const float* const filled = fill.values.data();
+        const float* const line = band.data();
+        float* const in = inner.data();
+        for (std::size_t i = 0; i < count; ++i) in[i] = filled[i] - line[i];
     }
     const auto lighter = [&](const std::vector<float>& more) {
-        for (std::size_t i = 0; i < count; ++i) band[i] = std::max(band[i], more[i]);
+        float* const line = band.data();
+        const float* const other = more.data();
+        for (std::size_t i = 0; i < count; ++i) line[i] = line[i] < other[i] ? other[i] : line[i];  // (std::max)
     };
     if (width > 0 && (core::py_truthy(at(st, "double")) || kind == "fancy_box")) {
         // a second line inside the first: two widths in, one width wide — none in a shape that is everywhere within
