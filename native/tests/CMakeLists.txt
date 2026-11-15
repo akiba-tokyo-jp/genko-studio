@@ -71,6 +71,10 @@ genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genk
 # The smooth figure, head and hands (SPEC FIGURE-01): closed, within budget, the same bytes on every run and thread, the
 # body numbers, the outlines; GENKO_FIGURE_OUT=<folder> writes the contact sheets.
 genko_test(test_figure_mesh SOURCES unit/test_figure_mesh.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
+# The pose library (SPEC FIGURE-02, genko.poses@1): the file, every pose's checks (joint ranges, support and contact,
+# limbs through the body, mirrors, within budget, thumbnails the same bytes), the ops' pose_id, mirror and keep, figures@1;
+# GENKO_POSE_SHEETS=<folder> writes the contact sheets.
+genko_test(test_figure_poses SOURCES unit/test_figure_poses.cpp DEPS genko_test_support genko_render_ops Qt6::Gui LABELS unit TIMEOUT 900)
 # The ops of M3-A1 (layers, masks, pixels, fills, areas, paper).
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)

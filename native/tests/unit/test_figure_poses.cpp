@@ -1,0 +1,354 @@
+// The figure's pose library (SPEC FIGURE-02, genko.poses@1, this build's own): the file as embedded and well formed, the
+// categories as many as promised; every pose (and its mirror) within the joints' ranges, resting on what it says it
+// rests on and balanced, no limb through the body, the mirror exact, drawn within the budget; the nine presets as
+// before and passing the same checks; the thumbnails the same bytes on every run and thread; the library's filters;
+// the ops' pose_id, mirror, keep, spread, thumb and hold; figures@1 named only while a book uses them (a book without
+// them saved as before, byte for byte), and a book with them saved and read back.
+// GENKO_POSE_SHEETS=<folder> also writes the contact sheets there (one per category and page) and checks.json.
+
+#include <QtTest>
+
+#include <QCryptographicHash>
+#include <QTemporaryDir>
+
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "core/command_bus.hpp"
+#include "core/json.hpp"
+#include "core/mesh3d.hpp"
+#include "core/pose_checks.hpp"
+#include "core/pose_library.hpp"
+#include "core/model.hpp"
+#include "core/ops_schema.hpp"
+#include "render/ops_registry.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/lock.hpp"
+#include "storage/reader.hpp"
+#include "storage/transaction.hpp"
+#include "storage/writer.hpp"
+#include "pose_sheets.hpp"
+#include "testsupport.hpp"
+
+namespace {
+
+using genko::core::Actor;
+using genko::core::Document;
+using genko::core::Json;
+using genko::core::Num;
+namespace library = genko::core::pose_library;
+namespace checks = genko::core::pose_checks;
+namespace mesh3d = genko::core::mesh3d;
+
+const genko::core::CommandBus& bus() {
+    static const genko::core::CommandBus b(genko::render::ops_registry());
+    return b;
+}
+
+Json ops(const std::string& text) { return genko::core::parse_python_json(text); }
+
+std::string sha256_of(std::string_view bytes) {
+    return QCryptographicHash::hash(QByteArrayView(bytes.data(), static_cast<qsizetype>(bytes.size())), QCryptographicHash::Sha256).toHex().toStdString();
+}
+
+// A book whose ids are the same each time, with figures, a head and a hand made by the ops of before (no pose_id,
+// hold, spread or thumb).
+Document book_of_before() {
+    Document doc = genko::core::new_episode("figures", Num(1), 2, genko::core::PageSpec::b5_doujin());
+    doc.book_id = "0123456789abcdef0123456789abcdef";
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        genko::core::Page& page = doc.edit_page(i);
+        page.id = "pg" + std::to_string(i + 1);
+        for (std::size_t k = 0; k < page.layers.size(); ++k) page.layers[k].id = "ly" + std::to_string(i + 1) + "_" + std::to_string(k);
+        for (std::size_t k = 0; k < page.frames.size(); ++k) page.frames[k].id = "fr" + std::to_string(i + 1) + "_" + std::to_string(k);
+    }
+    return bus()
+        .apply(doc, ops(R"([
+            {"op": "add_figure", "page": 1, "id": "a", "pos": [60, 120, 0], "preset": "walk", "body": {"sex": "female"}},
+            {"op": "add_figure", "page": 1, "id": "b", "pos": [120, 120, 0], "height_mm": 110,
+             "joints": {"l_arm": {"z": 1.2}}, "hands": {"l": {"pose": "grip", "curls": [0.2, 0.5, 0.5, 0.6, 0.7]}, "r": "fist"}},
+            {"op": "pose_figure", "page": 1, "id": "b", "preset": "think", "joints": {"head": {"y": 0.2}}},
+            {"op": "add_head", "page": 1, "id": "h", "pos": [140, 60, 0]},
+            {"op": "add_hand", "page": 2, "id": "k", "pos": [120, 90, 0], "side": "l", "pose": "peace"},
+            {"op": "pose_figure", "page": 2, "id": "k", "curls": [0.1, 0, 0, 1, 1]}])"),
+               Actor("genko"))
+        .doc;
+}
+
+// The book as it is saved (project.json's text), but for the version of the build that wrote it.
+std::string saved_text(const Document& doc) {
+    QTemporaryDir dir;
+    genko::storage::AssetStore store(std::filesystem::path(dir.path().toStdString()));
+    Json payload = genko::storage::project_payload_v4(doc, store);
+    payload["writer"]["version"] = "pinned";
+    return genko::core::dump_python_indent2(payload);
+}
+
+// The least each category of batch A holds (plan §8; mirrors do not count).
+const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},     {"fashion", 25},  {"walk", 10},        {"run", 10},
+                                                         {"sit_chair", 30}, {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25}};
+
+std::string issues_text(const std::vector<checks::Issue>& issues) {
+    std::string out;
+    for (const auto& i : issues) out += "\n  " + i.check + ": " + i.what;
+    return out;
+}
+
+// The sha256 of four thumbnails (60 × 90 at three quarters: stand's first, fashion's last mirrored, sit_chair's first,
+// kneel_squat's last mirrored), taken with this build.
+const char* const kThumbPins =
+    "21294bc3cc48111e8be475fa9f1686697e3b043efe7690ad762e69345ec6e071 02d657798c14cdb463ba280f7b3227e4fad1227eb9214e9986b83376147c2ea4 "
+    "36424809c0632dd85ce0ece0b3903ba6cf1ac2972167d790eea0ff62ce683847 9921041c628a8e3101b334d3783283bf57674d1dcad0fd3e9b42bda7b5cdaf21 ";
+
+std::string sheets_dir() { return qEnvironmentVariable("GENKO_POSE_SHEETS").toStdString(); }
+
+}  // namespace
+
+class TestFigurePoses : public QObject {
+    Q_OBJECT
+
+    Json measured_ = Json::array();
+
+private slots:
+    // The file is data/figure_poses.json byte for byte, genko.poses@1, well formed (core::pose_checks::check_file), and
+    // each category of batch A has its poses.
+    void theFileIsWellFormed() {
+        const std::string on_disk = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/native/src/core/data/figure_poses.json"));
+        QVERIFY(library::text() == on_disk);
+        const Json& file = library::library();
+        QCOMPARE(file["format"], Json("genko.poses@1"));
+        const auto issues = checks::check_file(file);
+        QVERIFY2(issues.empty(), issues_text(issues).c_str());
+        std::map<std::string, std::size_t> counts;
+        for (const auto& c : library::categories()) counts[c.id] = c.count;
+        std::size_t total = 0;
+        for (const auto& [category, least] : kAtLeast) {
+            QVERIFY2(counts[category] >= least, (std::string(category) + ": " + std::to_string(counts[category])).c_str());
+            total += counts[category];
+        }
+        QCOMPARE(total, file["poses"].size());
+        QVERIFY(total >= 195);
+    }
+
+    // The nine presets are as before (the JSON text of figure_presets(), taken with the build before FIGURE-02).
+    void presetsAreAsBefore() {
+        QCOMPARE(sha256_of(genko::core::dump_python(mesh3d::figure_presets())),
+                 std::string("7eaa858c1fe794e06cba02c1f44e3f74a3beaa72519b3faedd3c73040271a4e3"));
+    }
+
+    // The checks' thresholds hold the nine presets: within the ranges, no limb through the body, the mirror exact, drawn;
+    // the standing ones on both feet and balanced.
+    void presetsPassTheChecks() {
+        for (const auto& [name, data] : mesh3d::figure_presets().items()) {
+            Json pose = Json::object({{"id", "preset/" + name}, {"category", "preset"}, {"joints", Json::object()}, {"hands", Json::object()},
+                                      {"support", "none"}, {"contact", Json::array()}, {"symmetric", false}});
+            for (const auto& [k, v] : data.items()) (k == "hands" ? pose["hands"] : pose["joints"][k]) = v;
+            if (name == "stand" || name == "point" || name == "arms_up" || name == "think" || name == "peace") {
+                pose["support"] = "floor";
+                pose["contact"] = Json::array({"l_foot", "r_foot"});
+            }
+            const checks::Report r = checks::check_pose(pose);
+            QVERIFY2(r.ok(), (name + issues_text(r.issues)).c_str());
+            for (const char* sex : {"male", "female"}) {
+                const auto in = checks::check_inside(checks::figure_of(pose, 120.0, Json::object({{"sex", sex}})));
+                QVERIFY2(in.empty(), (name + " " + sex + issues_text(in)).c_str());
+            }
+        }
+    }
+
+    // Every pose of the library, and its mirror: each check (core/pose_checks.hpp), its surface made once. With
+    // GENKO_POSE_SHEETS the sheets and what each pose measured are written.
+    void everyPose_data() {
+        QTest::addColumn<QString>("category");
+        for (const auto& c : library::categories()) QTest::newRow(c.id.c_str()) << QString::fromStdString(c.id);
+    }
+    void everyPose() {
+        QFETCH(QString, category);
+        library::Filter filter;
+        filter.category = category.toStdString();
+        std::vector<genko::test::pose_sheets::Entry> entries;
+        std::string failed;
+        for (const Json* pose : library::list(filter)) {
+            const checks::Report r = checks::check_pose(*pose);
+            if (!r.ok()) failed += r.id + issues_text(r.issues) + "\n";
+            const Json mirror = library::mirrored(*pose);
+            const Json mirror_prim = checks::figure_of(mirror);
+            for (const auto& list : {checks::check_ranges(mirror["joints"]), checks::check_inside(mirror_prim), checks::check_mirror(mirror)}) {
+                if (!list.empty()) failed += r.id + " (mirrored)" + issues_text(list) + "\n";
+            }
+            for (const char* sex : {"male", "female"}) {
+                const auto in = checks::check_inside(checks::figure_of(*pose, 120.0, Json::object({{"sex", sex}})));
+                if (!in.empty()) failed += r.id + " (" + sex + ")" + issues_text(in) + "\n";
+            }
+            entries.push_back({*pose, r});
+        }
+        if (!sheets_dir().empty()) {
+            for (const auto& e : entries) measured_.push_back(genko::test::pose_sheets::measured(e));
+            genko::test::pose_sheets::write(sheets_dir(), category.toStdString(), entries);
+        }
+        QVERIFY2(failed.empty(), failed.c_str());
+    }
+
+    // The library's filters for the gallery and the tool to come (G4): categories and their counts, a category, tags,
+    // words in Japanese or English (any ASCII case), what the body rests on, its contacts; a mirrored id.
+    void filtersFindPoses() {
+        std::size_t all = 0;
+        for (const auto& c : library::categories()) {
+            library::Filter f;
+            f.category = c.id;
+            QCOMPARE(library::list(f).size(), c.count);
+            all += c.count;
+        }
+        QCOMPARE(library::list().size(), all);
+        library::Filter f;
+        f.query = "スマホ";
+        const auto ja = library::list(f);
+        f.query = "PHONE";
+        const auto en = library::list(f);
+        QVERIFY(ja.size() >= 4 && en.size() >= ja.size());
+        for (const Json* p : ja) QVERIFY(std::find(en.begin(), en.end(), p) != en.end());
+        f = {};
+        f.tags = {"正座"};
+        QVERIFY(!library::list(f).empty());
+        f = {};
+        f.support = "chair";
+        for (const Json* p : library::list(f)) QVERIFY(p->contains("seat_h"));
+        f.contact = {"seat", "l_foot"};
+        QVERIFY(!library::list(f).empty());
+        f = {};
+        f.category = "sit_floor";
+        f.query = "あぐら";
+        QVERIFY(!library::list(f).empty());
+        f.category = "stand";
+        QVERIFY(library::list(f).empty());
+        // a mirrored id: the mirror of the pose, its id with ~m; twice is the pose
+        const std::optional<Json> m = library::resolve("stand/wave~m");
+        QVERIFY(m.has_value());
+        QCOMPARE((*m)["id"], Json("stand/wave~m"));
+        QCOMPARE((*m)["joints"], library::mirrored_joints((*library::find("stand/wave"))["joints"]));
+        QCOMPARE((*library::resolve("stand/wave~m", true))["id"], Json("stand/wave"));
+        QCOMPARE(*library::resolve("stand/wave", false), *library::find("stand/wave"));
+        QVERIFY(!library::resolve("stand/nope").has_value());
+        QVERIFY(!library::resolve("~m").has_value());
+    }
+
+    // Thumbnails are the same bytes every time and on every thread (a pose's surface made in four threads at once), and
+    // a few are pinned.
+    void thumbnailsAreTheSameBytes() {
+        std::vector<Json> prims;
+        for (const auto& c : library::categories()) {
+            library::Filter f;
+            f.category = c.id;
+            const auto list = library::list(f);
+            prims.push_back(checks::figure_of(*list.front()));
+            prims.push_back(checks::figure_of(library::mirrored(*list.back())));
+        }
+        const auto thumbs = [&](std::size_t first, std::size_t step, std::vector<std::string>& out) {
+            for (std::size_t i = first; i < prims.size(); i += step) out[i] = checks::thumbnail(prims[i], 0.785, 60, 90);
+        };
+        mesh3d::clear_caches();
+        std::vector<std::string> one(prims.size());
+        thumbs(0, 1, one);
+        std::vector<std::string> again(prims.size());
+        thumbs(0, 1, again);
+        mesh3d::clear_caches();
+        std::vector<std::string> four(prims.size());
+        {
+            std::vector<std::thread> threads;
+            for (std::size_t t = 0; t < 4; ++t) threads.emplace_back(thumbs, t, 4, std::ref(four));
+            for (auto& t : threads) t.join();
+        }
+        for (std::size_t i = 0; i < prims.size(); ++i) {
+            QCOMPARE(one[i].size(), std::size_t{60 * 90});
+            QVERIFY(one[i] == again[i]);
+            QVERIFY(one[i] == four[i]);
+            QVERIFY(std::count(one[i].begin(), one[i].end(), static_cast<char>(255)) < 60 * 90 - 300);  // (a figure drawn)
+        }
+        std::string got;
+        for (std::size_t i : {0, 3, 8, 13}) got += sha256_of(one[i]) + " ";
+        QCOMPARE(got, std::string(kThumbPins));
+    }
+
+    // figures@1 is named while a prim says pose_id, hold, spread or thumb, and not otherwise; such a book is saved and read
+    // back with them as they were.
+    void figuresFeature() {
+        namespace storage = genko::storage;
+        Document doc = book_of_before();
+        QVERIFY(!library::uses_figures_feature(doc));
+        const auto features = [](const Document& d) {
+            QTemporaryDir dir;
+            storage::AssetStore store(std::filesystem::path(dir.path().toStdString()));
+            return storage::project_payload_v4(d, store)["features"];
+        };
+        const auto has = [](const Json& list) { return std::find(list.begin(), list.end(), Json("figures@1")) != list.end(); };
+        QVERIFY(!has(features(doc)));
+        for (const char* batch : {R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "stand/neutral"}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": "pen"}}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "b", "hands": {"r": {"pose": "fist", "thumb": 0.1}}}])",
+                                  R"([{"op": "pose_figure", "page": 2, "id": "k", "spread": 0.5}])"}) {
+            const Document d = bus().apply(doc, ops(batch), Actor("genko")).doc;
+            QVERIFY2(library::uses_figures_feature(d), batch);
+            QVERIFY2(has(features(d)), batch);
+        }
+        // the pose's id taken away by a drag and its hands' shapes by named ones: the book is one of before again
+        const Document dragged = bus().apply(doc, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "stand/neutral"},
+                                                          {"op": "pose_figure", "page": 1, "id": "a", "drag": {"handle": "l_wrist", "to": [70, 100]}}])"),
+                                             Actor("genko")).doc;
+        QVERIFY(has(features(dragged)));  // (the library's hands say spread and thumb)
+        const Document plain = bus().apply(dragged, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hands": {"l": "relaxed", "r": "relaxed"}}])"), Actor("genko")).doc;
+        QVERIFY(!has(features(plain)));
+        // saved and read back
+        const Document posed = bus().apply(doc, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "everyday/drink~m", "keep": "ground"},
+                                                        {"op": "pose_figure", "page": 2, "id": "k", "spread": 0.5, "thumb": 0.3}])"),
+                                           Actor("genko")).doc;
+        QTemporaryDir tmp;
+        const std::filesystem::path dir = std::filesystem::path(tmp.path().toStdString()) / "posed.genko";
+        {
+            storage::ProjectLock lock(dir);
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.ops = Json::array();
+            storage::Saver(lock).save(posed, request);
+        }
+        const auto loaded = storage::load_document(dir);
+        QVERIFY(std::find(loaded.document.features.begin(), loaded.document.features.end(), "figures@1") != loaded.document.features.end());
+        for (std::size_t p = 0; p < posed.pages.size(); ++p) QCOMPARE(loaded.document.page(p).prims, posed.page(p).prims);
+        QCOMPARE(loaded.document.page(0).prims[0]["pose_id"], Json("everyday/drink~m"));
+        QCOMPARE(loaded.document.page(0).prims[0]["hold"], Json::object({{"l", "cup"}}));
+    }
+
+    // The op catalogue (`genko schema`) says the new keys.
+    void theSchemaSaysTheKeys() {
+        for (const Json& item : genko::core::ops_schema()) {
+            const std::string op = item["op"].get<std::string>();
+            if (op == "add_figure" || op == "pose_figure") {
+                for (const char* key : {"pose_id", "mirror", "keep", "hold"}) QVERIFY2(item.contains(key), (op + " " + key).c_str());
+                QVERIFY(item["hands"].get<std::string>().find("spread") != std::string::npos);
+            }
+            if (op == "add_hand" || op == "pose_figure") {
+                QVERIFY(item.contains("spread") && item.contains("thumb"));
+            }
+        }
+    }
+
+    // A book without the library's keys is saved as the build before FIGURE-02 saved it (the sha256 of its project.json
+    // was taken with that build: native/figures e64e001d).
+    void booksWithoutTheNewKeysSaveAsBefore() {
+        const std::string text = saved_text(book_of_before());
+        QCOMPARE(sha256_of(text), std::string("81b68808e67d7ba9ed3643c1ae8b9a6ba6152e4980b92f5deb50bdf9905b615c"));
+        QCOMPARE(saved_text(book_of_before()), text);
+    }
+
+    void cleanupTestCase() {
+        if (sheets_dir().empty()) return;
+        std::ofstream out(std::filesystem::path(sheets_dir()) / "checks.json", std::ios::binary);
+        out << genko::core::dump_python_indent2(measured_);
+    }
+};
+
+QTEST_MAIN(TestFigurePoses)
+#include "test_figure_poses.moc"

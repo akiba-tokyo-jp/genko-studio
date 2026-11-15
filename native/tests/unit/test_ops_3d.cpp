@@ -19,6 +19,8 @@
 #include "core/limits.hpp"
 #include "core/linalg3.hpp"
 #include "core/model.hpp"
+#include "core/pose_checks.hpp"
+#include "core/pose_library.hpp"
 #include "core/poses.hpp"
 #include "core/pynum.hpp"
 #include "render/ops_registry.hpp"
@@ -596,6 +598,81 @@ private slots:
         } else {
             qputenv("GENKO_CONFIG_DIR", before);
         }
+    }
+
+    // The pose library through the ops (SPEC FIGURE-02, figures@1): pose_id puts the library's joints and hands in place
+    // as a preset does and keeps the id and what the hands hold, mirror swaps left and right (the library's mirror, or the
+    // figure's own), keep: ground keeps the lowest point where it was, a drag forgets the id, a preset too; the hands'
+    // spread and thumb; the refusals; saved and read back as they were.
+    void libraryPoses() {
+        namespace library = genko::core::pose_library;
+        const auto apply = [&](const Document& doc, const std::string& batch) { return bus().apply(doc, ops(batch), Actor("genko")).doc; };
+        const Json& wave = *library::find("stand/wave");
+        Document d = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave"}])");
+        Json f = *prim(d, "fig");
+        same(f["joints"], wave["joints"], "joints");
+        QCOMPARE(f["pose_id"], Json("stand/wave"));
+        QVERIFY(!f.contains("preset"));  // (the walk preset is gone)
+        QVERIFY(!f.contains("hold"));
+        QCOMPARE(f["hands"]["r"], wave["hands"]["r"]);
+        // the mirror: the library's, with "~m"; and a figure's own mirror toggles it back
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave", "mirror": true}])");
+        f = *prim(d, "fig");
+        QCOMPARE(f["pose_id"], Json("stand/wave~m"));
+        same(f["joints"], library::mirrored_joints(wave["joints"]), "mirrored joints");
+        QCOMPARE(f["hands"]["l"], wave["hands"]["r"]);
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])");
+        f = *prim(d, "fig");
+        QCOMPARE(f["pose_id"], Json("stand/wave"));
+        QCOMPARE(genko::core::dump_python(f["joints"]), genko::core::dump_python(library::mirrored_joints(library::mirrored_joints(wave["joints"]))));
+        // what the hands hold comes with the pose (and goes with the next one that holds nothing)
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink"}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], Json::object({{"r", "cup"}}));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": null, "l": "book"}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], Json::object({{"l", "book"}}));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/neutral"}])");
+        QVERIFY(!(*prim(d, "fig")).contains("hold"));
+        // keep: ground — the lowest point stays (a figure sitting down on the floor keeps its feet's floor); pelvis: pos stays
+        const double floor_before = (*prim(d, "fig"))["pos"][1].get<double>() + genko::core::pose_checks::lowest(*prim(d, "fig"));
+        const Document sat = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "sit_floor/agura", "keep": "ground"}])");
+        const Json& s = *prim(sat, "fig");
+        QVERIFY(std::abs(s["pos"][1].get<double>() + genko::core::pose_checks::lowest(s) - floor_before) < 1e-3);
+        QVERIFY(s["pos"][1].get<double>() > (*prim(d, "fig"))["pos"][1].get<double>() + 10.0);  // (the pelvis came down)
+        QCOMPARE(s["pos"][0], (*prim(d, "fig"))["pos"][0]);
+        const Document kept = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "sit_floor/agura", "keep": "pelvis"}])");
+        QCOMPARE((*prim(kept, "fig"))["pos"], (*prim(d, "fig"))["pos"]);
+        const Document added = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "f9", "pos": [80, 150, 0], "pose_id": "sit_chair/upright", "keep": "ground"},
+                                               {"op": "add_figure", "page": 1, "id": "f8", "pos": [80, 150, 0]}])");
+        QVERIFY(std::abs((*prim(added, "f9"))["pos"][1].get<double>() + genko::core::pose_checks::lowest(*prim(added, "f9")) -
+                         150.0 - genko::core::pose_checks::lowest(*prim(added, "f8"))) < 1e-3);
+        // a drag forgets the pose's id (it is the person's own pose now), as a preset does
+        const Document dragged = apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "drag": {"handle": "l_wrist", "to": [70, 100]}}])");
+        QVERIFY(!(*prim(dragged, "fig")).contains("pose_id"));
+        QVERIFY(!(*prim(apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "preset": "run"}])"), "fig")).contains("pose_id"));
+        QCOMPARE((*prim(apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "joints": {"head": {"y": 0.2}}}])"), "fig"))["pose_id"], Json("sit_floor/agura"));
+        // the hands' spread and thumb (figures@1): kept when given, as numbers 0..1 to 3 places
+        const Document spread = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hands": {"l": {"pose": "open", "spread": 0.71234, "thumb": 2}, "r": "fist"}},
+                                                {"op": "pose_figure", "page": 1, "id": "hand", "spread": 0.4, "thumb": 0.25},
+                                                {"op": "add_hand", "page": 1, "id": "h3", "pose": "grip", "thumb": 0.9}])");
+        QCOMPARE((*prim(spread, "fig"))["hands"]["l"], ops(R"({"pose": "open", "curls": [0.0, 0.0, 0.0, 0.0, 0.0], "spread": 0.712, "thumb": 1.0})"));
+        QCOMPARE((*prim(spread, "fig"))["hands"]["r"], Json("fist"));
+        QCOMPARE((*prim(spread, "hand"))["spread"], Json(0.4));
+        QCOMPARE((*prim(spread, "h3"))["thumb"], Json(0.9));
+        QVERIFY((*prim(base_, "fig"))["hands"].dump().find("spread") == std::string::npos);
+        // refusals (the reason first, then the op's keys)
+        const auto says = [](const std::string& error, const std::string& reason) { return error.find(": " + reason + " \u2016") != std::string::npos; };
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/nope"}])")), "no pose stand/nope (figure_poses lists them)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "add_figure", "page": 1, "pose_id": "stand/wave", "preset": "run"}])")), "give preset or pose_id, not both"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave", "keep": "feet"}])")), "keep is pelvis or ground"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": "cake"}}])")),
+                     "a hand holds one of cup, phone, paper, bag, umbrella, book, pen, sword, bat, ball"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "hands": {"l": {"pose": "open", "spread": "wide"}}}])")),
+                     "spread and thumb are numbers from 0 to 1"));
+        // saved and read back as they were
+        const Document mirrored = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink~m", "hands": {"l": {"pose": "grip", "spread": 0.2}}}])");
+        const Document back = read(make_book(book_path(), mirrored));
+        same(back.page(0).prims, mirrored.page(0).prims, "prims read back");
+        QCOMPARE((*prim(back, "fig"))["hold"], Json::object({{"l", "cup"}}));
     }
 
     // 3D guides are drawn in the proof and the name, never printed; a region drawn alone is the whole page cut.
