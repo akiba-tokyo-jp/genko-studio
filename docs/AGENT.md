@@ -184,7 +184,7 @@ GENKO_STYLE_CATALOG_TOKEN is sent as a bearer token.
 Genko makes no images. It writes a generation request, the agent generates with its own image tool, and Genko takes the result back as candidates.
 
 1. `next` gives the work in order: `make_sheet` → (person approves the sheet) → `gen_panel` → `import_pending` → `review_candidates` → `fix_panel` → `report_regions` → (person approves the art) → `upscale_panel` → `finish_page` → (person exports). Items another agent claimed (`next claim=true`, 10-minute lease) and items parked by `ask_human` show as blocked.
-2. `generation_request {page, frame_id}` (or `character_id` for a sheet, `location_id` for a background reference; `mode: edit|inpaint|upscale` with `parent`) → `studio/requests/<id>/request.json` with sizes (`suggested_px` ≈ 1 MP in multiples of 64, `tool_sizes` from `tools.json`, `print_px`), a prompt draft (`ja`, `en`, `tags`; character `tokens_en` as written), `avoid`, `keepout` (balloon areas, 0..1), `figures`, and files: `guides/composition.png`, `guides/pose.png`, `guides/keepout.png`, `refs/*` (approved sheets and faces, location images), `source.png`/`mask.png` for fixes. Same content → same id.
+2. `generation_request {page, frame_id}` (or `character_id` for a sheet, `location_id` for a background reference; `mode: edit|inpaint|upscale` with `parent`) → `studio/requests/<id>/request.json` with sizes (`suggested_px` ≈ 1 MP in multiples of 64, `tool_sizes` from `tools.json`, `print_px`), a prompt draft (`ja`, `en`, `tags`; character `tokens_en` as written), `avoid`, `keepout` (balloon areas, 0..1), `figures`, and files: `guides/composition.png`, `guides/pose.png`, `guides/keepout.png`, `refs/*` (approved sheets and faces, location images), `source.png`/`mask.png` for fixes. Same content → same id. A panel with 3D figures, heads or hands also gets `guides/figures.png` (the figures as smooth shaded meshes on black, a material colour per person: the control image of a 3D-mesh pose control) and `guides/regions.png` (a solid colour per person, black elsewhere: a regional control), named in `files.figures`, `files.regions`, `files.image_order` (figures first) and `request.control` (`px`: the output size, exactly the guides' size), with the first note saying how to use them (SPEC FIGURE-03, below).
 3. Save the generated images in `studio/inbox/<id>/` (or upload with `POST /v1/assets?path=PROJECT`, body = the image) and call `import_images {request_id, images: [{file | asset, origin: {kind, tool_id, model, prompt, params, refs_used}}]}`. Only the inbox and uploaded assets are read; 30 MB / 64 MP per image; the same image twice adds nothing. Each candidate gets `metrics` (aspect error, how busy the balloon areas are, brightness, edge overlap with the pose guide; lower `rank` is better).
 4. `candidates`, `render kind=compare` (the candidate with the name in red), `review_candidates`, then `adopt`. `report_regions` (faces and people, `box01` in the adopted image or `rect_mm`) feeds the balloon pass.
 5. After the person approves the art: `finish_page` (moves balloons off reported faces, turns `panel.fx` into effects, advances to finish). `preflight` lists what blocks the export; `export_proof` writes a 150 dpi proof with a 校正 watermark into `studio/proofs/`.
@@ -499,6 +499,35 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   shaded smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers),
   plus the head's pencil guides; no mesh edges. Boxes, scenes and imported models trace as before. Lines already
   traced stay as they were.
+
+### Figures as generation guides (SPEC FIGURE-01..03)
+
+- `generation_request` for a panel (mode new; fixes and upscales keep their parent's size and get none) draws the panel's figures, heads and hands (those with
+  the panel's `frame_id`, or with no `frame_id` and their middle in the panel) into `guides/figures.png`: black ground,
+  each person a material colour from a fixed palette in the panel's order (warm beige, lavender, olive, teal, salmon,
+  green, orchid, amber, cornflower, terracotta, mint, rose), lit by the page's light (`set_light`) with a fill and a
+  highlight, seen by the page's camera (`set_camera`); no lines, no face marks. `guides/regions.png` paints each
+  person's silhouette (grown about 1 % of the long side) in the same colour, black where nobody is. Without 3D figures,
+  a panel with two or more people in the brief gets `guides/regions.png` from the brief's places; a panel with one
+  person or none gets neither (its request is as before, byte for byte).
+- Size: the request's `size.suggested_px` (≈ 1 MP, multiples of 64), or, when `tool` names a tool of `tools.json`, the
+  first of `size.tool_sizes` (the tool's size nearest the panel's shape; the panel in the middle, the rest of the
+  picture beyond it). The output image must be exactly `request.control.px`.
+- With the user's PS5 AI Anima: upload `guides/figures.png` (`POST /api/inputs`) and generate with `controlnet:
+  lllite_3dpose`, `control_image_id`, `control_strength: 1`, CFG 1 and exactly that width and height; for two or more
+  people `guides/regions.png` goes to the regional control (`lllite_regional`), ended early. Other tools: any 3D-mesh
+  pose control; a tool that only takes reference images gets `files.image_order` from the front.
+- Look before asking: `render {page, frame_id, kind: "guide:figures"}` (or `"guide:regions"`).
+- A tool profile for the PS5 (1024 px a side at most, 64 px steps), `genko studio tools set ps5:anima --file ps5.json`:
+
+```json
+{"label": "PS5 AI Anima",
+ "sizes_px": [[1024, 1024], [896, 1024], [1024, 896], [832, 1024], [1024, 832], [768, 1024], [1024, 768],
+              [704, 1024], [1024, 704], [640, 1024], [1024, 640], [576, 1024], [1024, 576], [512, 1024], [1024, 512]],
+ "notes": "guides/figures.png → lllite_3dpose, regions.png → lllite_regional; the output exactly request.control.px; CFG 1"}
+```
+
+  (Add `supports` as the tool really has them: without it a tool is taken to accept references, edits and masks.)
 
 ### J7 additions
 

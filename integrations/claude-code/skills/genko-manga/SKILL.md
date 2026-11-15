@@ -170,6 +170,13 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
   - 参照画像（`files.references`: 設定画・顔・場所・`refs/style_pilot.png`）は、画像ツールが受け付けるなら必ず添える。
     `files.composition`（構図）と `files.pose`（人物の位置と向き）も参考として添えてよい。線をなぞらせる必要はない。
     `notes_for_agent` にマネキンの注記があるときは、`files.pose` の棒人形がポーズの指定。体の向きと手足の角度を合わせる。
+  - コマに 3D の人形（`add_figure`・`add_head`・`add_hand`）があると `files.figures`（`guides/figures.png`: 黒地に人ごとの色の、
+    陰とハイライトの付いた顔の無い人形。ページのカメラと光）と `files.regions`（`guides/regions.png`: 人ごとの単色の領域、黒は誰もいない所。
+    同じ色・同じ順）が付き、`notes_for_agent` の最初に使い方が書かれる。画像ツールに 3D メッシュのポーズの制御があれば
+    `guides/figures.png` を制御画像にする（例: PS5 AI Anima は `controlnet: lllite_3dpose`、`POST /api/inputs` で上げた id を
+    `control_image_id`、`control_strength` 1、CFG 1）。出力の大きさは `request.control.px` ちょうど（制御画像と同じ）。
+    2 人以上なら `guides/regions.png` を領域の制御（`lllite_regional`）にも渡す。参照画像として渡すときは `files.image_order` の順
+    （1 枚なら figures、2 枚なら figures と references_sheet）。台本に 2 人以上いて 3D の人形が無いコマは regions だけ（台本の配置から）。
   - サイズは `size.suggested_px`。画像ツールが決まったサイズしか出せないときは `size.tool_sizes` の先頭を使う（切れる方向が書いてある）。
   - `keepout` の場所（台詞が入る）は静かに空けておく。プロンプトの下書きにも書いてある。
   - ふつうは 1 枚作り、`inbox` に保存して下の `take_panel_art` で取り込む。比べて選びたいときだけ 2〜4 枚作って一度に `import_images` する。

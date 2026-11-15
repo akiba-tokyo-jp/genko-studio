@@ -1746,6 +1746,22 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 
 **変わらないもの**: 本の読み書き（新しい鍵は無い。保存は前と同じバイト）、印刷（人形は出ない）、トレース済みの線、2D の `add_mannequin`、箱・背景・取り込みモデルの陰と線（test_figure_mesh の theOtherKindsAreAsBefore が FIGURE-01 の前のビルドで取った値と比べる）、preset と取っ手。
 
+### FIGURE-03 生成の案内 guides/figures.png・guides/regions.png（利用者の決定 2026-11-15）
+
+**なぜ**: 利用者の画像生成（PS5 AI Anima、Anima Turbo の `controlnet: lllite_3dpose`〔toyxyz の anima_3dpose_6200〕と `lllite_regional`）は、制御画像として「黒地に、人ごとに違う材質色の、陰とハイライトで形と重なりが分かるなめらかな 3D の体」を学習している（色は意味の決まった番号ではない）。人形をその形でそのまま渡せば、ポーズ・体格・向き・重なりがそのまま生成に効く。この版だけのもの（Python 版には無い）。
+
+**どのコマで**: `generation_request` のコマの依頼（purpose panel_art・draft、mode new。直し〔edit・inpaint〕と upscale は元の候補の大きさで作るので付けない）。そのコマの人は、ページの prim のうち kind が figure・head・hand で、`frame_id` がそのコマのもの、または `frame_id` が無く、ページのカメラで見た箱（prim_bbox）の真ん中がコマの中のもの（ページの順）。
+
+**figures.png**: 黒（0,0,0）の地に、人ごとの材質色（決まった順の 12 色: 暖かいベージュ 236,204,150・ラベンダー 172,174,236・オリーブ 172,170,40・ティール 30,150,180・サーモン 240,150,130・緑・オーキッド・琥珀・コーンフラワー・テラコッタ・ミント・ローズ。13 人目から繰り返す）。ページのカメラ（`page.extra.camera`）とページの光（`page.extra.light` の dir・ambient。無ければいつもの光）で、主光（ページの光）・補助光（主光の左右の鏡、少し下から）・白いハイライト（Blinn-Phong、32 乗）。点ごとの法線（core::mesh3d::seen_normals）を三角の中で混ぜて正規化し、1 画素 3 × 3 の点で描いて整数で平均する。線・顔の印・案内線は描かない。prim の深さで重なりを決める（同じ深さは先の prim）。
+
+**regions.png**: 同じ大きさで、画素の真ん中の点に見える人（無ければ 9 点のうち最初に見える人）の色、そこから長い辺の約 1 %（最小 2 px）だけ広げる（4 近傍と 8 近傍を交互に、番号の小さい人が勝つ）。黒は誰もいない所。3D の人形が無く台本（panel.characters）に 2 人以上いるコマは、台本の配置（blocking の頭と体の箱を合わせた箱。重なる所は頭の真ん中が横に近い人）から。
+
+**大きさ**: 依頼の `size.suggested_px`（約 1 MP、64 px 刻み）で、生成の箱（コマ + 3 mm）を縦横それぞれの倍率で写す（ほかの案内と同じ）。依頼の `tool` が tools.json のツールなら、その `sizes_px` からコマの形にいちばん近い 1 つ（`size.tool_sizes` の 1 番目。1 辺 16〜4096 px のとき）で、箱をその縦横比へ真ん中から広げて 1 つの倍率で写す（コマは絵の真ん中）。出力の画像はこの大きさちょうど（`request.control.px`）。
+
+**依頼**: ファイル `guides/figures.png`・`guides/regions.png`。`files.figures`・`files.regions`・`files.image_order`（figures、references_sheet、参照の順）、`request.control`（`pose`・`regions`・`px`・`people`・`strength` 1）、`notes_for_agent` の最初に使い方（3D メッシュのポーズの制御画像。例 PS5 AI Anima の `lllite_3dpose`・`control_image_id`・`control_strength` 1・CFG 1、出力はちょうど W×H。2 人以上なら regions を領域の制御に）。これらの鍵・ファイル・注記は、ファイルがあるときだけ足す。人がいない・台本に 1 人だけで 3D の人形の無いコマの依頼は、前のビルドと同じバイト・同じ id（手で前のビルドと比べた）。3D の人形のあるコマと、台本に 2 人以上で人形の無いコマの依頼は、ファイルが増えるので id が変わる。
+
+**ほか**: `render` の kind `guide:figures`・`guide:regions`（プレビューの大きさ、ほかの案内と同じ写し方）。依頼の返す案内の並べた絵（guide_sheet）は、figures・regions があるときだけ色で、それらも並べる。決まった数: + − × ÷・平方根・min・max だけ、決まった順、1 つのスレッド。どの回・どのスレッド数でも同じバイト（test_figure_guide）。印刷は変わらない（人形は印刷に出ない）。
+
 ## 7. 利用者向け改善
 
 ### UX-01 導入と最初の制作

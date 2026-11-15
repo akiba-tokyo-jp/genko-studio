@@ -679,6 +679,8 @@ title.genko/
 }
 ```
 
+コマに 3D の人形・頭・手（`add_figure`・`add_head`・`add_hand`）があると（SPEC FIGURE-03）、`files` に `"figures": "guides/figures.png"`（黒地に人ごとの材質色の、陰とハイライトの付いたなめらかな人形。線も顔の印も無い。ページのカメラと光）、`"regions": "guides/regions.png"`（人ごとの単色の領域。同じ色・同じ順、黒は誰もいない所）、`"image_order": ["guides/figures.png", "guides/references_sheet.png", …]` が付き、`request.control` に `{"pose", "regions", "px", "people", "strength"}`、`notes_for_agent` の最初に使い方（3D メッシュのポーズの制御画像、出力はちょうど `px`）が入る。大きさは `size.suggested_px`、`tool` が tools.json のツールならその `tool_sizes` の 1 番目（コマはその真ん中）。台本に 2 人以上いて 3D の人形が無いコマは `regions` だけ（台本の配置から）。人がいない・1 人だけのコマの依頼は前と同じバイト（同じ id）。
+
 - **`purpose`:** `panel_art`（コマの絵）、`character_sheet`（設定画）、`location`（背景の参照）、`draft`（DRAFT に置く画像。エージェントはネームの承認の後だけ。承認の前のラフは画像にせず、ネームのレイヤーに線で描く）。
 - **`mode`:** `new`（新規）、`edit`（元画像 `source` + 指示で直す）、`inpaint`（元画像 + `mask` の白い所だけ描き直す）、`upscale`（高解像度化）。候補の `mode` にはほかに `derive`（Genko の決定的変換、`origin.kind:"genko"`）がある。修正の依頼は `parent` の候補を `source` に入れる。
 - **サイズ。** `suggested_px` はコマの比から計算した理想（約 1 MP、64 の倍数）。画像ツールが決まったサイズしか出せない場合に備え、`tool_sizes` に「どのサイズで作ってどう切るか」を並べる。候補を取り込むときに縦横比が違っても、配置は cover で合わせ、切れる範囲を `mapping` に残す。対応サイズの一覧はユーザー設定の `tools.json`（§6.5）から引く。
@@ -1274,6 +1276,7 @@ Genko は画像ツールを呼ばないが、依頼パックのサイズの候�
 - 値は例である。実際のサイズや機能は提供元と版で変わるので、利用者かエージェントが確かめて直す（`genko studio tools set`）。
 - 登録の無いツールの画像も取り込める。その場合、サイズの候補は一般的な正方形・横長・縦長を出す。
 - エージェントは `generation_request{tool: "openai:gpt-image-1"}` のように使うツールを伝えられる。依頼パックはそのツールの対応サイズで `tool_sizes` を作り、参照やマスクを渡せないツールなら、その旨を `notes_for_agent` に書く。
+- 例: 利用者の PS5 AI Anima（3D ポーズの制御 `lllite_3dpose`・領域の制御 `lllite_regional`、1 辺 1024 px まで、64 px 刻み、制御画像は出力と同じ大きさ）。`genko studio tools set ps5:anima --file ps5.json` で、`sizes_px` に 64 px 刻みで 1 辺 1024 までの縦横を並べる（`[[1024, 1024], [896, 1024], [1024, 896], [832, 1024], [1024, 832], [768, 1024], [1024, 768], [704, 1024], [1024, 704], [640, 1024], [1024, 640], [576, 1024], [1024, 576], [512, 1024], [1024, 512]]`）。`generation_request{tool: "ps5:anima"}` の `guides/figures.png`・`regions.png` はコマの形にいちばん近いその大きさになる（`request.control.px`）。`supports` はツールの実際に合わせて書く。
 
 ### 6.6 pyproject の extras
 
@@ -1436,7 +1439,7 @@ MCP サーバー名は `genko`。Hermes からは `mcp_genko_<道具名>` とし
 | `status` | – | 工程ごとの件数、承認待ち、承認依頼の状態、次の作業の件数 | なし |
 | `next` | `role?`, `limit?`, `claim?` | worklist の項目（`tools` の目安付き）、`waiting_for` | 予約だけ |
 | `inspect` | `target`（`bible` / `script` / `page` / `panel` / `candidate` / `request`） | 対象の JSON（小さく） | なし |
-| `render` | `page`, `frame_id?`, `kind`（`name` / `proof` / `crop` / `compare` / `guide:pose` / `guide:keepout`）, `max_px?` | プレビュー画像 + ファイル | なし |
+| `render` | `page`, `frame_id?`, `kind`（`name` / `proof` / `crop` / `compare` / `guide:pose` / `guide:keepout` / `guide:figures` / `guide:regions`）, `max_px?` | プレビュー画像 + ファイル | なし |
 | `set_bible` | `bible`（bible@1）, `commit` | 指摘、差分の要約 | `commit:true` のとき |
 | `set_script` | `script`（script@1）, `commit` | 指摘、ページごとの beat 数 | 同上 |
 | `submit_name` | `page`, `plan`（name_plan@1）, `commit` | 指摘（JSON ポインタ）、読み順の要約、name のプレビュー画像 | 同上 |
