@@ -32,6 +32,7 @@
   - 添付: `genko-studio-0.1.0-linux-x86_64.tar.gz`（sha256 `fc01b549b8cb7129ee4b43c832476e84f7cf7de66866eed1df65f56fc249a18f`）、`genko-studio-0.1.0-windows-x64.zip`（sha256 `989eaf9dbb3704a0fade8aa714e3aefb7c6fd26b2a50729336d8df47fcfb83af`）、SHA256SUMS.txt。
   - コードの版は 0.1.0 のまま（版の番号は変えていない）なので、タグに日付を付けた。前の下書き v0.1.0 はそのまま残っている。下書きの説明の Linux の一文は、今回確かめた範囲（素の Ubuntu への導入は流していない）に合わせた。
   - **Windows で確かめたのはビルドと上の 4 つの操作だけ。** Windows の全試験と実機での受入（配布の前に必須）は残る。
+  - **正式版として公開（利用者の決定 2026-11-15「正式版として公開」。使うのは利用者だけ）**: 手動でだけ動く `.github/workflows/publish-release.yml` を一度だけ置いて流し（run 43694750288）、v0.1.0-20261115 を下書きから正式版（Latest、プレリリースではない）にした。説明の 1 行目の「（下書き）」だけを外した。タグ `v0.1.0-20261115` は 5b3bfae3 を指す。流した後は `.github/disabled-workflows/` に移した。前の下書き v0.1.0 はそのまま。
 - 合格までの回（合格に数えていない）: 凍結 e5c2c0f3 の回。ASan で test_fukidashi だけが落ちた（1 回目は QtTest の 1 関数 5 分、落ちた 1 本だけの流し直しは ctest の 1,800 秒。どちらも `aThickDoubleLineWithDripsIsNotSlow` の中）。ほかの 270 本は合格、サニタイザーの報告は無し。原因と直しは下の「test_fukidashi の ASan の重さ」の節。コードを直したので、この出口は初めから流した（R4）。
 
 ## フキダシの追加（fukidashi@2。SPEC BALLOON-02）— 2026-11-14、2026-11-15 に main に統合
