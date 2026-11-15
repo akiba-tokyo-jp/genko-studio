@@ -18,6 +18,17 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 書体の追加（F1・F2）とフキダシの追加の出口 — 凍結 7046eea6 で Linux の ASan・Release が合格（2026-11-15）
+- **凍結SHA**: `7046eea6`（native/fonts-fukidashi2。書体の追加 F1・F2、フキダシの追加 群 1・群 2 とレビューの直し、書体の決定 2 件、範囲の細分〔native/validation-scope の取り込み 3584d348〕、レビュー 3 の直し、test_fukidashi の ASan の重さの直し）。計画は `validation_policy.py --base da6acebd --head 7046eea6 --phase milestone`（tier full、203 の変更、理由 13。写真加工の試験も ASan に入る）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB（プロセスは 14 GB の memory cgroup の中）/ Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 結果:
+  - linux-asan: 271/271 合格（2 並列、02:16〜04:46 UTC の 2 時間 30 分。QtTest の項目 6,683、SKIP 0、CLI23 合格）。1 回で走り切った（引き継ぎは起きていない）。test_fukidashi 1,968 秒（545 項目）、test_fx_lens 94 秒（前の出口の 3,054 秒から）、test_package 合格。
+  - linux-release: 271/271 合格（2 並列、05:26〜05:45 UTC の 19 分。項目 6,609、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。test_package 合格。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 66 本すべて合格（項目 1,229。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で、1 回温めてから）: test_perf_app 2 回（開くまで 915 ms・457 ms、入力から画面まで p95 0.78 ms・1.54 ms、p99 2.24 ms・2.99 ms）、test_perf_render 合格（F1 の頁 350 dpi 全体 674 ms。フキダシ 10 個の B4 600 dpi: フキダシ無し 373 ms、一から 778 ms、描き直し 523 ms。追加の全部を付けた 10 個 1,303 ms。表示だけで合否は付けていない。SKIP は前からの psd_of_groups_at_350dpi の 1 つ）、test_perf_pipeline 合格（PERF-F 全体 p95 530.8 ms、書き出し p95 5,347.8 ms）。
+  - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- 合格までの回（合格に数えていない）: 凍結 e5c2c0f3 の回。ASan で test_fukidashi だけが落ちた（1 回目は QtTest の 1 関数 5 分、落ちた 1 本だけの流し直しは ctest の 1,800 秒。どちらも `aThickDoubleLineWithDripsIsNotSlow` の中）。ほかの 270 本は合格、サニタイザーの報告は無し。原因と直しは下の「test_fukidashi の ASan の重さ」の節。コードを直したので、この出口は初めから流した（R4）。
+
 ## フキダシの追加（fukidashi@2。SPEC BALLOON-02）— 2026-11-14
 
 ### 利用者の決定（2026-11-14）
