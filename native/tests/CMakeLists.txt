@@ -357,8 +357,12 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # printed line's width, a balloon's own layer laid over the page, a solid black balloon with white letters, a tone box, the
 # keys of before), the book (the feature while used, a book of before growing its hand-drawn ovals once, its letters the size
 # they had — data/fukidashi, written by the last build of the hand-drawn look); the sample sheets when asked.
+# (ASan, 2026-11-15: 1,971 s through ctest with another test_fukidashi beside it — 545 cases; the 24 × 672 pictures of tails
+# at a box's corner 1,008 s of it, aMalformedStyleStillDraws's 1,300 pages the longest function at 174 s. Before that day's
+# speed-ups it passed 1,800 s inside one function, and would have taken about five hours. The limit leaves room for a machine
+# three times as busy; its functions take the slow rule's limit below)
 genko_test(test_fukidashi SOURCES unit/test_fukidashi.cpp DEPS genko_test_support genko_formats genko_render_ops
-           LABELS unit TIMEOUT 1800)
+           LABELS unit TIMEOUT 7200)
 # fonts@1 (書体の追加 F2): the catalogue of the lettering faces (native/resources/fonts/FONTS.json, embedded byte for byte: 46
 # fonts, keys safe as names, every face without kanji with a partner) and the feature a book names while it names one of the
 # forty added faces — each place a face is named, written and read, a book of before written as it was, a book whose faces'
@@ -1029,7 +1033,7 @@ endif()
 foreach(slow test_smart_stack test_gui_color
         test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_page_size
         test_gui_book test_gui_layout test_adjust test_contract_pyre test_contract_psd test_color_model
-        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines)
+        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi)
   if(TEST ${slow})
     get_test_property(${slow} TIMEOUT limit)
     math(EXPR function_ms "(${limit} - 100) * 1000")
