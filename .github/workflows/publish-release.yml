@@ -1,0 +1,31 @@
+name: publish-release
+
+# 下書きの Release を正式版（Latest）として公開する。手動で流すときだけ動く（push や PR では動かない）。
+# 利用者の指示（2026-11-15）: v0.1.0-20261115 を正式版として公開。流したあとはこのファイルも disabled-workflows に移す。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "公開する下書き Release のタグ（例: v0.1.0-20261115）"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 下書きを正式版にする（説明の「（下書き）」を外す）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,body > before.json
+          jq -e '.isDraft' before.json > /dev/null || { echo "$TAG は下書きではない"; exit 1; }
+          jq -r '.body' before.json | sed '1s/（下書き）//' > notes.md
+          cat notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest --notes-file notes.md
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,url,assets --jq '{tagName,isDraft,isPrerelease,url,assets:[.assets[].name]}'
