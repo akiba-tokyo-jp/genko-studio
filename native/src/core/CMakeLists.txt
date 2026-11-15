@@ -121,6 +121,8 @@ genko_library(genko_core
     ops_vector.cpp
     linalg3.cpp
     mesh3d.cpp
+    figure_shape.cpp
+    surface_nets.cpp
     prim3d.cpp
     persp3d.cpp
     mannequin.cpp
