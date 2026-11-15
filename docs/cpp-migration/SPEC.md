@@ -1746,6 +1746,40 @@ PSD出力に「文字を編集可能なレイヤーとして保持」と「見�
 
 **変わらないもの**: 本の読み書き（新しい鍵は無い。保存は前と同じバイト）、印刷（人形は出ない）、トレース済みの線、2D の `add_mannequin`、箱・背景・取り込みモデルの陰と線（test_figure_mesh の theOtherKindsAreAsBefore が FIGURE-01 の前のビルドで取った値と比べる）、preset と取っ手。
 
+### FIGURE-02 人形のポーズ集（genko.poses@1、figures@1。利用者の決定 2026-11-15）
+
+**利用者の決定（2026-11-15）**: 「サイトのようにポーズも充実させてください」「サイトのポーズくらいは包括してくれると助かります」。3D の人形（`add_figure`）に、名前で選べるポーズの一覧を持たせる。ポーズはすべてこの版のために作ったもの（動作を短い文で書き、そこから関節の角度を決めた。どのサイトの絵もデータも使っていない。サイトの分類と数は、どんな種類があればよいかの目安だけ）。グラビア・ボードワールのような分類は持たない（見せポーズは露出の指定なしの立ち方・座り方として後の群で）。左右反転は切り替えで、数に入れない。この版だけのもの（Python 版には無い）。
+
+**ファイル**: `native/src/core/data/figure_poses.json`（形式 `genko.poses@1`）を 1 バイトも変えずにプログラムに組み込む（`core/pose_library`）。`{"format": "genko.poses@1", "categories": [{id, ja, en}], "poses": [{id: "<分類>/<名前>", category, ja, en, tags（日本語と英語の両方）, joints（add_figure の joints と同じ、小数 4 桁まで）, hands（l・r: 形の名前か {pose, curls, spread, thumb}、小数 3 桁まで）, hold?（l・r: cup|phone|paper|bag|umbrella|book|pen|sword|bat|ball）, support（floor|chair|none）, seat_h?（chair のときだけ。座面の床からの高さ、人形の単位 u = 身長 / 頭身）, contact（l_foot・r_foot・l_knee・r_knee・l_hand・r_hand・seat・pelvis・back・front・side）, symmetric}]}`。ポーズは分類の順に並ぶ。
+
+**群 G3 の分類と数（バッチ A）**: 立つ（stand）・ファッション（fashion）・歩く（walk）・走る（run）・椅子に座る（sit_chair）・床に座る（sit_floor）・ひざまずく・しゃがむ（kneel_squat）・日常の動作（everyday）。数は HANDOFF と docs/POSES.md。後の群（G4・G5）で、寝る・上半身・振り向く・指さし・感情・話す・小物・アクション・スポーツ・ダンス・二人のポーズを足す。
+
+**左右反転**: id の後ろに `~m`。l_ と r_ を入れ替え、各関節を (x, −y, −z)、手の形と持つ物と接地の左右を入れ替える（0 は 0 のまま）。2 回で元のポーズ。骨格は元の骨格を左右に映したもの（1e-9 u 以内。test_figure_poses）。`symmetric` のポーズは自分自身の反転と同じ。
+
+**op**（`add_figure`・`pose_figure`）:
+- `pose_id`: 一覧のポーズの関節と手を、preset と同じように置き換える。`pose_id` を残し、ポーズに `hold` があればそれを、無ければ `hold` を消す。`preset` は消える。preset と一緒には断る（「give preset or pose_id, not both」）。知らない id は「no pose <id> (figure_poses lists them)」。
+- `mirror: true`: `pose_id` と一緒なら一覧のポーズの反転（`<id>~m`）。`pose_id` 無しなら、その人形の今のポーズを反転する（`pose_id` を持っていれば `~m` を付け外し、`preset` は消える）。
+- `keep`: `pelvis`（いつもの: `pos` はそのまま）か `ground`（人形の一番低い所が、op の前と同じ高さに残るよう、`pos` を y の向きに動かす。足が床に残る。高さは人形の網の点の、人形の回転を当てた y の最大。`add_figure` では、ポーズを付ける前のまっすぐ立った姿が前）。ほかは「keep is pelvis or ground」。
+- `hold`: `{l, r: 物 | null}` を足す・消す（null で消す）。物の形を描くのは G5 からで、今は鍵を持つだけで何も描かない。
+- `hands` の各手と `add_hand`・手の `pose_figure` は `spread`（指の開き）・`thumb`（親指の向かい合わせ）を 0〜1 で受け取る（範囲に収めて 3 桁に丸める。数でなければ「spread and thumb are numbers from 0 to 1」）。与えたときだけ持つ。名前の 6 つの形とその知らせは変わらない。
+- ドラッグ（`drag`）は `pose_id` を消す（人の自分のポーズになる。`preset` と同じ）。`joints` の手直しは消さない。preset は `pose_id` を消す。
+- 9 つの preset（`figure_presets()`）は変えない（その JSON の文字の sha256 を試験が控える）。
+
+**本**: 鍵はどれも任意。prim が `pose_id`・`hold`（人形）、`spread`・`thumb`（人形の手、または手だけの prim）のどれかを持つあいだ、`features` に `figures@1` を加える。無くなれば外す。持たない本は前と同じバイトで書く（FIGURE-02 の前のビルドで取った project.json の sha256 を試験が控える）。知らない読み手（figures@1 より前の版）は未知の拡張として読み取り専用で開く。保存して読み直すと鍵はそのまま。
+
+**確かめること（core/pose_checks、test_figure_poses。どれも u の単位で、どの大きさでも同じ）**:
+1. ファイルの形: 鍵、分類、id が「<分類>/<a-z0-9_>」で一度ずつ、数が有限で op の丸め（関節 4 桁、指・開き・親指 3 桁）、日本語と英語の名前とタグ、分類ごとの数（stand 40・fashion 25・walk 10・run 10・sit_chair 30・sit_floor 30・kneel_squat 25・everyday 25 以上）。
+2. 関節の範囲（右は左の鏡。9 つの preset も通る）: 背骨・首・頭・肘・手首・膝・足首は軸ごとの範囲（hip x ±1.7・y ±3.15・z ±0.8、spine x [−1.0, 0.6]・y ±0.8・z ±0.6、chest x [−0.6, 0.5]・y ±0.6・z ±0.5、neck x [−0.8, 0.7]・y ±0.9・z ±0.5、head x [−0.8, 0.7]・y ±1.0・z ±0.5、elbow x [−0.1, 2.6]・y ±1.8・z ±0.9、wrist x ±0.6・y ±0.6・z [−1.4, 1.2]、knee x [−2.85, 0.05]・y ±0.6・z ±0.3、ankle x [−1.6, 0.75]・y ±0.6・z ±0.5）。肩と股関節は向きのある円錐とねじれ（下に垂れた向きからの上がりの最大: 腕 前 3.2・外 3.15・後ろ 1.2・内 1.6、脚 前 2.6・外 1.3・後ろ 0.8・内 0.6、その間は直線で。ねじれ 腕 [−1.6, 1.9]（上がり 2.2 まで測る）、脚 [−0.9, 1.0]。外向きが +）。オイラー角は肩・股関節の測りにならない（脚を 90° 曲げると z では膝が開かない）ので、この 2 つだけ骨の向きで測る。
+3. 支え: floor は、接地に挙げた所（足・膝・手・座面・骨盤）が一番低い所から 0.03 u 以内、挙げていない所は 0.008 u より上。chair は、座面の一番低い所の床からの高さが `seat_h` の ±0.05 u（足を挙げたとき）、`seat_h` は 1.2〜3.6 u、足は床に。重心（骨の中ほどに体の割合）を上から見て、床・座面に触れた所の凸包から 0.25 u 以内（歩く・走る、壁などにもたれる back・front・side、none は除く）。
+4. 体を通り抜けない: 手足の軸（上腕と太ももは付け根を除く）が胴・頭の場（figure_shape の胴と頭そのもの）の内側へ半径の 0.5 より深く入らない。別の腕・脚の（先細りの）カプセルの重なりが細い方の半径の 0.4 以下（両手どうしは組んだり重ねたりするので除く）。男女と体型なしの 3 つで。
+5. 反転: 上のとおり。
+6. 描ける: 網があり、三角が 64000 以下、骨盤から各軸 7.5 u 以内、線がある。
+7. 小さな絵（`pose_checks::thumbnail`、60 × 90 など）が、何度でも、4 スレッドでも同じバイト。4 枚を控える。
+
+**見て確かめる**: `GENKO_POSE_SHEETS=<フォルダ> test_figure_poses` が分類ごとの一覧の絵（ポーズごとに正面・斜め・横、id と日本語の名前、床の線、椅子の座面、接地の点〔緑は接地、赤は離れている〕、確かめに落ちたものは赤い枠）と checks.json（測った数）を書く。全ポーズを人（ここではエージェント）が絵で見て、結果を docs/POSES.md に書く。
+
+**後の群**: 一覧の画面（ポーズ集…）、MCP・CLI の `figure_poses`、乱択は G4。小物の形と二人のポーズは G5。
+
 ### FIGURE-03 生成の案内 guides/figures.png・guides/regions.png（利用者の決定 2026-11-15）
 
 **なぜ**: 利用者の画像生成（PS5 AI Anima、Anima Turbo の `controlnet: lllite_3dpose`〔toyxyz の anima_3dpose_6200〕と `lllite_regional`）は、制御画像として「黒地に、人ごとに違う材質色の、陰とハイライトで形と重なりが分かるなめらかな 3D の体」を学習している（色は意味の決まった番号ではない）。人形をその形でそのまま渡せば、ポーズ・体格・向き・重なりがそのまま生成に効く。この版だけのもの（Python 版には無い）。

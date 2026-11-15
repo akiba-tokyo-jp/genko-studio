@@ -18,6 +18,42 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 人形のポーズ集（群 G3。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures（main には未統合）
+
+### したこと
+- ポーズ集 `native/src/core/data/figure_poses.json`（genko.poses@1）をプログラムに 1 バイトも変えずに組み込んだ（core/CMakeLists.txt、`figure_poses_data.cpp.in`）。読み込み `core/pose_library`（分類と数、id、`~m` の反転、絞り込み: 分類・タグ・語〔日本語・英語、ASCII の大小を問わない〕・支え・接地。G4 の画面・MCP・乱択はこれを使う）、確かめ `core/pose_checks`（ファイルの形、関節の範囲、支え・接地・重心、体の通り抜け、反転、描ける、小さな絵、keep: ground の一番低い所）。`core/figure_shape` の胴と頭の場を `torso_part`・`head_part` で取り出せるようにした（網は前と同じバイト: test_figure_mesh の控えのまま合格）。
+- op: `add_figure`・`pose_figure` の `pose_id`・`mirror`・`keep`（pelvis | ground）・`hold`、手の `spread`・`thumb`（人形の手と `add_hand`・手の `pose_figure`）。ドラッグと preset は `pose_id` を消す。preset と pose_id は一緒に断る。`hold` は鍵だけ（物の形は G5）。op の一覧（`core/data/ops_schema.json`・`docs/ops.schema.json`）。
+- 本: prim が `pose_id`・`hold`・`spread`・`thumb` を持つあいだ `features` に `figures@1`（storage/writer.cpp）、読み手は知る拡張に（storage/reader.cpp）。schema-v4.md に「人形のポーズ」。
+- 手引き: AGENT.md の J8（pose_id・mirror・keep・hold・spread/thumb・figures@1）、SPEC FIGURE-02、docs/POSES.md（全ポーズの見直しの記録）。SKILL.md・drawing.md は変えていない（ポーズ集を名指す道具が G4 で入るときに書く）。
+
+### 数
+- 209 ポーズ（反転は数えない）: 立つ 46、ファッション 27、歩く 11、走る 11、椅子に座る 32、床に座る 30、ひざまずく・しゃがむ 26、日常 26（plan §8 の最低 40・25・10・10・30・30・25・25 を満たす）。ファイルは 218 KB。
+- 作り方: どのポーズも短い動作の文（「腰に手を当てて立つ」など）から、足を置く所・手を置く所・胴の傾きを書き、そこから関節の角度を逆運動学で解いた（C++ の骨格をそのまま写した Python の道具。絵やデータはどこからも取っていない）。接地の高さは C++ の網で測った値から直した。道具は /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g3/（`build.py`・`kin.py`・`inside.py`・`lib.py`・`poses_*.py`、`iterate.sh` が「作る → 試験で測る → 直す」を回す）。G4・G5 のポーズもこれで足せる。
+
+### 確かめの最終の値（plan §3 の下書きから変えたもの）
+- 接地: 挙げた所は一番低い所から 0.03 u 以内（下書きどおり）、挙げていない所は 0.008 u より上。椅子: 座面の測った高さが seat_h の ±0.05 u（下書きどおり）、seat_h は 1.2〜3.6 u。座面は胴の下の部分と付け根から 0.8 u までの太もも。
+- 重心: 床や座面に触れた所（座面は一番低い所から 0.1 u まで）を上から見た凸包から 0.25 u 以内（新しく足した。歩く・走る・もたれる・none は除く）。
+- 通り抜け: 手足の軸が胴・頭の中へ半径の 0.5 まで（下書きどおり）、別の手足のカプセルの重なりは細い方の半径の 0.4 まで（下書きどおり）。両手どうしは除く（組む・合わせる）。カプセルの半径は体の太さに合わせた（上腕 0.21→0.15、前腕 0.16→0.115、手 0.055→0.04〔手のひらの厚み〕、太もも 0.33→0.21、すね 0.21→0.12、足 0.12→0.09 u）。男女と体型なしの 3 つの体で。
+- 範囲: 膝 x [−2.85, 0.05]（下書き −2.6 では正座ができない: 正座は約 −2.8）、足首 x [−1.6, 0.75]（正座で足の甲を床に付けるには足がすねの延長になる。足は 1 つの塊なので足首と足の中ほどの曲がりを合わせた値）。肩と股関節は軸ごとの範囲をやめて「骨の向きの円錐とねじれ」にした（オイラー角は 90° 曲げると z で膝が開かない＝座って膝を開けない。下書きの l_arm z [−0.6, 3.1] はこれに置き換えた）: 上がりの最大 腕 前 3.2・外 3.15・後ろ 1.2・内 1.6、脚 前 2.6・外 1.3・後ろ 0.8・内 0.6、ねじれ 腕 [−1.6, 1.9]（上がり 2.2 まで）・脚 [−0.9, 1.0]。ほかは SPEC FIGURE-02 の表。9 つの preset は全部の確かめに通る（立つ preset 5 つは接地と重心も）。
+- 確かめが捕まえた本当の誤り（直した）: 手が太ももの中、前腕が胸の中、腕組みの前腕どうし、つま先立ちで前へ倒れる、振り出した足が床に付く、正座でつま先が床の下、手が床に届かないのに付いている、など。docs/POSES.md に 49 件の直しと 8 件の外したもの。
+
+### 控え
+- `figure_presets()` の JSON の文字の sha256 `7eaa858c1fe794e06cba02c1f44e3f74a3beaa72519b3faedd3c73040271a4e3`（G3 の前のビルドで取った。preset は変えていない）。
+- 鍵を持たない本（人形 2 体・頭・手、preset と joints・hands の手直し）の project.json の sha256 `81b68808e67d7ba9ed3643c1ae8b9a6ba6152e4980b92f5deb50bdf9905b615c`（G3 の前のビルド e64e001d で取った。G3 の後も同じバイト）。
+- 小さな絵（60 × 90、斜め）4 枚: stand の最初 `21294bc3…6e071`、fashion の最後の反転 `02d65779…c2ea4`、sit_chair の最初 `36424809…83847`、kneel_squat の最後の反転 `9921041c…daf21`（全文は test_figure_poses の kThumbPins。2 回・別のプロセス・4 スレッドで同じバイト）。ポーズを直したらこの値も直す。
+
+### 一覧の絵と見直し
+- 絵: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g3/sheets/（分類ごとに 12 ポーズずつ: `stand_1.png` 〜 `everyday_3.png`、全 21 枚。正面・斜め・横、床の線、椅子の座面〔青〕、接地の点〔緑・赤〕、落ちたものは赤い枠）と checks.json（測った数）。`GENKO_POSE_SHEETS=<フォルダ> test_figure_poses` で同じものが書ける。
+- 全部をエージェントが絵で見た（docs/POSES.md）。利用者の目ではまだ見ていない。気づいて残したこと: あぐら系は股関節の範囲の中で膝を床まで下ろせず、膝を少し上げたあぐら。正座の足の甲は床から約 0.13 u 浮く（足首の円錐が甲より太い形のため）。
+
+### 試験（Release、関係するものだけ）
+- 新しい test_figure_poses（ファイルの形と分類の数、preset が前のまま、preset が確かめに通る、全ポーズ〔分類ごと〕と反転と男女の体、絞り込み、小さな絵が同じバイト〔1 と 4 スレッド〕と控え、figures@1 の付け外しと保存して読み直し、op の一覧の鍵、鍵の無い本が前と同じバイト）: 合格、36 秒（Release。遅い試験の一覧には入れていない: 1 つの関数の最長は約 8 秒）。
+- test_ops_3d に libraryPoses（pose_id・反転・hold・keep: ground と pelvis・ドラッグと preset で消える・spread と thumb・断る理由・保存して読み直し）: 合格。test_figure_mesh・test_figure_guide・test_command_bus・test_cli_e2e（`genko schema` が組み込んだファイル）・test_ledger_service_a（op の一覧と docs/ops.schema.json）・test_ledger_service_b・test_gui_guides: 合格。
+- ASan は流していない（工程の出口で流す。figure_shape の場は ASan で約 5 倍: test_figure_poses は約 3 分の見込み）。
+
+### 次（G4）
+- `figure_poses` の道具（MCP・CLI `genko studio figure-poses`、乱択、`--sheet`。この群の絵の描き方は tests/support/pose_sheets.hpp）、画面の「ポーズ集…」、バッチ B（寝る・上半身・振り向く・指さし・感情・話す・小物 など）。
+
 ## 生成の案内 guides/figures.png（群 G2。SPEC FIGURE-03）と体の比率の見直し — 2026-11-15、ブランチ native/figures（main には未統合）
 
 ### 体の比率の見直し（FIGURE-01 の形の表）

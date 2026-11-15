@@ -482,8 +482,9 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 
 ### J8 additions
 
-- `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset, joints {name: {x, y, z}},
-  hands {l, r}, rot}`; `pose_figure {id, joints (merged) | set_joints, body, hands, preset, rot, pos, drag {handle, to}}`
+- `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset | pose_id, mirror, keep,
+  joints {name: {x, y, z}}, hands {l, r}, hold, rot}`; `pose_figure {id, pose_id, mirror, keep, joints (merged) |
+  set_joints, body, hands, hold, preset, rot, pos, drag {handle, to}}`
   (joints: hip, spine, chest, neck, head, l/r_arm, l/r_elbow, l/r_wrist, l/r_leg, l/r_knee, l/r_ankle; x swings toward
   the viewer, y twists, z turns in the picture; presets stand, walk, run, sit, point, arms_up, think, kneel, peace;
   hands open, relaxed, fist, point, peace, grip).
@@ -494,6 +495,16 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 - `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts
   left out, and the lit surfaces as greys (with `tone`, the layer prints them as dots). `trace_prims` also leaves
   hidden lines out for figures, heads, hands and models.
+- The pose library (SPEC FIGURE-02, figures@1): about two hundred original poses in categories (stand, fashion, walk,
+  run, sit_chair, sit_floor, kneel_squat, everyday; more to come), each `"<category>/<name>"` with Japanese and English
+  names and tags. `add_figure`/`pose_figure {pose_id}` puts its joints and hands in place as a preset does and keeps
+  `pose_id` (and `hold`, what its hands hold); `mirror: true` swaps left and right (`"<id>~m"`; without `pose_id`, the
+  figure's own pose); `keep: "ground"` keeps the figure's lowest point where it was (sitting down keeps the floor;
+  default `"pelvis"` keeps `pos`); `hold {l, r: cup|phone|paper|bag|umbrella|book|pen|sword|bat|ball | null}` is kept
+  (the props are not drawn yet). A hand is also `{pose, curls, spread (fingers fanned 0..1), thumb (across the palm
+  0..1)}` (and `add_hand`/`pose_figure` of a hand take `spread`, `thumb`). A drag forgets `pose_id`. Unknown ids are
+  refused ("no pose <id> (figure_poses lists them)"). A book whose prims say any of these keys names `figures@1`.
+  The ids are in `native/src/core/data/figure_poses.json` (a listing tool comes later).
 - Figures, heads and hands are one smooth, seamless, faceless body (SPEC FIGURE-01): a realistic adult build, a
   neutral face relief without drawn features, hands with three-jointed fingers and a thumb (palms toward the body),
   shaded smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers),
