@@ -187,7 +187,7 @@ jobs:
           - Linux（Ubuntu 24.04 x86_64）: genko-studio-*-linux-x86_64.tar.gz。展開して ./install.sh。
           - Windows 10 / 11（x64）: genko-studio-*-windows-x64.zip。展開して bin\\genko.exe。
           - この 2 つは GitHub Actions で作り、動くかだけ（版・本を作る・調べる・描き出す）確かめた。
-          - Linux は同じコミットを手元で全試験（ASan・Release）・実際の画面・性能・素の Ubuntu への導入まで確かめている（docs/cpp-migration/HANDOFF.md）。
+          - Linux は同じ中身のコミットを手元で、工程の出口の試験（ASan・Release）・配布物の導入の試験・実際の画面・性能まで確かめている（docs/cpp-migration/HANDOFF.md）。
           - Windows は実機での受入がまだ（配布の前に必須）。
           EOF
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
