@@ -107,6 +107,10 @@ struct FigureMesh {
     std::vector<std::vector<Vec3>> marks;
 };
 FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandShape& right);
+// The figure's torso and its head as the body has them (the same fields figure() meshes): for the pose checks
+// (core/pose_checks: a limb laid through the body, a hand inside the head).
+Part torso_part(const mesh3d::Skeleton& sk);
+Part head_part(const mesh3d::Skeleton& sk);
 // A head on its own (u = its height / 1.1), centred on 0, and its face's guide lines. The face has a neutral relief
 // (brow, the eyes' hollows, nose, lips, chin, ears) and no drawn features: a person turned anywhere reads as one.
 FigureMesh head(double u);
