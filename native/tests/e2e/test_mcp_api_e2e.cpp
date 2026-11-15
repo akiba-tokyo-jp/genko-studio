@@ -961,6 +961,27 @@ private slots:
         QVERIFY2(after == before, tree_diff(before, after).c_str());
     }
 
+    // The people's guides over MCP (SPEC FIGURE-03): render's kinds guide:figures and guide:regions answer with a picture
+    // of the panel (black where nobody is), and an unknown kind's refusal names them.
+    void thePeoplesGuidesAreRenderKinds() {
+        const QString dir = fresh("figures");
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        const std::string frame = make_book(mcp, "b.genko");
+        QVERIFY(!frame.empty());
+        for (const char* kind : {"guide:figures", "guide:regions"}) {
+            const Json reply = mcp.call("render", Json::object({{"project", "b.genko"}, {"page", 1}, {"frame_id", frame}, {"kind", kind}, {"max_px", 256}}));
+            const Json shown = Mcp::text(reply);
+            QVERIFY2(shown.is_object() && shown["ok"] == Json(true), genko::core::dump_python(reply).substr(0, 2000).c_str());
+            bool image = false;
+            for (const Json& block : reply["result"]["content"]) image = image || block.value("type", "") == "image";
+            QVERIFY2(image, kind);
+        }
+        const Json refused = Mcp::text(mcp.call("render", Json::object({{"project", "b.genko"}, {"page", 1}, {"frame_id", frame}, {"kind", "guide:nobody"}})));
+        QCOMPARE(refused["ok"], Json(false));
+        QVERIFY2(genko::core::dump_python(refused).find("guide:figures") != std::string::npos, genko::core::dump_python(refused).c_str());
+    }
+
     // A person's upscaler: the agent names a registered one and a scale; the command line is the person's, with Genko's
     // own temporary files; what the program prints never reaches the protocol. Names that are not registered (paths,
     // shell words) are refused without running anything.
