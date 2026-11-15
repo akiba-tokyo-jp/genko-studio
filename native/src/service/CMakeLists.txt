@@ -55,6 +55,7 @@ genko_library(genko_service
     preview.cpp
     sheets.cpp
     guide.cpp
+    figure_guide.cpp
     genreq.cpp
     importer.cpp
     atari.cpp

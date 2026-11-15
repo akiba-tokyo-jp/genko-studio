@@ -77,7 +77,7 @@ const std::vector<ToolSpec>& table() {
          R"(ページのプレビュー画像（mode: name / proof / print。print は印刷と同じ見え方）。コマ番号は読み順。
         frame_id を渡すとそのコマだけ。layer_id を渡すとそのレイヤーだけを白の上に。
         kind: compare（候補にネームを赤で重ねる。candidate_id 省略で採用中の絵）/ guide:composition / guide:pose / guide:keepout /
-        atari（アタリと提案の重ね表示）。
+        guide:figures（コマの 3D の人形を黒地に人ごとの色で）/ guide:regions（人ごとの領域）/ atari（アタリと提案の重ね表示）。
         画像はファイルにも保存する。)",
          {{"project", Kind::Str, false, std::nullopt}, {"page", Kind::Int, false, std::nullopt}, {"mode", Kind::Str, false, Json("name")}, {"max_px", Kind::Int, false, Json(1024)}, {"frame_id", Kind::Str, true, Json()}, {"kind", Kind::Str, true, Json()}, {"candidate_id", Kind::Str, true, Json()}, {"layer_id", Kind::Str, true, Json()}, {"session", Kind::Str, true, Json()}}},
         {"import_image",
@@ -91,6 +91,8 @@ const std::vector<ToolSpec>& table() {
         "face:<人物 id>"、"person:<人物 id>" か rect_mm）/ upscale。複数人物のコマで一人だけ直すときは focus_character。
         修正は parent に元の候補 id。tool は tools.json のツール id（例 openai:gpt-image-1）。
         返す: request（サイズの候補、prompt の ja/en/tags、avoid、keepout、figures）、files（ガイドと参照画像の場所）、inbox。
+        コマに 3D の人形（add_figure・add_head・add_hand）があれば files.figures（guides/figures.png: 黒地に人ごとの色の陰の人形。
+        3D メッシュのポーズの制御画像）・files.regions（人ごとの領域）・files.image_order と request.control（px: 出力の大きさ）。
         同じ内容なら同じ id。)",
          {{"project", Kind::Str, false, std::nullopt}, {"page", Kind::Int, true, Json()}, {"frame_id", Kind::Str, true, Json()}, {"character_id", Kind::Str, true, Json()}, {"location_id", Kind::Str, true, Json()}, {"purpose", Kind::Str, true, Json()}, {"mode", Kind::Str, false, Json("new")}, {"parent", Kind::Str, true, Json()}, {"tool", Kind::Str, true, Json()}, {"instruction", Kind::Str, true, Json()}, {"regions", Kind::List, true, Json()}, {"focus_character", Kind::Str, true, Json()}, {"session", Kind::Str, true, Json()}}},
         {"import_images",

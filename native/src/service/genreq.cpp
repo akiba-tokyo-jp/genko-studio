@@ -15,6 +15,7 @@
 #include "service/blocking.hpp"
 #include "service/briefs.hpp"
 #include "service/data.hpp"
+#include "service/figure_guide.hpp"
 #include "service/fxwords.hpp"
 #include "service/guide.hpp"
 #include "service/book.hpp"
@@ -671,6 +672,62 @@ Json suggested_px(double aspect, std::int64_t pixels) {
     return Json::array({std::max<std::int64_t>(256, core::py_round_int(width / 64) * 64), std::max<std::int64_t>(256, core::py_round_int(height / 64) * 64)});
 }
 
+namespace {
+
+// The people's guides of a panel (SPEC FIGURE-03): guides/figures.png (its 3D figures, heads and hands shaded on black,
+// a colour each) and guides/regions.png (a solid colour each, black where nobody is) when it has any; regions.png from
+// the cast's places when it has two people or more but no 3D figure. The size is the tool's (its sizes_px, the one
+// nearest the panel's shape: the image covers the box, its middle is the box) when the request names a known tool,
+// else the request's suggested size (the image is the box, as the other guides). The `control` block, or null, and
+// the note to say first.
+Json control_guides(const core::Page& page, const core::Frame& frame, const NumBox& rect, const Json& panel, const guide::GenBox& box,
+                    const Json* tool, std::map<std::string, std::string>& files, std::string& note) {
+    const std::vector<Json> people = figure_guide::panel_prims(page, frame);
+    std::vector<figure_guide::Place> cast;
+    if (people.empty()) {
+        cast = figure_guide::cast_places(panel, rect);
+        if (cast.size() < 2) return Json();
+    }
+    std::array<int, 2> px = box.px;
+    bool cover = false;
+    if (tool != nullptr) {
+        const Json sizes = tool_sizes(box.width / box.height, util::item(*tool, "sizes_px"));
+        if (!sizes.empty()) {
+            const auto wh = core::int_tuple(sizes[0]["px"]);
+            if (wh.size() == 2 && wh[0] >= 16 && wh[1] >= 16 && wh[0] <= 4096 && wh[1] <= 4096) {
+                px = {static_cast<int>(wh[0]), static_cast<int>(wh[1])};
+                cover = true;
+            }
+        }
+    }
+    const figure_guide::View view = figure_guide::view_of({box.x, box.y, box.width, box.height}, px, cover);
+    const std::string size = std::to_string(px[0]) + "×" + std::to_string(px[1]);
+    const std::size_t count = people.empty() ? cast.size() : people.size();
+    if (!people.empty()) {
+        files["guides/figures.png"] = guide::to_png(figure_guide::figures(page, people, view));
+        files["guides/regions.png"] = guide::to_png(figure_guide::regions(page, people, view));
+        note = "guides/figures.png はこのコマの人物のポーズ・体格・向き・重なり（顔の無い 3D の人形を黒地に人ごとの色で、ページのカメラと光で描いたもの。" +
+               size + " px）。画像ツールに 3D メッシュのポーズの制御があれば制御画像にする（例: PS5 AI Anima は controlnet lllite_3dpose、"
+               "control_image_id に guides/figures.png を上げた id、control_strength 1、CFG 1）。出力はちょうど " + size +
+               " px（制御画像と同じ大きさ）。参照画像として渡すなら files.image_order の順（1 枚なら guides/figures.png、2 枚なら figures と references_sheet）";
+        if (count >= 2) {
+            note += "。2 人以上なので guides/regions.png（人ごとの領域。figures.png と同じ色・同じ順、黒は誰もいない所）も領域の制御"
+                    "（例: controlnet lllite_regional）に渡し、3D ポーズと合わせて使う（領域の制御は早めに切る）";
+        }
+    } else {
+        files["guides/regions.png"] = guide::to_png(figure_guide::place_regions(cast, view));
+        note = "guides/regions.png はこのコマの人物ごとの領域（台本の配置から。黒は誰もいない所。" + size +
+               " px）。画像ツールに領域の制御があれば渡す（例: PS5 AI Anima は controlnet lllite_regional）。出力はちょうど " + size + " px";
+    }
+    return Json::object({{"pose", people.empty() ? Json() : Json("guides/figures.png")},
+                         {"regions", "guides/regions.png"},
+                         {"px", Json::array({px[0], px[1]})},
+                         {"people", count},
+                         {"strength", 1}});
+}
+
+}  // namespace
+
 Pack build(const core::Document& doc, const fs::path& project, Options o) {
     if (!core::is_one_of(o.purpose, {"panel_art", "draft", "character_sheet", "location"})) {
         throw RequestError("purpose は " + join(std::vector<std::string>(std::begin(kPurposes), std::end(kPurposes)), ", ") + " のどれか", "/purpose");
@@ -693,6 +750,8 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
     const Num dpi = doc.spec.dpi.truthy() ? doc.spec.dpi : Num(600);
     std::string expression = doc.spec.expression;
     Json box_size, prompt, target, keep01 = Json::array(), figures_json = Json::array(), b_hash, avoid, characters = Json::array();
+    Json control;               // (the 3D-mesh pose and regional controls: only for a panel with people, SPEC FIGURE-03)
+    std::string control_note;   // (said first to the agent)
     std::vector<Json> cast;
     std::vector<std::string> refs;
     if (purpose == "panel_art" || purpose == "draft") {
@@ -732,6 +791,7 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
             figures_json.push_back(Json::object({{"char", f.char_id}, {"head01", box.box01(head)}, {"body01", box.box01(body)},
                                                  {"head_mm", box_json(f.head, 2)}, {"body_mm", box_json(f.body, 2)}}));
         }
+        if (mode == "new") control = control_guides(*pg, *frame, rect, panel, box, found_id.has_value() ? &tool_spec : nullptr, files, control_note);
         if (py_truthy(o.focus_character)) {
             if (std::none_of(cast.begin(), cast.end(), [&](const Json& c) { return core::py_equals(c, o.focus_character); })) {
                 throw RequestError(py_str(o.focus_character) + " はこのコマにいない", "/focus_character");
@@ -888,6 +948,7 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
         }
         if (mode == "upscale") notes.push_back("画像ツールの高解像度化で source.png を拡大する。無ければ record_review kind=upscale で理由を残す");
     }
+    if (!control_note.empty()) notes.insert(notes.begin(), control_note);
     const Json supports = py_get(tool_spec, "supports", Json::object());
     if (!py_truthy(py_get(supports, "references", Json(true)))) {
         notes.push_back("このツールは参照画像を渡せない。prompt だけで作り、取り込み時に refs_used を空にする");
@@ -911,6 +972,22 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
     for (const std::string& r : ordered_refs) ordered.push_back(r);
     Json notes_json = Json::array();
     for (const std::string& n : notes) notes_json.push_back(n);
+    Json files_json = Json::object({{"composition", file_or_null("guides/composition.png")},
+                                    {"pose", file_or_null("guides/pose.png")},
+                                    {"keepout", file_or_null("guides/keepout.png")},
+                                    {"references", ordered},
+                                    {"references_sheet", sheet ? Json("guides/references_sheet.png") : Json()},
+                                    {"source", source},
+                                    {"mask", mask}});
+    // (the people's guides: named only when they are there, so a request without them is as before, byte for byte)
+    if (files.count("guides/figures.png") != 0) files_json["figures"] = "guides/figures.png";
+    if (files.count("guides/regions.png") != 0) files_json["regions"] = "guides/regions.png";
+    if (files.count("guides/figures.png") != 0) {
+        Json order = Json::array({"guides/figures.png"});
+        if (sheet) order.push_back("guides/references_sheet.png");
+        for (const std::string& r : ordered_refs) order.push_back(r);
+        files_json["image_order"] = std::move(order);
+    }
     Json request = Json::object({{"type", kType},
                                  {"purpose", purpose},
                                  {"mode", mode},
@@ -927,19 +1004,14 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
                                  {"characters", characters},
                                  {"focus_character", o.focus_character},
                                  {"steps", steps},
-                                 {"files", Json::object({{"composition", file_or_null("guides/composition.png")},
-                                                         {"pose", file_or_null("guides/pose.png")},
-                                                         {"keepout", file_or_null("guides/keepout.png")},
-                                                         {"references", ordered},
-                                                         {"references_sheet", sheet ? Json("guides/references_sheet.png") : Json()},
-                                                         {"source", source},
-                                                         {"mask", mask}})},
+                                 {"files", files_json},
                                  {"order_of_instructions", Json::array({"共通制約", "ページ", "コマのメモ", "今回の指示"})},
                                  {"references_note", "references は大事な順。画像ツールが受けられる枚数が少ないときは、前から順に渡す"
                                                      "（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）。1〜2 枚しか渡せないなら "
                                                      "references_sheet（大事な参照を並べた 1 枚。コマと同じ縦横比なので、出てくる絵の形もそろう）を渡す"},
                                  {"notes_for_agent", notes_json},
                                  {"instruction", o.instruction}});
+    if (!control.is_null()) request["control"] = control;
     const Json kept = briefs::catalog(doc);
     if (!kept.is_null() && briefs::catalog_fits(kept, expression)) {  // (which style, which version: the request says so)
         request["style"] = Json::object({{"catalog_id", util::item(kept, "id")}, {"version", py_get(kept, "version")}, {"title", py_get(kept, "title")}});

@@ -27,6 +27,7 @@
 #include "service/atari.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
+#include "service/figure_guide.hpp"
 #include "service/finish.hpp"
 #include "service/genreq.hpp"
 #include "service/guide.hpp"
@@ -133,8 +134,25 @@ std::pair<std::string, std::string> render_kind(const core::Document& doc, const
         const std::string name = kind.get<std::string>().substr(6);
         image = name == "keepout" ? guide::keepout(doc, page, frame, box) : name == "pose" ? guide::pose(page, frame, box) : guide::composition(page, frame, box);
         label = name + "_" + frame.id;
+    } else if (core::is_one_of(kind, {"guide:figures", "guide:regions"})) {  // (SPEC FIGURE-03: the people's guides)
+        const double aspect = (frame.rect.width.value() + 2 * genreq::kPadMm) / (frame.rect.height.value() + 2 * genreq::kPadMm);
+        const guide::GenBox box = guide::GenBox::for_frame(frame, genreq::kPadMm, exact_px(aspect));
+        const figure_guide::View view = figure_guide::view_of({box.x, box.y, box.width, box.height}, box.px, false);
+        const std::vector<Json> people = figure_guide::panel_prims(page, frame);
+        const bool regions = core::py_equals(kind, Json("guide:regions"));
+        if (!regions) {
+            image = figure_guide::figures(page, people, view);
+        } else if (!people.empty()) {
+            image = figure_guide::regions(page, people, view);
+        } else {
+            const std::array<core::Num, 4> rect{frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height};
+            std::vector<figure_guide::Place> cast = figure_guide::cast_places(panel, rect);
+            if (cast.size() < 2) cast.clear();  // (as the request: one person has no regions)
+            image = figure_guide::place_regions(cast, view);
+        }
+        label = (regions ? "regions_" : "figures_") + frame.id;
     } else {
-        throw core::ApplyError("kind は compare / guide:composition / guide:pose / guide:keepout");
+        throw core::ApplyError("kind は compare / guide:composition / guide:pose / guide:keepout / guide:figures / guide:regions");
     }
     // (thumbnail only shrinks: an edge past an int's range is the int's end — the same picture, not a size cut to its
     // low bits)
@@ -148,9 +166,11 @@ namespace {
 
 // _guide_sheet(pack): the request's guides side by side, long side 512 px.
 std::optional<std::string> guide_sheet(const genreq::Pack& pack) {
+    // (in colour when the people's guides are there, SPEC FIGURE-03; else grey as before)
+    const bool colour = pack.files.count("guides/figures.png") != 0 || pack.files.count("guides/regions.png") != 0;
     std::vector<render::Image> images;
-    for (const char* name : {"guides/composition.png", "guides/pose.png", "guides/keepout.png"}) {
-        if (pack.files.count(name) != 0) images.push_back(open_picture(pack.files.at(name)).convert("L"));
+    for (const char* name : {"guides/composition.png", "guides/pose.png", "guides/keepout.png", "guides/figures.png", "guides/regions.png"}) {
+        if (pack.files.count(name) != 0) images.push_back(open_picture(pack.files.at(name)).convert(colour ? "RGB" : "L"));
     }
     if (images.empty()) return std::nullopt;
     const int h = std::min(256, images.front().height());
@@ -160,7 +180,8 @@ std::optional<std::string> guide_sheet(const genreq::Pack& pack) {
         thumbs.push_back(img.resize(render::Size{std::max(1, static_cast<int>(core::py_round_int(static_cast<double>(img.width()) * h / img.height()))), h}));
         total += thumbs.back().width();
     }
-    render::Image sheet = render::Image::create("L", render::Size{total + 8 * (static_cast<int>(thumbs.size()) - 1), h}, render::Ink(200));
+    render::Image sheet = colour ? render::Image::create("RGB", render::Size{total + 8 * (static_cast<int>(thumbs.size()) - 1), h}, render::Ink{200, 200, 200})
+                                 : render::Image::create("L", render::Size{total + 8 * (static_cast<int>(thumbs.size()) - 1), h}, render::Ink(200));
     int x = 0;
     for (const render::Image& thumb : thumbs) {
         sheet.paste(thumb, render::Point{x, 0});
