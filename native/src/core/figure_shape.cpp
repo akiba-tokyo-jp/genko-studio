@@ -219,7 +219,7 @@ std::vector<std::vector<Vec3>> marks_on(const Part& head, const Vec3& centre, co
 struct Sex {
     double rib_w = 1.0;
     double rib_d = 1.0;
-    double waist = 0.95;
+    double waist = 0.97;
     double pelvis = 1.0;
     double glute = 1.0;
     double limb = 1.0;
@@ -232,8 +232,8 @@ struct Sex {
 Sex sex_of(const Json& body) {
     const Json* sex = get(body, "sex");
     const std::string name = sex != nullptr && sex->is_string() ? sex->get<std::string>() : std::string();
-    if (name == "male") return Sex{1.12, 1.05, 1.0, 0.86, 0.92, 1.08, 1.0, 1.0, 1.06, 1};
-    if (name == "female") return Sex{0.9, 0.95, 0.82, 1.02, 1.12, 0.88, 1.08, 0.92, 0.9, 2};
+    if (name == "male") return Sex{1.12, 1.06, 1.0, 0.95, 0.92, 1.08, 1.0, 1.0, 1.06, 1};
+    if (name == "female") return Sex{1.02, 0.95, 0.93, 1.0, 1.1, 0.9, 1.04, 0.92, 0.9, 2};
     return Sex{};
 }
 
@@ -459,61 +459,55 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
     const auto radii = [u](double x, double y, double z) { return Vec3{x * u, y * u, z * u}; };
 
     Field f;
-    enum { kPelvis, kBelly, kChest, kNeck };
+    enum { kTorso, kNeck };
     // (sizes in u, the skeleton's unit: a head is 1.1 u tall; an adult's widths, girths and depths as such)
-    const auto pair = [](Part& p, Piece one, Piece other) {  // (a left and right pair: joined first, the same either way)
+    // (a left and right pair: joined first, the same either way)
+    const auto pair = [](std::vector<Piece>& list, Piece one, Piece other) {
         one.paired = true;
-        p.pieces.push_back(one);
-        p.pieces.push_back(other);
+        list.push_back(one);
+        list.push_back(other);
     };
-    {  // 0 the pelvis and the buttocks
+    const double hw = 0.5 * clamp(hips, 0.6, 1.6);        // (the hip joints' half spacing, as the skeleton has it)
+    const double sw = 0.95 * clamp(shoulders, 0.6, 1.5);  // (and the shoulders')
+    {  // 0 the torso as one smooth body: the pelvis (as wide as the thighs' tops: the hip runs into the thigh), the
+       // buttocks, the belly, the ribs, the shoulders' line and the trapezius; the pectorals or the breasts on it
         Part p;
-        p.k = 0.16 * u;
-        p.pieces.push_back(ellipsoid(off(P0, H, 0.0, 0.02, 0.02), H, radii((0.42 + 0.3 * hips) * g * sx.pelvis, 0.5, 0.44 * dd)));
+        p.k = 0.3 * u;
+        p.pieces.push_back(ellipsoid(off(P0, H, 0.0, 0.02, 0.03), H, radii((hw + 0.3) * g * sx.pelvis, 0.62, 0.45 * dd)));
         p.pieces.push_back(ellipsoid(off(P0, H, 0.0, 0.4, 0.0), H, radii(0.17 * g * sx.pelvis, 0.26, 0.27 * dd)));  // (between the legs)
         Piece glute[2];
         for (int i = 0; i < 2; ++i) {
             const double s = i == 0 ? 1.0 : -1.0;
-            glute[i] = ellipsoid(off(P0, H, s * 0.26 * hips, 0.22, 0.2 * dd), H, radii(0.33 * g * sx.glute, 0.36, 0.28 * dd * sx.glute));
+            glute[i] = ellipsoid(off(P0, H, s * 0.27 * hips, 0.2, 0.22 * dd), H, radii(0.32 * g * sx.glute, 0.36, 0.29 * dd * sx.glute));
         }
-        pair(p, glute[0], glute[1]);
-        f.parts.push_back(std::move(p));
-    }
-    {  // 1 the belly
-        Part p;
-        p.pieces.push_back(ellipsoid(off(P0, S, 0.0, -0.8, 0.0), S,
-                                     radii(0.62 * g * sx.waist * (0.55 + 0.225 * (hips + shoulders)), 0.8, 0.43 * dd)));
-        f.parts.push_back(std::move(p));
-    }
-    {  // 2 the chest: the ribs, the shoulders' line, the trapezius, and the pectorals or the breasts
-        Part p;
-        p.k = 0.16 * u;
-        p.pieces.push_back(ellipsoid(off(W, C, 0.0, -0.8, 0.04), C, radii((0.36 + 0.38 * shoulders) * g * sx.rib_w, 0.82, 0.48 * dd * sx.rib_d)));
-        const double sw = 0.95 * clamp(shoulders, 0.6, 1.5);
-        p.pieces.push_back(ellipsoid(off(N, C, 0.0, 0.3, 0.05), C, radii(sw * 0.86, 0.25 * g, 0.3 * dd * sx.rib_d)));
-        pair(p, cone(off(N, C, 0.0, 0.05, 0.1), 0.2 * u * g, off(sk.point("l_shoulder"), C, 0.0, -0.02, 0.05), 0.15 * u * g),
-             cone(off(N, C, 0.0, 0.05, 0.1), 0.2 * u * g, off(sk.point("r_shoulder"), C, 0.0, -0.02, 0.05), 0.15 * u * g));
+        pair(p.pieces, glute[0], glute[1]);
+        p.pieces.push_back(ellipsoid(off(P0, S, 0.0, -0.85, -0.04), S,
+                                     radii(0.75 * g * sx.waist * (0.55 + 0.225 * (hips + shoulders)), 0.8, 0.47 * dd)));
+        p.pieces.push_back(ellipsoid(off(W, C, 0.0, -0.78, 0.0), C, radii((0.36 + 0.38 * shoulders) * g * sx.rib_w, 0.84, 0.55 * dd * sx.rib_d)));
+        p.pieces.push_back(ellipsoid(off(N, C, 0.0, 0.3, 0.06), C, radii(sw * 0.9, 0.24 * g, 0.3 * dd * sx.rib_d)));
+        // (on it, by a narrower blend: the trapezius rising to the neck, the pectorals or the breasts)
+        p.detail_k = 0.2 * u;
+        pair(p.details, cone(off(N, C, 0.0, 0.0, 0.1), 0.2 * u * g, off(sk.point("l_shoulder"), C, 0.0, -0.04, 0.06), 0.15 * u * g),
+             cone(off(N, C, 0.0, 0.0, 0.1), 0.2 * u * g, off(sk.point("r_shoulder"), C, 0.0, -0.04, 0.06), 0.15 * u * g));
         if (sx.chest == 1) {
-            pair(p, ellipsoid(off(W, C, 0.3 * shoulders, -1.06, -0.33 * dd), C, radii(0.3 * g, 0.22, 0.15 * dd)),
-                 ellipsoid(off(W, C, -0.3 * shoulders, -1.06, -0.33 * dd), C, radii(0.3 * g, 0.22, 0.15 * dd)));
+            pair(p.details, ellipsoid(off(W, C, 0.3 * shoulders, -1.06, -0.38 * dd), C, radii(0.3 * g, 0.22, 0.15 * dd)),
+                 ellipsoid(off(W, C, -0.3 * shoulders, -1.06, -0.38 * dd), C, radii(0.3 * g, 0.22, 0.15 * dd)));
         } else if (sx.chest == 2) {
-            pair(p, ellipsoid(off(W, C, 0.27 * shoulders, -0.88, -0.36 * dd), C, radii(0.21 * g, 0.2 * g, 0.19 * g)),
-                 ellipsoid(off(W, C, -0.27 * shoulders, -0.88, -0.36 * dd), C, radii(0.21 * g, 0.2 * g, 0.19 * g)));
+            pair(p.details, ellipsoid(off(W, C, 0.26 * shoulders, -0.86, -0.4 * dd), C, radii(0.21 * g, 0.2 * g, 0.18 * g)),
+                 ellipsoid(off(W, C, -0.26 * shoulders, -0.86, -0.4 * dd), C, radii(0.21 * g, 0.2 * g, 0.18 * g)));
         }
         f.parts.push_back(std::move(p));
     }
     const Vec3 neck_low = off(N, C, 0.0, 0.1, 0.04);
     const Vec3 neck_top = off(HB, Hd, 0.0, -0.05, 0.06);
-    const double r_neck_low = 0.25 * u * gs * sx.neck;
-    const double r_neck_top = 0.21 * u * gs * sx.neck;
-    {  // 3 the neck (the head is meshed on its own, finer grid, with the neck's top: below)
+    const double r_neck_low = 0.29 * u * gs * sx.neck;
+    const double r_neck_top = 0.24 * u * gs * sx.neck;
+    {  // 1 the neck (the head is meshed on its own, finer grid, with the neck's top: below)
         Part p;
         p.pieces.push_back(cone(neck_low, r_neck_low, neck_top, r_neck_top));
         f.parts.push_back(std::move(p));
     }
-    f.joints.push_back(Joint{kPelvis, kBelly, off(P0, S, 0.0, -0.45, 0.0), 0.45 * u, 1.1 * u});
-    f.joints.push_back(Joint{kBelly, kChest, off(W, C, 0.0, -0.25, 0.0), 0.45 * u, 1.1 * u});
-    f.joints.push_back(Joint{kChest, kNeck, off(N, C, 0.0, 0.05, 0.03), 0.16 * u, 0.45 * u});
+    f.joints.push_back(Joint{kTorso, kNeck, off(N, C, 0.0, 0.1, 0.03), 0.35 * u, 0.6 * u});
 
     struct Arm {
         int fore;
@@ -532,14 +526,14 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         const Vec3& wrist = sk.point(s + "_wrist");
         const Mat3& arm_r = sk.turn(s + "_arm");
         const Mat3& fore_r = sk.turn(s + "_elbow");
-        const double r_shoulder = 0.2 * u * limb;
-        const double r_elbow = 0.145 * u * limb;
+        const double r_shoulder = 0.23 * u * limb;
+        const double r_elbow = 0.15 * u * limb;
         const double r_wrist = 0.12 * u * limb;
         {  // the upper arm and its deltoid
             Part p;
             p.k = 0.1 * u;
             p.pieces.push_back(cone(shoulder, r_shoulder, elbow, r_elbow));
-            p.pieces.push_back(ellipsoid(off(shoulder, arm_r, 0.0, 0.16, 0.0), arm_r, radii(0.25 * limb, 0.38, 0.24 * limb)));
+            p.pieces.push_back(ellipsoid(off(shoulder, arm_r, 0.0, 0.13, 0.0), arm_r, radii(0.28 * limb, 0.4, 0.27 * limb)));  // (the deltoid)
             f.parts.push_back(std::move(p));
         }
         const int upper = static_cast<int>(f.parts.size()) - 1;
@@ -547,11 +541,11 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             Part p;
             p.k = 0.1 * u;
             p.pieces.push_back(cone(elbow, r_elbow, wrist, r_wrist));
-            p.pieces.push_back(ellipsoid(off(elbow, fore_r, 0.0, 0.36, 0.0), fore_r, radii(0.165 * limb, 0.42, 0.15 * limb)));
+            p.pieces.push_back(ellipsoid(off(elbow, fore_r, 0.0, 0.36, 0.0), fore_r, radii(0.18 * limb, 0.42, 0.16 * limb)));
             f.parts.push_back(std::move(p));
         }
         const int fore = upper + 1;
-        f.joints.push_back(Joint{kChest, upper, shoulder, 0.16 * u, 0.5 * u});
+        f.joints.push_back(Joint{kTorso, upper, shoulder, 0.18 * u, 0.55 * u});
         f.joints.push_back(Joint{upper, fore, elbow, 0.05 * u, 0.22 * u});
         arms[side] = Arm{fore, elbow, wrist, r_elbow, r_wrist};
 
@@ -566,8 +560,8 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         {  // the thigh
             Part p;
             p.k = 0.14 * u;
-            p.pieces.push_back(cone(hip, 0.39 * u * g * sx.thigh, knee, r_knee));
-            p.pieces.push_back(ellipsoid(off(hip, thigh_r, 0.0, 0.8 * legs, -0.05), thigh_r, radii(0.31 * g * sx.thigh, 0.8 * legs, 0.31 * g * sx.thigh)));
+            p.pieces.push_back(cone(off(hip, thigh_r, -sg * 0.06, 0.22, 0.0), 0.34 * u * g * sx.thigh, knee, r_knee));  // (its top ball inside the pelvis)
+            p.pieces.push_back(ellipsoid(off(hip, thigh_r, 0.0, 0.72 * legs, -0.04), thigh_r, radii(0.3 * g * sx.thigh, 0.85 * legs, 0.31 * g * sx.thigh)));
             f.parts.push_back(std::move(p));
         }
         const int thigh = static_cast<int>(f.parts.size()) - 1;
@@ -594,7 +588,7 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             f.parts.push_back(std::move(p));
         }
         const int foot = shin + 1;
-        f.joints.push_back(Joint{kPelvis, thigh, hip, 0.3 * u, 0.8 * u});
+        f.joints.push_back(Joint{kTorso, thigh, hip, 0.32 * u, 1.1 * u});
         f.joints.push_back(Joint{thigh, shin, knee, 0.05 * u, 0.25 * u});
         f.joints.push_back(Joint{shin, foot, ankle, 0.08 * u, 0.3 * u});
     }
@@ -613,13 +607,14 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         Field hf;
         hf.parts.push_back(head_part(Hc, Hd, u));
         Part stub;
-        stub.pieces.push_back(stub_of(neck_low, r_neck_low, neck_top, r_neck_top, 0.3 * u, 0.01 * u));
+        // (narrowed only a little: its rim stays inside the body's neck, and its slope, so its light, is the neck's)
+        stub.pieces.push_back(stub_of(neck_low, r_neck_low, neck_top, r_neck_top, 0.3 * u, 0.004 * u));
         const Vec3 down = unit(sub(neck_low, neck_top));
         stub.cut = true;  // (kept down to 0.3 u below the neck's top: inside the body's own neck below that)
         stub.cut_n = down;
         stub.cut_d = dot3(down, neck_top) + 0.3 * u;
         hf.parts.push_back(std::move(stub));
-        hf.joints.push_back(Joint{0, 1, HB, 0.12 * u, 0.4 * u});
+        hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.2), 0.25 * u, 0.5 * u});  // (at the nape: the chin stays clear of the neck)
         Smooth hm = surface_nets::mesh(hf, u / kHeadCells);
         // (the outline of the neck changes from the body's to the head's 0.12 u below the neck's top)
         for (std::size_t i = 0; i < hm.v.size(); ++i) {

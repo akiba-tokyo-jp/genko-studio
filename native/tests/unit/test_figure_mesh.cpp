@@ -204,7 +204,8 @@ private slots:
     }
 
     // The same bytes every time: the figure, a hand and the head made twice (the cache emptied between), on four
-    // threads at once, drawn and traced twice; and the pins (taken when FIGURE-01 was made).
+    // threads at once, drawn and traced twice; and the pins (taken when FIGURE-01 was made, again after G2's proportion
+    // pass).
     void theSameBytesOnEveryRunAndThread() {
         const Json walk = figure_prim("walk", "", 0.0);
         const Json fist = ops(R"({"kind": "hand", "size": [25, 25, 25], "side": "l", "pose": "fist"})");
@@ -448,10 +449,10 @@ private slots:
     }
 
 private:
-    static constexpr const char* kWalkMesh = "aa4e934277a89fb7dae89bb955bd06241ba62cd3f3b24795bb894d484ed55811";
-    static constexpr const char* kWalkLines = R"({"count":29,"points":807,"sha":"1ee327eec70395a1758b88710e77c8aa1c74617aed1b8d6c36bc15d89e5cf382"})";
+    static constexpr const char* kWalkMesh = "cc8a7dc26f6e8a084e75fc25a835a33ea0a1d87fb47530e71c81be1a3b8d08cd";
+    static constexpr const char* kWalkLines = R"({"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"})";
     static constexpr const char* kDrawn =
-        "65324a1ca2d7e5ee572da85c54889f3ae052ea8c879a288a3d708ff29c214984657c49acec45e069b2df8eccd2d141df8eded120cf32dfdc7f8af1c2d216bc1f";
+        "08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f589255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae";
     static constexpr const char* kOtherKinds = "e409e23fb070dbc71bec9c449236bb21af6a5d096c658aa93538c930a241f54a";
 };
 

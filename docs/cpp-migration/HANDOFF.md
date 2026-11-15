@@ -18,6 +18,14 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 生成の案内 guides/figures.png（群 G2。SPEC FIGURE-03）と体の比率の見直し — 2026-11-15、ブランチ native/figures（main には未統合）
+
+### 体の比率の見直し（FIGURE-01 の形の表）
+- なぜ: G1 の体は利用者の画像生成の 3D ポーズ制御（anima_3dpose。学習は写実の大人のなめらかな体）の体より細く、胴が筒のようで、腰に横の帯（胴を骨盤・腹・胸の 3 部位に分け、関節の近くだけなめらかにつないだ継ぎ目の陰）、女の太ももが腰の下で急にふくらみ、首が細く長かった。
+- したこと（core/figure_shape.cpp の数だけ。骨格・体型の数の読み方・preset は前と同じ）: 胴を 1 つの部位（幅 0.3u のなめらかな最小値）にし、僧帽筋と大胸筋・胸はその上に細い幅（0.2u）で。骨盤の幅を太ももの付け根と同じ（股関節の間隔 + 0.3u）にし、太ももの上の球を骨盤の内へ寄せ、胴と太ももの結びを広く（0.32u・半径 1.1u）。胸郭の厚みを 0.48 → 0.55、腹を高く厚く、くびれを 女 0.82 → 0.93・指定なし 0.95 → 0.97、女の胸郭の幅 0.9 → 1.02、男の骨盤 0.86 → 0.95。上腕・三角筋・前腕を太く。首を太く（付け根 0.25 → 0.29u、上 0.21 → 0.24u）、胴と首の結びを広く（0.35u・半径 0.6u）、頭と首の結びをうなじへ（あごは首と結ばない）、頭の網の首の切り株の細め方を 0.01u → 0.004u（首の中ほどの光の帯が消えた）。
+- 測った形（arms_up、u 単位、前 → 後）: 正面の半幅 女 胸 0.56 → 0.67・くびれ 0.44 → 0.58・腰 0.97 → 0.92、男 胸 0.89 → 0.93・くびれ 0.56 → 0.71・腰 0.88 → 0.83、指定なし 胸 0.74 → 0.77・くびれ 0.52 → 0.65・腰 0.89 → 0.86。胸の厚み（中心線） 女 0.90 → 0.99、男 1.07 → 1.23、指定なし 0.96 → 1.10。腰／胸の比（test_figure_mesh）: 男 0.892、女 1.385、指定なし 1.126（試験の条件〔女 > 指定なし > 男、女 > 1.3 × 男〕は変えずに合格）。三角の数: walk 53,088 → 54,320、全 preset・性別・極端な体型の最大 61,424 → 62,584（上限 64,000 は変えていない）。速さ（test_perf_render smooth_figure）: 作る 132〜153 ms、B4 の校正 163 ms（上限は変えていない）。
+- 絵: 前 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/before/、後 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/after/、並べたもの /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/before_after_*.png（左が前、右が後）。
+
 ## なめらかな 3D の人形（群 G1。SPEC FIGURE-01）— 2026-11-15、ブランチ native/figures（main b1cba245 から。main には未統合）
 
 ### 利用者の決定（2026-11-15）
@@ -37,9 +45,10 @@
 - `test_ledger_service_b.cpp:1642` の手引きの例: 人形 hina（point、110 mm、turn 0.6）のトレースだけで 24 本（マネキン 4 本・四角 1・線 1 を足して 30 本ほど）。試験は変えずに合格。
 
 ### 新しい控え（test_figure_mesh。FIGURE-01 の形を変えたら値を取り直して、ここと試験を直す）
-- walk（指定なし、90 mm）の網: `aa4e934277a89fb7dae89bb955bd06241ba62cd3f3b24795bb894d484ed55811`（点・法線・三角・nocontour・案内線のバイト）。
-- walk の線（40 dpi）: `{"count":29,"points":807,"sha":"1ee327eec70395a1758b88710e77c8aa1c74617aed1b8d6c36bc15d89e5cf382"}`。
-- walk と fist の手の 60 dpi の陰（zbuf と shade の sha256 を続けたもの）: `65324a1ca2d7e5ee572da85c54889f3ae052ea8c879a288a3d708ff29c214984` + `657c49acec45e069b2df8eccd2d141df8eded120cf32dfdc7f8af1c2d216bc1f`。
+- **G2 の比率の見直し（下の G2 の節）で取り直した。** 胴・首・腕・太ももの形を変えたので網・線・陰の値がすべて変わる（ほかの種類の値 e409e23f… は変わらない）。前の値は G1 のもの。
+- walk（指定なし、90 mm）の網: 前 `aa4e934277a89fb7dae89bb955bd06241ba62cd3f3b24795bb894d484ed55811` → 後 `cc8a7dc26f6e8a084e75fc25a835a33ea0a1d87fb47530e71c81be1a3b8d08cd`（点・法線・三角・nocontour・案内線のバイト）。
+- walk の線（40 dpi）: 前 `{"count":29,"points":807,"sha":"1ee327eec70395a1758b88710e77c8aa1c74617aed1b8d6c36bc15d89e5cf382"}` → 後 `{"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"}`。
+- walk と fist の手の 60 dpi の陰（zbuf と shade の sha256 を続けたもの）: 前 `65324a1ca2d7e5ee572da85c54889f3ae052ea8c879a288a3d708ff29c214984` + `657c49acec45e069b2df8eccd2d141df8eded120cf32dfdc7f8af1c2d216bc1f` → 後 `08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f58` + `9255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae`。
 - 箱・円柱・階段・部屋・球・円錐・椅子・取り込みモデル（カメラ無しと有り）の陰と線: `e409e23fb070dbc71bec9c449236bb21af6a5d096c658aa93538c930a241f54a`。**この値は FIGURE-01 の前のビルド（main b1cba245 の mesh3d）で取った**（theOtherKindsAreAsBefore）。前の控え・許容は 1 つも変えていない。
 
 ### 試験（Release、関係するものだけ＝R1）
