@@ -27,6 +27,11 @@
   - 実 xcb の GUI（Release、Xvfb 1920x1080）: 66 本すべて合格（項目 1,229。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
   - 性能（静かな機械で、1 回温めてから）: test_perf_app 2 回（開くまで 915 ms・457 ms、入力から画面まで p95 0.78 ms・1.54 ms、p99 2.24 ms・2.99 ms）、test_perf_render 合格（F1 の頁 350 dpi 全体 674 ms。フキダシ 10 個の B4 600 dpi: フキダシ無し 373 ms、一から 778 ms、描き直し 523 ms。追加の全部を付けた 10 個 1,303 ms。表示だけで合否は付けていない。SKIP は前からの psd_of_groups_at_350dpi の 1 つ）、test_perf_pipeline 合格（PERF-F 全体 p95 530.8 ms、書き出し p95 5,347.8 ms）。
   - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- **実行ファイル（利用者の指示 2026-11-15「前回と同じ手順で作ってください」）**: `.github/workflows/build-executables.yml` を一度だけ有効にして流し、下書きの Release **v0.1.0-20261115** を作った（公開していない）。流した後は `.github/disabled-workflows/` に戻した（`.github/workflows/` は空。native.yml も無効のまま）。
+  - 合格した run: 43689763785（main 5b3bfae3。凍結 7046eea6 と同じ中身に、この記録とワークフローの移動だけ）。Linux（ubuntu-24.04）と Windows（windows-2022）でビルドし、展開した配布物で `--version`・`new`・`inspect`・`export --format png` が通った。Linux 約 20 分、Windows 約 44 分（vcpkg の控えが無く作り直し）。
+  - 添付: `genko-studio-0.1.0-linux-x86_64.tar.gz`（sha256 `fc01b549b8cb7129ee4b43c832476e84f7cf7de66866eed1df65f56fc249a18f`）、`genko-studio-0.1.0-windows-x64.zip`（sha256 `989eaf9dbb3704a0fade8aa714e3aefb7c6fd26b2a50729336d8df47fcfb83af`）、SHA256SUMS.txt。
+  - コードの版は 0.1.0 のまま（版の番号は変えていない）なので、タグに日付を付けた。前の下書き v0.1.0 はそのまま残っている。下書きの説明の Linux の一文は、今回確かめた範囲（素の Ubuntu への導入は流していない）に合わせた。
+  - **Windows で確かめたのはビルドと上の 4 つの操作だけ。** Windows の全試験と実機での受入（配布の前に必須）は残る。
 - 合格までの回（合格に数えていない）: 凍結 e5c2c0f3 の回。ASan で test_fukidashi だけが落ちた（1 回目は QtTest の 1 関数 5 分、落ちた 1 本だけの流し直しは ctest の 1,800 秒。どちらも `aThickDoubleLineWithDripsIsNotSlow` の中）。ほかの 270 本は合格、サニタイザーの報告は無し。原因と直しは下の「test_fukidashi の ASan の重さ」の節。コードを直したので、この出口は初めから流した（R4）。
 
 ## フキダシの追加（fukidashi@2。SPEC BALLOON-02）— 2026-11-14、2026-11-15 に main に統合
