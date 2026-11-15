@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -59,16 +60,29 @@ Json mirrored(const Json& pose);
 Json mirrored_joints(const Json& joints);
 
 // The poses that match (all the conditions given; empty: any), in the file's order. `query` is matched, without
-// regard to ASCII case, against the id, the Japanese and English names and the tags; `tags` must each be a tag of the
-// pose; `contact`, each a contact of it.
+// regard to ASCII case, against the id, the Japanese and English names and the tags (words split by spaces, ASCII or
+// 全角: each must match); `tags` must each be a tag of the pose; `contact`, each a contact of it; `props` true: only the
+// poses whose hands hold something, false: only those that hold nothing.
 struct Filter {
     std::string category;
     std::vector<std::string> tags;
     std::string query;
     std::string support;
     std::vector<std::string> contact;
+    std::optional<bool> props;
 };
 std::vector<const Json*> list(const Filter& filter = {});
+
+// What the gallery and the figure_poses tool say of a pose: {id, ja, en, category, tags, hands {l, r: the hand's shape's
+// name}, contact, support, props [what the hands hold, l then r], symmetric}.
+Json summary(const Json& pose);
+
+// A random pick for the gallery and the tool (never inside an op): `n` poses of `from` (all of them when fewer), each
+// once, in the order drawn, by splitmix64 from `seed` — the same seed, the same pick. A seed is written "fp-" and 16 hex
+// digits (seed_of reads one: nothing for any other text; seed_text writes one).
+std::vector<const Json*> sample(const std::vector<const Json*>& from, std::size_t n, std::uint64_t seed);
+std::optional<std::uint64_t> seed_of(std::string_view text);
+std::string seed_text(std::uint64_t seed);
 
 // What a hand may hold (the props G5 draws in the hand: until then the key is kept and nothing is drawn).
 inline constexpr std::string_view kProps[] = {"cup", "phone", "paper", "bag", "umbrella", "book", "pen", "sword", "bat", "ball"};

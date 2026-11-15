@@ -420,6 +420,19 @@ Ball ball_of(std::string_view joint, const Json& axes) {
     const Vec3 z{0.0, 0.0, 1.0};
     const Vec3 r0 = z * c + la::cross(axis, z) * s + axis * (la::dot(axis, z) * (1.0 - c));
     b.twist = -side * std::atan2(la::dot(d, la::cross(r0, r)), la::dot(r0, r));
+    if (joint.ends_with("_leg")) {
+        // the hip's rotation about the femur, in the joint's own coordinate system: m = rx(flexion) rz(abduction) ry(twist)
+        const double ab = std::asin(std::max(-1.0, std::min(1.0, d[0])));
+        const double fl = std::atan2(-d[2], d[1]);
+        const double ca = std::cos(fl);
+        const double sa = std::sin(fl);
+        const double cb = std::cos(ab);
+        const double sb = std::sin(ab);
+        const Vec3 x = la::column(m, 0);
+        const double m00 = cb * x[0] - ca * sb * x[1] + sa * sb * x[2];  // ((rx rz)ᵀ m)[0][0]
+        const double m20 = sa * x[1] + ca * x[2];                        // ((rx rz)ᵀ m)[2][0]
+        b.twist = side * std::atan2(m20, m00);
+    }
     return b;
 }
 
@@ -497,6 +510,27 @@ Measure measure(const Json& prim, const mesh3d::Model& model, const Json& pose) 
         m.lowest[name] = at;
     }
     m.seat = m.gap["seat"];
+    // the ribcage (the chest and the back: a body lying on the floor), the head and the upper arms (a body on its side rests
+    // on the shoulder), the lowest of each
+    for (const auto& [name, bone] : {std::pair<const char*, const char*>{"torso", "torso_high"}, {"head", "head"}, {"l_upper", "l_upper"}, {"r_upper", "r_upper"}}) {
+        const int index = bone_index(bones, bone);
+        double low = -std::numeric_limits<double>::infinity();
+        Vec3 at{};
+        for (std::size_t i = 0; i < v.size(); ++i) {
+            if (v[i][1] > low && region[i] == index) {
+                low = v[i][1];
+                at = v[i];
+            }
+        }
+        m.gap[name] = (m.floor - low) / u;
+        m.lowest[name] = at;
+    }
+    {  // the face of the torso toward the floor
+        const Mat3& chest = sk.turn("chest");
+        const double front = -la::column(chest, 2)[1];  // (the front is −z: how far it faces down)
+        const double side = std::fabs(la::column(chest, 0)[1]);
+        m.down = side > std::fabs(front) ? "side" : (front > 0 ? "front" : "back");
+    }
     // the centre of mass (each bone's share of the body at its middle) and the place the body rests on
     static const std::pair<const char*, double> kMass[] = {{"head", 0.081}, {"torso_low", 0.25}, {"torso_high", 0.25}, {"neck", 0.0},
                                                            {"l_upper", 0.028}, {"r_upper", 0.028}, {"l_fore", 0.016}, {"r_fore", 0.016},
@@ -549,7 +583,18 @@ std::vector<Issue> check_support(const Json& pose, const Measure& m) {
             if (feet && !has(contact, name) && gap(name) < kUnlistedGap) out.push_back({"support", std::string(name) + " touches the floor but is not a contact"});
         }
     }
-    const bool leans = has(contact, "back") || has(contact, "front") || has(contact, "side");
+    const bool faces = has(contact, "back") || has(contact, "front") || has(contact, "side");
+    // (on the floor, back, front or side with the ribcage on it is lying there; off it, a lean on a wall)
+    const bool lying = support == "floor" && faces && m.gap.at("torso") <= kContactGap;
+    if (lying) {
+        for (const char* face : {"back", "front", "side"}) {
+            if (has(contact, face) && m.down != face) out.push_back({"support", "the body lies on its " + m.down + ", not its " + face});
+        }
+    }
+    if (support == "floor" && !faces && m.gap.at("torso") < kUnlistedGap) {
+        out.push_back({"support", "the torso touches the floor but is not a contact (back, front or side)"});
+    }
+    const bool leans = faces && !lying;
     if (support != "none" && !leans && category != "walk" && category != "run" && m.balance > kBalance) {
         out.push_back({"balance", "the centre of mass is " + fmt(m.balance) + " u beyond what the body rests on"});
     }

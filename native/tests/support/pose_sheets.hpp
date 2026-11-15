@@ -20,6 +20,7 @@
 #include "core/json.hpp"
 #include "core/mesh3d.hpp"
 #include "core/pose_checks.hpp"
+#include "render/figure_thumbs.hpp"
 
 namespace genko::test::pose_sheets {
 
@@ -43,13 +44,11 @@ struct Entry {
 inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
     const Json prim = checks::figure_of(e.pose);
     const double u = e.report.measured.unit;
-    const double tall = 13.0 * u;
-    const double dpi = kCellH / (tall / 25.4);
-    const double k = dpi / 25.4;
-    const double box_w = tall * kCellW / kCellH;
     for (int v = 0; v < 3; ++v) {
         const double turn = kViews[v];
-        const std::string grey = checks::thumbnail(prim, turn, kCellW, kCellH);
+        render::figure_thumbs::Frame f;
+        const std::string grey = render::figure_thumbs::grey(prim, turn, kCellW, kCellH, 2, &f);
+        const double k = f.px_per_mm;
         QImage cell(kCellW, kCellH, QImage::Format_RGB888);
         for (int py = 0; py < kCellH; ++py) {
             for (int px = 0; px < kCellW; ++px) {
@@ -62,11 +61,11 @@ inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
         painter.drawImage(ox, oy, cell);
         Json seen = prim;
         seen["rot"] = Json::array({0.0, turn, 0.0});
-        const double floor = checks::lowest(seen);
-        const double box_y = floor + 0.9 * u - tall;
+        const double floor = f.floor;
+        const double box_y = f.top;
         const auto to_px = [&](const core::la::Vec3& p) {
             const mesh3d::OnPage at = mesh3d::to_page(seen, std::vector<core::la::Vec3>{p}, nullptr);
-            return QPointF(ox + (at.pts[0][0] + box_w / 2) * k, oy + (at.pts[0][1] - box_y) * k);
+            return QPointF(ox + (at.pts[0][0] - f.left) * k, oy + (at.pts[0][1] - box_y) * k);
         };
         painter.setPen(QPen(QColor(150, 120, 90), 1));
         const double fy = oy + (floor - box_y) * k;
@@ -78,7 +77,11 @@ inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
             painter.drawLine(QPointF(c.x() - 0.9 * u * k, sy), QPointF(c.x() + 0.9 * u * k, sy));
         }
         for (const Json& c : e.pose.value("contact", Json::array())) {
-            const std::string name = c.get<std::string>();
+            std::string name = c.get<std::string>();
+            if (name == "back" || name == "front" || name == "side") {  // (lying on it: the ribcage's point; a lean on a wall: none)
+                if (e.report.measured.gap.at("torso") > checks::kContactGap) continue;
+                name = "torso";
+            }
             const auto at = e.report.measured.lowest.find(name);
             if (at == e.report.measured.lowest.end()) continue;
             const double gap = e.report.measured.gap.at(name);
@@ -140,7 +143,7 @@ inline std::vector<std::filesystem::path> write(const std::filesystem::path& dir
 inline Json measured(const Entry& e) {
     const checks::Measure& m = e.report.measured;
     Json gaps = Json::object();
-    for (const auto& [k, v] : m.gap) gaps[k] = std::round(v * 1000.0) / 1000.0;
+    for (const auto& [k, v] : m.gap) gaps[k] = std::isfinite(v) ? Json(std::round(v * 1000.0) / 1000.0) : Json(99.0);  // (no point of that part)
     Json lowest = Json::object();
     for (const auto& [k, p] : m.lowest) lowest[k] = Json::array({p[0] / m.unit, p[1] / m.unit, p[2] / m.unit});
     Json issues = Json::array();
@@ -152,6 +155,7 @@ inline Json measured(const Entry& e) {
                          {"gap", gaps},
                          {"lowest", lowest},
                          {"seat", std::round(m.seat * 1000.0) / 1000.0},
+                         {"down", m.down},
                          {"balance", std::round(m.balance * 1000.0) / 1000.0},
                          {"mass", Json::array({m.mass[0] / m.unit, m.mass[1] / m.unit, m.mass[2] / m.unit})},
                          {"inside", Json::object({{"torso", e.report.inside.torso}, {"head", e.report.inside.head}, {"overlap", e.report.inside.overlap},

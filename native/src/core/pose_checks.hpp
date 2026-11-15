@@ -55,9 +55,12 @@ const std::vector<JointRange>& joint_ranges();
 std::array<double, 2> range_of(std::string_view joint, char axis);
 
 // The shoulders and the hips (l_arm, l_leg; the right ones mirrored): how far the bone may rise from hanging down —
-// toward the front, outward, the back and inward, straight between —, and its twist about itself (outward +, against
-// the shortest swing from hanging down; measured only up to twist_rise: the swing to an arm raised high depends on the
-// way it went up, so its twist is no measure there). The arm's rest (±0.12 about z) counts.
+// toward the front, outward, the back and inward, straight between —, and its twist about itself (outward +). The
+// arm's twist is against the shortest swing from hanging down (measured only up to twist_rise: the swing to an arm
+// raised high depends on the way it went up, so its twist is no measure there); the thigh's is the hip's own rotation
+// about the femur in the joint's coordinate system (flexion, then abduction, then rotation — the clinical one: the
+// shortest swing to a thigh both flexed and spread reads up to 0.8 rad of twist the hip does not make, so it refused
+// a cross-legged sit at no outward rotation at all). The arm's rest (±0.12 about z) counts.
 struct BallRange {
     std::string_view joint;
     double forward;
@@ -98,7 +101,8 @@ struct Measure {
     double unit = 0;
     double floor = 0;                    // the lowest point (mm)
     std::map<std::string, double> gap;   // each part's (l_foot … pelvis) lowest point above the floor (u)
-    std::map<std::string, Vec3> lowest;  // and that point (mm)
+    std::map<std::string, Vec3> lowest;  // and that point (mm); "torso" the chest's and back's (the ribcage)
+    std::string down;                    // the torso's face nearest the floor: back, front or side
     double seat = 0;                     // the seat's lowest point above the floor (u)
     double balance = 0;                  // the centre of mass beyond the place it rests on (u; 0 inside)
     Vec3 mass{};                         // the centre of mass (mm)
@@ -109,7 +113,9 @@ Measure measure(const Json& prim, const mesh3d::Model& model, const Json& pose);
 
 // (3) Resting on what it says: floor — each contact on the floor, no other part touching it, the body balanced over
 // them (not for walking, running, or a body that leans on something: back, front, side); chair — the seat on it at
-// seat_h and the feet named on the floor, balanced; none — nothing.
+// seat_h and the feet named on the floor, balanced; none — nothing. A body lying on the floor (its ribcage on it) names
+// the face it lies on — back, front or side — as a contact, and that face is the one toward the floor; it is balanced
+// as any body on the floor is (back, front and side off the floor are a lean on a wall, as before).
 std::vector<Issue> check_support(const Json& pose, const Measure& m);
 
 // (4) No limb through the body: each limb's axis (the upper arm and thigh beyond their roots) outside the torso and the
