@@ -494,6 +494,11 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 - `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts
   left out, and the lit surfaces as greys (with `tone`, the layer prints them as dots). `trace_prims` also leaves
   hidden lines out for figures, heads, hands and models.
+- Figures, heads and hands are one smooth, seamless, faceless body (SPEC FIGURE-01): a realistic adult build, a
+  neutral face relief without drawn features, hands with three-jointed fingers and a thumb (palms toward the body),
+  shaded smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers),
+  plus the head's pencil guides; no mesh edges. Boxes, scenes and imported models trace as before. Lines already
+  traced stay as they were.
 
 ### J7 additions
 

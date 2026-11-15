@@ -106,7 +106,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
      `height_mm`（全身の高さ。`add_figure` は 10〜400）はショットで決める: ロング（引き）はコマの高さの 1/3〜1/2、フル（全身）はコマに収まる高さ、
      バストはコマの高さの 2 倍ほど、アップは 3〜4 倍（頭と肩だけがコマに入り、腰はコマの下の外になる）。
      向きは `rot`（`[tip, turn, lean]`、ラジアン。turn 1.57 で横向き、3.14 で後ろ向き）、手足は `pose_figure`・`pose_mannequin`。
-  3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（隠れた線は省かれる）。
+  3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（3D の人形・頭・手は輪郭の線だけ。隠れた線は省かれる）。
   4. 物と背景: `add_shape`（`layer_id`、`shape` は rect・ellipse・line・polyline・curve・polygon、`kind: "pencil"`）で机・窓・建物の箱や地面の線を描く。
      3D の小物（`add_prim3d` の `kind: "prop"`）や背景（`add_scene`）を置いて `trace_prims` してもよい。
   5. ほかの線: `add_stroke`（`layer_id`、`points` はページの mm、`kind: "pencil"`）で、視線や動きの向き、効果の目印などを少し足す。

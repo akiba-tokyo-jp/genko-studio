@@ -18,6 +18,43 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## なめらかな 3D の人形（群 G1。SPEC FIGURE-01）— 2026-11-15、ブランチ native/figures（main b1cba245 から。main には未統合）
+
+### 利用者の決定（2026-11-15）
+- 「滑らかにする直しも一緒に進めて」「サイトのようにポーズも充実させてください」「良いです、進めてください」。人形の見た目はネーム・校正の絵で変わってよい（印刷には出ない）。トレース済みの線は保存されたまま。設計（G1〜G5）は /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-plan.md。この節は G1（なめらかな体）。
+- 同じ日の追加（リード経由。利用者の画像生成は anima_3dpose の 3D ポーズ制御で、学習データは写実に近い大人のなめらかな体・中立の顔の起伏・指あり）: 頭に中立の顔の起伏（目のくぼみ・鼻・唇・あご・耳。線は描かない）、体の比率を写実に近く、指が見えること。陰の材質色とハイライトは G2（ここでは点ごとの見た向きの法線を `mesh3d::seen_normals` で出せるようにしただけ）。
+
+### したこと
+- 新しいファイル: `core/figure_shape.{hpp,cpp}`（部位ごとの距離の場: 丸い円錐・楕円体・角の丸い箱、部位の中の多項式のなめらかな最小値、関節の近くだけのなめらかな結合、左右の組は先にまとめる、足の裏の平面、顔の起伏〔details〕と目のくぼみ〔hollows〕、手〔3 節の指・親指・水かき〕、首と前腕の切り株）、`core/surface_nets.{hpp,cpp}`（8³ ブロックの Surface Nets、Newton 2 回、短い対角線、勾配の法線、遠いブロックと遠い部位を飛ばしても値が同じになる仕組み）。
+- `core/mesh3d`: `Model` に `tris`・`vn`・`nocontour`（なめらかなモデルは `mesh.f` が空）。`model_of` の figure・head・hand はこの網（モデルの控えは最大 64 個かつ 64 MB。head と hand も控える。前は人形だけ 64 個）。`hand_shape`（`spread`・`thumb` の形ごとの既定。op はまだ受け取らない＝G3）、`seen_normals`。`raster` はなめらかなモデルを Gouraud（点の明るさを深さと同じ重みで混ぜる）。`lines` はなめらかなモデルの輪郭（g = n·(p − 目) の符号の変わる所を三角ごとにつなぎ、前と同じ深さの判定で見える所、0.03 mm の Douglas–Peucker）と頭の案内線。箱・背景・取り込みモデルの道は前と同じ（同じ数の順）。
+- 頭は体とは別の格子（u/30、首の上 0.3u の切り株つき）、手は手の長さ/52 の格子（前腕の 0.15u の切り株つき）、体は u·max(1, √(build^0.75))/16。切り株は端で 0.01u 細くして体の網の内に収め（輪が出ない）、輪郭は手首 0.06u・首 0.12u の所で体と手・頭が入れ替わる。
+- 手は解剖のとおりの左右に直した（前の箱の手は左右が鏡に映した逆だった）。腕を下ろすと手のひらは体の側、親指は前。`add_hand` は手の甲がこちら。
+- 手引き: docs/AGENT.md の J8 に 1 項（なめらかな体・輪郭の線だけ）。SKILL.md（native/resources・integrations/hermes・integrations/claude-code の 3 つ、同じ文）の「線にする」に「3D の人形・頭・手は輪郭の線だけ」。SPEC.md に FIGURE-01。
+
+### 測った数（Release、4 CPU のクラウド機、ほかの仕事なし）
+- 三角の数: walk（指定なし）53,088（点 26,545）。内訳の例: 体 約 23,000、頭と首 約 9,300、手 1 つ 約 9,500。test_figure_mesh の全体（9 preset × 指定なし・男・女、build 0.5・1.8、極端な体型）の最大は 61,424（上限 64,000）。
+- 作る時間（test_perf_render の smooth_figure。walk・女・120 mm、控えを空にして）: 119〜147 ms。トレース（40 dpi、控えあり）7〜9 ms・20 本、16 dpi（画面）6〜7 ms。B4 のページに人形 1 体を校正 150 dpi で一から 150〜191 ms。新しい上限（前の上限は変えていない）: 作る 600 ms、トレース 40 ms、ページ 800 ms（どれも測った値の約 4 倍）。設計の目安 60 ms より遅い（頭と手を別の格子にし、法線と Newton を中心差分にしたため。中心差分は左右の鏡の一致に要る）。
+- `test_ledger_service_b.cpp:1642` の手引きの例: 人形 hina（point、110 mm、turn 0.6）のトレースだけで 24 本（マネキン 4 本・四角 1・線 1 を足して 30 本ほど）。試験は変えずに合格。
+
+### 新しい控え（test_figure_mesh。FIGURE-01 の形を変えたら値を取り直して、ここと試験を直す）
+- walk（指定なし、90 mm）の網: `aa4e934277a89fb7dae89bb955bd06241ba62cd3f3b24795bb894d484ed55811`（点・法線・三角・nocontour・案内線のバイト）。
+- walk の線（40 dpi）: `{"count":29,"points":807,"sha":"1ee327eec70395a1758b88710e77c8aa1c74617aed1b8d6c36bc15d89e5cf382"}`。
+- walk と fist の手の 60 dpi の陰（zbuf と shade の sha256 を続けたもの）: `65324a1ca2d7e5ee572da85c54889f3ae052ea8c879a288a3d708ff29c214984` + `657c49acec45e069b2df8eccd2d141df8eded120cf32dfdc7f8af1c2d216bc1f`。
+- 箱・円柱・階段・部屋・球・円錐・椅子・取り込みモデル（カメラ無しと有り）の陰と線: `e409e23fb070dbc71bec9c449236bb21af6a5d096c658aa93538c930a241f54a`。**この値は FIGURE-01 の前のビルド（main b1cba245 の mesh3d）で取った**（theOtherKindsAreAsBefore）。前の控え・許容は 1 つも変えていない。
+
+### 試験（Release、関係するものだけ＝R1）
+- 新しい test_figure_mesh（10 項目）: 閉じた網・上限・単位の法線・外向き、2 回と 4 スレッドで同じバイト（網・陰・線）、体型の数（脚・頭身・肩・腰・build・男女の腰と胸の比〔女 1.733、男 0.976、指定なし 1.203〕）、手（握りこぶし・指さし・開き・親指・左右の鏡）、足の裏（立ち姿で 1.07u の長さが平ら、いちばん低い）、左右を入れ替えた姿勢が鏡の体（1e-7u 以内）、線が輪郭（外形の 100% に線、外れた線なし、本数 31・11）、ほかの種類が前と同じ。合格。
+- 合格: test_ops_3d（geometryBasics・drawnWhereGuidesAre は変えずに）、test_ledger_service_b（1642 と SKILL の写しの一致）、test_material_stamp、test_command_bus、test_ink_edit、test_page_size、test_render_page、test_proof、test_gui_guides、test_gui_ledger_b、test_gui_ledger_c、test_perf_render（SKIP は前からの psd_of_groups の 1 つ）、tools/acceptance/m3_kind_check.py。
+- 絵（見た上で直した）: 前 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/before/、後 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/after/、並べたもの /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/before_after_*.png（presets_male・presets_female: 9 preset の正面と 3/4、陰と線。close_*: 立つ・座る・走る・考える の正面・3/4・横。parts: 頭・手・足・握りこぶしの近く。hands: 6 つの手の形の左右、甲・手のひら・横 2 方向。heads）。`GENKO_FIGURE_OUT=<フォルダ> test_figure_mesh` で同じ絵が書ける。
+
+### 残ること・気づいたこと
+- 素材「3d-デッサン人形」の見本の絵（`:/genko/materials/24eaed0d….png`）は前の人形のまま（取り直していない）。
+- `render_prims` の線は prim ごとの深さで隠すので、人形の線はほかの prim（箱の机など）の後ろでも見える（陰は正しく隠れる）。前からの振る舞いで G1 では変えていない（変えると箱の線の扱いも変わる）。
+- 前からの不具合（G1 では変えない。箱は前と同じバイト）: ページのカメラ（`set_camera`）があると、箱の線（`trace_prims`・ネームの絵・画面）が床の格子になる。最小の例: `add_prim3d {kind: box, pos: [100,150,0], size: [60,40,30]}` → `set_camera {turn: 0.3, tip: 0.2}` → `trace_prims` で 15 本の 2 点の線（カメラ無しは箱の辺）。原因は core/prim3d.cpp の `segments3d` に box の場合が無く、最後の `else`（floor の格子）に落ちること（`edges` はカメラがあると箱を `segments3d` へ回す）。陰（`render_prims` の面）は mesh3d の箱なので正しい。
+- 顔の起伏は控えめな仮の形（目のくぼみ・鼻・唇・耳）。G2 の figures.png を生成で試してから整える余地がある。
+- ASan は流していない（工程の出口で流す）。figure_shape の場は ASan で約 5 倍。
+- 次: G2（guides/figures.png。黒地・人ごとの材質色・Blinn-Phong。plan §9）。
+
 ## 書体の追加（F1・F2）とフキダシの追加の出口 — 凍結 7046eea6 で Linux の ASan・Release が合格（2026-11-15）
 - **凍結SHA**: `7046eea6`（native/fonts-fukidashi2。書体の追加 F1・F2、フキダシの追加 群 1・群 2 とレビューの直し、書体の決定 2 件、範囲の細分〔native/validation-scope の取り込み 3584d348〕、レビュー 3 の直し、test_fukidashi の ASan の重さの直し）。計画は `validation_policy.py --base da6acebd --head 7046eea6 --phase milestone`（tier full、203 の変更、理由 13。写真加工の試験も ASan に入る）。
 - 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB（プロセスは 14 GB の memory cgroup の中）/ Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
