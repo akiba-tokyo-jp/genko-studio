@@ -185,7 +185,35 @@ std::shared_ptr<const Model> figure(const Json& prim) {
     const HandShape left = shape("l");
     const HandShape right = shape("r");
     figure_shape::FigureMesh made = figure_shape::figure(sk, left, right);
-    return smooth_model(std::move(made.mesh), std::move(made.marks));
+    // what the hands hold (SPEC FIGURE-02: `hold`, drawn unless `props` is false)
+    const Json* hold = dict_get(prim, "hold");
+    const Json* shown = dict_get(prim, "props");
+    const auto held = [&](const char* side) {
+        const Json* v = hold != nullptr && hold->is_object() ? dict_get(*hold, side) : nullptr;
+        return v != nullptr && v->is_string() ? v->get<std::string>() : std::string();
+    };
+    const std::string held_l = held("l");
+    const std::string held_r = held("r");
+    if ((held_l.empty() && held_r.empty()) || (shown != nullptr && shown->is_boolean() && !shown->get<bool>())) {
+        return smooth_model(std::move(made.mesh), std::move(made.marks));
+    }
+    figure_shape::Props props = figure_shape::props(sk, held_l, held_r);
+    const auto body = made.mesh.v.size();
+    const auto base = static_cast<std::int32_t>(body);
+    figure_shape::Smooth& m = made.mesh;
+    m.v.insert(m.v.end(), props.mesh.v.begin(), props.mesh.v.end());
+    m.n.insert(m.n.end(), props.mesh.n.begin(), props.mesh.n.end());
+    m.no_contour.insert(m.no_contour.end(), props.mesh.no_contour.begin(), props.mesh.no_contour.end());
+    for (const auto& t : props.mesh.t) m.t.push_back({base + t[0], base + t[1], base + t[2]});
+    auto model = std::const_pointer_cast<Model>(smooth_model(std::move(made.mesh), std::move(made.marks)));
+    model->body = props.mesh.v.empty() ? 0 : body;
+    for (auto e : props.edges) {
+        for (int k = 0; k < 4; ++k) {
+            if (e[static_cast<std::size_t>(k)] >= 0) e[static_cast<std::size_t>(k)] += base;
+        }
+        model->creases.push_back(e);
+    }
+    return model;
 }
 
 // The smooth models made last (Python's lru_cache of 64 figures; these are larger: at most 64 of them and 64 MB)
@@ -201,7 +229,8 @@ ModelCache& model_cache() {
 }
 
 std::size_t bytes_of(const Model& m) {
-    return m.mesh.v.size() * sizeof(Vec3) + m.vn.size() * sizeof(Vec3) + m.nocontour.size() + m.tris.size() * sizeof(m.tris[0]) + 256;
+    return m.mesh.v.size() * sizeof(Vec3) + m.vn.size() * sizeof(Vec3) + m.nocontour.size() + m.tris.size() * sizeof(m.tris[0]) +
+           m.creases.size() * sizeof(m.creases[0]) + 256;
 }
 
 constexpr std::size_t kModelCacheItems = 64;
@@ -237,6 +266,9 @@ std::shared_ptr<const Model> cached_figure(const Json& prim) {
     for (const char* k : {"size", "body", "joints", "hands"}) {
         const Json* v = dict_get(prim, k);
         key_value[k] = v != nullptr ? *v : Json();
+    }
+    for (const char* k : {"hold", "props"}) {  // (SPEC FIGURE-02: only when the figure has them)
+        if (const Json* v = dict_get(prim, k); v != nullptr) key_value[k] = *v;
     }
     return cached_model(dump_canonical(key_value), [&] { return figure(key_value); });
 }
@@ -1122,6 +1154,31 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
             contours(prim, *s.model, camera, chains);
             for (const OnPage& g : s.guides) {
                 for (std::size_t i = 0; i + 1 < g.pts.size(); ++i) segs.push_back(Seg{g.pts[i], g.pts[i + 1], g.depth[i] - 0.3, g.depth[i + 1] - 0.3});
+            }
+            if (!s.model->creases.empty()) {  // (what the hands hold: its edges where it turns away from the eye, and its creases)
+                const Model& m = *s.model;
+                const std::vector<Vec3> q = turned(prim, m.mesh.v, camera);
+                const std::vector<Vec3> nq = turned(prim, m.vn, camera);
+                const Vec3 eye = eye_of(prim, camera);
+                const double cos_crease = py_cos(crease_deg * (kPi / 180.0));
+                const auto facing = [&](std::int32_t at) {
+                    const auto i = static_cast<std::size_t>(at);
+                    return la::dot(nq[i], q[i] - eye) < 0.0;
+                };
+                for (const auto& e : m.creases) {
+                    bool keep = false;
+                    if (e[3] < 0) {
+                        keep = true;
+                    } else {
+                        const auto f0 = static_cast<std::size_t>(e[2]);
+                        const auto f1 = static_cast<std::size_t>(e[3]);
+                        keep = facing(e[2]) != facing(e[3]) || (e[4] == 0 && la::dot(nq[f0], nq[f1]) < cos_crease);
+                    }
+                    if (!keep) continue;
+                    const auto a = static_cast<std::size_t>(e[0]);
+                    const auto b = static_cast<std::size_t>(e[1]);
+                    segs.push_back(Seg{s.at.pts[a], s.at.pts[b], s.at.depth[a], s.at.depth[b]});
+                }
             }
             continue;
         }

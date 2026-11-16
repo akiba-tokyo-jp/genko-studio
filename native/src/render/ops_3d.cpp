@@ -258,6 +258,18 @@ void hold_into(Json& prim, const Json& raw) {
     }
 }
 
+// props: whether what the hands hold is drawn (SPEC FIGURE-02: true, the usual, keeps no key; false is kept)
+void props_into(Json& prim, const Json& op) {
+    const Json* shown = get(op, "props");
+    if (shown == nullptr || shown->is_null()) return;
+    if (!shown->is_boolean()) throw OpError("props is true or false");
+    if (shown->get<bool>()) {
+        prim.erase("props");
+    } else {
+        prim["props"] = false;
+    }
+}
+
 // pose_id: the library's pose (mirrored when the id ends in ~m, or `mirror`), its joints and hands put in place of the
 // figure's as a preset's are, its id kept (pose_id) and what its hands hold (hold); the preset said before is gone.
 void library_pose(Json& prim, const Json& id_value, bool mirror) {
@@ -496,6 +508,7 @@ void add_figure(OpContext& c) {
         for (const auto& [k, v] : given.items()) prim["hands"][k] = v;
     }
     if (const Json* hold = get(c.op, "hold"); hold != nullptr && !hold->is_null()) hold_into(prim, *hold);
+    props_into(prim, c.op);
     if (ground) {
         core::require_finite(prim);
         keep_ground(prim, standing);
@@ -601,6 +614,7 @@ void pose_figure(OpContext& c) {
         prim["hands"] = std::move(merged);
     }
     if (const Json* hold = get(c.op, "hold"); hold != nullptr && !hold->is_null()) hold_into(prim, *hold);
+    props_into(prim, c.op);
     for (const char* key : {"rot", "pos"}) {
         if (const Json* v = get(c.op, key); v != nullptr && !v->is_null()) prim[key] = vec(*v, 3, key);
     }

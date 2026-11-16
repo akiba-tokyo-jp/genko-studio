@@ -245,7 +245,7 @@ bool uses_figures_feature(const Json& prim) {
     const auto kind = prim.find("kind");
     if (kind == prim.end() || !kind->is_string()) return false;
     if (*kind == "figure") {
-        if (prim.contains("pose_id") || prim.contains("hold")) return true;
+        if (prim.contains("pose_id") || prim.contains("hold") || prim.contains("props")) return true;
         if (const auto hands = prim.find("hands"); hands != prim.end() && hands->is_object()) {
             for (const auto& [side, hand] : hands->items()) {
                 if (is_hand_with_shape(hand)) return true;

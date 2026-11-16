@@ -731,7 +731,8 @@ double lowest(const Json& prim) {
     static const Json kNone = Json::array({0, 0, 0});
     const Mat3 turn = mesh3d::prim_rotation(get_else(prim, "rot", kNone));
     double low = -std::numeric_limits<double>::infinity();
-    for (const Vec3& p : model->mesh.v) low = std::max(low, matvec(turn, p)[1]);
+    const std::size_t body = model->body_points();  // (the body's own: not what its hands hold)
+    for (std::size_t i = 0; i < body; ++i) low = std::max(low, matvec(turn, model->mesh.v[i])[1]);
     return std::isfinite(low) ? low : 0.0;
 }
 

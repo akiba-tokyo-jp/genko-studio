@@ -250,6 +250,52 @@ private slots:
         QCOMPARE(std::string(render::read_png(shown.images.front()).mode()), std::string("RGB"));
     }
 
+    // What a hand holds (SPEC FIGURE-02, `hold`; G5) is drawn in its holder's colour: a sword in the first person's hand
+    // adds pixels of the first colour to regions.png and shaded pixels of its hue (warm: red over blue) to figures.png,
+    // and none of the second person's; props: false draws the person as without it.
+    void propsInTheHoldersColour() {
+        genko::core::Page page;  // (no camera: the prims' own; the usual light)
+        Json a = Json::object({{"id", "a"}, {"kind", "figure"}, {"pos", Json::array({60.0, 100.0, 0.0})}, {"size", Json::array({45.0, 90.0, 22.5})},
+                               {"rot", Json::array({0.0, 0.6, 0.0})}, {"body", Json::object()},
+                               {"joints", genko::core::parse_python_json(R"({"r_arm": {"x": 0.9, "z": -0.2}, "r_elbow": {"x": 1.1}})")},
+                               {"hands", Json::object({{"r", "grip"}})}, {"hold", Json::object({{"r", "sword"}})}});
+        Json b = a;
+        b["id"] = "b";
+        b["pos"] = Json::array({140.0, 100.0, 0.0});
+        b.erase("hold");
+        Json bare = a;
+        bare["props"] = false;
+        const fg::View view = fg::view_of({10.0, 20.0, 180.0, 140.0}, {450, 350}, true);
+        const std::vector<Json> held{a, b};
+        const std::vector<Json> plain{bare, b};
+        const render::Image with = fg::regions(page, held, view, 0);
+        const render::Image without = fg::regions(page, plain, view, 0);
+        const render::Image shaded = fg::figures(page, held, view);
+        const render::Image shaded_without = fg::figures(page, plain, view);
+        std::size_t added = 0;
+        std::size_t warm = 0;
+        for (int y = 0; y < 350; ++y) {
+            for (int x = 0; x < 450; ++x) {
+                const std::array<int, 3> w = rgb_at(with, x, y);
+                const std::array<int, 3> o = rgb_at(without, x, y);
+                if (w == o) continue;
+                QVERIFY2(w == fg::colour(0) && black(o), (std::to_string(x) + "," + std::to_string(y)).c_str());
+                ++added;
+                const std::array<int, 3> s = rgb_at(shaded, x, y);
+                QVERIFY(!black(s));
+                if (s[0] > s[2]) ++warm;
+            }
+        }
+        QVERIFY2(added > 300, std::to_string(added).c_str());
+        QVERIFY2(warm * 10 >= added * 9, (std::to_string(warm) + " of " + std::to_string(added)).c_str());
+        QVERIFY(shaded.tobytes() != shaded_without.tobytes());
+        // props: false is the person as without hold
+        Json none = a;
+        none.erase("hold");
+        QVERIFY(fg::figures(page, std::vector<Json>{none, b}, view).tobytes() == shaded_without.tobytes());
+    }
+
+
     // Drawn on one thread or four at once: the same bytes.
     void theSameBytesOnEveryThread() {
         const fs::path root = folder(QStringLiteral("threads"));

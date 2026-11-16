@@ -132,6 +132,7 @@ genko_library(genko_core
     linalg3.cpp
     mesh3d.cpp
     figure_shape.cpp
+    figure_props.cpp
     surface_nets.cpp
     prim3d.cpp
     persp3d.cpp

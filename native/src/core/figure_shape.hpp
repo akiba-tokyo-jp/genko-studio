@@ -2,8 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
+#include "core/json.hpp"
 #include "core/linalg3.hpp"
 #include "core/mesh3d.hpp"
 
@@ -116,6 +118,21 @@ Part head_part(const mesh3d::Skeleton& sk);
 FigureMesh head(double u);
 // A hand on its own, `length` long, its wrist at y = −length / 2, the back of the hand toward the viewer.
 Smooth hand(double length, const HandShape& shape, int side);
+
+// The body's hand size (the sex's: 1 for the usual body) and the figure's hand length (0.8 u × that).
+double hand_scale(const Json& body);
+double hand_length(const mesh3d::Skeleton& sk);
+
+// What the hands hold (SPEC FIGURE-02, `hold`; core/figure_props.cpp): small solids of flat faces in each hand's frame,
+// in the figure's own space (as figure() puts the hands). Each face has its own points and one normal (flat), its
+// triangles fanned; its points draw no outline (no_contour). `edges` are the solids' edges for the pen's lines: {point a,
+// point b (of the first face), a point of that face, a point of the other face (−1: none), 1 when both faces are of a
+// rounded piece (drawn only where it turns away from the eye)}. A name the hand does not know (or empty) holds nothing.
+struct Props {
+    Smooth mesh;
+    std::vector<std::array<std::int32_t, 5>> edges;
+};
+Props props(const mesh3d::Skeleton& sk, std::string_view left, std::string_view right);
 
 // The grid steps (per figure unit u; per hand length; per head height).
 inline constexpr double kBodyCells = 16.0;

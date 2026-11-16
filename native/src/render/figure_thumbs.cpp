@@ -32,7 +32,11 @@ Json seen_at(const Json& prim, double turn) {
 
 }  // namespace
 
-Json figure_for(const Json& pose, const Json& body, double height_mm) { return core::pose_checks::figure_of(pose, height_mm, body); }
+Json figure_for(const Json& pose, const Json& body, double height_mm) {
+    Json prim = core::pose_checks::figure_of(pose, height_mm, body);
+    if (pose.contains("hold")) prim["hold"] = pose["hold"];  // (what the hands hold, drawn: SPEC FIGURE-02)
+    return prim;
+}
 
 Frame frame_of(const Json& prim, double turn, int width, int height) {
     const Json seen = seen_at(prim, turn);

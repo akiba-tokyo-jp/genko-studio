@@ -261,6 +261,8 @@ void append(Smooth& a, const Smooth& b, Place place, Turn turn, bool flip) {
 
 }  // namespace
 
+double hand_scale(const Json& body) { return sex_of(body).hand; }
+
 // --- pieces -----------------------------------------------------------------------------------------------------------
 
 Piece cone(const Vec3& a, double ra, const Vec3& b, double rb) {

@@ -42,7 +42,7 @@ struct Entry {
 
 // One pose's three views and its label, at (x, y) of the painter.
 inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
-    const Json prim = checks::figure_of(e.pose);
+    const Json prim = render::figure_thumbs::figure_for(e.pose);  // (with what its hands hold)
     const double u = e.report.measured.unit;
     for (int v = 0; v < 3; ++v) {
         const double turn = kViews[v];
