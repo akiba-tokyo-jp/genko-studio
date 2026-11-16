@@ -18,6 +18,50 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## ポーズ集の見直し（絵で見て、名前のとおりに読めるよう直す。SPEC FIGURE-02）— 2026-11-16、ブランチ native/figures-polish（d8074ef8 の上）
+
+### なぜ
+- リードが一覧の絵を見て、ほとんどのポーズが硬い（まっすぐ立った体に腕だけ動かした形: 肩も腰も水平、背はまっすぐ、足はそろえて平行、頭はまっすぐ）、いくつかは名前と違う（見せポーズ・ソファ・感情・剣・二人の腕・持つ物）、と指摘した。体の作り直しで胴が腰・背・胸で曲がるようになったので、それを使って直した。
+
+### したこと（詳しくは docs/POSES.md の各行と最後の節）
+- 変えたのはポーズのデータ（`native/src/core/data/figure_poses.json`）と、試験の分類ごとの最低の数（下）だけ。体（`figure_shape`・`surface_nets`）、案内の絵、確かめ（`pose_checks`: しきい値・関節の範囲・接地と重心の許し・カプセルの半径）、持つ物の形と手の中の置き場所（`figure_props.cpp`）、`hold` の形、genko.poses@1、op、MCP の inputSchema は変えていない。
+- 変わったポーズ 406（655 のうち）、新しいポーズ 15（計 670）。分類ごと: 立つ 36、ファッション 24、歩く 11、椅子に座る 30、日常 23、見せポーズ 57（+ 新 7）、ベッド・ソファ 21（+ 新 3）、寝る 3（+ 新 5）、上半身 35、振り向く 10、指さす 8、感情 24、話す 13、物を持つ 26、スポーツ 8、アクション 4、ダンス 2、ヒーロー 18、仕事と暮らし 26、カップル 10、二人 17。走る・床に座る・ひざまずく・しゃがむは変えていない。
+- 名前のあった所:
+  - 見せポーズ: 立ち姿すべてに S 字（腰を出す・胸は逆・頭を傾ける）。rail_elbows_back は後ろへもたれて両肘を引く、arch_low_back は胸を張って反る、wall_* は足を壁から離して体を傾ける。
+  - ベッド・ソファ: sofa_* は骨盤を後ろへ転がして背を丸め首を前へ、sofa_arms_back は肘を背もたれの上に上げて前腕を垂らす、edge_* は椅子の座り方と違う形に。
+  - 感情: anger_stomp（拳を下へ・前かがみ・踏み鳴らす足・あごを引く）、joy_fist_pump、sad_slump（背を丸め腕を前へ垂らし膝をゆるめる）。
+  - ヒーロー: sword_raised は刃が上へ立つ、flying は正面でも読める、sword_shoulder_hero は剣を肩にかつぐ。
+  - 二人: hug・waltz・twirl・shoulder_buddies・sword_clash（剣が交わる）と、lean_back・umbrella_share・selfie・peace_photo・stand_gaze・push_back・handshake。並んで立つだけの組（cheer_together・thumbs_up_both・look_at_phone・talking・explain_point・wave_far・hold_hands_look）は二人とも片足に重心。
+  - 持つ物: 手の中の置き場所は正しかった（剣・バット・傘はこぶしを通って親指の側へ出る。手のひらを下に向けて上に置くと手の下から床へ下りる）。違っていたのはポーズの腕と手首だったので、`figure_props.cpp` は変えず、物の向きを決めてから手首を解いた。umbrella_cane は手のひらを下に向けるだけで傘が床へ下りた（`hold` の形を変えずに直せた）。紙は手のひらの面に沿い、読む・掲げる・差し出すポーズで面が読み手か相手へ向いている。
+- G5 で形に合わせて変えた名前を戻した（形を直した上で）: `heroic/sword_shoulder_hero` 剣を下げて堂々と立つ → 剣を肩にかついで堂々と立つ、`action/sword_thrust` 剣を立てて踏み込む → 剣で突く、`action/hero_landing` 片膝をついて着地 → 片膝と拳をついて着地、`two_people/sword_clash` 剣を構えて向き合う → 剣を交える、`sports_action/batting_contact`（バットを振り出す）→ id `sports_action/batting_swing`（バットを振り抜く）。変わった id はこの 1 つだけ（G5 の作業の中で付け替えた id を元へ戻した。`batting_contact` を pose_id に持つ本があれば、その人形の関節はそのままで、名前だけ一覧に見つからなくなる）。
+- 新しいポーズ 15（G4 で外した寝姿の分）: `lie/` back_spread_eagle・back_arms_overhead・front_head_turned・front_arms_pillow・side_propped_elbow、`relax_bed/` back_sprawl・front_pillow_hug・side_propped_head、`pinup/` back_arms_overhead_knee・back_hand_hair_knee_in・front_cheek_on_arms・front_head_turned_knee・side_propped_hip・side_head_hand・side_arm_pillow。横向きは骨盤の横を床につけ、背を横へ曲げて起こす（G4 では骨盤ごと傾けて腰が浮いた）。同じ直しを `lie/` side_sleep・side_head_on_arm・side_straight、`relax_bed/` side_pillow_hug・side_phone・sofa_side_lie にも当てた。
+- test_figure_poses: 分類ごとの最低（kAtLeast）を計画 §8 の数に上げた（pinup 78 → 85、relax_bed 33 → 36、lie 20 → 25。前のコメントが計画の数と足りない理由を書いていた）。ほかの試験は変えていない。
+
+### 控え（動いたものは無い）
+- 小さな絵の 4 枚（kThumbPins: stand/neutral、fashion/kneel_pose の反転、sit_chair/upright、kneel_squat の最後の反転）は、どれも変えていないポーズなので前のまま（2ac00a4e…・1a2c7c68…・1cf8a694…・b9be8243…）。
+- 網・線・絵の控え（test_figure_mesh）、案内の絵の控え（test_figure_guide: ポーズ集のポーズを使っていない）、`figure_presets()` の sha、何も持たない本の project.json の sha、MCP の inputSchema の sha と action の数は動いていない（試験がそのまま合格）。
+
+### 試験（Release、関係するものだけ。最後の変更の後に流した。権限を落とした setpriv の包みで）
+- 合格（ctest、2 並列、16 本で 124 秒）: test_figure_poses 64.4 秒、test_figure_mesh 19.8 秒、test_figure_guide 5.4 秒、test_gui_poses 6.8 秒、test_mcp_api_e2e 50.3 秒、test_cli_e2e 4.6 秒、test_ledger_service_a 3.1 秒・b 30.3 秒・c 1.8 秒、test_gui_ledger_a 11.0 秒・b 14.8 秒・c 3.6 秒、test_ops_3d 10.7 秒、test_render_page 6.8 秒、test_command_bus 2.7 秒、test_gui_guides 8.3 秒。test_perf_render は単独で 25.5 秒。（figure_poses・figure_mesh・mcp_api_e2e・ledger_service_b・gui_ledger_a の 5 本は、記録を取り直すためにもう一度流した時の値。）
+- 試験の基準・上限・許容は 1 つも変えていない。SKIP は増やしていない。ASan と全体の試験は流していない（工程の出口で）。
+- 一覧の絵つきの test_figure_poses（`GENKO_POSE_SHEETS`）は 177 秒かかった（絵なしは 64 秒）。
+
+### 絵
+- 前: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/before/、後: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/after/（同じ名前。pinup_8・lie_3 は増えた分）。前 | 後 を並べた絵: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/compare/（pinup_1〜3、relax_bed_1・2、emotion_1、heroic_1、couple_1、two_people_1、hands_props_1〜3、stand_1・2、lie_1・2、action_2、upper_body_1、sit_chair_1、fashion_1、talk_1、everyday_1 と、新しい寝姿の pinup_8・lie_3）。
+- 作るのに使った道具（リポジトリの外）: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/tools/（`pl.py`・`common.py`・`c_*.py`: ポーズを骨盤の傾き・足の置き場所・手の付く先で書いて解く。`pp.cpp`: C++ の確かめと大きい絵）。
+
+### 環境
+- Claude Code クラウドコンテナ、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Ubuntu 24.04.5 LTS、Qt 6.11.2、Release（build/linux-release）。
+
+### 残ること（まだ足りない所）
+- `lie/side_fetal`・`lie/side_hug_knees`・`relax_bed/side_curl_blanket`（丸まった横向き）は G4 のまま: 肩と足で支わり、腰が床から約 0.3 u 浮く。
+- `couple/piggyback`: 背負われる人の脚が横へ開いたまま。`two_people/shoulder_buddies`: 回した腕の手が相手の肩の後ろに隠れる。`couple/waltz`: 組んだ手が少し高い。
+- 紙を「両手で」持つポーズ（paper_read・paper_hand_over・card_exchange）: 紙は `hold` の手から出て、もう片方の手は紙の縁に届いていない。両手で 1 つの物を持つ形は `hold` の今の形では書けない（片手ごとに物を付ける）。直すなら `hold` に「両手で」を足すか、物の置き場所をもう片方の手へ寄せる規則を `figure_props` に足す（どちらも今回はしていない: 形と公開の約束を変えない）。
+- 剣を真上へまっすぐ掲げる（腕も刃も一直線）形は、剣がこぶしから親指の側へ出る置き方では手首の範囲（±0.6）に入らない: 腕は斜め上、刃は真上にした。腕と一直線の持ち方（突き出した剣・杖）が要るなら、`hold` に握りの向き（親指の側・指の先）を足す案がある（今回はしていない）。
+- 硬さをほぐした立ち姿の多くは、重心・遊び足・頭をポーズごとに変えただけで、肘・手首・指の表情は元のまま。走る・床に座る・しゃがむ・スポーツとアクションの大半・ダンスは絵で見ただけで変えていない。
+- 一覧の絵で宙に浮くポーズ（跳ぶ・飛ぶ）に印を付ける件はしていない（絵の道具は変えていない）。
+- 利用者の目ではまだ見ていない。
+
 ## 人形の体の作り直し（解剖の見直し。SPEC FIGURE-01・FIGURE-03）— 2026-11-16、ブランチ native/figures-polish（main ac8c32dc から）
 
 ### なぜ
