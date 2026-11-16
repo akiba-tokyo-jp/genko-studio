@@ -33,7 +33,7 @@
   - ヒーロー: sword_raised は刃が上へ立つ、flying は正面でも読める、sword_shoulder_hero は剣を肩にかつぐ。
   - 二人: hug・waltz・twirl・shoulder_buddies・sword_clash（剣が交わる）と、lean_back・umbrella_share・selfie・peace_photo・stand_gaze・push_back・handshake。並んで立つだけの組（cheer_together・thumbs_up_both・look_at_phone・talking・explain_point・wave_far・hold_hands_look）は二人とも片足に重心。
   - 持つ物: 手の中の置き場所は正しかった（剣・バット・傘はこぶしを通って親指の側へ出る。手のひらを下に向けて上に置くと手の下から床へ下りる）。違っていたのはポーズの腕と手首だったので、`figure_props.cpp` は変えず、物の向きを決めてから手首を解いた。umbrella_cane は手のひらを下に向けるだけで傘が床へ下りた（`hold` の形を変えずに直せた）。紙は手のひらの面に沿い、読む・掲げる・差し出すポーズで面が読み手か相手へ向いている。
-- G5 で形に合わせて変えた名前を戻した（形を直した上で）: `heroic/sword_shoulder_hero` 剣を下げて堂々と立つ → 剣を肩にかついで堂々と立つ、`action/sword_thrust` 剣を立てて踏み込む → 剣で突く、`action/hero_landing` 片膝をついて着地 → 片膝と拳をついて着地、`two_people/sword_clash` 剣を構えて向き合う → 剣を交える、`sports_action/batting_contact`（バットを振り出す）→ id `sports_action/batting_swing`（バットを振り抜く）。変わった id はこの 1 つだけ（G5 の作業の中で付け替えた id を元へ戻した。`batting_contact` を pose_id に持つ本があれば、その人形の関節はそのままで、名前だけ一覧に見つからなくなる）。
+- G5 で形に合わせて変えた名前を戻した（形を直した上で）: `heroic/sword_shoulder_hero` 剣を下げて堂々と立つ → 剣を肩にかついで堂々と立つ、`action/sword_thrust` 剣を立てて踏み込む → 剣で突く、`action/hero_landing` 片膝をついて着地 → 片膝と拳をついて着地、`two_people/sword_clash` 剣を構えて向き合う → 剣を交える、`sports_action/batting_contact` バットを振り出す → バットを振り抜く（id はそのまま。1 回目に id を batting_swing へ変えたが、batting_contact は main に出ている id なので 2 回目に戻した: 下）。変わった・消えた id は無い。
 - 新しいポーズ 15（G4 で外した寝姿の分）: `lie/` back_spread_eagle・back_arms_overhead・front_head_turned・front_arms_pillow・side_propped_elbow、`relax_bed/` back_sprawl・front_pillow_hug・side_propped_head、`pinup/` back_arms_overhead_knee・back_hand_hair_knee_in・front_cheek_on_arms・front_head_turned_knee・side_propped_hip・side_head_hand・side_arm_pillow。横向きは骨盤の横を床につけ、背を横へ曲げて起こす（G4 では骨盤ごと傾けて腰が浮いた）。同じ直しを `lie/` side_sleep・side_head_on_arm・side_straight、`relax_bed/` side_pillow_hug・side_phone・sofa_side_lie にも当てた。
 - test_figure_poses: 分類ごとの最低（kAtLeast）を計画 §8 の数に上げた（pinup 78 → 85、relax_bed 33 → 36、lie 20 → 25。前のコメントが計画の数と足りない理由を書いていた）。ほかの試験は変えていない。
 
@@ -53,10 +53,24 @@
 ### 環境
 - Claude Code クラウドコンテナ、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Ubuntu 24.04.5 LTS、Qt 6.11.2、Release（build/linux-release）。
 
+### 2 回目（同じ日。リードが 1 回目の後の絵を見て戻した 8 項目。5362bfc3 まで）
+- 変えたのはポーズのデータだけ（確かめ・しきい値・範囲・試験・控え・`hold` の形・物の置き場所はそのまま）。変わったポーズ 62: 立つ 3、ファッション 3、歩く 1、椅子 2、床に座る 1、日常 2、見せポーズ 32、ベッド 2、寝る 2、上半身 1、話す 3、物を持つ 3、仕事 3、カップル 3、二人 1。
+- 1 id: `sports_action/batting_swing` → `sports_action/batting_contact` へ戻した（main ac8c32dc に出ている id。形は振り抜き、名前は「バットを振り抜く」）。main の 655 の id と head の 670 の id を比べた: main の id は 1 つも欠けず、順も同じ。増えたのは寝姿の 15 だけ。
+- 2 電話を耳に 4（everyday/phone_call、work_life/phone_and_notes、sit_chair/phone_call、talk/phone_talk_walk。タグとポーズ名で探した: 電話を耳に当てるのはこの 4 つ、ほかのスマホのポーズは見る・撮る・操作）: 肘を下・少し前へ、前腕を立てる、頭を電話へ傾ける。上腕が前腕より長く、手首を耳の真横に置くと肘が肩より上がるので、手首はあごの角、手とスマホが頬に沿う（一部だけ: 手は耳ではなく頬〜あごの横）。
+- 3 後ろ手 11（stand/at_ease・hands_clasped_behind、walk/hands_behind、talk/chat_lean、hands_props/bag_behind、pinup/flamingo・lean_hands_behind、fashion/back_pockets、couple/stand_gaze・walk_side_glance と two_people/look_at_phone の b）: 上腕が体の横に見え、肘が外・後ろへ張る。手は尻ではなく腰のくびれ（尻の後ろは腕の長さで届かず、腕がまっすぐ胴の後ろへ入る）。pinup/wall_hands_behind・arch_low_back・profile_chest_out・kneel_arch、fashion/arch_back は肘が元から外に出ていた（そのまま）。
+- 4 両手で持つ紙・本 7（hands_props/paper_read・paper_hand_over、work_life/card_exchange、everyday/read_standing、sit_chair/reading、sit_floor/agura_book、relax_bed/headboard_book）: 空いた手は紙・本の向こうの縁に（持つ手の骨格から面と縁を出して解いた。関節の範囲で届かないものは無かった）。差し出す紙は相手へ傾けた。lie/back_book_up・lie/front_reading・hands_props/book_offer・pen_notes は元から両手が物に届いている（そのまま）。
+- 5 丸まった横向き 3: 骨盤の横が床に付いた（床から 0.90 u = 股関節 0.5 + 腰の横 0.4）。
+- 6 couple/piggyback: 太ももを前へ、膝を曲げ、手は膝の下、腕は肩の上から前へ。
+- 7 見せポーズの立ち姿 32: 正面の絵で骨盤の線と肩の線の傾き（度、骨格で測った）: 1 回目は骨盤 5〜10・肩 4〜9 で頭はほぼまっすぐ（0〜4）。2 回目は骨盤 9〜15・肩 8〜14（逆向き）、首のくぼみと重心の足の横のずれ 0.1 u 以内、遊び足の膝の曲げ 1.0 rad 前後、頭 12〜25 度。前かがみの 3 つ（hip_hands_front_lean・lean_hand_thigh・lean_hands_behind）は肩の線が 3〜5 度（前へ倒れた胸では横の傾きが正面に出にくい）。wall_shoulder_twist は腰を 43 度回して胸を戻した。変えなかったもの: peace_tilt（骨盤 8.6・肩 7.8 で通る）、profile_chest_out（横向き: 正面の絵は体の横）、両足の形が名前のもの（knees_hands_look_up・bend_touch_shins・tiptoe_reach・squat_peace、片膝を折る skirt_pinch）、両手を壁について体を預ける wall_hands_look_back（骨盤 5・肩 5 で同じ向き: S 字ではない）。wall_arm_up は膝の曲げが 0.39 rad（足を前へ出して壁にもたれるので膝は伸び気味）。
+- 8 見ていなかった一覧を開いて見た（work_life 2・3、everyday 2・3、point 1、walk 1、talk 1・2、fashion 2・3、upper_body 2・3、sit_chair 2・3、stand 2・3・4）。直した 6: talk_2 の greet_bow（決まりで斜めになった会釈を元へ）、stand_4 の fists（歩く形 → 踏ん張って拳）、work_life_2 の lift_box（腕が後ろ → 前）、upper_body_3 の hug_self（腕が前へ突き出る → 上腕を抱く）、fashion_2 の jacket_over_shoulder（前腕が顔の前 → 拳を肩の上）・hands_on_thighs（手を腿に）。ほかの面は変えていない。
+- 控え: 動いたものは無い（小さな絵の 4 枚のポーズは変えていない）。
+- 試験（Release、setpriv の包み、最後の変更の後。16 本 2 並列で 125 秒）: test_figure_poses 65.8 秒、test_figure_mesh 20.1 秒、test_figure_guide 5.1 秒、test_gui_poses 6.7 秒、test_mcp_api_e2e 50.4 秒、test_cli_e2e 5.1 秒、test_ledger_service_a 3.2 秒・b 31.5 秒・c 1.9 秒、test_gui_ledger_a 11.7 秒・b 14.6 秒・c 3.8 秒、test_ops_3d 10.8 秒、test_render_page 7.2 秒、test_command_bus 2.7 秒、test_gui_guides 9.0 秒。test_perf_render は単独で 28.6 秒。機械は上と同じ（4 CPU Xeon 2.30 GHz、16 GB、Ubuntu 24.04.5、Qt 6.11.2）。
+- 絵: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/after2/（全ページと checks.json）、1 回目 | 2 回目 を並べた絵: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/pose-pass/compare2/（変わったポーズのある 25 ページ）。
+
 ### 残ること（まだ足りない所）
-- `lie/side_fetal`・`lie/side_hug_knees`・`relax_bed/side_curl_blanket`（丸まった横向き）は G4 のまま: 肩と足で支わり、腰が床から約 0.3 u 浮く。
-- `couple/piggyback`: 背負われる人の脚が横へ開いたまま。`two_people/shoulder_buddies`: 回した腕の手が相手の肩の後ろに隠れる。`couple/waltz`: 組んだ手が少し高い。
-- 紙を「両手で」持つポーズ（paper_read・paper_hand_over・card_exchange）: 紙は `hold` の手から出て、もう片方の手は紙の縁に届いていない。両手で 1 つの物を持つ形は `hold` の今の形では書けない（片手ごとに物を付ける）。直すなら `hold` に「両手で」を足すか、物の置き場所をもう片方の手へ寄せる規則を `figure_props` に足す（どちらも今回はしていない: 形と公開の約束を変えない）。
+- 電話を耳に当てる 4 つ: 手は耳ではなく頬〜あごの横（肘を肩より下げるため）。
+- `two_people/shoulder_buddies`: 回した腕の手が相手の肩の後ろに隠れる（リードの判断でそのまま）。`couple/waltz`: 組んだ手が少し高い。`fashion/jacket_over_shoulder`: 拳が肩の上に浮き、肘が横へ出る。`fashion/shoulder_bag`: 鞄が胸の前の手から下がる。
+- 両手で持つ紙・本は、空いた手を紙の縁へ解いて直した（2 回目。`hold` の形は変えていない）。紙は `hold` の手の指先の角から出るので、持つ手は紙の角、空いた手は反対の縁に付く。
 - 剣を真上へまっすぐ掲げる（腕も刃も一直線）形は、剣がこぶしから親指の側へ出る置き方では手首の範囲（±0.6）に入らない: 腕は斜め上、刃は真上にした。腕と一直線の持ち方（突き出した剣・杖）が要るなら、`hold` に握りの向き（親指の側・指の先）を足す案がある（今回はしていない）。
 - 硬さをほぐした立ち姿の多くは、重心・遊び足・頭をポーズごとに変えただけで、肘・手首・指の表情は元のまま。走る・床に座る・しゃがむ・スポーツとアクションの大半・ダンスは絵で見ただけで変えていない。
 - 一覧の絵で宙に浮くポーズ（跳ぶ・飛ぶ）に印を付ける件はしていない（絵の道具は変えていない）。
