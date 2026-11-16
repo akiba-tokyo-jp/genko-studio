@@ -106,9 +106,11 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
      `height_mm`（全身の高さ。`add_figure` は 10〜400）はショットで決める: ロング（引き）はコマの高さの 1/3〜1/2、フル（全身）はコマに収まる高さ、
      バストはコマの高さの 2 倍ほど、アップは 3〜4 倍（頭と肩だけがコマに入り、腰はコマの下の外になる）。
      向きは `rot`（`[tip, turn, lean]`、ラジアン。turn 1.57 で横向き、3.14 で後ろ向き）、手足は `pose_figure`・`pose_mannequin`。
-     ポーズ集（立つ・座る・寝る・感情・話す・物を持つなど数百）から選ぶなら、`mcp__genko__figure_poses` で一覧を見て（`category`・`query` の言葉・
+     ポーズ集（立つ・座る・寝る・感情・話す・物を持つ・スポーツ・アクション・ダンスなど六百あまり）から選ぶなら、`mcp__genko__figure_poses` で一覧を見て（`category`・`query` の言葉・
      `random` でランダム・`sheet: true` で一覧の絵）、その `id` を `add_figure` か `pose_figure` の `pose_id` に渡す
-     （`mirror: true` で左右反転、`keep: "ground"` で足もとの高さを保つ）。
+     （`mirror: true` で左右反転、`keep: "ground"` で足もとの高さを保つ）。手に持つ物（`hold`: 剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）は手の中に描かれる。
+     二人のポーズ（分類 `couple`・`two_people`、一覧で `pair: true`）は、`add_figure` に `pose_id` を渡すと相手（`partner_id`）も一緒に置かれ、
+     `pose_figure` なら `partner_id` の人形（無い id なら足す）が相手になる。
   3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（3D の人形・頭・手は輪郭の線だけ。隠れた線は省かれる）。
   4. 物と背景: `add_shape`（`layer_id`、`shape` は rect・ellipse・line・polyline・curve・polygon、`kind: "pencil"`）で机・窓・建物の箱や地面の線を描く。
      3D の小物（`add_prim3d` の `kind: "prop"`）や背景（`add_scene`）を置いて `trace_prims` してもよい。

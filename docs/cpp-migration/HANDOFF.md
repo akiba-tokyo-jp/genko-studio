@@ -18,6 +18,38 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 人形のポーズ集（群 G5。SPEC FIGURE-02）— 2026-11-16、ブランチ native/figures（main には未統合）
+
+### したこと
+- 持つ物の形（core/figure_props.cpp）: `hold` の 10 の物（剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）を、手の座標系の小さな平らな面の立体で描く。網では体の点の後ろに続き（`mesh3d::Model::body`・`creases`）、体の点と三角は持たないときと同じバイト。陰（render_prims・校正の案内）・トレースの線（物の辺: 表と裏の境と 40° の折れ。体の後ろでは隠れる。FIGURE-01 のほかの 3D の後ろの線も同じ）・生成の案内（figures.png・regions.png に持つ人の色）・ポーズ集の小さな絵に出る。鞄とカップは人形の下の向きでぶら下がる・立つ。剣・バット・傘は拳を通り、手のひらを下へ置くと手のひらの下から下へ。傘は親指が上なら開く。`props: false`（op の鍵、figures@1）で隠す。足もとを保つの一番低い所は体だけ。
+- 二人のポーズ: ポーズ集の 1 項目に二人分（`figures` の a と b〔offset・turn〕、`touch`、接地 `partner`）。`<id>#a`・`#b` が一人のポーズ、反転 `<id>~m#a`。op は G4 の設計の `add_pair`・`pose_pair` ではなく、`add_figure`・`pose_figure` に `partner_id`・`partner_body` を足した（新しい op 名を増やさず、承認・道具・ポーズ集の道を同じにするため。SPEC に設計の変更を書いた）。2 体に `pose_id` `#a`・`#b` と同じ `pair`。反転・足もとを保つ（二人を同じだけ動かす）。その人形自身のポーズの変更で 2 体から `pair` を外す。断り 4 つに日本語の言い換え（wording.cpp）。figures@1 は `props`・`pair` も数える。
+- 二人の確かめ（core/pose_checks の check_pair）: 一人ずつの今までの確かめ、同じ床（kContactGap）、もたれる二人の重心（kBalance、二人の床の点の凸包）、touch の各組の表面の間（新しい kTouchGap 0.15 u・kTouchDepth 0.25 u）、二人の間の手足の軸の深さ（kInside）・胴と頭の軸は入らない・手足のカプセルの重なり（kOverlap）。除くのは touch に挙げた部分（手が触れるときはその前腕も）だけで、相手の胴・頭に触れる手足は kTouchDepth で見る。今までの閾値は 1 つも変えていない（新しい 2 つと除き方は SPEC FIGURE-02 に理由つきで）。
+- 画面「ポーズ集…」: 二人のポーズは選んだ人形とその pair の相手（無ければ新しい人形を足す）に 1 つの変更で付ける。3D の一覧の名前に「・二人の a/b」。道具 `figure_poses`: 二人の要約（`pair: true`・`figures`）、説明文と apply の例、接地の絞り込みに partner（入力の schema は変えていない）。CLI `--check` は二人に check_pair。小さな絵（figure_thumbs）は二人を一緒に描き、寝た体（枠の 0.4 より低い）は最大 2 倍に大きく描く（G3 の `pose_checks::thumbnail` と控えは同じ）。
+- ポーズ: バッチ C（下の数）。作り方は G3・G4 と同じ道具を写した /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g5/（`build.py` に二人の組み立てと測った床、`lib_pair.py`〔二人の床の空間・相手の体の点へ手を伸ばす〕、`lib_g5.py`、`poses_s1..s4_*.py`・`poses_t_pairs.py`、`tools/propview.cpp`・`pairview.cpp`〔見直し用の拡大の絵。リポジトリには入れていない〕）。全ポーズを一覧の絵で見て docs/POSES.md に記録（194 行、外したものと理由、G3・G4 の持つポーズを物つきで見直した結果）。
+- 手引き: SPEC FIGURE-02（持つ物の形・二人のポーズ・G5 の分類・小さな絵）、schema-v4（`props`・`pair`）、AGENT.md J8、SKILL.md・drawing.md（写し 2 つも同じバイト）、ops_schema.json（2 つ）、MCP の道具の説明文。
+
+### 数
+- バッチ C 194 ポーズ（反転は数えない。二人のポーズは 1 項目で数える）: スポーツ 38・アクション 30・ダンス 20・ヒーロー 20・仕事と暮らし 26・カップル 30・二人 30（計画 §8 の 35・30・20・20・25・30・30 に足りている）。ポーズ集の全体は 655。ファイルは約 750 KB。
+- 外したもの: 横蹴り・尻もち・クラウチングスタート・腕立て伏せ・二人の手のハート・頭をなでる・手を引いて走る（代わりのポーズを入れた。理由は POSES.md）。
+
+### 控え
+- 変わらず: `figure_presets()` の sha256 `7eaa858c…a4e3`、鍵の無い本の project.json `81b68808…b615c`、G3 の小さな絵 4 枚（kThumbPins）、網・案内・ほかの 3D（test_figure_mesh の kWalkMesh・kWalkLines・kDrawn・kOtherKinds、test_figure_guide）、MCP の道具の inputSchema の sha256（test_mcp_api_e2e）、操作の数（test_gui_actions）、commands.json。
+- 変えた控え: 無い。test_figure_poses の kAtLeast に G5 の 7 分類（届けた数）を足し、全体の最低を 455 → 650 にした（緩めていない）。
+
+### 試験（Release、関係するものだけ）
+- test_figure_poses: 合格 約 140 秒（G4 の 81 秒から。655 ポーズとその反転、二人は check_pair を 2 回〔反転は男女と線を省く〕。150 秒の目安の中だが、ASan では約 5 倍の見込み）。新しい pairEntries、一覧の絵は二人も。
+- test_figure_mesh 17 秒（新しい theHandsHoldTheirProps: 10 の物が手の座標系で手に届く・腕を回しても手の座標系で同じ〔鞄・カップ・長い物は人形の下の向きで決まるので手のそばに残ること〕・反転で反対の手・props: false は体だけのバイト・剣の辺が線になる）、test_figure_guide 4.6 秒（新しい propsInTheHoldersColour）、test_ops_3d 9.9 秒（新しい pairPoses: 2 体の置き方・反転・足もとを保つ・partner_id の 3 つの場合・pair の外れ方・一人のポーズ・断り・保存と読み直し）、test_gui_poses 6.1 秒（新しい applyingAPairPose: 一体に二人のポーズで相手を足す・pair の相手に付け直す・元に戻す）。
+- test_gui_ledger_a 11.8 秒（全エラーが日本語）・test_gui_ledger_b 15.7・test_gui_ledger_c 3.5・test_ledger_service_a 3.1・test_ledger_service_b 31.3（手引きの写し 3 つ）・test_mcp_api_e2e 46.6・test_cli_e2e 4.6・test_command_bus 2.9・test_gui_guides 9.3・test_gui_prefs 10.6・test_gui_actions 12.5・test_contract_plugins 25.4・test_render_page 7.7・test_proof 0.6・test_perf_render 29.8・test_material_stamp 0.1: 合格。
+
+### 環境
+- Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
+
+### 残る見た目の課題・しなかったこと
+- 剣・バットの向きは手の向き（親指の側）で決まるので、ポーズによっては刃・バットが立つ（剣を立てて踏み込む・中段・バットを振り出す）。名前を絵に合わせた。G4 の `hands_props/umbrella_cane`（傘が床へ向かない）・紙を持つポーズ（紙が手の横に縦）・`bat_stance`（バットが後ろへ水平）は直していない。
+- 宙のポーズの一覧の絵は、一番低い所を床の線に描く（跳んだ高さは見せない）。
+- 計画の「時間があれば」（G4 で外した寝姿の試し直し・背もたれに腕をかけるポーズ）はしていない。寝た体の小さな絵の拡大はした（上）。
+- test_figure_poses が約 140 秒（ASan で 10 分を超える見込み）。重いのは二人の網（反転で 4 体）と G5 の 130 の一人のポーズ。
+
 ## 古い不具合 2 つの直し（カメラで見た箱・ほかの 3D の後ろの人形の線。SPEC FIGURE-01）— 2026-11-16、ブランチ native/figures（main には未統合）
 
 ### したこと

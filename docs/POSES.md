@@ -5,7 +5,7 @@
 - 見た人 `agent` はこの版を作ったエージェント（人の目ではない。利用者の目で見直したら、その日付と名前の行を足す）。
 - fixed: 絵か確かめを見て直したもの（直した点を書く）。ok: そのまま通したもの。
 - 自動の確かめ（関節の範囲・接地・寝た体の面・重心・体の通り抜け・反転・描ける・小さな絵が同じバイト）は全ポーズが通る（test_figure_poses）。
-- バッチ A（立つ〜日常の動作）は群 G3、バッチ B（見せポーズ〜物を持つ）と、あぐらの 4 つの作り直しは群 G4。
+- バッチ A（立つ〜日常の動作）は群 G3、バッチ B（見せポーズ〜物を持つ）と、あぐらの 4 つの作り直しは群 G4、バッチ C（スポーツ〜二人のポーズ）は群 G5。
 
 | 分類 | 数 | 群 |
 |---|---|---|
@@ -26,7 +26,14 @@
 | 感情（emotion） | 26 | G4 |
 | 話す（talk） | 13 | G4 |
 | 物を持つ（hands_props） | 27 | G4 |
-| 計 | 461 | |
+| スポーツ（sports_action） | 38 | G5 |
+| アクション（打つ・蹴る・構える・剣・投げる・倒れる）（action） | 30 | G5 |
+| ダンス（dance） | 20 | G5 |
+| ヒーロー・決めポーズ（heroic） | 20 | G5 |
+| 仕事と暮らし（work_life） | 26 | G5 |
+| カップル（二人）（couple） | 30 | G5 |
+| 二人のポーズ（two_people） | 30 | G5 |
+| 計 | 655 | |
 
 
 ## 立つ（stand）
@@ -620,3 +627,263 @@
 - `sit_chair/figure_four`（片足首を膝に乗せて座る）: 戻した（上の椅子に座るの表）。
 - `sit_floor/butterfly`（足の裏を合わせて座る）: まだ外したまま。股関節の測り方を直して膝は下ろせたが、足の裏を合わせると足先どうしが重なる（足の形の向きの問題）。
 - `sit_floor/w_sit`・`sit_floor/side_sit`・`sit_floor/side_lean_hand`・`sit_floor/legs_out_one_hand`・`kneel_squat/kneel_sit_side`・`everyday/rub_shoulder`: G4 では試していない（外した理由が股関節のねじれではなく、足首の範囲・重心・肩のねじれのため）。
+
+## バッチ C（群 G5、2026-11-16）
+
+- 作り方は G3・G4 と同じ（動作の短い文 → 足と手を置く所・胴の傾き → 関節の角度。どのサイトの絵もデータも使っていない）。道具は scratchpad の poses-g5（`lib_g5.py`・`lib_pair.py`・`poses_s1..s4_*.py`・`poses_t_pairs.py`）。
+- 二人のポーズは、一人ずつの確かめに加えて二人の確かめ（SPEC FIGURE-02「二人のポーズ」）を通る。一覧の絵は二人を一緒に回して描く（接地の点は描かない）。
+- 持つ物は G5 から描く。G3・G4 の持つポーズも物が描かれるようになった（下の「持つ物を描いて見直したもの」）。
+
+| 分類 | 数 | 計画 §8 |
+|---|---|---|
+| スポーツ（sports_action） | 38 | 35 |
+| アクション（打つ・蹴る・構える・剣・投げる・倒れる）（action） | 30 | 30 |
+| ダンス（dance） | 20 | 20 |
+| ヒーロー・決めポーズ（heroic） | 20 | 20 |
+| 仕事と暮らし（work_life） | 26 | 25 |
+| カップル（二人）（couple） | 30 | 30 |
+| 二人のポーズ（two_people） | 30 | 30 |
+| 計 | 194 | 190 |
+
+## スポーツ（sports_action）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `sports_action/soccer_kick` | ボールを蹴る（サッカー） | 2026-11-16 | agent | fixed | 軸足を重心の下へ（重心） |
+| `sports_action/soccer_trap` | ボールを足で止める | 2026-11-16 | agent | fixed | 上げる脚を高く・軸足を体の下へ（床に触れる・重心） |
+| `sports_action/soccer_header` | ヘディングで跳ぶ | 2026-11-16 | agent | ok |  |
+| `sports_action/goalkeeper_ready` | ゴールキーパーの構え | 2026-11-16 | agent | ok |  |
+| `sports_action/goalkeeper_catch` | ボールを胸で受け止める | 2026-11-16 | agent | ok |  |
+| `sports_action/basketball_shoot` | シュートを打つ（バスケットボール） | 2026-11-16 | agent | fixed | つま先立ちの足を後ろへ（重心） |
+| `sports_action/basketball_dribble` | ドリブルする | 2026-11-16 | agent | ok |  |
+| `sports_action/basketball_pass` | 胸からパスを出す | 2026-11-16 | agent | ok | ボールは持たせていない |
+| `sports_action/volleyball_receive` | レシーブする（バレーボール） | 2026-11-16 | agent | ok |  |
+| `sports_action/volleyball_spike` | アタックを打つ（宙で） | 2026-11-16 | agent | ok |  |
+| `sports_action/volleyball_set` | トスを上げる | 2026-11-16 | agent | ok |  |
+| `sports_action/batting_ready` | バットを構える | 2026-11-16 | agent | fixed | 手を前へ（上腕が胴の中）。バットは後ろへ寝る形 |
+| `sports_action/batting_contact` | バットを振り出す | 2026-11-16 | agent | fixed | batting_swing（振り抜き）を作り直した: 腕が胴の中・肘の範囲。バットが立つので名前を「バットを振り出す」に |
+| `sports_action/pitch_windup` | 足を上げて振りかぶる（投手） | 2026-11-16 | agent | ok |  |
+| `sports_action/pitch_release` | ボールを投げ込む（投手） | 2026-11-16 | agent | fixed | 踏み出しを短く（重心） |
+| `sports_action/fielder_ready` | 守備の構え（野球） | 2026-11-16 | agent | ok |  |
+| `sports_action/tennis_forehand` | フォアハンドで打つ（テニス） | 2026-11-16 | agent | ok |  |
+| `sports_action/tennis_serve` | サーブを打つ（テニス） | 2026-11-16 | agent | fixed | 足を平らに（重心） |
+| `sports_action/badminton_smash` | スマッシュを打つ（バドミントン） | 2026-11-16 | agent | fixed | 後ろ足を床に（重心） |
+| `sports_action/table_tennis_ready` | 卓球の構え | 2026-11-16 | agent | ok |  |
+| `sports_action/golf_address` | ゴルフのアドレス | 2026-11-16 | agent | ok |  |
+| `sports_action/golf_finish` | ゴルフのフィニッシュ | 2026-11-16 | agent | fixed | 手の位置（肘の範囲・腕のねじれ・上腕が胴の中） |
+| `sports_action/arm_stretch` | 腕を胸の前で伸ばすストレッチ | 2026-11-16 | agent | fixed | crouch_start（クラウチングスタート）の代わり: 手が範囲の中で床に届かなかった |
+| `sports_action/hurdle` | ハードルを跳び越える | 2026-11-16 | agent | fixed | 後ろ脚の開きを小さく（股関節の範囲・太ももの重なり） |
+| `sports_action/long_jump` | 走り幅跳び（宙で） | 2026-11-16 | agent | ok | 同上（宙） |
+| `sports_action/shot_put` | 砲丸を構える | 2026-11-16 | agent | fixed | 砲丸の手を首の横へ（肩の範囲・肘の範囲） |
+| `sports_action/swim_crawl` | クロールで泳ぐ | 2026-11-16 | agent | fixed | 前の腕を下げる（肩の範囲） |
+| `sports_action/speed_skate` | スケートで滑る（片足） | 2026-11-16 | agent | ok |  |
+| `sports_action/side_bend` | 体を横に倒すストレッチ | 2026-11-16 | agent | fixed | pushup（腕立て伏せ）の代わり: 脚を範囲の中で床に置けなかった |
+| `sports_action/squat_workout` | スクワットをする | 2026-11-16 | agent | fixed | 浅く（足首の範囲） |
+| `sports_action/lunge_stretch` | ランジでストレッチ | 2026-11-16 | agent | ok |  |
+| `sports_action/jumping_jack` | ジャンピングジャック | 2026-11-16 | agent | ok |  |
+| `sports_action/cheer_jump` | チアのジャンプ | 2026-11-16 | agent | ok |  |
+| `sports_action/cheer_v` | チアのV字 | 2026-11-16 | agent | ok |  |
+| `sports_action/archery_draw` | 弓を引く（弓道・アーチェリー） | 2026-11-16 | agent | fixed | 引く手を肩の前へ（上腕が胴の中・肘の範囲） |
+| `sports_action/victory_knee_slide` | ひざで滑ってガッツポーズ | 2026-11-16 | agent | fixed | つま先を立てる（足首の範囲） |
+| `sports_action/weight_overhead` | 重りを頭上に差し上げる | 2026-11-16 | agent | ok |  |
+| `sports_action/bowling` | ボールを転がす（ボウリング） | 2026-11-16 | agent | fixed | 軸足を体の下へ（重心） |
+
+## アクション（打つ・蹴る・構える・剣・投げる・倒れる）（action）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `action/fight_stance` | ファイティングポーズ | 2026-11-16 | agent | ok |  |
+| `action/jab` | ジャブを打つ | 2026-11-16 | agent | ok |  |
+| `action/straight_punch` | ストレートを打つ | 2026-11-16 | agent | ok |  |
+| `action/uppercut` | アッパーを突き上げる | 2026-11-16 | agent | ok |  |
+| `action/hook` | フックを振る | 2026-11-16 | agent | ok |  |
+| `action/cross_block` | 腕を交差させて防ぐ | 2026-11-16 | agent | ok |  |
+| `action/high_block` | 腕を上げて頭を守る | 2026-11-16 | agent | ok |  |
+| `action/karate_punch` | 正拳突き（前屈立ち） | 2026-11-16 | agent | ok |  |
+| `action/palm_strike` | 掌底を突き出す | 2026-11-16 | agent | ok |  |
+| `action/front_kick` | 前蹴り | 2026-11-16 | agent | ok |  |
+| `action/roundhouse_kick` | 回し蹴り | 2026-11-16 | agent | fixed | 軸足を体の下へ・脚のねじれを小さく（重心・範囲） |
+| `action/knee_strike` | 膝蹴り | 2026-11-16 | agent | fixed | 軸足を体の下へ（重心） |
+| `action/flying_kick` | 跳び蹴り | 2026-11-16 | agent | ok |  |
+| `action/sword_middle` | 剣を中段に構える | 2026-11-16 | agent | ok | 刃が立ち気味（中段より上段寄り） |
+| `action/sword_overhead` | 剣を振りかぶる | 2026-11-16 | agent | ok |  |
+| `action/sword_cut_down` | 剣を振り下ろす | 2026-11-16 | agent | fixed | 指を下へ向けて刃を前下へ（刃が上を向いていた） |
+| `action/sword_thrust` | 剣を立てて踏み込む | 2026-11-16 | agent | fixed | 後ろのかかとを上げる（足首の範囲）。刃が立つので名前を「剣を立てて踏み込む」に |
+| `action/sword_side_slash` | 剣を横に払った後 | 2026-11-16 | agent | ok |  |
+| `action/iai_draw` | 刀に手をかけて抜く構え | 2026-11-16 | agent | fixed | 柄に掛ける手を前へ（上腕が胴の中） |
+| `action/sword_planted` | 剣を地に突き立てて立つ | 2026-11-16 | agent | ok |  |
+| `action/throw_overhand` | 大きく振りかぶって投げる | 2026-11-16 | agent | ok |  |
+| `action/throw_follow` | 投げ終わり | 2026-11-16 | agent | ok |  |
+| `action/throw_underhand` | 下手で放る | 2026-11-16 | agent | ok |  |
+| `action/dodge_back` | のけぞってよける | 2026-11-16 | agent | fixed | 反りを小さく・後ろ足を下げる（重心） |
+| `action/hit_recoil` | 殴られてよろける | 2026-11-16 | agent | fixed | 後ろ足を平らに（重心） |
+| `action/fall_back` | 後ろに倒れかける | 2026-11-16 | agent | ok |  |
+| `action/beckon_taunt` | 構えて手招きで挑発する | 2026-11-16 | agent | fixed | fallen_sitting（尻もち）の代わり: 手と腰が床に落ち着かなかった |
+| `action/hero_landing` | 片膝をついて着地 | 2026-11-16 | agent | fixed | 拳は床から少し浮かせた（腕が床に届かない）。名前を「片膝をついて着地」に |
+| `action/aim_finger_gun` | 指で銃を構える | 2026-11-16 | agent | ok |  |
+| `action/crouch_ready` | 低くしゃがんで身構える | 2026-11-16 | agent | fixed | ninja_crouch を作り直した（足首の範囲） |
+
+## ダンス（dance）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `dance/ballet_first` | バレエの一番ポジション | 2026-11-16 | agent | ok |  |
+| `dance/ballet_arabesque` | アラベスク | 2026-11-16 | agent | ok |  |
+| `dance/ballet_retire` | つま先立ちで片脚を曲げて回る | 2026-11-16 | agent | ok |  |
+| `dance/ballet_plie` | プリエ（膝を開いて曲げる） | 2026-11-16 | agent | fixed | 外への開きを小さく（股関節のねじれ） |
+| `dance/jazz_hands` | ジャズハンズ | 2026-11-16 | agent | ok |  |
+| `dance/disco_point` | 人差し指を斜め上に突き上げる | 2026-11-16 | agent | ok |  |
+| `dance/hiphop_lean` | ヒップホップで腕を組んで反る | 2026-11-16 | agent | ok |  |
+| `dance/wave_arms` | 腕でウェーブ | 2026-11-16 | agent | ok |  |
+| `dance/robot` | ロボットダンス | 2026-11-16 | agent | fixed | 右腕を体の前でなく横へ（上腕が胴の中） |
+| `dance/idol_heart` | アイドルの両手ハート | 2026-11-16 | agent | ok |  |
+| `dance/idol_wink_point` | アイドルの決め（指さし） | 2026-11-16 | agent | fixed | 軸足を体の下へ（重心） |
+| `dance/flamenco` | フラメンコ | 2026-11-16 | agent | ok |  |
+| `dance/hula` | フラを踊る | 2026-11-16 | agent | ok |  |
+| `dance/bon_odori` | 盆踊り | 2026-11-16 | agent | ok |  |
+| `dance/high_kick_line` | ラインダンスで脚を高く上げる | 2026-11-16 | agent | fixed | 軸足を体の下へ（重心） |
+| `dance/spin_arm_up` | 片腕を上げてくるりと回る | 2026-11-16 | agent | fixed | つま先立ちの足を後ろへ（重心） |
+| `dance/vogue` | ヴォーグ（手で顔を縁取る） | 2026-11-16 | agent | fixed | 手を遠くへ（肘の範囲） |
+| `dance/clap_step` | 手拍子でステップ | 2026-11-16 | agent | fixed | 軸足を体の下へ（重心） |
+| `dance/curtsy` | カーテシー（裾をつまんでお辞儀） | 2026-11-16 | agent | ok |  |
+| `dance/stage_bow` | 舞台で深くお辞儀する | 2026-11-16 | agent | ok |  |
+
+## ヒーロー・決めポーズ（heroic）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `heroic/power_stance` | 腰に手を当てて胸を張る | 2026-11-16 | agent | ok |  |
+| `heroic/fist_raised` | 拳を天に突き上げる | 2026-11-16 | agent | ok |  |
+| `heroic/flying` | 拳を前に突き出して飛ぶ | 2026-11-16 | agent | ok | 同上（宙） |
+| `heroic/transform` | 変身ポーズ（腕を斜めに構える） | 2026-11-16 | agent | ok |  |
+| `heroic/point_to_sky` | 空を指さして見上げる | 2026-11-16 | agent | ok |  |
+| `heroic/point_at_you` | お前だ、と指さす | 2026-11-16 | agent | ok |  |
+| `heroic/energy_blast` | 両手のひらから気を放つ | 2026-11-16 | agent | ok |  |
+| `heroic/magic_cast` | 片手をかざして魔法を放つ | 2026-11-16 | agent | ok |  |
+| `heroic/sword_raised` | 剣を高く掲げる | 2026-11-16 | agent | ok |  |
+| `heroic/sword_shoulder_hero` | 剣を下げて堂々と立つ | 2026-11-16 | agent | fixed | 剣が手から下へ下がる形（手のひらが下）。名前を「剣を下げて堂々と立つ」に |
+| `heroic/arms_spread_glory` | 両腕を広げて光を浴びる | 2026-11-16 | agent | ok |  |
+| `heroic/ready_to_fight` | 拳を握って身構える | 2026-11-16 | agent | ok |  |
+| `heroic/back_turned` | 背中を向けて肩越しに振り返る | 2026-11-16 | agent | ok |  |
+| `heroic/shield_forearm` | 腕を前に出して受け止める | 2026-11-16 | agent | ok |  |
+| `heroic/rising_up` | 片膝から立ち上がる | 2026-11-16 | agent | ok |  |
+| `heroic/salute_hero` | 敬礼して立つ | 2026-11-16 | agent | ok |  |
+| `heroic/cape_stance` | マントをなびかせて遠くを見る | 2026-11-16 | agent | ok |  |
+| `heroic/finger_guns_cool` | 両手の指を銃にしてキメる | 2026-11-16 | agent | ok |  |
+| `heroic/kneel_vow` | 片膝をついて誓う | 2026-11-16 | agent | ok |  |
+| `heroic/look_up_resolve` | 拳を握って空を見上げる | 2026-11-16 | agent | ok |  |
+
+## 仕事と暮らし（work_life）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `work_life/typing` | パソコンで文字を打つ | 2026-11-16 | agent | ok |  |
+| `work_life/desk_coffee` | 机でコーヒーを飲む | 2026-11-16 | agent | ok |  |
+| `work_life/stretch_at_desk` | 椅子で伸びをする | 2026-11-16 | agent | ok |  |
+| `work_life/phone_and_notes` | 電話しながらメモを取る | 2026-11-16 | agent | ok |  |
+| `work_life/presentation` | 手で示して発表する | 2026-11-16 | agent | ok |  |
+| `work_life/business_bow` | 会釈・お辞儀（ビジネス） | 2026-11-16 | agent | ok |  |
+| `work_life/card_exchange` | 両手で名刺を差し出す | 2026-11-16 | agent | ok |  |
+| `work_life/carry_documents` | 書類を抱えて歩く | 2026-11-16 | agent | ok |  |
+| `work_life/check_watch` | 腕時計を見る | 2026-11-16 | agent | ok |  |
+| `work_life/cooking_stir` | 鍋をかき混ぜる | 2026-11-16 | agent | ok |  |
+| `work_life/cooking_taste` | 小皿で味見する | 2026-11-16 | agent | ok |  |
+| `work_life/wipe_table` | テーブルを拭く | 2026-11-16 | agent | ok |  |
+| `work_life/hang_laundry` | 洗濯物を干す | 2026-11-16 | agent | fixed | つま先立ちの足を後ろへ（重心） |
+| `work_life/sweep_floor` | ほうきで床を掃く | 2026-11-16 | agent | ok |  |
+| `work_life/lift_box` | 床から箱を持ち上げる | 2026-11-16 | agent | fixed | 浅く（足首の範囲） |
+| `work_life/carry_box` | 箱を胸に抱えて運ぶ | 2026-11-16 | agent | ok |  |
+| `work_life/shopping_bags` | 買い物袋を両手に提げる | 2026-11-16 | agent | ok |  |
+| `work_life/waiter_tray` | トレーを片手で運ぶ | 2026-11-16 | agent | ok | トレーの形は無い（手のひらを上に） |
+| `work_life/garden_dig` | しゃがんで庭の土をいじる | 2026-11-16 | agent | fixed | 肘の向き（腕のねじれ） |
+| `work_life/water_plants` | じょうろで水やり | 2026-11-16 | agent | ok |  |
+| `work_life/teacher_board` | 黒板に書く | 2026-11-16 | agent | ok |  |
+| `work_life/raise_hand_class` | 授業で手を挙げる（座って） | 2026-11-16 | agent | ok |  |
+| `work_life/train_strap` | 電車でつり革につかまる | 2026-11-16 | agent | ok |  |
+| `work_life/umbrella_walk` | 傘をさして歩く | 2026-11-16 | agent | ok |  |
+| `work_life/driving` | 車を運転する | 2026-11-16 | agent | ok |  |
+| `work_life/yawn_stretch` | あくびをして伸びる | 2026-11-16 | agent | ok |  |
+
+## カップル（二人）（couple）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `couple/hold_hands_walk` | 手をつないで歩く | 2026-11-16 | agent | fixed | 二人の間を 3.1 u に、手を間で（上腕・前腕の重なり） |
+| `couple/hold_hands_look` | 手をつないで見つめ合う | 2026-11-16 | agent | fixed | 二人の間を 3.1 u に、触れる腕を挙げた |
+| `couple/both_hands_face` | 向き合って両手をつなぐ | 2026-11-16 | agent | ok |  |
+| `couple/hug` | 抱き合う | 2026-11-16 | agent | fixed | 足を後ろへ・二人の間を 1.35 u に（足の重なり・胴の沈み）、腕どうしの触れを挙げた |
+| `couple/back_hug` | 後ろから抱きしめる | 2026-11-16 | agent | fixed | 前の人の手を後ろの人の手の上へ（触れる所が遠かった） |
+| `couple/forehead_touch` | 額を寄せ合う | 2026-11-16 | agent | fixed | 足を後ろへ・二人の間を 1.75 u に（足の重なり・頭の沈み） |
+| `couple/arm_in_arm` | 腕を組んで歩く | 2026-11-16 | agent | fixed | 二人の間を 2.4 u に、触れる腕を挙げた |
+| `couple/shoulder_hold` | 肩を抱き寄せる | 2026-11-16 | agent | fixed | 二人の間を 2.4 u に、手を肩の上へ（手が体の中） |
+| `couple/slow_dance` | チークダンス（肩と腰に手を） | 2026-11-16 | agent | fixed | 手を左右に分け腰の外へ（両手が同じ所へ行っていた）・足を後ろへ |
+| `couple/waltz` | ワルツの組み方 | 2026-11-16 | agent | fixed | b の上げた手を下げる（肘の範囲）、腕どうしの触れを挙げた |
+| `couple/twirl` | 手を取ってくるりと回す | 2026-11-16 | agent | fixed | 二人の間を広げ、b の軸足を体の下へ（重心・腕が体の中） |
+| `couple/umbrella_share` | 一つの傘に二人で入る | 2026-11-16 | agent | fixed | 二人の間を 2.7 u に |
+| `couple/selfie` | 寄り添って自撮りする | 2026-11-16 | agent | fixed | 肩を抱く腕をやめ、二人の間を 3.1 u に（腕が体の中・肘の範囲） |
+| `couple/back_to_back` | 背中合わせで寄りかかる | 2026-11-16 | agent | fixed | heart_together（二人で手のハート）の代わり: 腕が交差して相手の体に入った |
+| `couple/proposal` | 片膝をついて手を取る（プロポーズ） | 2026-11-16 | agent | fixed | 二人の間を 3.6 u に（足の重なり） |
+| `couple/head_on_shoulder` | 肩に頭をもたせかけて座る | 2026-11-16 | agent | fixed | 傾く向きを直した（体の傾きの符号）・二人の間を 2.4 u に |
+| `couple/back_to_back_sit` | 背中合わせで床に座る | 2026-11-16 | agent | ok |  |
+| `couple/stand_gaze` | 並んで立ち見つめ合う | 2026-11-16 | agent | fixed | head_pat（頭をなでる）の代わり: 頭が相手の胸に入り手が届かなかった |
+| `couple/whisper` | 耳元でささやく | 2026-11-16 | agent | fixed | 手を自分の口元に（腕のねじれ）、二人の間を広げた |
+| `couple/cheek_hands` | 両手で頬を包む | 2026-11-16 | agent | fixed | 足を後ろへ（足の重なり） |
+| `couple/walk_side_glance` | 並んで歩き見つめ合う | 2026-11-16 | agent | fixed | 二人の間を 3.1 u に |
+| `couple/peace_photo` | 並んでピースする | 2026-11-16 | agent | fixed | 二人の間を 3.1 u に |
+| `couple/feed_cup` | 飲み物を口元へ差し出す | 2026-11-16 | agent | ok |  |
+| `couple/side_hug` | 横から腰を抱く | 2026-11-16 | agent | fixed | 二人の間を 2.8 u に、回す腕は相手の後ろへ |
+| `couple/bench_hands` | 並んで座り手を重ねる | 2026-11-16 | agent | fixed | 座った手の高さを直した（膝の上）・二人の間を 3.0 u に |
+| `couple/pinky_promise` | 指切りする | 2026-11-16 | agent | ok |  |
+| `couple/hands_on_chest` | 胸に手を添えて見上げる | 2026-11-16 | agent | fixed | 手を左右に分けた・腕どうしの触れを挙げた |
+| `couple/lean_back` | 後ろの人にもたれかかる | 2026-11-16 | agent | fixed | 手を肩の上へ・二人の間を 1.15 u に（胴の沈み） |
+| `couple/piggyback` | おんぶする | 2026-11-16 | agent | fixed | b の手を左右に分けた、脚と腕の触れを挙げた |
+| `couple/gaze_walk_lead` | 手を引いて振り返る | 2026-11-16 | agent | ok |  |
+
+## 二人のポーズ（two_people）
+
+| id | 名前 | 日付 | 見た人 | 結果 | 直したこと・気づいたこと |
+|---|---|---|---|---|---|
+| `two_people/handshake` | 握手する | 2026-11-16 | agent | fixed | 手首を握る点から手の長さだけ引いた（手が相手の前腕に重なった） |
+| `two_people/high_five` | ハイタッチ | 2026-11-16 | agent | fixed | 手の間を詰めた（触れる所が遠かった） |
+| `two_people/fist_bump` | グータッチ | 2026-11-16 | agent | ok |  |
+| `two_people/shoulder_buddies` | 肩を組んで笑う | 2026-11-16 | agent | fixed | 二人の間を 2.4 u に、手を肩の後ろへ（手が体の中） |
+| `two_people/back_to_back` | 背中合わせに腕を組んで立つ | 2026-11-16 | agent | ok |  |
+| `two_people/talking` | 向き合って話す | 2026-11-16 | agent | ok |  |
+| `two_people/explain_point` | 指さして教える | 2026-11-16 | agent | fixed | 二人の間を広げた（足・手の重なり） |
+| `two_people/sparring` | 向かい合って構える（組手） | 2026-11-16 | agent | ok |  |
+| `two_people/sword_clash` | 剣を構えて向き合う | 2026-11-16 | agent | fixed | 剣が交わらず上を向くので名前を「剣を構えて向き合う」に |
+| `two_people/bow_greeting` | 向き合ってお辞儀する | 2026-11-16 | agent | ok |  |
+| `two_people/hand_over_paper` | 書類を手渡す | 2026-11-16 | agent | fixed | 受け取る手を近づけた（触れる所が遠かった） |
+| `two_people/throw_catch` | ボールを投げて受け取る | 2026-11-16 | agent | ok |  |
+| `two_people/help_up` | 手を引いて起こす | 2026-11-16 | agent | fixed | 座る人を床に座る形に作り直した（腰と手が床に落ち着かなかった） |
+| `two_people/console` | うずくまる友の肩に手を置く | 2026-11-16 | agent | fixed | 手を肩の上へ（手が体の中） |
+| `two_people/toast` | カップで乾杯する | 2026-11-16 | agent | ok |  |
+| `two_people/secret` | 内緒話をする | 2026-11-16 | agent | fixed | 手を自分の口元に（腕のねじれ）・二人の間を広げた |
+| `two_people/push_back` | 背中を押して送り出す | 2026-11-16 | agent | fixed | 手を左右に分けた（腕が交差） |
+| `two_people/race` | 並んで走る | 2026-11-16 | agent | fixed | 二人の間を 3.2 u に |
+| `two_people/floor_chat` | 床に座っておしゃべり | 2026-11-16 | agent | fixed | 二人の間を 3.6 u に |
+| `two_people/teacher_student` | 先生が指し、生徒が手を挙げる | 2026-11-16 | agent | ok |  |
+| `two_people/carry_box_together` | 二人で大きな箱を運ぶ | 2026-11-16 | agent | ok |  |
+| `two_people/walk_talk` | 並んで歩きながら話す | 2026-11-16 | agent | fixed | pull_by_hand（手を引いて走り出す）の代わり: 後ろへ伸ばす腕が範囲の外 |
+| `two_people/photo_friend` | 友だちの写真を撮る | 2026-11-16 | agent | ok |  |
+| `two_people/wave_far` | 離れて手を振り合う | 2026-11-16 | agent | ok |  |
+| `two_people/cheer_together` | 並んで拳を突き上げる | 2026-11-16 | agent | fixed | 二人の間を 3.1 u に |
+| `two_people/punch_dodge` | 拳をかわす | 2026-11-16 | agent | ok |  |
+| `two_people/kick_block` | 蹴りを腕で受ける | 2026-11-16 | agent | fixed | 横蹴りを前蹴りに作り直した（片足の重心） |
+| `two_people/shoulder_support` | 肩を貸して歩く | 2026-11-16 | agent | fixed | 二人の間を 2.85 u に、回す腕は相手の後ろへ |
+| `two_people/thumbs_up_both` | 並んで親指を立てる | 2026-11-16 | agent | fixed | 外側の手で親指を立てる（前腕の重なり） |
+| `two_people/look_at_phone` | 並んでスマホをのぞき込む | 2026-11-16 | agent | fixed | 二人の間を 2.9 u に |
+
+## G5 で外したもの
+
+- `action/side_kick`（横蹴り）: 片足で脚を横へ高く上げると重心が軸足から外れ、補正を回すと足が床から離れた。前蹴り・回し蹴りは残した。
+- `action/fallen_sitting`（尻もち）・`sports_action/crouch_start`（クラウチングスタート）・`sports_action/pushup`（腕立て伏せ）: 手か腰か足が床に落ち着かなかった（範囲の中で届かない）。代わりに beckon_taunt・arm_stretch・side_bend を入れた。
+- 二人: `couple/heart_together`（手を合わせたハート）・`couple/head_pat`（頭をなでる）・`two_people/pull_by_hand`（手を引いて走る）を代わりのポーズに入れ替えた（上の表）。
+
+## 持つ物を描いて見直したもの（G3・G4 のポーズ、2026-11-16、agent）
+
+- 剣・バット・ボール・カップ・スマホ・本・ペン・鞄は、手の中に読める形で出た（hands_props・everyday・sit_chair などの一覧の絵と拡大の絵で見た）。
+- `everyday/umbrella`: 手のひらが下を向くポーズで、初めは閉じた傘が手の下へ出た。親指が上を向くときは開くよう規則を直し、開いた傘になった（少し後ろへ傾く）。
+- `hands_props/umbrella_cane`（傘を杖のようにつく）: 手のひらが上を向いた手で、傘が床へ向かず横へ出る。ポーズの手の向きの問題として残す（直していない）。
+- `hands_props/paper_read` など紙を持つポーズ: 紙が手の横で縦に見える（手のひらの面に沿う）。両手で広げた紙には見えない。残す。
+- `hands_props/bat_stance`: バットが後ろへ水平に出る（構えとしては寝すぎ）。残す。
