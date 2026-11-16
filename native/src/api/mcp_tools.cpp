@@ -35,6 +35,7 @@ Genko が検査・コマ割り・縦書き写植・プレビュー描画をす�
 進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
 コマ割りは緩急で決める（規則の「コマ割りの緩急」）。layout_ideas でそのページの案の束を出して選び、崩してから submit_name に出す。
+人形のポーズは figure_poses で選ぶ（分類・言葉・ランダム・一覧の絵）。付けるのは apply_ops の pose_figure {page, id, pose_id, mirror, keep: "ground"}。
 作画: generation_request で依頼パックを受け取る → 自分の画像ツールで生成し、返された inbox フォルダに保存 →
 take_panel_art（取り込み・採用・足りなければ拡大・顔と人物の位置の報告を 1 回で）。2 枚以上を比べるときだけ import_images → candidates → review_candidates → adopt。
 作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（既定は png）。
@@ -243,6 +244,31 @@ const std::vector<ToolSpec>& table() {
           {"variation", Kind::Float, true, Json(), R"({"minimum": 0, "maximum": 1, "description": "変異度（既定 0.3）"})"},
           {"focus", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 8, "description": "見せ場のコマ（読み順の番号）"})"},
           {"plan", Kind::Dict, true, Json(), R"({"description": "下書きのネーム計画（name_plan@1）: 各案を入れた plan が返る"})"},
+          {"session", Kind::Str, true, Json()}}},
+        {"figure_poses",
+         R"(人形（add_figure）のポーズ集を見る。読むだけで、本は変えない（project は省いてよい）。
+        返す: categories [{id, ja, en, count}]（分類と数）、poses [{id, ja, en, category, tags, hands, contact, support, props, symmetric}]、total（条件に合う数）。
+        絞り込み（どれも任意、全部に合うもの）: category（分類の id）、tags（タグの並び）、query（日本語か英語の言葉。空白で区切ると全部に合うもの）、
+        contact（接地: l_foot, r_foot, l_knee, r_knee, l_hand, r_hand, seat, pelvis, back, front, side）、support（floor / chair / none）、
+        props（true: 手に物を持つポーズだけ、false: 持たないものだけ）。limit（既定 50）と offset で先へ。
+        random=n: 条件に合うものから n ポーズをランダムに選ぶ。seed（fp- と 16 桁の 16 進数）を渡すと同じ選び方。省くと新しい seed を返す。
+        sheet=true: 選んだポーズ（24 まで）の一覧の絵を返す（views: front / three_quarter / side、既定は 3 つ。body で体型）。
+        付ける: apply_ops で pose_figure {page, id, pose_id, mirror（true で左右反転）, keep: "ground"（足もとの高さを保つ）}。新しい人形は add_figure に pose_id。
+        人形をドラッグすると pose_id は外れる。持つ物（props）の形はまだ描かない。)",
+         {{"project", Kind::Str, true, Json()},
+          {"category", Kind::Str, true, Json(), R"({"description": "分類の id（stand, sit_chair, lie, emotion など。categories に全部）"})"},
+          {"tags", Kind::ListStr, true, Json(), R"({"description": "タグ（日本語か英語）。全部を持つポーズ"})"},
+          {"query", Kind::Str, true, Json(), R"({"description": "言葉（id・名前・タグに含まれる。空白で区切ると全部に合うもの）"})"},
+          {"contact", Kind::ListStr, true, Json(), R"({"description": "接地（l_foot, r_foot, l_knee, r_knee, l_hand, r_hand, seat, pelvis, back, front, side）。全部を持つポーズ"})"},
+          {"support", Kind::Str, true, Json(), R"({"enum": ["floor", "chair", "none"], "description": "体が何に乗るか"})"},
+          {"props", Kind::Bool, true, Json(), R"({"description": "true: 手に物を持つポーズだけ、false: 持たないものだけ"})"},
+          {"limit", Kind::Int, false, Json(50), R"({"minimum": 1, "maximum": 500})"},
+          {"offset", Kind::Int, false, Json(0), R"({"minimum": 0})"},
+          {"random", Kind::Int, true, Json(), R"({"minimum": 1, "maximum": 500, "description": "条件に合うものから n ポーズをランダムに"})"},
+          {"seed", Kind::Str, true, Json(), R"({"description": "random の選び方をもう一度: 返された seed（例 fp-0123456789abcdef）"})"},
+          {"sheet", Kind::Bool, false, Json(false), R"({"description": "true: 一覧の絵（24 ポーズまで）を返す"})"},
+          {"views", Kind::ListStr, true, Json(), R"({"description": "一覧の絵の向き: front / three_quarter / side（既定は 3 つ）"})"},
+          {"body", Kind::Dict, true, Json(), R"({"description": "一覧の絵の体型（add_figure の body と同じ: sex, heads, shoulders, hips, build, legs）"})"},
           {"session", Kind::Str, true, Json()}}},
         {"take_panel_art",
          R"(コマ 1 つの絵を 1 回で入れる: 依頼（request_id）の画像を取り込み、採用し、原稿の解像度に足りなければ拡大して
@@ -822,9 +848,9 @@ namespace {
 
 // genko/mcp/server.py READ_ONLY: tools that never write (no book-in-use warning, no presence).
 bool read_only(std::string_view tool) {
-    static constexpr std::array<std::string_view, 16> kNames{"projects", "status", "next", "inspect", "render", "candidates", "preflight", "check",
+    static constexpr std::array<std::string_view, 17> kNames{"projects", "status", "next", "inspect", "render", "candidates", "preflight", "check",
                                                              "tickets", "proposals", "review_page", "export", "export_proof", "export_status",
-                                                             "style_catalog", "layout_ideas"};
+                                                             "style_catalog", "layout_ideas", "figure_poses"};
     return std::find(kNames.begin(), kNames.end(), tool) != kNames.end();
 }
 
@@ -957,6 +983,8 @@ Call mapping(std::string_view tool, const Json& v) {
     } else if (tool == "layout_ideas") {
         args({"project", "page", "panels", "min_panels", "max_panels", "min_tiers", "max_tiers", "preset", "knobs", "seed", "count", "base",
               "base_page", "variation", "focus", "plan"});
+    } else if (tool == "figure_poses") {
+        args({"project", "category", "tags", "query", "contact", "support", "props", "limit", "offset", "random", "seed", "sheet", "views", "body"});
     } else if (tool == "take_panel_art") {
         args({"project", "request_id", "image", "regions", "upscale", "method", "crop01"});
     } else if (tool == "style_catalog") {

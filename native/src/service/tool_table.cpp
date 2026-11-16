@@ -122,6 +122,12 @@ const std::vector<Tool>& tools() {
                       optional("seed", none), optional("count", none), optional("base", none), optional("base_page", false),
                       optional("variation", none), optional("focus", none), optional("plan", none)},
                      &StudioService::layout_ideas});
+        // 人形のポーズ集 G4 (SPEC FIGURE-02): the pose library (reads only; project may be left out)
+        t.push_back({"figure_poses",
+                     {optional("project", none), optional("category", none), optional("tags", none), optional("query", none), optional("contact", none),
+                      optional("support", none), optional("props", none), optional("limit", 50), optional("offset", 0), optional("random", none),
+                      optional("seed", none), optional("sheet", false), optional("views", none), optional("body", none)},
+                     &StudioService::figure_poses});
         t.push_back({"apply_ops", {required("project"), required("ops"), optional("commit", false)}, &StudioService::apply_ops});
         t.push_back({"record_review", {required("project"), required("page"), required("score"), required("notes")}, &StudioService::record_review});
         t.push_back({"record_chat_approval",
