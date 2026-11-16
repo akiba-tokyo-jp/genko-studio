@@ -977,6 +977,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("focal_mm must be between 20 and 5000", "画角（焦点距離）は 20〜5000 mm です"));
         r.push_back(rule("hand poses are .*", "手の形は、開く・力を抜く・握る・指さす・ピース・つかむから選びます"));
         r.push_back(rule("hands is .*", "手の形は、左手・右手ごとに決めます"));
+        // (the pose library, SPEC FIGURE-02)
+        r.push_back(rule("a hand holds one of .*", "手に持たせられる物は、決まった物の中から選びます"));
+        r.push_back(rule(R"(hold is \{l, r: .*\})", "手に持たせる物は、左手（l）・右手（r）ごとに決めます"));
+        r.push_back(rule("give preset or pose_id, not both", "見本とポーズ集のポーズは、どちらか一方を選びます"));
+        r.push_back(rule("keep is pelvis or ground", "合わせる所は、腰か足もとです"));
+        r.push_back(rule(R"(no pose (.*) \(figure_poses lists them\))", "「\\1」というポーズはありません（ポーズ集で選べます）"));
+        r.push_back(rule("spread and thumb are numbers from 0 to 1", "指の開きと親指の向きは 0〜1 の数です"));
         r.push_back(rule("height_mm must be between 10 and 400", "身長は 10〜400 mm です"));
         r.push_back(rule("joints is .*", "関節の設定が正しくありません"));
         r.push_back(rule("obj is the model's OBJ text", "3D モデルの中身（OBJ ファイルの文字）が要ります"));
