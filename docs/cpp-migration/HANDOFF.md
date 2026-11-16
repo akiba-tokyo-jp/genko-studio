@@ -18,6 +18,28 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 古い不具合 2 つの直し（カメラで見た箱・ほかの 3D の後ろの人形の線。SPEC FIGURE-01）— 2026-11-16、ブランチ native/figures（main には未統合）
+
+### したこと
+- カメラで見た箱: `prim3d::edges` が、カメラのときに箱を `segments3d`（円柱・階段・床・背景・球・円錐・小物の辺）へ回していて、そこに箱の場合が無く、最後の else の床の格子（既定 8 本 → 18 本の 2 点の線）になっていた。今はカメラ無しと同じ角の道で 12 本の辺。面の向きはカメラが見るとおりの角と目で決める（新しい `mesh3d::in_view`: `turned` と `eye_of`。カメラ無しの道は 1 文字も変えていない）。`bbox` は前から角を写した点の枠で正しかった（確かめを足した）。
+- 人形の線とほかの 3D: `trace_prims`・`render_prims` は 3D を 1 つずつトレースしていて、3D どうしの隠れ方は人形の中（`mesh3d::lines` の深さの絵）にしか無かった（箱どうしも無い）。今は人形・頭・手・取り込んだモデルの線を、ページのほかの面を持つ 3D の面も描いた深さの絵で調べる（`mesh3d::lines`・`prim_lines`・`prim3d::trace` の引数 `hiders`、選ぶのは ops_3d の `hiders_of`）。手前の決め方・隠すものの選び方は SPEC FIGURE-01 の「ほかの 3D の後ろの線」。箱などの辺の線は変えていない。校正の案内（render/prims）と画面の 3D は前のまま 1 つずつ。
+
+### 変えた控え（意図した変更）
+- test_figure_mesh の theOtherKindsAreAsBefore `kOtherKinds` `e409e23f…f54a` → `6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1`。19 個の要素のうち変わったのはカメラで見た箱の trace の 1 つだけ: `{"count":18,"points":36,…6112465…}`（床の格子）→ `{"count":9,"points":18,"sha":"16458bd2…7e1f"}`（見える 9 本の辺）。陰の絵 2 つ・カメラ無しの全部・カメラのほかの 3D は同じ値。これがこの控えが箱 ＋ カメラを通っていた所で、直しの意図した結果。
+- ほかに変わった控えは無い（人形の後ろに手前の 3D がある控えは無かった）。
+
+### 足した試験
+- test_ops_3d `boxThroughTheCamera`（直す前は 12 本のところ 18 本で落ちた）: 2 つの箱 × 3 つのカメラで、12 本の辺が隣り合う角どうし、見える辺は試験の中で別に求めた面の向き（カメラの空間の角と目）と同じ、trace の本数、外枠、回らないカメラ = カメラ無し、op を通した線の点が箱の角。
+- test_ops_3d `figureBehindAnotherPrim`（直す前は箱の内に 317 点が残って落ちた）: カメラ無しと有りで、手前の薄い箱の輪郭の 2 mm 内に人形の線の点が 0（無いときは 20 より多い）、箱の上は残る、`render_prims` の線も同じ、奥の箱・別のコマの箱・自分のカメラの箱は前と同じ線、同じコマなら隠れる、手前の頭・人形で線が 20 mm 以上短くなる、奥の人形は前と同じ線、2 回で同じ。
+- test_perf_render smooth_figure: 手前に箱と 2 体目の人形があるトレースを同じ上限（kFigureTraceMs 40 ms）で（測って 11 ms。1 体だけは 7〜8 ms）。上限は 1 つも変えていない。
+
+### 試験（Release、関係するものだけ）
+- 合格: test_ops_3d 8.9 秒、test_figure_mesh 11.0 秒、test_figure_guide 3.8 秒、test_figure_poses 79.1 秒、test_ledger_service_b 30.3 秒、test_material_stamp 0.1 秒、test_render_page 6.6 秒、test_proof 0.5 秒、test_ink_edit 20.0 秒、test_page_size 1.7 秒、test_command_bus 2.7 秒、test_gui_guides 9.2 秒、test_gui_ledger_b 16.9 秒、test_gui_ledger_c 3.5 秒、test_perf_render 30.9 秒（人形: 作る 135〜137 ms、トレース 7〜8 ms、手前に 2 つ 11 ms、B4 の校正 182 ms。上限 600・40・800 ms）。
+- test_gui_ledger_a の test_every_error_reads_in_japanese は G4 のポーズの断り 6 つ（keep is pelvis or ground など）に日本語が無くて落ちる。直す前の a851ec0a でも同じに落ちる（この直しとは関係ない。まだ直していない）。
+
+### 環境
+- Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
+
 ## 人形のポーズ集（群 G4。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures（main には未統合）
 
 ### したこと
