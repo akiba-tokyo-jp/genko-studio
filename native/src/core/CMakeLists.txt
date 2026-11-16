@@ -215,7 +215,7 @@ if(NOT MSVC)
 endif()
 
 # The smooth figure's field and its mesher (SPEC FIGURE-01) are optimized in Debug too: unoptimized, a figure takes
-# about 40 times as long as in Release (about 5 s under ASan), and test_figure_poses meshes all 655 library poses. The
+# about 40 times as long as in Release (about 5 s under ASan), and test_figure_poses meshes all 670 library poses. The
 # sanitizers still instrument both files; the arithmetic is the same IEEE double either way (the same mesh bytes are
 # pinned in Release and Debug alike).
 if(NOT MSVC)
