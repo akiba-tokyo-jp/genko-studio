@@ -97,8 +97,10 @@ const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},      {"fa
                                                          {"pinup", 78},      {"relax_bed", 33}, {"lie", 20},         {"upper_body", 35},
                                                          {"turn", 10},       {"point", 8},      {"emotion", 25},     {"talk", 13},
                                                          {"hands_props", 24},
-                                                         // (batch C, G5: the numbers delivered)
-                                                         {"two_people", 1}};
+                                                         // (batch C, G5: the numbers delivered; plan §8 asked sports_action 35, action
+                                                         // 30, dance 20, heroic 20, work_life 25, couple 30, two_people 30)
+                                                         {"sports_action", 38}, {"action", 30},     {"dance", 20},  {"heroic", 20},
+                                                         {"work_life", 26},     {"couple", 30},     {"two_people", 30}};
 
 std::string issues_text(const std::vector<checks::Issue>& issues) {
     std::string out;
@@ -143,7 +145,7 @@ private slots:
             total += counts[category];
         }
         QCOMPARE(total, file["poses"].size());
-        QVERIFY(total >= 455);
+        QVERIFY(total >= 650);
         library::Filter held;
         held.category = "hands_props";
         for (const Json* p : library::list(held)) QVERIFY2(p->contains("hold"), (*p)["id"].get<std::string>().c_str());
@@ -221,7 +223,12 @@ private slots:
         f.props = false;
         const auto empty = library::list(f);
         QCOMPARE(held.size() + empty.size(), library::list().size());
-        for (const Json* p : held) QVERIFY(p->contains("hold"));
+        const auto holds = [](const Json& p) {  // (a pair: one of its people)
+            if (!library::is_pair(p)) return p.contains("hold");
+            return p["figures"][0].contains("hold") || p["figures"][1].contains("hold");
+        };
+        for (const Json* p : held) QVERIFY(holds(*p));
+        for (const Json* p : empty) QVERIFY(!holds(*p));
         f = {};
         f.query = "phone";
         const std::size_t phones = library::list(f).size();
@@ -285,7 +292,7 @@ private slots:
                 if (!pr.ok()) failed += pr.id + issues_text(pr.issues) + "\n";
                 const Json mirror = library::mirrored(*pose);
                 if (library::mirrored(mirror) != *pose) failed += pr.id + "\n  mirror: the mirror of the mirror is not the pair\n";
-                const checks::PairReport pm = checks::check_pair(mirror);
+                const checks::PairReport pm = checks::check_pair(mirror, Json(), false);  // (its bodies' inside and lines: the pair's own, mirrored)
                 if (!pm.ok()) failed += pr.id + " (mirrored)" + issues_text(pm.issues) + "\n";
                 // (the mirror's two are the reflection of the pair's two: b's pelvis across a's middle)
                 const auto two = checks::pair_figures(*pose);
@@ -347,7 +354,9 @@ private slots:
         QVERIFY(!library::list(f).empty());
         f = {};
         f.support = "chair";
-        for (const Json* p : library::list(f)) QVERIFY(p->contains("seat_h"));
+        for (const Json* p : library::list(f)) {
+            QVERIFY(library::is_pair(*p) ? ((*p)["figures"][0].contains("seat_h") || (*p)["figures"][1].contains("seat_h")) : p->contains("seat_h"));
+        }
         f.contact = {"seat", "l_foot"};
         QVERIFY(!library::list(f).empty());
         f = {};
@@ -365,6 +374,50 @@ private slots:
         QCOMPARE(*library::resolve("stand/wave", false), *library::find("stand/wave"));
         QVERIFY(!library::resolve("stand/nope").has_value());
         QVERIFY(!library::resolve("~m").has_value());
+    }
+
+    // Pair poses (G5): couple and two_people hold only pairs, the other categories none; a pair's summary says pair and
+    // both people; "<id>#a" and "#b" are its people as poses of their own (the mirror's too), "#a" of a pose of one person
+    // is none; the filters take a pair when one of its people matches (contact partner, support none); b is where the
+    // pair says (pair_figures: a's pelvis + offset × u, turned by turn).
+    void pairEntries() {
+        std::size_t pairs = 0;
+        for (const Json* p : library::list()) {
+            const std::string cat = (*p)["category"].get<std::string>();
+            const bool pair_cat = cat == "couple" || cat == "two_people";
+            QCOMPARE(library::is_pair(*p), pair_cat);
+            if (!pair_cat) continue;
+            ++pairs;
+            const Json sum = library::summary(*p);
+            QCOMPARE(sum["pair"], Json(true));
+            QCOMPARE(sum["figures"].size(), std::size_t{2});
+            const std::string id = (*p)["id"].get<std::string>();
+            const std::optional<Json> a = library::resolve(id + "#a");
+            const std::optional<Json> bm = library::resolve(id + "~m#b");
+            QVERIFY(a && bm);
+            QCOMPARE((*a)["joints"], (*p)["figures"][0]["joints"]);
+            QCOMPARE((*bm)["joints"], library::mirrored_joints((*p)["figures"][1]["joints"]));
+            QCOMPARE((*bm)["id"], Json(id + "~m#b"));
+            const auto two = checks::pair_figures(*p);
+            const double u = mesh3d::figure_skeleton(two[0]).unit;
+            const Json& f = (*p)["figures"][1];
+            for (int i = 0; i < 3; ++i) QVERIFY(std::fabs(two[1]["pos"][i].get<double>() - f["offset"][i].get<double>() * u) < 2e-4);
+            QVERIFY(std::fabs(two[1]["rot"][1].get<double>() - f["turn"].get<double>()) < 2e-4);
+        }
+        QVERIFY(pairs >= 60);
+        QVERIFY(!library::resolve("stand/wave#a").has_value());
+        library::Filter f;
+        f.contact = {"partner"};
+        const auto leaning = library::list(f);
+        QVERIFY(!leaning.empty());
+        for (const Json* p : leaning) QVERIFY(library::is_pair(*p));
+        f = {};
+        f.category = "couple";
+        f.support = "none";
+        QVERIFY(!library::list(f).empty());  // (one of them carried)
+        QCOMPARE(library::mirror_id("couple/hug#a"), std::string("couple/hug~m#a"));
+        QCOMPARE(library::mirror_id("couple/hug~m#b"), std::string("couple/hug#b"));
+        QCOMPARE(library::mirror_id("stand/wave"), std::string("stand/wave~m"));
     }
 
     // Thumbnails are the same bytes every time and on every thread (a pose's surface made in four threads at once), and
