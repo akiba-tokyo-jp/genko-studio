@@ -10,9 +10,10 @@
 #include "core/mesh3d.hpp"
 
 // The smooth body of the 3D figure, its head and its hands (SPEC FIGURE-01, this build's own: Python's mesh3d.py put
-// ellipsoids, capsules and boxes side by side). The shape is a field: each part of the body (the pelvis, the chest, an
-// upper arm, a finger…) is the distance to a few rounded pieces — round cones, ellipsoids and rounded boxes set in the
-// skeleton's bones —; the parts meet by the plain minimum, and, near the joint between two parts that the skeleton
+// ellipsoids, capsules and boxes side by side). The shape is a field: each part of the body (the torso, an upper arm,
+// a finger…) is the distance to a few rounded pieces set in the skeleton's bones — round cones, ellipsoids, rounded
+// boxes and lofts (a form along a bone whose oval section changes smoothly along it: the ribcage, the waist, a thigh
+// with its taper) —; the parts meet by the plain minimum, and, near the joint between two parts that the skeleton
 // joins, by a smooth minimum whose width falls off with the distance from the joint (so an arm laid on the belly shows
 // a crease, never a web). core/surface_nets makes the triangles.
 //
@@ -24,20 +25,34 @@ namespace genko::core::figure_shape {
 using la::Mat3;
 using la::Vec3;
 
-// One rounded piece. Every distance is the true distance or less, and changes by at most the step taken.
+// A loft's section at y along its axis: half the width (across, x), half the depth (z) and where its middle is in z.
+struct Station {
+    double y = 0;
+    double rx = 0;
+    double rz = 0;
+    double zc = 0;
+};
+
+// One rounded piece. A cone's and a box's distance is the true one; an ellipsoid's and a loft's is the first-order
+// one (the true distance at the surface, never more than it elsewhere).
 struct Piece {
-    enum class Kind : std::uint8_t { Cone, Ellipsoid, Box };
-    Kind kind = Kind::Cone;
-    Vec3 a{};       // cone: one end; ellipsoid, box: the centre
-    Vec3 b{};       // cone: the other end
-    double ra = 0;  // cone: the radius at a
-    double rb = 0;  // cone: the radius at b
-    Mat3 axes{};    // ellipsoid, box: its axes as columns (a turn)
-    Vec3 size{};    // ellipsoid: its radii; box: its half sizes
-    double round = 0;  // box: the rounding
+    enum class Kind : std::uint8_t { Cone, Ellipsoid, Box, Loft };
     Vec3 centre{};  // a ball that holds the piece
     double reach = 0;
+    double steep = 1;     // (past that ball the piece's value is at least the distance from the ball / steep)
+    double blend = -1;    // the width it is joined by in its part (< 0: the part's own k)
+    Kind kind = Kind::Cone;
+    bool carve = false;   // taken away from what is before it in the part (a hollow), by a smooth maximum
     bool paired = false;  // (this piece and the next are a left and right pair: joined first)
+    bool rest = false;    // set in the part's rest space (Part::bend): the trunk, which bends with the spine
+    Vec3 a{};       // cone: one end; ellipsoid, box: the centre; loft: where y = 0 is
+    Vec3 b{};       // cone: the other end
+    double ra = 0;  // cone: the radius at a; loft: the height of the dome that closes its first end
+    double rb = 0;  // cone: the radius at b; loft: of its last end
+    Mat3 axes{};    // ellipsoid, box, loft: its axes as columns (a turn; a loft runs along y)
+    Vec3 size{};    // ellipsoid: its radii; box: its half sizes
+    double round = 0;  // box: the rounding
+    std::vector<double> loft;  // loft: its stations and the cubics between them (see loft())
 
     double at(const Vec3& x) const;
 };
@@ -45,32 +60,64 @@ struct Piece {
 Piece cone(const Vec3& a, double ra, const Vec3& b, double rb);
 Piece ellipsoid(const Vec3& centre, const Mat3& axes, const Vec3& radii);
 Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round);
+// A loft from the first station to the last (y rising; two or more) in the frame `axes` at `origin`: between the
+// stations the section's numbers run as cubics through them, and each end is closed by half an ellipsoid as high as
+// cap0 and cap1. The cubics' slopes at the stations are `slopes` (each number's change per unit of y, in its place in
+// a Station), or without them those of the smoothest run through the stations that is flat at both ends (run_slopes).
+Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& stations, double cap0, double cap1, const std::vector<Station>* slopes = nullptr);
+// The slopes at each station of the cubic spline through them (its curvature unbroken; flat at both ends).
+std::vector<Station> run_slopes(const std::vector<Station>& stations);
 
-// A part: its pieces joined by a smooth minimum of width k (0: the plain minimum), its details by one of detail_k, its
-// hollows taken away; then, when `cut` is set, only the side of the plane where n·x − d ≤ 0 is kept (with the edge rounded by `cut_k`: a sole flattened, a stub cut off).
+// The bend of a trunk: its rest space is the body standing straight (the pelvis at 0, the waist `waist` above it on
+// −y); a point of the figure is carried there by the pelvis's turn below the pelvis, the spine's between the two
+// joints and the chest's above the waist, and over a stretch above each joint (from `from` to `from` + `over`, along
+// the trunk) by the two turns mixed, more and more of the upper one — so the trunk's one run of sections bends as a
+// spine does, with no step where a turn changes. (The mix makes the field steeper there: its value is divided by how
+// much, so it stays a distance or less.)
+struct Bend {
+    bool on = false;
+    Vec3 pelvis{};
+    Vec3 waist_at{};
+    Mat3 hip{};
+    Mat3 spine{};
+    Mat3 chest{};
+    double waist = 0;    // (the waist joint's height above the pelvis in the rest space)
+    double from[2]{};    // (where each stretch begins, as a height above the pelvis)
+    double over[2]{};    // (and how long it is)
+};
+
+// A part: its pieces joined in their order by a smooth minimum (each by its own width, or the part's k; 0: the plain
+// minimum), a carved piece taken away from what is before it; then, when `cut` is set, only the side of the plane
+// where n·x − d ≤ 0 is kept (with the edge rounded by `cut_k`: a sole flattened, a stub cut off); when `fade` is set
+// the part thins by fade × (n·x − d0) past the plane n·x = d0 (a stub narrowing toward its cut end, under the other
+// mesh of the same limb); and the whole part is `inset` thinner (the head's own piece of the neck, kept under the
+// body's coarser mesh of the same neck).
 struct Part {
     std::vector<Piece> pieces;
     double k = 0;
-    std::vector<Piece> details;  // (small pieces added after, by a narrower smooth minimum: a nose, the lips, the ears)
-    double detail_k = 0;
-    std::vector<Piece> hollows;  // (pieces taken away by a smooth maximum: the eyes' hollows)
-    double hollow_k = 0;
     bool cut = false;
     Vec3 cut_n{};
     double cut_d = 0;
     double cut_k = 0;
+    double fade = 0;
+    Vec3 fade_n{};
+    double fade_d = 0;
+    double inset = 0;
+    Bend bend;  // (the pieces marked `rest` are worked out in its rest space)
     bool no_contour = false;  // (its points draw no outline: a hand's stub of the forearm, seen through the body's own)
 
     double at(const Vec3& x) const;
 };
 
-// A joint: near `at` (within `radius`), parts p and c meet by a smooth minimum of width up to k.
+// A joint: near `at` (within `radius`), parts p and c meet by a smooth minimum of width up to k: the whole k within
+// flat × radius of it, falling to nothing at the radius.
 struct Joint {
     int p = 0;
     int c = 0;
     Vec3 at{};
     double k = 0;
     double radius = 1;
+    double flat = 0;
 };
 
 struct Field {
@@ -86,7 +133,8 @@ struct Field {
     void bounds(Vec3& lo, Vec3& hi) const;
 };
 
-// The smooth minimum of a and b over a width k (polynomial: + − × ÷ only): a and b themselves where they are k apart.
+// The smooth minimum of a and b over a width k (a cubic: + − × ÷ only; its curvature has no step where the blend
+// begins, so no band shows in the light): a and b themselves where they are k apart, k / 6 less where they are equal.
 double smin(double a, double b, double k);
 
 // The shape of a hand: each finger's curl (thumb, index, middle, ring, little: 0 straight .. 1 closed), how far the
@@ -100,6 +148,10 @@ struct Smooth {
     std::vector<std::array<std::int32_t, 3>> t;
     std::vector<std::uint8_t> no_contour;  // per point
     std::vector<std::uint8_t> part;        // per point: the part nearest to it
+    // per point, or empty (then n): the direction the outline is found by. A head's is that of the plain head under
+    // its face's relief, so its outline stays the clean oval (and, from the side, the face's own profile) whatever the
+    // nose, the lids and the ears do to the light.
+    std::vector<Vec3> outline;
 };
 
 // The figure's body (head, torso, limbs, feet) and its two hands, in the figure's own space (as figure_skeleton has
@@ -113,8 +165,9 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
 // (core/pose_checks: a limb laid through the body, a hand inside the head).
 Part torso_part(const mesh3d::Skeleton& sk);
 Part head_part(const mesh3d::Skeleton& sk);
-// A head on its own (u = its height / 1.1), centred on 0, and its face's guide lines. The face has a neutral relief
-// (brow, the eyes' hollows, nose, lips, chin, ears) and no drawn features: a person turned anywhere reads as one.
+// A head on its own (u = its height / 1.1), centred on 0, and its face's guide lines. The face has a calm relief (the
+// brow, the eyes' shallow sockets and lids, the nose, closed lips, the chin, small flat ears) and no drawn features: a
+// person turned anywhere reads as one.
 FigureMesh head(double u);
 // A hand on its own, `length` long, its wrist at y = −length / 2, the back of the hand toward the viewer.
 Smooth hand(double length, const HandShape& shape, int side);

@@ -97,6 +97,7 @@ struct Model {
     std::vector<std::array<std::int32_t, 3>> tris;
     std::vector<Vec3> vn;
     std::vector<std::uint8_t> nocontour;
+    std::vector<Vec3> outline;  // (per point, or empty: the direction the outline is found by where it is not vn — figure_shape::Smooth::outline)
     // A figure's held props (SPEC FIGURE-02, `hold`: figure_shape::props): their flat faces follow the body's points
     // among the triangles (from `body` on; 0: none), and their edges draw the pen's lines as a box's do (`creases`:
     // figure_shape::Props::edges).

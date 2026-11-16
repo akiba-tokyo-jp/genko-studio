@@ -169,6 +169,7 @@ std::shared_ptr<const Model> smooth_model(figure_shape::Smooth mesh, std::vector
     model->vn = std::move(mesh.n);
     model->tris = std::move(mesh.t);
     model->nocontour = std::move(mesh.no_contour);
+    model->outline = std::move(mesh.outline);
     model->marks = std::move(marks);
     return model;
 }
@@ -204,6 +205,7 @@ std::shared_ptr<const Model> figure(const Json& prim) {
     m.v.insert(m.v.end(), props.mesh.v.begin(), props.mesh.v.end());
     m.n.insert(m.n.end(), props.mesh.n.begin(), props.mesh.n.end());
     m.no_contour.insert(m.no_contour.end(), props.mesh.no_contour.begin(), props.mesh.no_contour.end());
+    if (!m.outline.empty()) m.outline.insert(m.outline.end(), props.mesh.n.begin(), props.mesh.n.end());
     for (const auto& t : props.mesh.t) m.t.push_back({base + t[0], base + t[1], base + t[2]});
     auto model = std::const_pointer_cast<Model>(smooth_model(std::move(made.mesh), std::move(made.marks)));
     model->body = props.mesh.v.empty() ? 0 : body;
@@ -229,7 +231,7 @@ ModelCache& model_cache() {
 }
 
 std::size_t bytes_of(const Model& m) {
-    return m.mesh.v.size() * sizeof(Vec3) + m.vn.size() * sizeof(Vec3) + m.nocontour.size() + m.tris.size() * sizeof(m.tris[0]) +
+    return m.mesh.v.size() * sizeof(Vec3) + (m.vn.size() + m.outline.size()) * sizeof(Vec3) + m.nocontour.size() + m.tris.size() * sizeof(m.tris[0]) +
            m.creases.size() * sizeof(m.creases[0]) + 256;
 }
 
@@ -518,13 +520,14 @@ Vec3 eye_of(const Json& prim, const Json* camera) {
     return Vec3{0.0, 0.0, -(focal + to_float(pos[2]))};
 }
 
-// The outline of a smooth model: where n · (p − eye) changes sign, a segment across each triangle (its ends on the
+// The outline of a smooth model: where n · (p − eye) changes sign (n the point's normal, or its outline direction
+// where the model has one: a head's relief does not break its oval), a segment across each triangle (its ends on the
 // triangles' edges, shared by the two triangles of an edge), chained through the shared edges from the lowest
 // triangle on; the triangles touching a point marked nocontour draw nothing.
 void contours(const Json& prim, const Model& model, const Json* camera, std::vector<Outline>& out) {
     const std::vector<Vec3>& v = model.mesh.v;
     const std::vector<Vec3> q = turned(prim, v, camera);
-    const std::vector<Vec3> nq = turned(prim, model.vn, camera);
+    const std::vector<Vec3> nq = turned(prim, model.outline.size() == model.vn.size() ? model.outline : model.vn, camera);  // (a head's: its plain form's)
     const Vec3 eye = eye_of(prim, camera);
     std::vector<double> g(q.size());
     for (std::size_t i = 0; i < q.size(); ++i) g[i] = la::dot(nq[i], q[i] - eye);
