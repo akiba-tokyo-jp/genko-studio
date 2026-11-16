@@ -55,10 +55,16 @@
 5. 腕が胸の横に当たる所の外形の小さな角は直していない（関節のつなぎの幅が 0 になる所。直すには肩のつなぎを作り直すことになり、受け入れられた肩を動かす）。
 - ポーズのデータは変えていない（655 すべて、そのままで確かめに合格）。手足のカプセルの半径も変えていない。
 
-### 欠点ごとの結果（絵で見た。足りない所も書く。3 回目の後）
+### 4 回目（同じ日。女の内ももだけ。顔・首・男の胸・男の体はそのまま）
+- 3 回目の女の内もも（寄せて短くした楕円体）は、太ももの半ばで内側へふくらみ、膝の上で急に細くなった（乗馬ズボンのように見えた）。座って下げた太ももの下には、腰の近くに袋が出た。
+- 直し: 腰が広い体では、内ももを楕円体から「股のすぐ下で一番太く、膝の上で太ももの中に消える丸い円錐」に替えた（内側の輪郭が股から膝へ 1 本のまっすぐな先細り）。いつもの腰・狭い腰の体は前の楕円体のまま、その間は wide（0〜1）でなだらかに替わる。男と指定なしの既定の体は wide = 0 で、形は 3 回目と同じバイト（案内の look の絵 6 枚を比べて同じ）。腰の外の輪郭（3 回目の腰骨の幅）は変えていない。
+- 体型の端で見た: 女の hips 1.6・0.6、build 1.8・0.5、legs 1.5・0.6、hips 1.6 × build 1.8、指定なしの hips 1.1・1.17・1.3、男の hips 1.4。どれも太ももの半ばのふくらみは出ない（hips 1.1 の指定なしは前の楕円体のゆるい丸みのまま）。hips 1.6 × build 0.5（細い体に広い腰）は骨盤が箱に見えるが、内ももの直しとは別で、前からのもの。
+- ポーズのデータは変えていない（655 すべて、そのままで合格）。
+
+### 欠点ごとの結果（絵で見た。足りない所も書く。4 回目の後）
 1. 胴: 胸郭・くびれ・骨盤・鎖骨（低い稜）・僧帽筋の傾き・肩甲骨（やわらかなふくらみ）・背骨の溝（腰で深く、首と骨盤へ消える）・尻がある。横の帯・棒・筋は無い（曲げても）。男の大胸筋は左右 2 つの広い形で、下にやわらかな縁、真ん中に浅いくぼみ。足りない所: 腹筋・肋骨の縁・へそは無い。大胸筋は斜めから見ると内側の縁が弧に見え、少し「円盤」のように読める。
 2. 肩: 胸は溝なしで三角筋へ続く。首・肩から胸への筋は無い。わきの下は深い所だけ折り目で、ぎざぎざは見えない（腕が胸の横に当たる端に小さな角が外形に残る）。
-3. 股・骨盤: 前を横切る線は無い。腰骨から内下へ向かう折り目はごく浅い影（手本の V より弱い）。外形はくびれから腰、大転子（一番広い）へ 1 本の曲線で、そこから膝へ細くなる（女の腰の下のふくらみは無い）。足りない所: 女の腰の横で、腰骨のハイライトと大転子のハイライトの間にごく弱い境が見える。脚の間は上が狭く下へ開くが、合わさってはいない（細いすき間が股まで続く）。内ももの輪郭は太ももの半ばで一度ふくらんでから細くなる。
+3. 股・骨盤: 前を横切る線は無い。腰骨から内下へ向かう折り目はごく浅い影（手本の V より弱い）。外形はくびれから腰、大転子（一番広い）へ 1 本の曲線で、そこから膝へ細くなる（女の腰の下のふくらみは無い）。女の内ももは股のすぐ下が一番太く、膝へまっすぐ細くなる（太ももの半ばのふくらみは無い。脚の間は股から下へ開く逆 V）。座った太ももの下は尻から膝へなめらか。足りない所: 女の腰の横で、腰骨のハイライトと大転子のハイライトの間にごく弱い境が見える。女の太ももの付け根は 2 回目より太い（股のすぐ下で左右が近い）。男と指定なしの内ももは 2 回目の楕円体のままで、太ももの半ばにゆるい丸みがある。
 4. 脚・5. 腕・6. 手: 1 回目のまま（先細り、膝、ふくらはぎ、足首、足。握りこぶしは拳に見える）。足りない所: 足の指は分かれていない、くるぶし・膝の骨は無い、指は丸い円錐。
 7. 頭・首: 眉の稜、鼻筋で分かれた左右の目のくぼみとその中のまぶたのふくらみ、鼻筋と鼻先、閉じた唇（1 つのやわらかな形）、あご。暗い帯・横の筋は無い。あごは首の上に張り出し、首はあごより細く、下で僧帽筋へ広がる。足りない所: 目・唇は 1 回目ほどくっきりしない（やわらかい形）。男の頭を斜めから見ると、手前のまぶたが明るい楕円に見え、その周りにごく弱いむらが残る。あごの線は耳の下からあごまで陰の境として追えるが、やわらかい。
 8. 線: 頭の輪郭は卵形と顔の十字。手首・膝・股に切れ端は出ない（歩きの 40 dpi の線は 24 本・741 点）。
@@ -66,11 +72,11 @@
 - 手本との差（全体）: 手本は彫った網で、筋・骨の細かい起伏と指・足の指がある。こちらは丸い小片の場なので、面はなめらかで起伏は大きな形だけ。
 
 ### 測った数（Release、4 CPU のクラウド機）
-- 作る時間（test_perf_render の smooth_figure、walk・女・120 mm。3 回目の終わりに、同じ機械で続けて測った。機械のゆれが大きく、同じ版でも 20〜40 ms ゆれる）: 元（ac8c32dc）131〜140 ms、2 回目（0db851de）160〜180 ms（ゆれた回は 200 台）、今 168〜185 ms（同）。ゆれを除くため別の道具で 6 回ずつ測った一番速い回は、2 回目 165.3 ms、今 164.0 ms（同じ）。元の約 1.25 倍。40 dpi の線 7〜8 ms（同じ）、箱ともう 1 体の後ろで 11〜12 ms。上限（600・40・800 ms）は変えていない。
-- 三角の数: walk・女 51,416 →（1 回目 51,460、2 回目 51,288）→ 51,416、walk・指定なし 54,320 →（53,512、52,968）→ 52,764、全 preset・性別・極端な体型の最大 62,584 →（60,836、60,384）→ 59,976（上限 64,000 は変えていない）。
+- 作る時間（test_perf_render の smooth_figure、walk・女・120 mm。4 回目の終わりに、同じ機械で続けて測った。機械のゆれが大きく、同じ版でも 20〜40 ms ゆれる）: 元（ac8c32dc）131〜148 ms（ゆれた回は 200 前後）、3 回目（ca14ba8a）165〜170 ms、今 165〜174 ms。ゆれを除くため別の道具で 6 回ずつ測った一番速い回は、元 135.9 ms、3 回目 164.8 ms、今 164.5 ms（3 回目の終わりには 2 回目 165.3 ms・3 回目 164.0 ms）。2 回目から増えていない。元の約 1.21〜1.25 倍。40 dpi の線 7〜8 ms（同じ）、箱ともう 1 体の後ろで 11〜12 ms。上限（600・40・800 ms）は変えていない。
+- 三角の数: walk・女 51,416 →（1 回目 51,460、2 回目 51,288）→ 51,396（3 回目 51,416）、walk・指定なし 54,320 →（53,512、52,968）→ 52,764、全 preset・性別・極端な体型の最大 62,584 →（60,836、60,384）→ 59,976（上限 64,000 は変えていない）。
 - test_figure_poses（655 ポーズ）: Release で 63〜67 秒（前の出口 63 秒）。
 
-### 控え（体の入ったものだけが変わった。理由はどれも体の形・網の法線・材質の作り直し。元 → 1 回目 → 2 回目 → 今）
+### 控え（体の入ったものだけが変わった。理由はどれも体の形・網の法線・材質の作り直し。元 → 1 回目 → 2 回目 → 3 回目。4 回目で変わったのは案内の 2 つだけ: この節の最後の行）
 - test_figure_mesh `kWalkMesh`: `cc8a7dc26f6e8a084e75fc25a835a33ea0a1d87fb47530e71c81be1a3b8d08cd` → `c11d7a0e9b91990ddfe6d5e27c2a20793fbf5233ffc9634181108f1ec04673be` → `c4ca995abce54e25b7112a27bf767502608de78b7e304af618fc5974e8bde3c2` → `95f78dee587e161bbc7ad8c2cce28b3dfbc67c50a8a3524a28138e09e9bad731`（1 回目から控えに輪郭の向き `Model::outline` も入れた。2 回目・3 回目は体の形と頭の法線）。
 - `kWalkLines`: `{"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"}` → `{"count":26,"points":728,"sha":"df42788820cd9df339bf7e04b316c31025707e374e519f3e4e4836028624d3f6"}` → `{"count":26,"points":729,"sha":"5cd993d54f501b54ac1f52dbb6007d7efab4613fc27c021c9cf7aab32a2b673d"}` → `{"count":24,"points":741,"sha":"ef9c4c3831dbc07d6a14c89e9bfc70216d2485c5f78f68e907ea096e1d948c6f"}`。
 - `kDrawn`: `08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f58` + `9255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae` → `df5963d4a8208a49771a138dca48ae72285a3ccf79ce3544aa64737f078f2654` + `8f62345b2186489341785ca366e19a503d59b3ee1f0b8baea7d4ad80deafc28f` → `a7c75fa9ea033450644d55d2a05f37937d237a073c6ac2620913f09f347b973c` + `7422e6fcbb63c8c11923ae696884c1ff4d7be5f796dc63e68f9bee208d37b8cf` → `1bad6e090a6d7ac380785199b0aa8d7d591f1c3e286f37de58353e504a53f3ab` + `f0cf1499ea3ba583da9dc25814eb8c6ad7bf3a570074c6ce02bdc1138ef7190c`。
@@ -78,20 +84,21 @@
 - test_figure_guide `kFiguresPng`: `9d221aec4182638c0f6c6cb4131e328a5e253527da489b2c4552a5f846f857e9` → `d207c41dacbcfab5080862e69034f6a678ea0ad1bf890b9993ffc31edbc52a9e` → `fbefdbc9057f358c799de2cafd861e1f29b91d5984062fe3cedc7933b5508c29` → `eb4654022cfe0d2fcdd18816d8f6d7e5b9d91cc6279f206d651eda9e7b90aab8`（1 回目は体と材質、2 回目は体とハイライトの押し詰め、3 回目は体）。`kRegionsPng`: `5d30b462e90bfb7cc6f36299133a15d441a696036209c8de7f247743a75dc1a1` → `5d3a823e266c622fb7c14c262410bc1a361e02edc77674533e2cd89436786afb` → `c894a1af3e44688fd78461e039534ff1f25e427cb6a069c296e2c54e78cfb696` → `8c4ebcb52286c65a96265c266a3973b88a58668459794642a7ec948d2cd642ae`（1 回目は体と形を 1 つにする処理、2 回目・3 回目は体）。
 - test_figure_poses `kThumbPins`: `21294bc3…6e071 02d65779…c2ea4 36424809…83847 9921041c…daf21` → `d908c193d5ab24864c8e21290546eff417add3f7a9dedceda633b0079c96d8b9 3a6f1e85a6dc97e70df691f6cbefb5a27199a1af875e93112373d2d65137acd6 99dcba8a03659ee1332be6e8374337cafdd3247a8f028267895096b2ecdc9227 a76d3afde31077e4bf535d8d56dd0f61910d1fb52b730cc63fe5994e60853ec3` → `4d463fcbff7c22fad25885d9af7c6cceae54263675fe67cda69926650dee2cb2 3b4f7e7859c5e6be95193c358c0775d09ff055d159229f9a71a2381311346d01 67f70778a732c736c6eaa1708064caa0332e17cca5efb13c69b81d3887bfec88 c88d1a2cdcd3a095e6b2b0d8267c153b86e15cfa81504558e7b747269c4152cd` → `2ac00a4ecf4880832b2ad495c9d65e57cca21d033f89fa6b17e4a52215504059 1a2c7c68a436bd3fde150c81d08dfe3eb6cafc91a1928b4a58c9698d42d1fba7 1cf8a694e543d7ee8085e9b3fa7ba8e14e7c194586ba66745dc2657129344214 b9be8243e7f600b07f8ba3528472ca5a1f2ea6bc9842f94b42d762ee4622e40b`（体。1 回目は sit_chair・kneel_squat のポーズの直しも）。
 - 変わらず: `figure_presets()` の sha256 `7eaa858c…a4e3`、鍵の無い本の project.json `81b68808…b615c`（どちらも test_figure_poses が合格）、MCP の道具の inputSchema、操作の数。
+- 4 回目（女の内もも）: test_figure_guide `kFiguresPng` `eb4654022cfe0d2fcdd18816d8f6d7e5b9d91cc6279f206d651eda9e7b90aab8` → `024b6ebfbbf0c7c1916bb50c558107edf8f3fe57439ae38a70d1744be8f6ae27`、`kRegionsPng` `8c4ebcb52286c65a96265c266a3973b88a58668459794642a7ec948d2cd642ae` → `6a16f09e7e7be1fd6ab3f1c74e49d558c950037158df782855e34913d140a8c9`（案内の例に女の人形がいる）。test_figure_mesh の 3 つ（指定なしの体）と test_figure_poses のサムネイル 4 枚は 3 回目のまま動いていない（指定なしと男の体は同じバイトのため）。
 
 ### ポーズ集（docs/POSES.md の最後の節に詳しく）
 - 確かめの閾値・関節の範囲は 1 つも変えていない。確かめの中の「手足のカプセルの半径」は体の太さを測った値なので、新しい体に測り直した（core/pose_checks.cpp の bones_of: 上腕 0.21→0.15 が 0.235→0.165、前腕 0.16→0.115 が 0.165→0.1、手 0.055→0.04 が 0.06→0.045、太もも 0.33→0.21 が 0.4→0.245、すね 0.21→0.12 が 0.245→0.142。足は同じ）。作り直しの途中の体で数えると、測り直さなくても 237 ポーズが落ち、測り直すと 242（重なりで落ちるのは 55 ポーズ。多くはほかの確かめでも落ちる同じポーズ）。
 - 直したポーズ: 655 のうち 284（関節の角度 230、`seat_h` 70、二人組の `offset` 9。名前・タグ・手・接地は同じ）。理由: 座面が約 0.2 u 上がった（尻の袋をやめた）、手足が太くなった、足の形、寝た背中と頭の形、二人の床と重なり。動かした角度の最大は中央値 0.10 rad・最大 0.70 rad。
 - 2 回目: さらに 23 ポーズ（一人 16: 関節の角度。二人組 7: 関節 6・置き場所 5・向き 1）。床に座る・ひざを抱える 11、ベッド 4、立つ 1、二人組 7。理由: そけい部と尻・太もものつなぎを広くして座った底が約 0.04 u ふくらんだ（足が床から 0.03〜0.06 u 浮いた）、肩の球を胴から外して形が変わった（相手の肩に置いた手）。動かした角度の最大は中央値 0.2 rad・最大 0.5 rad。手足のカプセルの半径は 2 回目では変えていない（太さは同じ）。元から変わったポーズは合わせて 286。
-- 3 回目: ポーズのデータは 1 つも変えていない（655 すべて、そのままで合格）。
+- 3 回目・4 回目: ポーズのデータは 1 つも変えていない（655 すべて、そのままで合格）。
 - 直し方: 新しい体の網で測りながら関節を少しずつ動かす探索（前の体での接地の測り `checks.json` を手本に、付いていた所は付いたまま）。道具は /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/tools/（`refit.cpp`・`refit_pair.cpp`・`merge.py`・`merge_pairs.py`・`pipeline.sh`・`try_pose.py`・`try_pair.py`・`pose_view.py`。リポジトリには入れていない。G3〜G5 の Python の道具は使っていない）。
 
-### 試験（Release、関係するものだけ。3 回目の最後の直しの後に流した）
-- 合格（ctest、2 並列、141 秒）: test_figure_mesh 20.8 秒、test_figure_guide 5.5 秒、test_figure_poses 66.6 秒、test_ops_3d 10.8 秒、test_gui_poses 7.2 秒、test_gui_guides 9.3 秒、test_gui_ledger_a 12.3 秒、test_gui_ledger_b 15.6 秒、test_gui_ledger_c 4.1 秒、test_ledger_service_a 3.2 秒、test_ledger_service_b 34.5 秒、test_ledger_service_c 1.9 秒、test_material_stamp 0.1 秒、test_render_page 7.3 秒、test_proof 0.5 秒、test_ink_edit 20.2 秒、test_page_size 1.7 秒、test_command_bus 2.8 秒、test_mcp_api_e2e 51.3 秒、test_cli_e2e 5.2 秒。別に test_perf_render 30.4 秒、test_gui_info・test_gui_paint・test_gui_layout・test_gui_ai・test_gui_shapes・test_png・test_font_faces・test_gui_actions・test_gui_prefs・test_contract_plugins も合格（同じ最後のビルドで）。
+### 試験（Release、関係するものだけ。4 回目の最後の直しの後に流した）
+- 合格（ctest、2 並列、146 秒）: test_figure_mesh 21.1 秒、test_figure_guide 5.6 秒、test_figure_poses 66.9 秒、test_ops_3d 11.9 秒、test_gui_poses 7.1 秒、test_gui_guides 10.8 秒、test_gui_ledger_a 14.5 秒、test_gui_ledger_b 16.6 秒、test_gui_ledger_c 3.7 秒、test_ledger_service_a 3.4 秒、test_ledger_service_b 35.4 秒、test_ledger_service_c 2.0 秒、test_material_stamp 0.1 秒、test_render_page 7.6 秒、test_proof 0.5 秒、test_ink_edit 22.2 秒、test_page_size 1.8 秒、test_command_bus 3.1 秒、test_mcp_api_e2e 51.2 秒、test_cli_e2e 5.4 秒。別に test_perf_render 31.8 秒、test_gui_info・test_gui_paint・test_gui_layout・test_gui_ai・test_gui_shapes・test_png・test_font_faces・test_gui_actions・test_gui_prefs・test_contract_plugins も合格（同じ最後のビルドで）。
 - 試験の基準・上限・許容は 1 つも変えていない。SKIP は増やしていない。ASan と全体の試験は流していない（工程の出口で流す。test_figure_poses は Release で前とほぼ同じ時間なので、ASan でも前の 682 秒に近い見込み: 上限 1,800 秒）。
 
-### 絵（前・1 回目・2 回目・後）
-- 前: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/before/（一覧の絵と `guide/` の案内の例）。1 回目: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/round1/。2 回目: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/round2/（`three_way_*.png` は前・1 回目・2 回目）。後（3 回目）: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/after/（同じ名前。`three_way_*.png` は左から 1 回目・2 回目・後: look の head_male・head_female・stand_female・stand_male・torso_female・torso_male・back_male・seated_female と、案内の例 two_shot の figures。`guide/` は案内の例と look_*.png、`poses/` は全分類のポーズの一覧）。
+### 絵（前・1 回目・2 回目・3 回目・後）
+- 前: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/before/（一覧の絵と `guide/` の案内の例）。1 回目: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/round1/。2 回目: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/round2/（`three_way_*.png` は前・1 回目・2 回目）。3 回目: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/round3/（`three_way_*.png` は 1 回目・2 回目・3 回目）。後（4 回目）: /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/model-pass/after/（同じ名前。`three_way_*.png` は左から 2 回目・3 回目・後: look の stand_female・seated_female・torso_female・back_female・stand_neither・stand_male と、案内の例 two_shot の figures。`guide/` は案内の例と look_*.png、`poses/` は全分類のポーズの一覧）。
 
 ### 環境
 - Claude Code クラウドコンテナ、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Ubuntu 24.04.5 LTS、カーネル 6.18.44、Qt 6.11.2、Release（build/linux-release）。
