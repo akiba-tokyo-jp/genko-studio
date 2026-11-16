@@ -912,3 +912,7 @@
 - 二人組 7: `couple/back_to_back_sit`（二人の足）、`two_people/` shoulder_buddies（b の置き場所）・help_up（b の足と高さ）・console（b を 0.18 u 離す）・push_back（0.06 u 近づける）・floor_chat（足）・shoulder_support（置き場所と向き −0.06）。
 - 手で決めたもの: `relax_bed/front_sprawl`（うつ伏せで骨盤が床から 0.037 u 浮いた。背骨の x を 0.025 → 0.05 にしてから探索: 腕の x −0.2684 → −0.2184・z ±1.3939 → ±1.4939、脚の x 0.0375 → 0.025）。
 - 直し方と道具は 1 回目と同じ（`refit.cpp`・`refit_pair.cpp`、一人は `merge.py`、二人は `merge_pairs.py`）。
+
+### 3 回目（同じ日。顔・首・女の太もも・男の胸の直し）
+
+ポーズのデータは変えていない。655 すべて、そのままで確かめに合格した（閾値・関節の範囲・手足のカプセルの半径も同じ）。
