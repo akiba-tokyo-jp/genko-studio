@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,6 +26,7 @@
 #include "core/pose_library.hpp"
 #include "core/model.hpp"
 #include "core/ops_schema.hpp"
+#include "render/figure_thumbs.hpp"
 #include "render/ops_registry.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -88,9 +90,13 @@ std::string saved_text(const Document& doc) {
     return genko::core::dump_python_indent2(payload);
 }
 
-// The least each category of batch A holds (plan §8; mirrors do not count).
-const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},     {"fashion", 25},  {"walk", 10},        {"run", 10},
-                                                         {"sit_chair", 30}, {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25}};
+// The least each category holds (mirrors do not count): batch A (G3), then batch B (G4: plan §8 asked pinup 85,
+// relax_bed 36, lie 25 — the lying poses this body could not rest properly were taken out, docs/POSES.md).
+const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},      {"fashion", 25},   {"walk", 10},        {"run", 10},
+                                                         {"sit_chair", 30},  {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25},
+                                                         {"pinup", 78},      {"relax_bed", 33}, {"lie", 20},         {"upper_body", 35},
+                                                         {"turn", 10},       {"point", 8},      {"emotion", 25},     {"talk", 13},
+                                                         {"hands_props", 24}};
 
 std::string issues_text(const std::vector<checks::Issue>& issues) {
     std::string out;
@@ -106,6 +112,10 @@ const char* const kThumbPins =
 
 std::string sheets_dir() { return qEnvironmentVariable("GENKO_POSE_SHEETS").toStdString(); }
 
+// The gallery's pictures (app/pose_gallery: 120 × 180)
+constexpr int PoseGalleryWidth = 120;
+constexpr int PoseGalleryHeight = 180;
+
 }  // namespace
 
 class TestFigurePoses : public QObject {
@@ -115,7 +125,7 @@ class TestFigurePoses : public QObject {
 
 private slots:
     // The file is data/figure_poses.json byte for byte, genko.poses@1, well formed (core::pose_checks::check_file), and
-    // each category of batch A has its poses.
+    // each category of batches A and B has its poses; the hands of hands_props hold something.
     void theFileIsWellFormed() {
         const std::string on_disk = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/native/src/core/data/figure_poses.json"));
         QVERIFY(library::text() == on_disk);
@@ -131,7 +141,102 @@ private slots:
             total += counts[category];
         }
         QCOMPARE(total, file["poses"].size());
-        QVERIFY(total >= 195);
+        QVERIFY(total >= 455);
+        library::Filter held;
+        held.category = "hands_props";
+        for (const Json* p : library::list(held)) QVERIFY2(p->contains("hold"), (*p)["id"].get<std::string>().c_str());
+    }
+
+    // A body lying on the floor names the face it lies on (back, front or side), and that is the face toward the floor;
+    // its torso on the floor without one is refused; off the floor, back is a lean on a wall as before.
+    void lyingNamesItsFace() {
+        // (a pose lying on its back whose ribcage is right on the floor)
+        Json back;
+        library::Filter lying;
+        lying.category = "lie";
+        lying.contact = {"back"};
+        for (const Json* p : library::list(lying)) {
+            if (back.is_null() && checks::check_pose(*p).measured.gap.at("torso") < checks::kUnlistedGap) back = *p;
+        }
+        QVERIFY(back.is_object());
+        QVERIFY(std::find(back["contact"].begin(), back["contact"].end(), Json("back")) != back["contact"].end());
+        QVERIFY2(checks::check_pose(back).ok(), issues_text(checks::check_pose(back).issues).c_str());
+        QCOMPARE(checks::check_pose(back).measured.down, std::string("back"));
+        Json wrong = back;
+        for (Json& c : wrong["contact"])
+            if (c == Json("back")) c = "front";
+        const auto said = checks::check_pose(wrong).issues;
+        QVERIFY(std::any_of(said.begin(), said.end(), [](const checks::Issue& i) { return i.what == "the body lies on its back, not its front"; }));
+        Json none = back;
+        Json kept = Json::array();
+        for (const Json& c : back["contact"])
+            if (c != Json("back")) kept.push_back(c);
+        none["contact"] = kept;
+        const auto unnamed = checks::check_pose(none).issues;
+        QVERIFY(std::any_of(unnamed.begin(), unnamed.end(), [](const checks::Issue& i) { return i.what.find("the torso touches the floor") == 0; }));
+        QCOMPARE(checks::check_pose(*library::find("relax_bed/front_sprawl")).measured.down, std::string("front"));
+        // a lean on a wall: back off the floor, no balance asked
+        const checks::Report wall = checks::check_pose(*library::find("stand/wall_lean_back"));
+        QVERIFY(wall.ok());
+        QVERIFY(wall.measured.gap.at("torso") > checks::kContactGap);
+    }
+
+    // The hip's twist is its rotation about the femur in the joint's own frame (flexion, abduction, rotation): a thigh
+    // flexed and turned reads its turn exactly, the right as the left's mirror; the cross-legged sits keep the knees low.
+    void hipTwistIsTheHipsOwn() {
+        for (const double x : {0.0, 0.6, 1.2, 1.9}) {
+            for (const double y : {-0.7, 0.0, 0.4, 0.9}) {
+                const auto l = checks::ball_of("l_leg", Json::object({{"x", x}, {"y", y}}));
+                const auto r = checks::ball_of("r_leg", Json::object({{"x", x}, {"y", -y}}));
+                QVERIFY2(std::fabs(l.twist - y) < 1e-9, (std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(l.twist)).c_str());
+                QVERIFY(std::fabs(r.twist - y) < 1e-9);
+            }
+        }
+        for (const char* id : {"sit_floor/agura", "sit_floor/agura_chin", "sit_floor/meditation", "sit_floor/agura_book"}) {
+            const Json pose = *library::find(id);
+            const Json prim = checks::figure_of(pose);
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(prim);
+            const checks::Report r = checks::check_pose(pose);
+            QVERIFY2(r.ok(), (std::string(id) + issues_text(r.issues)).c_str());
+            for (const char* side : {"l", "r"}) {
+                const double knee = (r.measured.floor - sk.point(std::string(side) + "_knee")[1]) / sk.unit;  // (the knee's joint above the floor)
+                QVERIFY2(knee < 1.1, (std::string(id) + " " + side + " " + std::to_string(knee)).c_str());  // (G3's: about 1.9)
+                QVERIFY(checks::ball_of(std::string(side) + "_leg", pose["joints"][std::string(side) + "_leg"]).twist > 0.5);
+            }
+        }
+    }
+
+    // What the figure_poses tool and the gallery use: a pose's summary, the hold filter, words that each must match, a
+    // random pick that is the same for the same seed (and every pose once), the seed's text.
+    void picksAndSummaries() {
+        const Json s = library::summary(*library::find("hands_props/cup_offer"));
+        for (const char* key : {"id", "ja", "en", "category", "tags", "hands", "contact", "support", "props", "symmetric"}) QVERIFY2(s.contains(key), key);
+        QCOMPARE(s["props"], Json::array({"cup"}));
+        QVERIFY(s["hands"]["r"].is_string());
+        library::Filter f;
+        f.props = true;
+        const auto held = library::list(f);
+        f.props = false;
+        const auto empty = library::list(f);
+        QCOMPARE(held.size() + empty.size(), library::list().size());
+        for (const Json* p : held) QVERIFY(p->contains("hold"));
+        f = {};
+        f.query = "phone";
+        const std::size_t phones = library::list(f).size();
+        f.query = "phone\xe3\x80\x80lying";  // (a 全角 space between)
+        const auto both = library::list(f);
+        QVERIFY(!both.empty() && both.size() < phones);
+        const auto all = library::list();
+        const auto a = library::sample(all, 30, 0xa5);
+        QCOMPARE(a.size(), std::size_t{30});
+        QVERIFY(library::sample(all, 30, 0xa5) == a);
+        QVERIFY(library::sample(all, 30, 0xa6) != a);
+        QCOMPARE(std::set<const Json*>(a.begin(), a.end()).size(), a.size());
+        QCOMPARE(library::sample(all, 100000, 7).size(), all.size());
+        QCOMPARE(library::seed_text(0xa5), std::string("fp-00000000000000a5"));
+        QCOMPARE(*library::seed_of("fp-00000000000000A5"), std::uint64_t{0xa5});
+        QVERIFY(!library::seed_of("km-00000000000000a5").has_value());
+        QVERIFY(!library::seed_of("fp-123").has_value());
     }
 
     // The nine presets are as before (the JSON text of figure_presets(), taken with the build before FIGURE-02).
@@ -237,7 +342,7 @@ private slots:
     }
 
     // Thumbnails are the same bytes every time and on every thread (a pose's surface made in four threads at once), and
-    // a few are pinned.
+    // a few are pinned (G3's four, unchanged).
     void thumbnailsAreTheSameBytes() {
         std::vector<Json> prims;
         for (const auto& c : library::categories()) {
@@ -247,8 +352,14 @@ private slots:
             prims.push_back(checks::figure_of(*list.front()));
             prims.push_back(checks::figure_of(library::mirrored(*list.back())));
         }
+        // (batch A's categories with G3's thumbnail, pinned; batch B's with the gallery's: render::figure_thumbs, which
+        // draws a body lying down as large as it fits)
+        const std::size_t batch_a = 16;
         const auto thumbs = [&](std::size_t first, std::size_t step, std::vector<std::string>& out) {
-            for (std::size_t i = first; i < prims.size(); i += step) out[i] = checks::thumbnail(prims[i], 0.785, 60, 90);
+            for (std::size_t i = first; i < prims.size(); i += step) {
+                out[i] = i < batch_a ? checks::thumbnail(prims[i], 0.785, 60, 90)
+                                     : genko::render::figure_thumbs::grey(prims[i], 0.785, PoseGalleryWidth, PoseGalleryHeight, 2);
+            }
         };
         mesh3d::clear_caches();
         std::vector<std::string> one(prims.size());
@@ -263,10 +374,11 @@ private slots:
             for (auto& t : threads) t.join();
         }
         for (std::size_t i = 0; i < prims.size(); ++i) {
-            QCOMPARE(one[i].size(), std::size_t{60 * 90});
+            const std::size_t area = i < batch_a ? std::size_t{60 * 90} : std::size_t{PoseGalleryWidth * PoseGalleryHeight};
+            QCOMPARE(one[i].size(), area);
             QVERIFY(one[i] == again[i]);
             QVERIFY(one[i] == four[i]);
-            QVERIFY(std::count(one[i].begin(), one[i].end(), static_cast<char>(255)) < 60 * 90 - 300);  // (a figure drawn)
+            QVERIFY2(static_cast<std::size_t>(std::count(one[i].begin(), one[i].end(), static_cast<char>(255))) < area - 300, std::to_string(i).c_str());  // (a figure drawn)
         }
         std::string got;
         for (std::size_t i : {0, 3, 8, 13}) got += sha256_of(one[i]) + " ";
