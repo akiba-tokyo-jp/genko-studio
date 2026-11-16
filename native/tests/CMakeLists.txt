@@ -73,8 +73,9 @@ genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genk
 genko_test(test_figure_mesh SOURCES unit/test_figure_mesh.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
 # The pose library (SPEC FIGURE-02, genko.poses@1): the file, every pose's checks (joint ranges, support and contact,
 # limbs through the body, mirrors, within budget, thumbnails the same bytes), the ops' pose_id, mirror and keep, figures@1;
-# GENKO_POSE_SHEETS=<folder> writes the contact sheets.
-genko_test(test_figure_poses SOURCES unit/test_figure_poses.cpp DEPS genko_test_support genko_render_ops Qt6::Gui LABELS unit TIMEOUT 900)
+# GENKO_POSE_SHEETS=<folder> writes the contact sheets. (655 poses: about 140 s in Release, about 5 times that under ASan, so
+# the limit, which only catches a hang, is 1800 s; it is not a performance pass value.)
+genko_test(test_figure_poses SOURCES unit/test_figure_poses.cpp DEPS genko_test_support genko_render_ops Qt6::Gui LABELS unit TIMEOUT 1800)
 # The ops of M3-A1 (layers, masks, pixels, fills, areas, paper).
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
@@ -1047,7 +1048,7 @@ endif()
 foreach(slow test_smart_stack test_gui_color
         test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_page_size
         test_gui_book test_gui_layout test_adjust test_contract_pyre test_contract_psd test_color_model
-        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi)
+        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi test_figure_poses)
   if(TEST ${slow})
     get_test_property(${slow} TIMEOUT limit)
     math(EXPR function_ms "(${limit} - 100) * 1000")
