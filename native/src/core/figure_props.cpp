@@ -200,7 +200,8 @@ void make(Solid& s, std::string_view name, const Vec3& down) {
     const Vec3 dn = unit(down);
     const Vec3 up = mul(dn, -1.0);
     if (name == "sword" || name == "bat" || name == "umbrella") {
-        if (dot(N, dn) > 0.6) {  // (the palm laid on its top: the prop down from under it, closed)
+        const bool held_up = name == "umbrella" && dot(W, up) > 0.3;  // (an umbrella with the thumb up is held up, open)
+        if (dot(N, dn) > 0.6 && !held_up) {  // (the palm laid on its top: the prop down from under it, closed)
             long_prop(s, name, Vec3{0.42, 0.0, 0.08}, N, A, W, 0.44, false);
             return;
         }

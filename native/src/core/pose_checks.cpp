@@ -316,7 +316,8 @@ void person_fields(const Json& p, const In& in, bool in_pair) {
     } else {
         std::set<std::string> seen;
         for (const Json& c : contact) {
-            if (!c.is_string() || std::find(std::begin(kContacts), std::end(kContacts), c.get<std::string>()) == std::end(kContacts)) {
+            if (!c.is_string() || (std::find(std::begin(kContacts), std::end(kContacts), c.get<std::string>()) == std::end(kContacts) &&
+                                   !(in_pair && c.get<std::string>() == pose_library::kPartner))) {
                 in("unknown contact " + c.dump());
                 continue;
             }
@@ -898,6 +899,16 @@ bool part_has(const std::string& part, const std::string& bone) {
     return part == bone;
 }
 
+// A touching part and its neighbour on the limb (a hand and its forearm: a hand held wraps the other's wrist)
+bool near_part(const std::string& part, const std::string& bone) {
+    if (part_has(part, bone)) return true;
+    for (const char* side : {"l_", "r_"}) {
+        const std::string s(side);
+        if ((part == s + "hand" && bone == s + "fore") || (part == s + "fore" && bone == s + "hand")) return true;
+    }
+    return false;
+}
+
 constexpr int kPairSamples = 9;
 
 std::pair<Vec3, double> sample_of(const Bone& b, double from, int i) {
@@ -921,7 +932,7 @@ double from_surface(const Placed& q, const std::string& part, const Vec3& x) {
 
 }  // namespace
 
-PairReport check_pair(const Json& pair, const Json& body) {
+PairReport check_pair(const Json& pair, const Json& body, bool full) {
     PairReport r;
     r.id = pair.value("id", std::string());
     const auto issue = [&](const std::string& check, const std::string& what) { r.issues.push_back({check, what}); };
@@ -938,13 +949,14 @@ PairReport check_pair(const Json& pair, const Json& body) {
         one.id = person.value("id", std::string());
         models[static_cast<std::size_t>(k)] = mesh3d::model_of(own);
         one.measured = measure(own, *models[static_cast<std::size_t>(k)], person);
-        const auto lines = mesh3d::prim_lines(own, nullptr, 40.0);
+        const auto lines = full ? mesh3d::prim_lines(own, nullptr, 40.0) : nullptr;
         one.inside = inside(own);
         for (auto list : {check_ranges(person.value("joints", Json::object())), check_support(person, one.measured), check_inside(own), check_mirror(person),
-                          check_render(one.measured, lines ? lines->size() : 0)}) {
+                          full ? check_render(one.measured, lines ? lines->size() : 0) : std::vector<Issue>{}}) {
             for (const Issue& i : list) issue(i.check, std::string(roles[k]) + ": " + i.what);
         }
         for (const char* sex : {"male", "female"}) {
+            if (!full) break;
             for (const Issue& i : check_inside(figure_of(person, 120.0, Json::object({{"sex", sex}})))) issue(i.check, std::string(roles[k]) + " (" + sex + "): " + i.what);
         }
         const mesh3d::Skeleton sk = mesh3d::figure_skeleton(own);
@@ -1001,14 +1013,28 @@ PairReport check_pair(const Json& pair, const Json& body) {
         if (gap < -kTouchDepth) issue("touch", "a's " + pa + " is " + fmt(-gap) + " u inside b's " + pb);
         for (const Bone& x : a.bones) {
             for (const Bone& y : b.bones) {
-                if (part_has(pa, x.name) && part_has(pb, y.name)) exempt.insert({x.name, y.name});
+                if (near_part(pa, x.name) && near_part(pb, y.name)) exempt.insert({x.name, y.name});
             }
         }
     }
     // between the two: no limb's axis in the other's torso or head deeper than kInside of its radius, no torso, neck or
-    // head axis in it at all (r.between.torso: the worst, as a part of what is allowed)
+    // head axis in it at all (r.between.torso: the worst, as a part of what is allowed) — but a limb named touching the
+    // other's torso or head, which the touch holds to kTouchDepth instead
+    std::set<std::pair<std::string, std::string>> laid;  // (role, bone)
+    for (const Json& t : pair.value("touch", Json::array())) {
+        const std::string pa = t.value("a", std::string());
+        const std::string pb = t.value("b", std::string());
+        for (const auto& [mine, theirs, role, bones] : {std::tuple<std::string, std::string, std::string, const std::vector<Bone>*>{pa, pb, "a", &a.bones},
+                                                        {pb, pa, "b", &b.bones}}) {
+            if (theirs != "torso" && theirs != "head") continue;
+            for (const Bone& x : *bones) {
+                if (x.chain >= 0 && near_part(mine, x.name)) laid.insert({role, x.name});
+            }
+        }
+    }
     for (const auto& [me, other, label] : {std::tuple<const Placed*, const Placed*, const char*>{&a, &b, "a"}, {&b, &a, "b"}}) {
         for (const Bone& x : me->bones) {
+            if (laid.count({label, x.name}) != 0) continue;
             for (int i = 0; i < kPairSamples; ++i) {
                 const auto [p, rr] = sample_of(x, 0.0, i);
                 const Vec3 q = other->in(p);

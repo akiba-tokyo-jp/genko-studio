@@ -23,6 +23,8 @@ namespace {
 constexpr double kTall = 13.0;     // (u: the frame's height at the usual scale)
 constexpr double kFloorAt = 0.9;   // (u: the floor above the picture's foot)
 constexpr double kFill = 0.92;     // (the most of the picture a body drawn smaller fills)
+constexpr double kLow = 0.4;       // (a body lower than this part of the room is drawn larger …)
+constexpr double kZoom = 2.0;      // (… by this at most)
 
 Json seen_at(const Json& prim, double turn) {
     Json seen = prim;
@@ -97,6 +99,8 @@ Frame frame_of(const std::vector<Json>& prims, double turn, int width, int heigh
     const double room_h = height * (1.0 - margin) * kFill;
     if ((x1 - x0) * k > room_w) k = room_w / (x1 - x0);
     if ((y1 - y0) * k > room_h) k = room_h / (y1 - y0);
+    // (a body low and wide — lying down — is drawn larger, as large as it fits, up to kZoom times: G5)
+    if ((y1 - y0) * k < kLow * room_h && x1 > x0 && y1 > y0) k = std::min({k * kZoom, room_w / (x1 - x0), room_h / (y1 - y0)});
     f.px_per_mm = k;
     f.floor = y1;
     f.left = (x0 + x1) / 2 - width / 2.0 / k;

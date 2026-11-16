@@ -168,8 +168,9 @@ std::array<Json, 2> pair_figures(const Json& pair, double height_mm = 120.0, con
 // leans on or is held by the other: its own balance is not checked), and the two together: on the same floor (when
 // neither rests on nothing: their lowest points within kContactGap), their centre of mass over what they rest on
 // together when one leans on the other (kBalance), each touch named within kTouchGap and no deeper than kTouchDepth,
-// no limb's axis in the other's torso or head deeper than kInside of its radius and no torso, neck or head axis in it at
-// all, the limbs of the two overlapping by kOverlap at most (but the parts that touch).
+// no limb's axis in the other's torso or head deeper than kInside of its radius (but a limb named touching that torso
+// or head: kTouchDepth holds it) and no torso, neck or head axis in it at all, the limbs of the two overlapping by kOverlap at most (but the parts that touch, a touching hand's forearm with
+// them: a hand held wraps the other's wrist).
 struct PairReport {
     std::string id;
     std::vector<Issue> issues;
@@ -181,7 +182,8 @@ struct PairReport {
     Inside between;             // (torso: the deepest in the other's body; overlap: the largest of the two's limbs)
     bool ok() const { return issues.empty(); }
 };
-PairReport check_pair(const Json& pair, const Json& body = Json());
+// (full false: without the male and female bodies' inside and the lines' count — the mirror of a pair checked already)
+PairReport check_pair(const Json& pair, const Json& body = Json(), bool full = true);
 
 // --- for the ops and the pictures ---------------------------------------------------------------------------------
 

@@ -16,7 +16,8 @@
 // gallery), turned about its upright axis (正面 0, 斜め 0.785, 横 1.571), drawn with the core raster (no camera: the
 // figure's own perspective) at `supersample`× and box-averaged in integers: the same bytes on every run and thread.
 // The frame is 13 u tall with the floor near the foot (as G3's thumbnails), the figure centred across; a body wider or
-// taller than that (lying, arms spread) is drawn smaller so it fits.
+// taller than that (lying, arms spread, a pair) is drawn smaller so it fits, and one lower than 0.4 of it (lying down)
+// larger, as large as it fits but at most twice (G5).
 
 namespace genko::render::figure_thumbs {
 
