@@ -518,20 +518,24 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `apply_ops` → `pose_figure {page, id, pose_id, mirror, keep: "ground"}`. From the shell: `genko studio figure-poses
   [--category …] [--tags a,b] [--query …] [--random n --seed …] [--sheet DIR] [--check]`. In the app: 定規・3D →
   ポーズ集… (or ツール → 3D → ポーズ集…).
-- Figures, heads and hands are one smooth, seamless, faceless body (SPEC FIGURE-01): a realistic adult build, a
-  neutral face relief without drawn features, hands with three-jointed fingers and a thumb (palms toward the body),
-  shaded smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers),
-  plus the head's pencil guides; no mesh edges. Boxes, scenes and imported models trace as before. Lines already
-  traced stay as they were.
+- Figures, heads and hands are one smooth, seamless body (SPEC FIGURE-01): an artist's mannequin of a realistic adult
+  build (ribcage, waist and pelvis, pectorals or breasts, collarbones, shoulder blades, limbs that taper, feet with a
+  heel, an instep and toes), a calm face in shallow relief without drawn features (brow, eye sockets and lids, nose,
+  closed lips, small flat ears), hands with three-jointed fingers and a thumb (palms toward the body), shaded
+  smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers; a head's
+  outline stays a clean oval, its face's own profile from the side), plus the head's pencil guides; no mesh edges.
+  Boxes, scenes and imported models trace as before. Lines already traced stay as they were.
 
 ### Figures as generation guides (SPEC FIGURE-01..03)
 
 - `generation_request` for a panel (mode new; fixes and upscales keep their parent's size and get none) draws the panel's figures, heads and hands (those with
   the panel's `frame_id`, or with no `frame_id` and their middle in the panel) into `guides/figures.png`: black ground,
   each person a material colour from a fixed palette in the panel's order (warm beige, lavender, olive, teal, salmon,
-  green, orchid, amber, cornflower, terracotta, mint, rose), lit by the page's light (`set_light`) with a fill and a
-  highlight, seen by the page's camera (`set_camera`); no lines, no face marks. `guides/regions.png` paints each
-  person's silhouette (grown about 1 % of the long side) in the same colour, black where nobody is. Without 3D figures,
+  green, orchid, amber, cornflower, terracotta, mint, rose), lit by the page's light (`set_light`) with a fill, a soft
+  sheen and a small highlight (the forms read in the light and in the shade), seen by the page's camera
+  (`set_camera`); no lines, no face marks. `guides/regions.png` paints each person's silhouette as one clean shape
+  (slits narrower than about 2 % of the long side closed — an arm beside the body —, then grown about 1 %) in the same
+  colour, black where nobody is. Without 3D figures,
   a panel with two or more people in the brief gets `guides/regions.png` from the brief's places; a panel with one
   person or none gets neither (its request is as before, byte for byte).
 - Size: the request's `size.suggested_px` (≈ 1 MP, multiples of 64), or, when `tool` names a tool of `tools.json`, the
