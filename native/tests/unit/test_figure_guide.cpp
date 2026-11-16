@@ -489,8 +489,8 @@ private:
                     {"notes", "制御画像（guides/figures.png・regions.png）は出力と同じ大きさ。CFG 1"}};
     }
 
-    static constexpr const char* kFiguresPng = "d207c41dacbcfab5080862e69034f6a678ea0ad1bf890b9993ffc31edbc52a9e";
-    static constexpr const char* kRegionsPng = "5d3a823e266c622fb7c14c262410bc1a361e02edc77674533e2cd89436786afb";
+    static constexpr const char* kFiguresPng = "fbefdbc9057f358c799de2cafd861e1f29b91d5984062fe3cedc7933b5508c29";
+    static constexpr const char* kRegionsPng = "c894a1af3e44688fd78461e039534ff1f25e427cb6a069c296e2c54e78cfb696";
 };
 
 QTEST_GUILESS_MAIN(TestFigureGuide)

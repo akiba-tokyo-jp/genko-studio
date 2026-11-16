@@ -141,12 +141,17 @@ std::array<int, 3> shade(const Vec3& normal, const std::array<double, 3>& albedo
     const double lit = 0.55 * key + 0.45 * half * half;
     const double round = 0.55 + 0.45 * std::sqrt(facing);
     const double diffuse = (0.04 + 0.28 * light.ambient + 0.86 * lit + 0.1 * fill) * round;
-    const double sheen = 0.42 * h8 * h4;
-    const double spark = 0.3 * h32 * h32;
+    const double sheen = 0.36 * h8 * h4;
+    const double spark = 0.22 * h32 * h32;
     std::array<int, 3> out{};
     for (int c = 0; c < 3; ++c) {
         const double a = albedo[static_cast<std::size_t>(c)];
-        const double v = a * diffuse + (sheen + spark) * (0.55 + 0.45 * a);
+        double v = a * diffuse + (sheen + spark) * (0.55 + 0.45 * a);
+        // (the brightest quarter is pressed together, never cut off at white: the form reads in the highlights too)
+        if (v > 0.72) {
+            const double over = (v - 0.72) / 0.28;
+            v = 0.72 + 0.28 * over / (1.0 + over);
+        }
         out[static_cast<std::size_t>(c)] = static_cast<int>(std::floor(clamp01(v) * 255.0 + 0.5));
     }
     return out;
