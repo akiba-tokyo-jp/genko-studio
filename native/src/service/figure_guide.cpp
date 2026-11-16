@@ -122,17 +122,33 @@ std::vector<Seen> seen_all(const core::Page& page, std::span<const Json> prims, 
 
 double clamp01(double v) { return v > 0.0 ? (v < 1.0 ? v : 1.0) : 0.0; }
 
-// The colour of a sample: Blinn-Phong with the key light, a fill and a white highlight over the material colour.
+// The colour of a sample: the material colour lit by the key light (its terminator soft: half the light wraps past
+// it), a fill from the other side and what the page's ambient gives, darker where the surface turns away from the eye
+// (so each form's round reads, in the light and in the shade), and over it a broad soft sheen and a small bright
+// highlight, both a little of the material's own colour. Only + − × ÷ and the square root.
 std::array<int, 3> shade(const Vec3& normal, const std::array<double, 3>& albedo, const Light& light) {
     const Vec3 n = unit(normal);
-    const double key = std::max(0.0, n[0] * light.key[0] + n[1] * light.key[1] + n[2] * light.key[2]);
+    const double nl = n[0] * light.key[0] + n[1] * light.key[1] + n[2] * light.key[2];
+    const double key = std::max(0.0, nl);
+    const double half = 0.5 * nl + 0.5;  // (1 toward the light, 0 away from it)
     const double fill = std::max(0.0, n[0] * light.fill[0] + n[1] * light.fill[1] + n[2] * light.fill[2]);
-    double h = std::max(0.0, n[0] * light.half[0] + n[1] * light.half[1] + n[2] * light.half[2]);
-    for (int i = 0; i < 5; ++i) h = h * h;  // (h^32)
-    const double diffuse = 0.12 + 0.4 * light.ambient + 0.72 * key + 0.22 * fill;
-    const double spec = 0.4 * h;
+    const double facing = std::max(0.0, -n[2]);  // (the eye is toward −z)
+    const double h = std::max(0.0, n[0] * light.half[0] + n[1] * light.half[1] + n[2] * light.half[2]);
+    const double h2 = h * h;
+    const double h4 = h2 * h2;
+    const double h8 = h4 * h4;
+    const double h32 = h8 * h8 * h8 * h8;
+    const double lit = 0.55 * key + 0.45 * half * half;
+    const double round = 0.55 + 0.45 * std::sqrt(facing);
+    const double diffuse = (0.04 + 0.28 * light.ambient + 0.86 * lit + 0.1 * fill) * round;
+    const double sheen = 0.42 * h8 * h4;
+    const double spark = 0.3 * h32 * h32;
     std::array<int, 3> out{};
-    for (int c = 0; c < 3; ++c) out[static_cast<std::size_t>(c)] = static_cast<int>(std::floor(clamp01(albedo[static_cast<std::size_t>(c)] * diffuse + spec) * 255.0 + 0.5));
+    for (int c = 0; c < 3; ++c) {
+        const double a = albedo[static_cast<std::size_t>(c)];
+        const double v = a * diffuse + (sheen + spark) * (0.55 + 0.45 * a);
+        out[static_cast<std::size_t>(c)] = static_cast<int>(std::floor(clamp01(v) * 255.0 + 0.5));
+    }
     return out;
 }
 
@@ -229,38 +245,84 @@ Drawn draw(const core::Page& page, std::span<const Json> prims, const View& view
     return out;
 }
 
-// Owners grown by `grow` px into the pixels nobody has (the first person wins a tie), then painted.
-render::Image paint(std::vector<int> owner, const std::array<int, 2>& px, int grow) {
-    const int width = px[0];
-    const int height = px[1];
+// One step of the owners' growth into the pixels nobody has (4 and 8 neighbours by turns: a roughly round growth; the
+// first person wins a tie). False when nothing changed.
+bool grow_step(std::vector<int>& owner, std::vector<int>& next, int width, int height, int step) {
+    const bool diagonal = step % 2 == 1;
+    bool changed = false;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+            next[at] = owner[at];
+            if (owner[at] >= 0) continue;
+            int best = -1;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if ((dx == 0 && dy == 0) || (!diagonal && dx != 0 && dy != 0)) continue;
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                    const int o = owner[static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx)];
+                    if (o >= 0 && (best < 0 || o < best)) best = o;
+                }
+            }
+            if (best >= 0) {
+                next[at] = best;
+                changed = true;
+            }
+        }
+    }
+    owner.swap(next);
+    return changed;
+}
+
+// Each person's silhouette made one clean shape: grown by `by` px and taken back by as much, so the slits and
+// notches narrower than twice that — between an arm and the body it hangs beside, where a hand meets a hip — are the
+// person's own (what was the person's stays; nobody's pixel taken back is nobody's again, and the picture's edge
+// counts as the person's, so a figure cut by it is not eaten).
+void close_gaps(std::vector<int>& owner, int width, int height, int by) {
+    if (by <= 0) return;
+    const std::vector<int> first = owner;
     std::vector<int> next = owner;
-    for (int step = 0; step < grow; ++step) {
-        const bool diagonal = step % 2 == 1;  // (4 and 8 neighbours by turns: a roughly round growth)
-        bool changed = false;
+    int steps = 0;
+    for (; steps < by; ++steps) {
+        if (!grow_step(owner, next, width, height, steps)) break;
+    }
+    for (int step = steps - 1; step >= 0; --step) {  // (taken back by the same steps)
+        const bool diagonal = step % 2 == 1;
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
                 next[at] = owner[at];
-                if (owner[at] >= 0) continue;
-                int best = -1;
-                for (int dy = -1; dy <= 1; ++dy) {
+                if (owner[at] < 0 || first[at] >= 0) continue;  // (nobody's, or the person's from the start)
+                bool keep = true;
+                for (int dy = -1; dy <= 1 && keep; ++dy) {
                     for (int dx = -1; dx <= 1; ++dx) {
                         if ((dx == 0 && dy == 0) || (!diagonal && dx != 0 && dy != 0)) continue;
                         const int nx = x + dx;
                         const int ny = y + dy;
                         if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-                        const int o = owner[static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx)];
-                        if (o >= 0 && (best < 0 || o < best)) best = o;
+                        if (owner[static_cast<std::size_t>(ny) * static_cast<std::size_t>(width) + static_cast<std::size_t>(nx)] != owner[at]) {
+                            keep = false;
+                            break;
+                        }
                     }
                 }
-                if (best >= 0) {
-                    next[at] = best;
-                    changed = true;
-                }
+                if (!keep) next[at] = -1;
             }
         }
         owner.swap(next);
-        if (!changed) break;
+    }
+}
+
+// Owners closed (close_gaps) and grown by `grow` px into the pixels nobody has, then painted.
+render::Image paint(std::vector<int> owner, const std::array<int, 2>& px, int grow) {
+    const int width = px[0];
+    const int height = px[1];
+    close_gaps(owner, width, height, grow);
+    std::vector<int> next = owner;
+    for (int step = 0; step < grow; ++step) {
+        if (!grow_step(owner, next, width, height, step)) break;
     }
     std::string rgb(static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height)) * 3, '\0');
     for (std::size_t i = 0; i < owner.size(); ++i) {
