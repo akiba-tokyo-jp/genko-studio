@@ -422,7 +422,8 @@ private slots:
     }
 
     // Boxes, scenes and imported models are drawn and traced exactly as before FIGURE-01 (the digests were taken with
-    // the build before it).
+    // the build before it), but for the box traced through the camera: its own edges since the fix of 2026-11-16 (it
+    // was the floor's grid; docs/cpp-migration/HANDOFF.md).
     void theOtherKindsAreAsBefore() {
         const std::vector<Json> prims = other_kinds();
         Json camera = ops(R"({"turn": 0.3, "tip": 0.2, "roll": 0.05, "focal_mm": 300, "target": [100, 140]})");
@@ -453,7 +454,7 @@ private:
     static constexpr const char* kWalkLines = R"({"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"})";
     static constexpr const char* kDrawn =
         "08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f589255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae";
-    static constexpr const char* kOtherKinds = "e409e23fb070dbc71bec9c449236bb21af6a5d096c658aa93538c930a241f54a";
+    static constexpr const char* kOtherKinds = "6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1";
 };
 
 QTEST_GUILESS_MAIN(TestFigureMesh)

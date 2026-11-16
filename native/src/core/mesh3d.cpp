@@ -936,6 +936,11 @@ std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* c
     return normals(turned(prim, mesh.v, truthy(camera)), mesh.f);
 }
 
+InView in_view(const Json& prim, std::span<const Vec3> local, const Json* camera) {
+    camera = truthy(camera);
+    return InView{turned(prim, local, camera), eye_of(prim, camera)};
+}
+
 OnPage to_page(const Json& prim, std::span<const Vec3> local, const Json* camera) {
     camera = truthy(camera);
     static const Json kDefaultPos = Json::array({100, 150, 0});
@@ -1095,7 +1100,7 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
     return out;
 }
 
-std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi, double crease_deg) {
+std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi, double crease_deg, std::span<const Json> hiders) {
     camera = truthy(camera);
     std::vector<Json> meshy;
     for (const Json& p : prims) {
@@ -1198,7 +1203,10 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     const double fh = py_max(1.0, int_of((y1 - y0) * k) + 2);
     // (a depth picture for the lines, at their own small resolution: one this big is a 3D far too large to trace)
     if (fw * fh > limits::kLineDepthPixels) throw Error("image_too_large", "the 3D is too large to draw at this resolution");
-    const Raster depth = raster(meshy, static_cast<int>(fw), static_cast<int>(fh), dpi, camera, nullptr, 0.35, x0, y0);
+    // (with the hiders' surfaces: the depth picture of all of them, the lines' own prims first)
+    std::vector<Json> surfaces = meshy;
+    surfaces.insert(surfaces.end(), hiders.begin(), hiders.end());
+    const Raster depth = raster(surfaces, static_cast<int>(fw), static_cast<int>(fh), dpi, camera, nullptr, 0.35, x0, y0);
     const double tolerance = py_max(0.8, 2.5 * 25.4 / dpi);  // (a pixel's worth of depth, and the rim of rounded parts)
     const float tolerance_f = static_cast<float>(tolerance);
     // seen when some pixel beside it is empty or no nearer than it (the rim of a rounded part)
@@ -1278,17 +1286,30 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     return result;
 }
 
-std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi) {
+std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi, std::span<const Json> hiders) {
     camera = truthy(camera);
-    Json own = Json::object();
-    if (prim.is_object()) {
-        for (const auto& [k, v] : prim.items()) {
-            if (k != "camera") own[k] = v;
+    const auto without_camera = [](const Json& p) {
+        Json own = Json::object();
+        if (p.is_object()) {
+            for (const auto& [k, v] : p.items()) {
+                if (k != "camera") own[k] = v;
+            }
+        } else {
+            raise_attribute_error(p, "items");
         }
-    } else {
-        raise_attribute_error(prim, "items");
-    }
+        return own;
+    };
+    const Json own = without_camera(prim);
     Json key_value = Json::object({{"camera", camera != nullptr ? *camera : Json()}, {"prim", own}});
+    std::vector<Json> others;  // (seen with the prim's camera, as raster has them)
+    if (!hiders.empty()) {
+        Json listed = Json::array();
+        for (const Json& h : hiders) {
+            others.push_back(without_camera(h));
+            listed.push_back(others.back());
+        }
+        key_value["hiders"] = std::move(listed);
+    }
     // (the resolution's exact bits as text: std::to_chars, which no locale changes — snprintf's %a takes its decimal point)
     char dpi_text[64];
     const auto written = std::to_chars(dpi_text, dpi_text + sizeof dpi_text, dpi, std::chars_format::hex);
@@ -1304,7 +1325,7 @@ std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Jso
         }
     }
     const std::vector<Json> one{own};
-    auto made = std::make_shared<const std::vector<Line2>>(lines(one, camera, dpi));
+    auto made = std::make_shared<const std::vector<Line2>>(lines(one, camera, dpi, 40.0, others));
     std::lock_guard lock(cache.mutex);
     cache.items.emplace_front(key, made);
     while (cache.items.size() > 128) cache.items.pop_back();

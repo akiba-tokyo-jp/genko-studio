@@ -67,8 +67,10 @@ std::vector<Edge> edges(const Json& prim, const Json* camera);
 // (x, y, w, h) on the page.
 std::array<double, 4> bbox(const Json& prim, const Json* camera);
 std::array<double, 4> prim_bbox(const Json& prim, const Json* camera);
-// Lines to draw the prim with a pen (its seen edges, or the figure's bones and head).
-std::vector<Line2> trace(const Json& prim, const Json* camera);
+// Lines to draw the prim with a pen (its seen edges, or the figure's bones and head). A figure's, a head's, a hand's
+// or a model's lines are also hidden where one of `hiders` (other prims, seen with the same camera) is in front of them
+// (SPEC FIGURE-01, 線); the other kinds' lines do not look at them.
+std::vector<Line2> trace(const Json& prim, const Json* camera, std::span<const Json> hiders = {});
 // Segments that meet end to end joined into polylines.
 std::vector<Line2> join_lines(const std::vector<Line2>& lines, double eps = 0.05);
 

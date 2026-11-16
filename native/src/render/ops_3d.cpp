@@ -352,6 +352,55 @@ void attach_frame(const Page& page, const Json& op, Json& prim) {
 
 const Json* page_camera(const Page& page) { return get(page.extra, "camera"); }
 
+// The panel a prim is drawn in, as the proof draws it (render/prims: a frame_id that names one of the page's panels;
+// else the whole page, "").
+std::string panel_of(const Json& prim, const std::vector<const core::Frame*>& leaves) {
+    const Json* frame_id = core::dict_get(prim, "frame_id");
+    if (frame_id == nullptr || !frame_id->is_string() || !core::py_truthy(*frame_id)) return {};
+    const std::string& id = frame_id->get_ref<const std::string&>();
+    for (const core::Frame* leaf : leaves) {
+        if (leaf->id == id) return id;
+    }
+    return {};
+}
+
+// The prims whose surfaces hide the lines of page.prims[at] (SPEC FIGURE-01, 線): for a figure, a head, a hand or a
+// model, every other prim of the page with a surface (a box, cylinder, stairs, floor, scene, sphere, cone, prop or
+// another of those four; not a mannequin), in the page's order, that is seen with the same camera and drawn where it is
+// (on the whole page, or in its panel), and that can be drawn at all (one that cannot hides nothing). In front is then
+// what raster's depth says: nearer to the eye along the camera's view, or without a camera nearer in z (the depth the
+// shaded surfaces of render_prims are drawn by).
+std::vector<Json> hiders_of(const Page& page, std::size_t at, const Json* camera, const Json* page_camera_value) {
+    if (!page.prims.is_array() || at >= page.prims.size()) return {};
+    const Json& prim = page.prims[at];
+    const Json* kind = core::dict_get(prim, "kind");
+    if (kind == nullptr || !mesh3d::is_mesh_kind(*kind)) return {};
+    const std::vector<const core::Frame*> leaves = page.leaf_frames();
+    const std::string panel = panel_of(prim, leaves);
+    camera = truthy(camera) ? camera : nullptr;
+    std::vector<Json> out;
+    for (std::size_t i = 0; i < page.prims.size(); ++i) {
+        if (i == at) continue;
+        const Json& other = page.prims[i];
+        const Json* other_kind = core::dict_get(other, "kind");
+        if (other_kind == nullptr ||
+            !(mesh3d::is_mesh_kind(*other_kind) || core::is_one_of(*other_kind, {"box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"}))) {
+            continue;
+        }
+        const Json* seen_with = mesh3d::camera_of(other, page_camera_value);
+        if ((seen_with == nullptr) != (camera == nullptr) || (camera != nullptr && *seen_with != *camera)) continue;
+        const std::string where = panel_of(other, leaves);
+        if (!where.empty() && where != panel) continue;
+        try {
+            (void)mesh3d::raster(std::span<const Json>(&other, 1), 1, 1, 40.0, camera, nullptr, 0.35);
+        } catch (const core::Error&) {
+            continue;
+        }
+        out.push_back(other);
+    }
+    return out;
+}
+
 // coerce_stroke([(round(x, 3), round(y, 3)) …]) with the op's kind, width and colour
 core::StrokePtr traced_stroke(const prim3d::Line2& line, const std::string& kind, const Json& op) {
     auto stroke = std::make_shared<core::Stroke>();
@@ -725,14 +774,17 @@ void render_prims(OpContext& c) {
     const Json* camera_value = page_camera(page);
     std::vector<Json> picked;           // the prims, each as with_camera gives it (for the lines)
     std::vector<const Json*> cameras;   // the camera each is seen with
+    std::vector<std::size_t> places;    // where each is in page.prims
     // camera_of may return a pointer inside a prim: keep this copy alive until every line has been traced.
     const Json prims = core::py_list(page.prims);
-    for (const Json& p : prims) {
+    for (std::size_t i = 0; i < prims.size(); ++i) {
+        const Json& p = prims[i];
         if (!chosen(p, ids)) continue;
         const Json* kind = core::dict_get(p, "kind");
         if (kind != nullptr && core::py_equals(*kind, Json("mannequin"))) continue;
         picked.push_back(p);
         cameras.push_back(mesh3d::camera_of(p, camera_value));
+        places.push_back(i);
     }
     if (picked.empty()) throw OpError("no 3D figure or box to trace");
     const Json* surfaces = get(c.op, "surfaces");
@@ -799,7 +851,8 @@ void render_prims(OpContext& c) {
         static const Json kMili = "mili";
         const std::string kind = core::brush_kind(get_else(c.op, "kind", kMili), c.doc);
         for (std::size_t i = 0; i < picked.size(); ++i) {
-            for (const prim3d::Line2& line : prim3d::trace(picked[i], cameras[i])) made.push_back(traced_stroke(line, kind, c.op));
+            const std::vector<Json> hiders = hiders_of(page, places[i], cameras[i], camera_value);
+            for (const prim3d::Line2& line : prim3d::trace(picked[i], cameras[i], hiders)) made.push_back(traced_stroke(line, kind, c.op));
         }
     }
     if (target.screen) core::require_finite(*target.screen, "tone");
@@ -1105,7 +1158,9 @@ void trace_prims(OpContext& c) {
     std::vector<core::StrokePtr> made;
     for (const std::size_t i : picked) {
         const Json& prim = page.prims[i];
-        for (const prim3d::Line2& line : prim3d::join_lines(prim3d::trace(prim, mesh3d::camera_of(prim, camera_value)))) {
+        const Json* camera = mesh3d::camera_of(prim, camera_value);
+        const std::vector<Json> hiders = hiders_of(page, i, camera, camera_value);
+        for (const prim3d::Line2& line : prim3d::join_lines(prim3d::trace(prim, camera, hiders))) {
             made.push_back(traced_stroke(line, kind, c.op));
         }
     }

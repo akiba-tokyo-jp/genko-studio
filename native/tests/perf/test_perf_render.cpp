@@ -428,6 +428,23 @@ private slots:
             most_trace = std::max(most_trace, trace);
             QVERIFY(!lines.empty() && !screen.empty());
         }
+        // (and traced again with a box and a second figure in front of it, as trace_prims has them: SPEC FIGURE-01, 線 —
+        // within the same bound; the second figure's making is not the tracing's)
+        Json other = prim;
+        other["id"] = "g";
+        other["pos"] = Json::array({150, 185, -40});
+        const std::vector<Json> hiders{
+            Json::object({{"id", "b"}, {"kind", "box"}, {"pos", Json::array({128, 170, -60})}, {"size", Json::array({30, 30, 4})}, {"rot", Json::array({0, 0, 0})}}),
+            other};
+        (void)mesh3d::model_of(other);
+        QElapsedTimer behind_timer;
+        behind_timer.start();
+        const auto behind = genko::core::prim3d::trace(prim, nullptr, hiders);
+        const qint64 traced_behind = behind_timer.elapsed();
+        qInfo("the smooth figure traced at 40 dpi behind a box and a second figure: %lld ms (%zu lines)", static_cast<long long>(traced_behind),
+              behind.size());
+        QVERIFY(!behind.empty());
+        QVERIFY2(traced_behind < kFigureTraceMs, qPrintable(QString::number(traced_behind)));
         Document doc = genko::core::new_episode("人形", genko::core::Num(1), 1, genko::core::PageSpec::b4_comic());
         doc.edit_page(0).numero = false;
         doc.edit_page(0).prims = Json::array({prim});

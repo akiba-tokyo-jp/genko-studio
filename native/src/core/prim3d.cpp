@@ -214,21 +214,28 @@ std::vector<Vec3> corners3d(const Json& prim) {
     return out;
 }
 
+namespace {
+
+// The eight corners in the prim's own space before its turn (as corners3d orders them), for the camera's projection.
+std::vector<Vec3> local_corners(const Json& prim) {
+    const Vec3 size = size_of(prim);
+    const double w = size[0];
+    const double h = size[1];
+    const double d = size[2];
+    std::vector<Vec3> local;
+    for (const int sx : {-1, 1}) {
+        for (const int sy : {-1, 1}) {
+            for (const int sz : {-1, 1}) local.push_back(Vec3{sx * w / 2, sy * h / 2, sz * d / 2});
+        }
+    }
+    return local;
+}
+
+}  // namespace
+
 std::vector<Point2> project(const Json& prim, const Json* camera) {
     camera = truthy(camera);
-    if (camera != nullptr) {
-        const Vec3 size = size_of(prim);
-        const double w = size[0];
-        const double h = size[1];
-        const double d = size[2];
-        std::vector<Vec3> local;
-        for (const int sx : {-1, 1}) {
-            for (const int sy : {-1, 1}) {
-                for (const int sz : {-1, 1}) local.push_back(Vec3{sx * w / 2, sy * h / 2, sz * d / 2});
-            }
-        }
-        return mesh3d::to_page(prim, local, camera).pts;
-    }
+    if (camera != nullptr) return mesh3d::to_page(prim, local_corners(prim), camera).pts;
     const Place at = place_of(prim);
     const double focal = focal_of(prim);
     std::vector<Point2> out;
@@ -493,12 +500,17 @@ std::vector<Edge> edges(const Json& prim, const Json* camera) {
         }
         return out;
     }
-    if (kind_is(prim, {"cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"}) || (camera != nullptr && is_box(prim))) {
+    if (kind_is(prim, {"cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"})) {
         std::vector<Edge> out;
         for (const auto& [a, b] : segments3d(prim)) out.push_back(Edge{to_page(prim, a, camera), to_page(prim, b, camera), true});
         return out;
     }
-    const std::vector<Vec3> pts3 = corners3d(prim);
+    // A box: its twelve edges, those of the faces turned toward the eye seen. Through a camera the corners and the eye
+    // are where the camera's projection has them (to_page: the prim's turn, then the camera's); without one, the
+    // corners turned on their own and the eye at -focal in front of the page.
+    mesh3d::InView view;
+    if (camera != nullptr) view = mesh3d::in_view(prim, local_corners(prim), camera);
+    const std::vector<Vec3> pts3 = camera != nullptr ? view.pts : corners3d(prim);
     const std::vector<Point2> pts = project(prim, camera);
     const double focal = focal_of(prim);
     static const Json kOrigin = Json::array({0, 0, 0});
@@ -520,7 +532,11 @@ std::vector<Edge> edges(const Json& prim, const Json* camera) {
                                      pts3[static_cast<std::size_t>(kFaces[f][2])][k], pts3[static_cast<std::size_t>(kFaces[f][3])][k]};
             centre[static_cast<std::size_t>(k)] = py_float_sum(items) / 4;
         }
-        centre[2] += cz + focal;  // from the camera (at -focal) to the face
+        if (camera != nullptr) {
+            centre = Vec3{centre[0] - view.eye[0], centre[1] - view.eye[1], centre[2] - view.eye[2]};  // from the eye to the face
+        } else {
+            centre[2] += cz + focal;  // from the camera (at -focal) to the face
+        }
         seen_faces[f] = n[0] * centre[0] + n[1] * centre[1] + n[2] * centre[2] < 0;
         seen_count += seen_faces[f] ? 1 : 0;
     }
@@ -605,9 +621,9 @@ std::array<double, 4> prim_bbox(const Json& prim, const Json* camera) {
     return bbox(prim, camera);
 }
 
-std::vector<Line2> trace(const Json& prim, const Json* camera) {
+std::vector<Line2> trace(const Json& prim, const Json* camera, std::span<const Json> hiders) {
     camera = truthy(camera);
-    if (kind_is(prim, {"figure", "head", "hand", "mesh"})) return *mesh3d::prim_lines(prim, camera, 40.0);
+    if (kind_is(prim, {"figure", "head", "hand", "mesh"})) return *mesh3d::prim_lines(prim, camera, 40.0, hiders);
     if (kind_is(prim, {"mannequin"})) {
         const mannequin::Bone bone = mannequin::skeleton(prim);
         std::vector<Line2> out;

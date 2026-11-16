@@ -7,6 +7,8 @@
 
 #include <QTemporaryDir>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <filesystem>
 #include <functional>
@@ -673,6 +675,247 @@ private slots:
         const Document back = read(make_book(book_path(), mirrored));
         same(back.page(0).prims, mirrored.page(0).prims, "prims read back");
         QCOMPARE((*prim(back, "fig"))["hold"], Json::object({{"l", "cup"}}));
+    }
+
+    // A box seen through the page's camera is traced as the box (it was a floor's grid): its twelve edges between the
+    // corners project puts on the page, the ones at its back not drawn — a face is seen when the camera's eye is on its
+    // outer side, worked out here on its own from the corners where the camera has them; with a camera that does not
+    // turn the box is seen as without one.
+    void boxThroughTheCamera() {
+        namespace prim3d = genko::core::prim3d;
+        namespace mesh3d = genko::core::mesh3d;
+        namespace la = genko::core::la;
+        using namespace genko::core::la;  // (the element-wise operators)
+        using la::Vec3;
+        // corner i: x from bit 2, y from bit 1, z from bit 0
+        static constexpr int kBoxFaces[6][4] = {{0, 1, 3, 2}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 3, 7, 5}};
+        const auto expected_seen = [](const Json& box, const Json& camera) {
+            const Vec3 size{box["size"][0].get<double>(), box["size"][1].get<double>(), box["size"][2].get<double>()};
+            const Vec3 at{box["pos"][0].get<double>(), box["pos"][1].get<double>(), box["pos"][2].get<double>()};
+            const la::Mat3 turn = mesh3d::prim_rotation(box["rot"]);
+            const la::Mat3 view = mesh3d::prim_rotation(Json::array({camera.value("tip", 0.0), camera.value("turn", 0.0), camera.value("roll", 0.0)}));
+            const Vec3 target{camera["target"][0].get<double>(), camera["target"][1].get<double>(), 0.0};
+            const double focal = camera.value("focal_mm", 400.0);
+            std::array<Vec3, 8> c{};
+            for (int i = 0; i < 8; ++i) {
+                const Vec3 local{(i & 4 ? 0.5 : -0.5) * size[0], (i & 2 ? 0.5 : -0.5) * size[1], (i & 1 ? 0.5 : -0.5) * size[2]};
+                c[static_cast<std::size_t>(i)] = la::matvec(view, la::matvec(turn, local) + at - target);
+            }
+            Vec3 middle{0, 0, 0};
+            for (const Vec3& p : c) middle = middle + p / 8.0;
+            const Vec3 eye{0.0, 0.0, -focal};
+            std::array<bool, 6> seen{};
+            for (int f = 0; f < 6; ++f) {
+                Vec3 centre{0, 0, 0};
+                for (const int k : kBoxFaces[f]) centre = centre + c[static_cast<std::size_t>(k)] / 4.0;
+                seen[static_cast<std::size_t>(f)] = la::dot(centre - middle, eye - centre) > 0;
+            }
+            return seen;
+        };
+        const auto near = [](const prim3d::Point2& a, const prim3d::Point2& b) { return std::abs(a[0] - b[0]) < 1e-9 && std::abs(a[1] - b[1]) < 1e-9; };
+        const Json boxes[] = {ops(R"({"kind": "box", "pos": [100, 150, 0], "size": [30, 20, 25], "rot": [0.3, 0.6, 0]})"),
+                              ops(R"({"kind": "box", "pos": [70, 90, 40], "size": [50, 12, 18], "rot": [-0.4, 1.9, 0.2]})")};
+        const Json cameras[] = {ops(R"({"turn": 0.3, "tip": 0.2, "target": [91, 128.5]})"),
+                                ops(R"({"turn": 2.5, "tip": -0.4, "roll": 0.1, "focal_mm": 200, "target": [100, 150]})"),
+                                ops(R"({"turn": -1.2, "tip": 0.9, "focal_mm": 900, "target": [40, 200]})")};
+        for (const Json& box : boxes) {
+            for (const Json& camera : cameras) {
+                const std::vector<prim3d::Point2> corners = prim3d::project(box, &camera);
+                const std::vector<prim3d::Edge> edges = prim3d::edges(box, &camera);
+                QCOMPARE(edges.size(), std::size_t{12});
+                const std::array<bool, 6> faces = expected_seen(box, camera);
+                int faces_seen = 0;
+                for (const bool f : faces) faces_seen += f ? 1 : 0;
+                QVERIFY(faces_seen >= 1 && faces_seen <= 3);
+                std::size_t seen_edges = 0;
+                for (const prim3d::Edge& e : edges) {
+                    int a = -1;
+                    int b = -1;
+                    for (int i = 0; i < 8; ++i) {
+                        if (near(e.a, corners[static_cast<std::size_t>(i)])) a = i;
+                        if (near(e.b, corners[static_cast<std::size_t>(i)])) b = i;
+                    }
+                    QVERIFY2(a >= 0 && b >= 0 && std::popcount(static_cast<unsigned>(a ^ b)) == 1, "an edge between two corners next to each other");
+                    bool want = false;
+                    for (int f = 0; f < 6; ++f) {
+                        const auto& face = kBoxFaces[f];
+                        const bool has_a = std::find(std::begin(face), std::end(face), a) != std::end(face);
+                        const bool has_b = std::find(std::begin(face), std::end(face), b) != std::end(face);
+                        want = want || (faces[static_cast<std::size_t>(f)] && has_a && has_b);
+                    }
+                    QCOMPARE(e.seen, want);
+                    seen_edges += e.seen ? 1 : 0;
+                }
+                const std::vector<prim3d::Line2> traced = prim3d::trace(box, &camera);
+                QCOMPARE(traced.size(), seen_edges);
+                // its box on the page is its corners'
+                const auto [x, y, w, h] = prim3d::bbox(box, &camera);
+                double x0 = corners[0][0], x1 = x0, y0 = corners[0][1], y1 = y0;
+                for (const auto& p : corners) x0 = std::min(x0, p[0]), x1 = std::max(x1, p[0]), y0 = std::min(y0, p[1]), y1 = std::max(y1, p[1]);
+                QCOMPARE(x, x0);
+                QCOMPARE(y, y0);
+                QCOMPARE(w, x1 - x0);
+                QCOMPARE(h, y1 - y0);
+            }
+            // a camera that does not turn, aimed at the box's own centre: the box as it is seen without a camera
+            const Json still = Json::object({{"turn", 0}, {"tip", 0}, {"target", Json::array({box["pos"][0], box["pos"][1]})}});
+            const std::vector<prim3d::Edge> with = prim3d::edges(box, &still);
+            const std::vector<prim3d::Edge> without = prim3d::edges(box, nullptr);
+            QCOMPARE(with.size(), without.size());
+            for (std::size_t i = 0; i < with.size(); ++i) {
+                QVERIFY(near(with[i].a, without[i].a) && near(with[i].b, without[i].b));
+                QCOMPARE(with[i].seen, without[i].seen);
+            }
+        }
+        // through the op: the box's seen edges, joined, every point a corner of the box
+        Document doc = base_;
+        doc = bus().apply(doc, ops(R"([{"op": "set_camera", "page": 1, "turn": 0.3, "tip": 0.2},
+                                       {"op": "trace_prims", "page": 1, "layer_id": "pen", "ids": ["box"]}])"),
+                          Actor("genko"))
+                  .doc;
+        const Json camera = doc.page(0).extra["camera"];
+        const std::vector<prim3d::Point2> corners = prim3d::project(*prim(doc, "box"), &camera);
+        const auto& strokes = layer(doc, "pen")->strokes->items;
+        QVERIFY(!strokes.empty() && strokes.size() <= 3);  // (nine edges, three faces: joined into a few lines)
+        std::size_t segments = 0;
+        for (const auto& s : strokes) {
+            segments += s->points.size() - 1;
+            for (const auto& p : s->points) {
+                bool corner = false;
+                for (const auto& c : corners) corner = corner || (std::abs(p.x - c[0]) < 6e-4 && std::abs(p.y - c[1]) < 6e-4);
+                QVERIFY2(corner, "a point of the traced box is one of its corners");
+            }
+        }
+        std::size_t seen = 0;
+        for (const auto& e : prim3d::edges(*prim(doc, "box"), &camera)) seen += e.seen ? 1 : 0;
+        QCOMPARE(segments, seen);
+        QVERIFY(seen >= 4 && seen <= 9);
+    }
+
+    // A figure's lines are hidden where another prim is nearer to the viewer (SPEC FIGURE-01, 線): a box, a head or another
+    // figure in front of it, with the page's camera and without one; a prim behind it, in another panel, or seen with
+    // a camera of its own changes nothing; the same bytes each time.
+    void figureBehindAnotherPrim() {
+        namespace prim3d = genko::core::prim3d;
+        namespace mesh3d = genko::core::mesh3d;
+        Document doc = genko::core::new_episode("3D", Num(1), 1, genko::core::PageSpec::b5_doujin());
+        {
+            Layer pen;
+            pen.id = "pen";
+            pen.role = LayerRole::User;
+            pen.kind = LayerKind::Strokes;
+            doc.edit_page(0).layers.push_back(pen);
+        }
+        doc = bus().apply(doc, ops(R"([{"op": "add_figure", "page": 1, "id": "fig", "pos": [80, 130, 0], "preset": "walk"}])"), Actor("genko")).doc;
+        const auto with = [&](const Document& from, const std::string& batch) { return bus().apply(from, ops(batch), Actor("genko")).doc; };
+        // the figure's traced points (by trace_prims or render_prims' lines)
+        const auto traced = [&](const Document& from, const char* op = "trace_prims") {
+            mesh3d::clear_caches();
+            Json batch = ops(R"([{"page": 1, "layer_id": "pen", "ids": ["fig"]}])");
+            batch[0]["op"] = op;
+            if (std::string(op) == "render_prims") batch[0]["surfaces"] = false;
+            const Document d = bus().apply(from, batch, Actor("genko")).doc;
+            std::vector<prim3d::Line2> out;
+            for (const auto& s : layer(d, "pen")->strokes->items) {
+                prim3d::Line2 line;
+                for (const auto& p : s->points) line.push_back(prim3d::Point2{p.x, p.y});
+                out.push_back(std::move(line));
+            }
+            return out;
+        };
+        // how many of the points are inside (x0, y0)–(x1, y1)
+        const auto inside = [](const std::vector<prim3d::Line2>& lines, double x0, double y0, double x1, double y1) {
+            int n = 0;
+            for (const auto& line : lines) {
+                for (const auto& p : line) n += (p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1) ? 1 : 0;
+            }
+            return n;
+        };
+        // how many are more than `margin` mm inside the box's outline on the page (the hull of its corners)
+        const auto behind_box = [](const std::vector<prim3d::Line2>& lines, std::vector<prim3d::Point2> pts, double margin) {
+            std::sort(pts.begin(), pts.end());
+            const auto turn = [](const prim3d::Point2& o, const prim3d::Point2& a, const prim3d::Point2& b) {
+                return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+            };
+            std::vector<prim3d::Point2> hull;  // (Andrew's monotone chain: counter-clockwise in x right, y up)
+            for (int pass = 0; pass < 2; ++pass) {
+                const std::size_t start = hull.size();
+                for (const auto& p : pts) {
+                    while (hull.size() >= start + 2 && turn(hull[hull.size() - 2], hull.back(), p) <= 0) hull.pop_back();
+                    hull.push_back(p);
+                }
+                hull.pop_back();
+                std::reverse(pts.begin(), pts.end());
+            }
+            int n = 0;
+            for (const auto& line : lines) {
+                for (const auto& p : line) {
+                    bool in = true;
+                    for (std::size_t i = 0; i < hull.size() && in; ++i) {
+                        const auto& a = hull[i];
+                        const auto& b = hull[(i + 1) % hull.size()];
+                        in = turn(a, b, p) / std::hypot(b[0] - a[0], b[1] - a[1]) > margin;
+                    }
+                    n += in ? 1 : 0;
+                }
+            }
+            return n;
+        };
+        for (const bool camera : {false, true}) {
+            Document page = camera ? with(doc, R"([{"op": "set_camera", "page": 1, "turn": 0.3, "tip": 0.2, "target": [80, 130]}])") : doc;
+            const std::vector<prim3d::Line2> alone = traced(page);
+            QVERIFY(!alone.empty());
+            QCOMPARE(traced(page), alone);  // (the same each time)
+            // a thin box in front of the figure's middle: nothing of the figure inside it, the rest still there
+            const Document front = with(page, R"([{"op": "add_prim3d", "page": 1, "id": "wall", "kind": "box", "pos": [80, 130, -60], "size": [36, 40, 4], "rot": [0, 0, 0]}])");
+            const Json& extra = front.page(0).extra;
+            const Json* cam = mesh3d::camera_of(*prim(front, "wall"), extra.contains("camera") ? &extra["camera"] : nullptr);
+            const std::vector<prim3d::Point2> corners = prim3d::project(*prim(front, "wall"), cam);
+            const double by = prim3d::bbox(*prim(front, "wall"), cam)[1];
+            const std::vector<prim3d::Line2> hidden = traced(front);
+            QVERIFY2(behind_box(alone, corners, 2.0) > 20, "the figure has lines where the box is");
+            QCOMPARE(behind_box(hidden, corners, 2.0), 0);
+            QVERIFY(inside(hidden, 0, 0, 1000, by - 2) > 20);  // (the head and shoulders above the box)
+            QCOMPARE(traced(front), hidden);
+            const std::vector<prim3d::Line2> drawn = traced(front, "render_prims");  // (render_prims draws the same lines)
+            QVERIFY(!drawn.empty());
+            QCOMPARE(behind_box(drawn, corners, 2.0), 0);
+            // the same box behind the figure, a box in front in another panel, or one seen with a camera of its own
+            QCOMPARE(traced(with(page, R"([{"op": "add_prim3d", "page": 1, "id": "wall", "kind": "box", "pos": [80, 130, 60], "size": [36, 40, 4], "rot": [0, 0, 0]}])")), alone);
+            Document elsewhere = front;
+            for (Json& p : elsewhere.edit_page(0).prims) {
+                if (p.value("id", std::string()) == "wall") p["frame_id"] = elsewhere.page(0).leaf_frames().front()->id;
+            }
+            QCOMPARE(traced(elsewhere), alone);
+            for (Json& p : elsewhere.edit_page(0).prims) {
+                if (p.value("id", std::string()) == "fig") p["frame_id"] = elsewhere.page(0).leaf_frames().front()->id;
+            }
+            QCOMPARE(traced(elsewhere), hidden);  // (both in the one panel)
+            if (!camera) {
+                Document own = front;
+                for (Json& p : own.edit_page(0).prims) {
+                    if (p.value("id", std::string()) == "wall") p["camera"] = ops(R"({"turn": 0.3, "tip": 0.2, "target": [80, 130]})");
+                }
+                QCOMPARE(traced(own), alone);
+            }
+            // a head and another figure in front: less of the figure's lines; behind, the same lines
+            const auto length = [](const std::vector<prim3d::Line2>& lines) {
+                double sum = 0.0;
+                for (const auto& line : lines) {
+                    for (std::size_t i = 0; i + 1 < line.size(); ++i) sum += std::hypot(line[i + 1][0] - line[i][0], line[i + 1][1] - line[i][1]);
+                }
+                return sum;
+            };
+            const Document head = with(page, R"([{"op": "add_head", "page": 1, "id": "h", "pos": [80, 110, -60], "size_mm": 40}])");
+            qInfo("camera %d: the figure's lines %.1f mm, behind a head %.1f mm", camera, length(alone), length(traced(head)));
+            QVERIFY(length(traced(head)) < length(alone) - 20.0);
+            // (half in front of it: the camera's turn moves what is nearer to the right)
+            const Document other = with(page, camera ? R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [65, 135, -50], "preset": "stand"}])"
+                                                     : R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [95, 135, -50], "preset": "stand"}])");
+            qInfo("camera %d: behind another figure %.1f mm", camera, length(traced(other)));
+            QVERIFY(length(traced(other)) < length(alone) - 20.0);
+            QCOMPARE(traced(with(page, R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [95, 135, 50], "preset": "stand"}])")), alone);
+        }
     }
 
     // 3D guides are drawn in the proof and the name, never printed; a region drawn alone is the whole page cut.

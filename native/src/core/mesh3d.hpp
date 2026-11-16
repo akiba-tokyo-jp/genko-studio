@@ -127,6 +127,14 @@ std::vector<Vec3> seen_normals(const Json& prim, const Model& model, const Json*
 // Each face's unit normal as the prim is seen (its own turn, then the camera's): _normals(_turned(…)).
 std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* camera);
 
+// Points of a prim's own space as it is seen (its own turn, then the camera's) and where the eye is among them (to_page's
+// projection centre): the side of a face the eye is on, for a box's edges seen through a camera.
+struct InView {
+    std::vector<Vec3> pts;
+    Vec3 eye{};
+};
+InView in_view(const Json& prim, std::span<const Vec3> local, const Json* camera);
+
 // Shaded surfaces (1 = lit white; float32 as numpy has them) and the depth buffer (inf where there is no surface),
 // for the prims with meshes, drawn at dpi over a picture of width × height px whose top-left is (box_x, box_y) mm.
 // `light` is the light's direction (null: the usual one). With a window only that part of the picture is made (its
@@ -156,10 +164,13 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
 
 // The lines a pen would draw (page mm): outlines and creases of the meshes, the face guides, hidden parts left out. A
 // smooth model draws its outlines only (where the surface turns away from the eye, through its triangles), simplified
-// to within 0.03 mm.
-std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi = 40.0, double crease_deg = 40.0);
-// A mesh prim's pen lines (remembered while the prim and its camera are unchanged).
-std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi = 40.0);
+// to within 0.03 mm. `hiders` are prims that draw no lines but whose surfaces hide them too, as raster draws them with
+// the same camera (SPEC FIGURE-01, 線: the other prims in front of a figure); none: the lines as before.
+std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi = 40.0, double crease_deg = 40.0,
+                         std::span<const Json> hiders = {});
+// A mesh prim's pen lines (remembered while the prim, its camera and its hiders are unchanged).
+std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi = 40.0,
+                                                     std::span<const Json> hiders = {});
 
 // The pen lines of the prims again, without what is remembered (the tests use this).
 void clear_caches();
