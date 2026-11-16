@@ -903,3 +903,12 @@
 - 手で決めたもの（探索が止まったもの）: `pinup/stool_hands_seat`（両腕の x 0.21 → 0.35: 手を座面の前寄りへ、前腕が太ももに入らない）、`two_people/console` の b（肘を 0.15 曲げ、手が太ももに入らない）、`couple/piggyback`（背負われる b の脚を広く〔z 0.55 → 0.9、x 1.35 → 1.2〕・少し高く近く〔offset −1.15, 0.9 → −1.3, 0.86〕、背負う a の腕を外へ〔z 0.41 → 0.6〕）、`sit_floor/meditation`（膝の関節が床から 1.1 u を超えないよう、膝の高さも数えて探し直した）。
 - 見たもの: 全分類の一覧の絵を書き直し、床に座る・寝る・見せポーズ・二人組と、大きく動いたポーズ（上の 4 つと `pinup/legs_out_ankles_crossed`・`pinup/knees_up_hair`・`pinup/elbows_recline`・`two_people/floor_chat`・`lie/side_head_on_arm`）を元の角度と並べて見た（同じポーズに見える。腰が床に付き、浮いた足が無い）。全ポーズを 1 つずつ見直してはいない（利用者の目でもまだ見ていない）。
 
+### 2 回目（同じ日。体の硬い線・段を無くした後）
+
+体の 2 回目の直し（腰の横の棚・肩の筋・首の継ぎ目など。SPEC FIGURE-01）で、確かめに落ちた 23 ポーズだけを直した（閾値と関節の範囲は同じ。1 回目と合わせて、元から変わったポーズは 286）。
+
+- なぜ: そけい部と尻・太もものつなぎの幅を広くした（0.16 → 0.3 u）ので、座った底が約 0.04 u ふくらみ、床に座るポーズで足が床から 0.03〜0.06 u 浮いた（限りは 0.03 u）。肩の球を胴から外して形が変わり、相手の肩に置いた手の深さ・届き方が変わった。
+- 一人のポーズ 16（関節の角度だけ。最大の変化の中央値 0.2 rad、最大 0.5 rad）: `sit_floor/` hug_knees・face_on_knees・legs_out・legs_apart・knees_up_arms・game・phone・look_back・hug_one_knee・legs_out_crossed_arms・knees_chin、`relax_bed/` wake_stretch・hug_knees_tilt・front_sprawl・sofa_side_lie、`stand/wall_lean_shoulder`（左の上腕が胴へ半径の 0.502 入っていた: 腕の x 0.1885 → 0.2135、肘 1.677 → 1.6895）。
+- 二人組 7: `couple/back_to_back_sit`（二人の足）、`two_people/` shoulder_buddies（b の置き場所）・help_up（b の足と高さ）・console（b を 0.18 u 離す）・push_back（0.06 u 近づける）・floor_chat（足）・shoulder_support（置き場所と向き −0.06）。
+- 手で決めたもの: `relax_bed/front_sprawl`（うつ伏せで骨盤が床から 0.037 u 浮いた。背骨の x を 0.025 → 0.05 にしてから探索: 腕の x −0.2684 → −0.2184・z ±1.3939 → ±1.4939、脚の x 0.0375 → 0.025）。
+- 直し方と道具は 1 回目と同じ（`refit.cpp`・`refit_pair.cpp`、一人は `merge.py`、二人は `merge_pairs.py`）。
