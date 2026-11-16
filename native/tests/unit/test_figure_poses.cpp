@@ -11,9 +11,12 @@
 #include <QCryptographicHash>
 #include <QTemporaryDir>
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -284,9 +287,14 @@ private slots:
         QFETCH(QString, category);
         library::Filter filter;
         filter.category = category.toStdString();
-        std::vector<genko::test::pose_sheets::Entry> entries;
-        std::string failed;
-        for (const Json* pose : library::list(filter)) {
+        // (every pose is checked whole on its own; the poses share out over a few threads — each figure is meshed once,
+        // about 2.5 s under ASan — and their words and entries are put together in the library's order)
+        const std::vector<const Json*> poses = library::list(filter);
+        std::vector<std::string> said(poses.size());
+        std::vector<std::optional<genko::test::pose_sheets::Entry>> made(poses.size());
+        const auto check_one = [&](std::size_t i) {
+            const Json* pose = poses[i];
+            std::string& failed = said[i];
             if (library::is_pair(*pose)) {  // (a pair: both people and the two together, and the mirror of it)
                 const checks::PairReport pr = checks::check_pair(*pose);
                 if (!pr.ok()) failed += pr.id + issues_text(pr.issues) + "\n";
@@ -301,8 +309,8 @@ private slots:
                     std::fabs(two[1]["pos"][2].get<double>() - twin[1]["pos"][2].get<double>()) > 2e-4) {
                     failed += pr.id + "\n  mirror: b is not where the reflection puts it\n";
                 }
-                entries.push_back({*pose, pr.a, pr});
-                continue;
+                made[i] = genko::test::pose_sheets::Entry{*pose, pr.a, pr};
+                return;
             }
             const checks::Report r = checks::check_pose(*pose);
             if (!r.ok()) failed += r.id + issues_text(r.issues) + "\n";
@@ -315,7 +323,22 @@ private slots:
                 const auto in = checks::check_inside(checks::figure_of(*pose, 120.0, Json::object({{"sex", sex}})));
                 if (!in.empty()) failed += r.id + " (" + sex + ")" + issues_text(in) + "\n";
             }
-            entries.push_back({*pose, r, std::nullopt});
+            made[i] = genko::test::pose_sheets::Entry{*pose, r, std::nullopt};
+        };
+        const std::size_t workers = std::max<std::size_t>(1, std::min<std::size_t>({4, std::thread::hardware_concurrency(), poses.size()}));
+        std::atomic<std::size_t> next{0};
+        std::vector<std::thread> pool;
+        for (std::size_t w = 0; w < workers; ++w) {
+            pool.emplace_back([&] {
+                for (std::size_t i = next++; i < poses.size(); i = next++) check_one(i);
+            });
+        }
+        for (std::thread& t : pool) t.join();
+        std::vector<genko::test::pose_sheets::Entry> entries;
+        std::string failed;
+        for (std::size_t i = 0; i < poses.size(); ++i) {
+            failed += said[i];
+            entries.push_back(std::move(*made[i]));
         }
         if (!sheets_dir().empty()) {
             for (const auto& e : entries) {
