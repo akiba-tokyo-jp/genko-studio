@@ -226,6 +226,7 @@ Field hand_field(double length, const HandShape& shape, const Stub& stub) {
 // relief (the brow, the eyes' shallow sockets and their lids, the nose and its bridge, closed lips), small ears flat
 // against the head between the eyes' and the nose's height ------------------------------------------------------------
 
+constexpr double kHeadNormalSteps = 1.0;  // (the head's light: its relief is a few cells across — surface_nets::mesh)
 constexpr std::size_t kPlainHead = 5;  // (the head's first pieces: the skull, the face, the chin and the jaw's corners, without the relief)
 
 Part head_part(const Vec3& centre, const Mat3& turn, double u) {
@@ -238,26 +239,28 @@ Part head_part(const Vec3& centre, const Mat3& turn, double u) {
     p.push_back(ellipsoid(at(0.0, 0.14, -0.1), turn, r(0.29, 0.39, 0.335)));     // the face
     p.push_back(with_blend(ellipsoid(at(0.0, 0.4, -0.235), turn, r(0.16, 0.125, 0.135)), 0.14 * u));  // the chin
     pair(p, ellipsoid(at(0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), ellipsoid(at(-0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), 0.14 * u);  // the jaw's corners
-    p.push_back(with_blend(ellipsoid(at(0.0, -0.04, -0.24), turn, r(0.3, 0.12, 0.2)), 0.14 * u));     // the brow
-    // the nose: its bridge down to the tip, the wings
-    p.push_back(with_blend(cone(at(0.0, 0.0, -0.385), 0.05 * u, at(0.0, 0.165, -0.462), 0.055 * u), 0.1 * u));
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.183, -0.437), turn, r(0.066, 0.045, 0.06)), 0.09 * u));
-    // the round of the teeth under the mouth
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.13)), 0.08 * u));
-    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.06 * u);  // the ears
-    // The face's low relief, as swells (no edge anywhere, whatever the grid): the eyes — a shallow socket under the
-    // brow beside the nose's bridge, the closed lid in it —, the two lips closed on each other, the hollow of each ear.
+    p.push_back(with_blend(ellipsoid(at(0.0, -0.04, -0.24), turn, r(0.3, 0.12, 0.2)), 0.12 * u));     // the brow
+    // The face's low relief is made of swells (no edge anywhere), each at least three of the head's grid cells across —
+    // a form finer than the grid shows as noise, so a small form is made larger and softer, never finer.
     const auto both = [&](double x, double y, double z, const Vec3& size, double amount) {
         Piece one = swell(at(x, y, z), turn, size, amount * u);
         one.paired = true;
         p.push_back(std::move(one));
         p.push_back(swell(at(-x, y, z), turn, size, amount * u));
     };
-    both(0.15, 0.065, -0.39, r(0.14, 0.105, 0.14), -0.024);
-    both(0.152, 0.072, -0.385, r(0.105, 0.08, 0.12), 0.011);
-    p.push_back(swell(at(0.0, 0.28, -0.41), turn, r(0.11, 0.045, 0.09), 0.012 * u));
-    p.push_back(swell(at(0.0, 0.335, -0.405), turn, r(0.095, 0.045, 0.09), 0.012 * u));
-    both(0.35, 0.1, 0.062, r(0.05, 0.062, 0.036), -0.013);
+    // the eyes: a socket under the brow on each side of the nose's bridge (they end short of it: the bridge parts
+    // them), the closed lid a swell in each
+    both(0.16, 0.07, -0.39, r(0.105, 0.09, 0.14), -0.04);
+    both(0.16, 0.08, -0.385, r(0.082, 0.06, 0.12), 0.034);
+    // the nose: its bridge down to the tip (set after the sockets: it stands clear between them)
+    p.push_back(with_blend(cone(at(0.0, 0.0, -0.385), 0.045 * u, at(0.0, 0.165, -0.468), 0.05 * u), 0.08 * u));
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.183, -0.443), turn, r(0.068, 0.047, 0.06)), 0.07 * u));
+    // the mouth: the round of the teeth, the closed lips on it as one soft form, the hollow between the lips and the chin
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.13)), 0.08 * u));
+    p.push_back(swell(at(0.0, 0.305, -0.41), turn, r(0.115, 0.06, 0.09), 0.02 * u));
+    p.push_back(swell(at(0.0, 0.385, -0.375), turn, r(0.11, 0.055, 0.09), -0.012 * u));
+    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.06 * u);  // the ears
+    both(0.35, 0.1, 0.062, r(0.05, 0.062, 0.036), -0.013);  // (and the hollow of each)
     return head;
 }
 
@@ -338,13 +341,14 @@ struct Sex {
     double hand = 1.0;
     double neck = 1.0;
     int chest = 0;  // 1 pectorals, 2 breasts
+    double crest = 0.13;  // (how much narrower than the thighs' tops the crest of the hips may be)
 };
 
 Sex sex_of(const Json& body) {
     const Json* sex = get(body, "sex");
     const std::string name = sex != nullptr && sex->is_string() ? sex->get<std::string>() : std::string();
     if (name == "male") return Sex{1.02, 1.04, 1.04, 0.97, 0.95, 1.08, 1.0, 1.0, 1.06, 1};
-    if (name == "female") return Sex{1.05, 0.97, 1.02, 1.0, 1.08, 1.0, 1.06, 0.92, 0.92, 2};
+    if (name == "female") return Sex{1.05, 0.97, 1.02, 1.0, 1.08, 1.0, 1.06, 0.92, 0.96, 2, 0.1};
     return Sex{};
 }
 
@@ -449,9 +453,10 @@ Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round) 
     return p;
 }
 
-Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount) {
+Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount, bool flat) {
     Piece p;
     p.kind = Piece::Kind::Swell;
+    p.round = flat ? 1.0 : 0.0;
     p.a = centre;
     p.axes = axes;
     p.size = radii;
@@ -693,7 +698,7 @@ inline bool beyond(const Piece& p, const Vec3& x, double least) {
     return dx * dx + dy * dy + dz * dz >= r * r;
 }
 
-// How far a swell lifts the surface at x: its amount × (1 − r²)³ within its ellipsoid.
+// How far a swell lifts the surface at x: its amount × (1 − r²)³ within its ellipsoid (a flat one: (1 − r⁴)³).
 inline double lift_of(const Piece& p, const Vec3& x) {
     const Vec3 r = sub(x, p.a);
     if (!(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] < p.reach * p.reach)) return 0.0;  // (outside the ball that holds it)
@@ -701,7 +706,8 @@ inline double lift_of(const Piece& p, const Vec3& x) {
     const double qx = q[0] / p.size[0];
     const double qy = q[1] / p.size[1];
     const double qz = q[2] / p.size[2];
-    const double t = 1.0 - (qx * qx + qy * qy + qz * qz);
+    const double r2 = qx * qx + qy * qy + qz * qz;
+    const double t = p.round > 0.0 ? 1.0 - r2 * r2 : 1.0 - r2;
     return t > 0.0 ? p.ra * (t * t * t) : 0.0;
 }
 
@@ -931,7 +937,10 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     const Station ribs = st(-1.92, r_chest, 0.55 * d_chest, -0.015 * dd);
     const Station low = st(-1.3, r_ribs, 0.47 * d_chest, -0.035 * dd);
     const Station waist = st(-0.92, r_waist, 0.4 * dd, -0.035 * dd);
-    const Station crest = st(-0.3, 0.42 * r_waist + 0.58 * r_pelvis, 0.425 * dd, -0.025 * dd);
+    // (the crest is never much narrower than the thighs' tops beside the hip joints — wide hips flare from the waist
+    // to the crest and on to the trochanters in one curve, with no step out to the thigh)
+    const double r_crest = std::max(0.42 * r_waist + 0.58 * r_pelvis, d.hw + 0.395 * d.leg - sx.crest * g);
+    const Station crest = st(-0.3, r_crest, 0.425 * dd, -0.025 * dd);
     const Station lean{0.0, 0.0, 0.0, -0.14 * dd};  // (the ribcage's dome: its middle goes back by this for each u up)
     // The trunk is this one run, set in the body standing straight; it bends with the spine (Bend): rigid with the
     // pelvis below the pelvis joint, with the chest above the waist joint and what is 0.35 u over it, and the two
@@ -977,7 +986,8 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     const Vec3 rsr = shoulder_rest(rs);
     {
         const auto trapezius = [&](const Vec3& shoulder, double side) {
-            const Vec3 inner = rest(side * 0.1, -2.86, 0.1);
+            // (a woman's begins higher on the neck: her narrower neck does not read long)
+            const Vec3 inner = rest(side * 0.1, sx.chest == 2 ? -2.98 : -2.86, 0.1);
             const Vec3 outer = add(shoulder, rest(-side * 0.1, -0.03, 0.03));
             Piece e = ellipsoid(mul(add(inner, outer), 0.5), frame_along(sub(outer, inner)), Vec3{0.5 * length(sub(outer, inner)) + 0.1 * u, 0.17 * u * g, 0.2 * u * g});
             e.rest = true;
@@ -1034,14 +1044,15 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
         };
         relief_pair(bone(1.0), bone(-1.0));
     }
-    // the chest: the pectorals (a man's fuller), each a broad swell with a firmer lower edge
+    // the chest: the pectorals (a man's fuller): each one broad, even swell from beside the breastbone (the two leave
+    // a shallow hollow down the middle) out toward the arm and up over the collarbone — its soft edge shows below and
+    // along the middle only, as a pectoral's does
     if (sx.chest != 2) {
         const double full = sx.chest == 1 ? 1.0 : 0.4;
-        const double px = 0.36 * sh * g;
-        relief_pair(swell(rest(px, -2.2, -0.47 * d_chest), kIdentity, radii(0.4 * sh * g, 0.36, 0.28), 0.036 * u * full),
-                    swell(rest(-px, -2.2, -0.47 * d_chest), kIdentity, radii(0.4 * sh * g, 0.36, 0.28), 0.036 * u * full));
-        relief_pair(swell(rest(px, -2.1, -0.49 * d_chest), kIdentity, radii(0.38 * sh * g, 0.25, 0.25), 0.01 * u * full),
-                    swell(rest(-px, -2.1, -0.49 * d_chest), kIdentity, radii(0.38 * sh * g, 0.25, 0.25), 0.01 * u * full));
+        const double px = 0.375 * sh * g;
+        const Vec3 size = radii(0.48 * sh * g, 0.56, 0.6);
+        relief_pair(swell(rest(px, -2.45, -0.47 * d_chest), kIdentity, size, 0.04 * u * full, true),
+                    swell(rest(-px, -2.45, -0.47 * d_chest), kIdentity, size, 0.04 * u * full, true));
     }
     return out;
 }
@@ -1095,8 +1106,8 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         Mat3 m{};
         for (std::size_t r = 0; r < 3; ++r) m[r] = Vec3{e0[r], up[r], e2[r]};
         neck = loft(neck_low, m,
-                    {Station{0.0, 0.33 * u * nk, 0.3 * u * nk, 0.0}, Station{0.62 * neck_len, 0.25 * u * nk, 0.25 * u * nk, 0.012 * u},
-                     Station{neck_len, 0.25 * u * nk, 0.24 * u * nk, 0.02 * u}, Station{neck_len + 0.2 * u, 0.245 * u * nk, 0.235 * u * nk, 0.0}},
+                    {Station{0.0, 0.33 * u * nk, 0.3 * u * nk, 0.0}, Station{0.62 * neck_len, 0.218 * u * nk, 0.228 * u * nk, 0.012 * u},
+                     Station{neck_len, 0.212 * u * nk, 0.218 * u * nk, 0.02 * u}, Station{neck_len + 0.2 * u, 0.21 * u * nk, 0.215 * u * nk, 0.0}},
                     0.3 * u, 0.3 * u);
     }
     const double ring = dot3(down, neck_top) + 0.2 * u;  // (where down · x is this)
@@ -1184,7 +1195,15 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             p.pieces.push_back(loft(hip, thigh_r, stations_of(leg_run, 0, 3, 0.0), 0.5 * u * leg, r_knee * u, &slopes, 0.7));
             // (the inner thigh: the two meet under the crotch, when the build fills the room between the hips)
             const double inner = std::max(0.0, std::min(dm.hw - 0.3 * leg, 0.26 * leg));
-            p.pieces.push_back(with_blend(ellipsoid(off(hip, thigh_r, med * (0.6 * inner + 0.02), 0.72 * legs, 0.01), thigh_r, radii(0.3 * leg, 0.82 * legs, 0.3 * leg)), 0.25 * u));
+            // (and with wide hips it reaches almost to the middle: the gap between the legs stays small and low)
+            // (with wide hips it reaches further toward the other leg, fullest just under the crotch and shorter: the
+            // gap between the legs is narrow at its top and opens downward. The two never come nearer than two of
+            // the grid's cells — a thinner slit between two forms would be drawn ragged)
+            const double usual = 0.6 * inner + 0.02;
+            const double toward = std::max(usual, dm.hw - 0.3 * leg - 0.075);
+            const double more = toward - usual;
+            p.pieces.push_back(
+                with_blend(ellipsoid(off(hip, thigh_r, med * toward, (0.72 - 2.5 * more) * legs, 0.01), thigh_r, radii(0.3 * leg, (0.82 - 2.5 * more) * legs, 0.3 * leg)), 0.25 * u));
             f.parts.push_back(std::move(p));
         }
         const int thigh = static_cast<int>(f.parts.size()) - 1;
@@ -1263,10 +1282,11 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         under.fade_d = ring - 0.01 * u;
         hf.parts.push_back(std::move(under));
         hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.22), 0.24 * u, 0.5 * u, 0.0});  // (at the nape)
-        hf.joints.push_back(Joint{0, 1, neck_top, 0.15 * u, 0.5 * u, 0.5});                        // (under the jaw)
+        hf.joints.push_back(Joint{0, 1, neck_top, 0.1 * u, 0.5 * u, 0.5});                         // (under the jaw)
         hf.joints.push_back(Joint{2, 1, neck_joint.at, neck_joint.k, neck_joint.radius, neck_joint.flat});
-        Smooth hm = surface_nets::mesh(hf, u / kHeadCells);
-        plain_normals(hm, hf, {1, 2}, u, [&](const Vec3& x) { return dot3(down, x) > ring - 0.03 * u; });
+        Smooth hm = surface_nets::mesh(hf, u / kHeadCells, kHeadNormalSteps);
+        // (from two of the head's cells above where the thinning begins: the head's wider slope reaches that far)
+        plain_normals(hm, hf, {1, 2}, u, [&](const Vec3& x) { return dot3(down, x) > ring - 0.08 * u; });
         // (the outline of the neck changes from the body's to the head's at the ring)
         for (std::size_t i = 0; i < hm.v.size(); ++i) {
             if (hm.part[i] != 0 && dot3(down, hm.v[i]) > ring) hm.no_contour[i] = 1;
@@ -1317,7 +1337,7 @@ FigureMesh head(double u) {
     Field f;
     f.parts.push_back(head_part(Vec3{0.0, 0.0, 0.0}, kIdentity, u));
     FigureMesh out;
-    out.mesh = surface_nets::mesh(f, u / kHeadCells);
+    out.mesh = surface_nets::mesh(f, u / kHeadCells, kHeadNormalSteps);
     plain_outline(out.mesh, f.parts[0], u);
     out.marks = marks_on(f.parts[0], Vec3{0.0, 0.0, 0.0}, kIdentity, u);
     return out;

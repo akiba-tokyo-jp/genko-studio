@@ -55,7 +55,7 @@ struct Piece {
     double rb = 0;  // cone: the radius at b; loft: of its last end
     Mat3 axes{};    // ellipsoid, box, loft, swell: its axes as columns (a turn; a loft runs along y)
     Vec3 size{};    // ellipsoid, swell: its radii; box: its half sizes; loft: how full its two domes are
-    double round = 0;  // box: the rounding
+    double round = 0;  // box: the rounding; swell: more than 0 when it is flat
     std::vector<double> loft;  // loft: its stations and the cubics between them (see loft())
 
     double at(const Vec3& x) const;
@@ -64,7 +64,9 @@ struct Piece {
 Piece cone(const Vec3& a, double ra, const Vec3& b, double rb);
 Piece ellipsoid(const Vec3& centre, const Mat3& axes, const Vec3& radii);
 Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round);
-Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount);
+// (`flat`: the swell keeps most of its amount over its middle and falls off nearer the rim, as (1 − r⁴)³ does — a
+// broad even form with a soft edge: a pectoral)
+Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount, bool flat = false);
 // A loft from the first station to the last (y rising; two or more) in the frame `axes` at `origin`: between the
 // stations the section's numbers run as cubics through them, and each end is closed by half an ellipsoid as high as
 // cap0 and cap1 (its middle going on as zc slopes at the end: a dome that leans). A run is best begun and ended where

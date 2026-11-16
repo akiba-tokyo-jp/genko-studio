@@ -15,7 +15,10 @@
 namespace genko::core::surface_nets {
 
 // The surface of `field` (within its bounds, two steps more), on a grid of step h. A point is marked
-// no_contour when the part nearest to it is; `part` says which part that is.
-figure_shape::Smooth mesh(const figure_shape::Field& field, double h);
+// no_contour when the part nearest to it is; `part` says which part that is. The normals are the field's slope over
+// `normal_steps` × h to each side: 0.4 keeps a fold between two forms crisp; a whole step or more is for a surface
+// whose relief is only a few cells across (a face) — the light then shows the relief the grid can carry and none of
+// what it cannot (which would show as a mottle).
+figure_shape::Smooth mesh(const figure_shape::Field& field, double h, double normal_steps = 0.4);
 
 }  // namespace genko::core::surface_nets

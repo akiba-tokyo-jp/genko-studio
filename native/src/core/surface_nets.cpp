@@ -40,7 +40,7 @@ constexpr int kEdges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {
 
 }  // namespace
 
-Smooth mesh(const Field& field, double h) {
+Smooth mesh(const Field& field, double h, double normal_steps) {
     Smooth out;
     const std::size_t parts = field.parts.size();
     if (parts == 0 || !(h > 0.0) || !std::isfinite(h)) return out;
@@ -128,7 +128,7 @@ Smooth mesh(const Field& field, double h) {
 
     // 2. a point in each cell the surface crosses
     const double step = h * 0.05;  // (the gradient's step)
-    const double normal_step = h * 0.4;
+    const double normal_step = h * normal_steps;
     for (Brick& b : bricks) {
         const auto f = [&](const Vec3& x) { return field.at(x, b.use.data(), d.data()); };
         const auto gradient = [&](const Vec3& x, double e) {
@@ -179,7 +179,7 @@ Smooth mesh(const Field& field, double h) {
                         for (int a = 0; a < 3; ++a) p[a] = std::min(base[a] + 1.5 * h, std::max(base[a] - 0.5 * h, q[a]));
                         if (it == 1) (void)field.at(p, b.use.data(), d.data(), &nearest);
                     }
-                    // (the normal: the field's slope over a wider step, 0.4 h — along a crease it turns from one side's
+                    // (the normal: the field's slope over a wider step, 0.4 h or what is asked — along a crease it turns from one side's
                     // to the other's over the points beside it, so the light shows a clean fold, not a ragged one)
                     const Vec3 g = gradient(p, normal_step);
                     const double n2 = g[0] * g[0] + g[1] * g[1] + g[2] * g[2];
