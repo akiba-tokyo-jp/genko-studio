@@ -185,6 +185,8 @@ void MainWindow::build_guide_actions() {
     make("act_trace", QStringLiteral("3D を線にする（描く先のレイヤーへ）"), [this] { trace_prims(false); }, {},
          QStringLiteral("このページの 3D を鉛筆の線にして下描きにします"));
     make("act_del_prim", QStringLiteral("選んだ 3D を消す"), [this] { guides_->delete_prim(); });
+    make("act_pose_gallery", QStringLiteral("ポーズ集…"), [this] { guides_->pose_gallery(); }, {},
+         QStringLiteral("立つ・座る・寝る・感情・物を持つ…の数百のポーズから選んで、選んだデッサン人形に付けます"));
     for (const auto& [key, label] : kPoses) {
         auto* act = new QAction(QStringLiteral("ポーズ: %1").arg(QString::fromUtf8(label)), this);
         const std::string preset = key;
@@ -214,6 +216,7 @@ void MainWindow::build_guide_menus(QMenu* tools) {
     three->addAction(action("act_import_obj"));
     QMenu* poses = three->addMenu(QStringLiteral("ポーズ"));
     for (QAction* act : pose_actions_) poses->addAction(act);
+    three->addAction(action("act_pose_gallery"));
     three->addAction(action("act_trace"));
     three->addAction(action("act_del_prim"));
 }
@@ -240,6 +243,7 @@ void MainWindow::build_guide_pages(ToolSettings* ts) {
                                                                                      scene_actions_,
                                                                                      {action("act_import_obj")}})),
                          QStringLiteral("動かす・線にする"), static_cast<QWidget*>(menu_button(QStringLiteral("人形のポーズ"), {pose_actions_})),
+                         action("act_pose_gallery"),
                          action("act_trace"), action("act_del_prim")}));
 }
 

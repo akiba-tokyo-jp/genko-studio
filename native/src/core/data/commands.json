@@ -464,6 +464,7 @@
 {"id":"ポーズ: 立つ","name":"ポーズ: 立つ","old_names":[],"menu":["ツール","3D","ポーズ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"ポーズ: 考える","name":"ポーズ: 考える","old_names":[],"menu":["ツール","3D","ポーズ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"ポーズ: 走る","name":"ポーズ: 走る","old_names":[],"menu":["ツール","3D","ポーズ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
+{"id":"act_pose_gallery","name":"ポーズ集…","old_names":[],"menu":["ツール","3D"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_magic_eraser","name":"マジック消しゴムツール","old_names":[],"menu":["ツール"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":true},
 {"id":"マスクを反転","name":"マスクを反転","old_names":[],"menu":["レイヤー","レイヤーマスク"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_mask_edit","name":"マスクを編集する（ブラシで見せる・消しゴムで隠す）","old_names":["マスクを編集する（ペンで見せる・消しゴムで隠す）"],"menu":["レイヤー","レイヤーマスク"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},

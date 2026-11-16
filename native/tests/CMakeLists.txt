@@ -981,6 +981,10 @@ if(GENKO_BUILD_APP)
   # the same seed, the exact number of panels, variations and ガチャに戻る, an idea laid as real panels (one Undo, saved and
   # read back), the question first, the layout kept as a template and laid again (an inset's page, drawn panels)
   genko_test(test_gui_komawari SOURCES gui/test_gui_komawari.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # 人形のポーズ集 G4 (SPEC FIGURE-02): ツール → 3D → ポーズ集… and the panel's button — the categories and counts, the search,
+  # the views, 左右反転, 足もとを保つ, ランダム from a seed, the pictures on worker threads (the figure's body), a pose put on the
+  # figure by a double-click or Enter as one change (Undo)
+  genko_test(test_gui_poses SOURCES gui/test_gui_poses.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
   # processes (AC-SAVE 1, 8); `genko` alone
   genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)

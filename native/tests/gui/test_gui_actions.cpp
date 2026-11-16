@@ -471,7 +471,8 @@ private slots:
         // (and コマ割り K2's 1: ページ → コマ → コマ割りの案を出す… (act_komawari) — test_gui_komawari: 820＋1)
         // (and 今風のフキダシ B2's 1: ページ → 台詞 → フキダシのパレットを開く (act_balloon_palette) — test_gui_fukidashi: 821＋1)
         // (and 書体の追加 F2-C's 1: ページ → 台詞 → 書体のパレットを開く (act_font_palette) — test_gui_fonts: 822＋1)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{823});
+        // (and 人形のポーズ集 G4's 1: ツール → 3D → ポーズ集… (act_pose_gallery) — test_gui_poses: 823＋1)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{824});
         {
             // (コマ割り K2: its words, tip, keys and place — what it does: test_gui_komawari)
             QAction* ideas = w->action(QStringLiteral("act_komawari"));

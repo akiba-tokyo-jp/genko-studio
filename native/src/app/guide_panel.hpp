@@ -24,6 +24,7 @@ class QSpinBox;
 namespace genko::app {
 
 class MainWindow;
+class PoseGallery;
 
 // "直線定規", "パース定規（2 点）", "対称定規（6 方向）", "… ・ コマの中だけ".
 QString ruler_label(const core::Json& ruler);
@@ -40,6 +41,9 @@ public:
     void delete_prim();
     void keep_pose(const std::optional<QString>& name = std::nullopt);
     void body_dialog();
+    // ポーズ集… (人形のポーズ集 G4): the pose library for the selected figure (else the page's first), one window kept
+    void pose_gallery();
+    PoseGallery* gallery() const { return gallery_; }
     void camera_dialog();
     void render_dialog();
 
@@ -59,6 +63,7 @@ public:
     QDoubleSpinBox* size = nullptr;
     QSlider* focal = nullptr;
     QPushButton* body_button = nullptr;
+    QPushButton* gallery_button = nullptr;  // ポーズ集…
     QPushButton* save_pose = nullptr;
     QCheckBox* ik = nullptr;
 
@@ -79,6 +84,7 @@ private:
     void choose_preset();
 
     MainWindow* window_ = nullptr;
+    PoseGallery* gallery_ = nullptr;
     bool loading_ = false;
 };
 

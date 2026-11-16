@@ -25,8 +25,10 @@
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/pose_gallery.hpp"
 #include "app/theme.hpp"
 #include "core/mesh3d.hpp"
+#include "core/pose_library.hpp"
 #include "core/poses.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -200,6 +202,10 @@ GuidePanel::GuidePanel(MainWindow* window) : window_(window) {
     body_button = new QPushButton(QStringLiteral("体型・手…"));
     body_button->setToolTip(QStringLiteral("デッサン人形の等身・肩幅・腰幅・体格・脚の長さと、手のポーズ（手のモデルはその形）"));
     connect(body_button, &QPushButton::clicked, this, [this] { body_dialog(); });
+    gallery_button = new QPushButton(QStringLiteral("ポーズ集…"));
+    gallery_button->setObjectName(QStringLiteral("pose_gallery_button"));
+    gallery_button->setToolTip(QStringLiteral("立つ・座る・寝る・感情・物を持つ…の数百のポーズから選んで、選んだデッサン人形に付けます"));
+    connect(gallery_button, &QPushButton::clicked, this, [this] { pose_gallery(); });
     auto* camera = new QPushButton(QStringLiteral("カメラ・光…"));
     camera->setToolTip(QStringLiteral("このページの 3D をまとめて見る向き・画角と、光の向き"));
     connect(camera, &QPushButton::clicked, this, [this] { camera_dialog(); });
@@ -213,10 +219,11 @@ GuidePanel::GuidePanel(MainWindow* window) : window_(window) {
     ik->setChecked(settings()->value(QStringLiteral("3d/ik"), true).toString().toLower() == QLatin1String("true"));
     connect(ik, &QCheckBox::toggled, this, [](bool on) { settings()->setValue(QStringLiteral("3d/ik"), on); });
     more->addWidget(body_button, 0, 0);
-    more->addWidget(camera, 0, 1);
-    more->addWidget(surfaces, 1, 0);
-    more->addWidget(save_pose, 1, 1);
-    more->addWidget(ik, 2, 0, 1, 2);
+    more->addWidget(gallery_button, 0, 1);
+    more->addWidget(camera, 1, 0);
+    more->addWidget(surfaces, 1, 1);
+    more->addWidget(save_pose, 2, 0);
+    more->addWidget(ik, 3, 0, 1, 2);
     auto* prim_form = new QFormLayout;
     prim_form->addRow(QStringLiteral("ポーズ"), preset);
     prim_form->addRow(QStringLiteral("向き"), turn);
@@ -276,7 +283,13 @@ void GuidePanel::refresh() {
             QString label = QStringLiteral("%1 %2").arg(label_of(kind_labels(), kind)).arg(n);
             if (kind == "mesh" && !str_at(p, "title").empty()) label = QStringLiteral("モデル「%1」").arg(QString::fromStdString(str_at(p, "title")));
             const std::string pose = str_at(p, "preset");
-            if (!pose.empty()) {
+            if (const std::string from = str_at(p, "pose_id"); !from.empty()) {  // (人形のポーズ集: the pose's name)
+                const auto named = core::pose_library::resolve(from);
+                if (named) {
+                    label += QStringLiteral("（%1%2）").arg(QString::fromStdString(named->value("ja", from)),
+                                                           from.ends_with(core::pose_library::kMirror) ? QStringLiteral("・反転") : QString());
+                }
+            } else if (!pose.empty()) {
                 label += QStringLiteral("（%1）").arg(has(stick_poses(), pose) ? label_of(stick_poses(), pose) : label_of(figure_poses(), pose));
             }
             auto* item = new QListWidgetItem(label);
@@ -353,6 +366,7 @@ void GuidePanel::show_prim() {
     }
     preset->setEnabled(figure || kind == "hand");
     body_button->setEnabled(kind == "figure" || kind == "hand");
+    gallery_button->setEnabled(kind == "figure");
     save_pose->setEnabled(kind == "figure");
     focal->setEnabled(kind != "mannequin");
     const auto r = rot_of(*p);
@@ -538,6 +552,33 @@ void GuidePanel::keep_pose(const std::optional<QString>& asked) {
     }
     show_prim();
     window_->flash(QStringLiteral("ポーズ「%1」を残しました（ポーズの一覧の「自分: …」）").arg(name.trimmed()), 4000);
+}
+
+void GuidePanel::pose_gallery() {
+    const auto target = [this]() -> std::optional<PoseGallery::Target> {
+        const core::Page* page = window_->current_page();
+        if (page == nullptr || !page->prims.is_array()) return std::nullopt;
+        const Json* chosen = prim();
+        if (chosen == nullptr || str_at(*chosen, "kind") != "figure") {
+            chosen = nullptr;
+            for (const Json& p : page->prims)
+                if (chosen == nullptr && str_at(p, "kind") == "figure") chosen = &p;
+        }
+        if (chosen == nullptr) return std::nullopt;
+        return PoseGallery::Target{page->index.json(), str_at(*chosen, "id"), chosen->contains("body") ? (*chosen)["body"] : Json::object()};
+    };
+    if (!target()) {
+        window_->flash(QStringLiteral("先にデッサン人形を置きます（3D → デッサン人形を置く）"), 3000);
+        return;
+    }
+    if (gallery_ == nullptr) {
+        gallery_ = new PoseGallery(window_, target, [this](const Json& op) { return window_->apply_ops(Json::array({op})); });
+        gallery_->setAttribute(Qt::WA_DeleteOnClose, false);
+    }
+    gallery_->follow_target();
+    gallery_->show();
+    gallery_->raise();
+    gallery_->activateWindow();
 }
 
 void GuidePanel::body_dialog() {
