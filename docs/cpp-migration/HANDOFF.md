@@ -18,7 +18,23 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## 人形のポーズ集（群 G5。SPEC FIGURE-02）— 2026-11-16、ブランチ native/figures（main には未統合）
+## 人形（G1〜G5・古い不具合 2 つ）の出口 — 凍結 0bde467a で Linux の ASan・Release が合格（2026-11-16）
+- **凍結SHA**: `0bde467a`（native/figures。なめらかな人形 G1、生成の案内 G2、ポーズ集 G3〜G5〔655 ポーズ・二人組・手に持つ物〕、カメラで見た箱と 3D の後ろの人形の線の直し、ポーズ集の断りの文の日本語、下の ASan の重さの直し）。計画は `validation_policy.py --base b1cba245 --head 0bde467a --phase milestone`（tier full、71 の変更、理由 9）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 結果:
+  - linux-asan: 275/275 合格（2 並列、08:17〜11:03 UTC の 2 時間 45 分。QtTest の項目 6,756、SKIP 0、CLI23 合格）。1 回で走り切った（引き継ぎは起きていない）。test_figure_poses 682 秒、test_figure_mesh 185 秒。
+  - linux-release: 275/275 合格（2 並列、11:44〜12:06 UTC の 21 分。項目 6,682、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。test_figure_poses 63 秒。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 67 本すべて合格（項目 1,237。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で、1 回温めてから）: test_perf_app 2 回（開くまで 593 ms・600 ms、入力から画面まで p95 0.94 ms・0.91 ms、p99 2.52 ms・2.47 ms）、test_perf_render 合格（なめらかな人形: 作る 152〜214 ms〔合格値 600〕、40 dpi の線 7〜9 ms〔40〕、箱ともう 1 体の後ろで 15 ms〔40〕、B4 の校正 175 ms〔800〕）、test_perf_pipeline 合格（PERF-F 8 ページの校正 p95 5,165 ms）。
+  - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- 合格までの回（合格に数えていない）: 凍結 feb0c555 の回。ASan で test_figure_poses だけが ctest の上限 1,800 秒に掛かった（9 分類目まで合格のまま時間切れ）。ほかの 274 本は合格、サニタイザーの報告は無し。
+  - 原因: ASan のプリセットは Debug（最適化なし）で、人形 1 体の網（figure_shape の場と surface_nets）が Release の約 40 倍、約 5 秒かかり、655 ポーズを 1 体ずつ網にする試験が収まらなかった（gdb で止めて見た所はほぼ全部 `figure_shape::Field::at`）。
+  - 直し（確かめの中身・基準・上限は変えていない）: (1) e11ce224 `figure_shape.cpp`・`surface_nets.cpp` だけ Debug でも `-O2` で組む（サニタイザーの計測は付いたまま。網の固定値は Release・ASan とも同じで合格）。これで 1,647 秒。(2) 0bde467a test_figure_poses の `everyPose` で、ポーズを最大 4 つのスレッドに分けて確かめ、結果は元の順で合わせる。これで単独 603 秒、出口の中で 682 秒。
+  - 前の feb0c555 で、test_figure_poses の上限（止まりを見つけるためのもの。性能の合格値ではない）を 900 秒から 1,800 秒にし、遅い試験の一覧に入れている。
+  - コードを直したので、この出口は初めから流した（R4）。
+- **残る見た目の課題**（試験は通るが、絵として直したいもの。docs/POSES.md に記録）: 剣・バットが親指の向きに伸びて立つポーズがある（名前は見た目に合わせた）、傘を杖にするポーズの傘、紙を持つポーズの紙の向き、バットを構えるポーズのバット、二人組の「肩を組んで笑う」の腕、背もたれに腕を掛けるポーズ（背もたれが無い）、G4 で予定より少ない寝た姿勢（見せポーズ −7、ベッド・ソファ −3、寝る −5）。
+
+## 人形のポーズ集（群 G5。SPEC FIGURE-02）— 2026-11-16、ブランチ native/figures、2026-11-16 に main に統合
 
 ### したこと
 - 持つ物の形（core/figure_props.cpp）: `hold` の 10 の物（剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）を、手の座標系の小さな平らな面の立体で描く。網では体の点の後ろに続き（`mesh3d::Model::body`・`creases`）、体の点と三角は持たないときと同じバイト。陰（render_prims・校正の案内）・トレースの線（物の辺: 表と裏の境と 40° の折れ。体の後ろでは隠れる。FIGURE-01 のほかの 3D の後ろの線も同じ）・生成の案内（figures.png・regions.png に持つ人の色）・ポーズ集の小さな絵に出る。鞄とカップは人形の下の向きでぶら下がる・立つ。剣・バット・傘は拳を通り、手のひらを下へ置くと手のひらの下から下へ。傘は親指が上なら開く。`props: false`（op の鍵、figures@1）で隠す。足もとを保つの一番低い所は体だけ。
@@ -50,7 +66,7 @@
 - 計画の「時間があれば」（G4 で外した寝姿の試し直し・背もたれに腕をかけるポーズ）はしていない。寝た体の小さな絵の拡大はした（上）。
 - test_figure_poses が約 140 秒（ASan で 10 分を超える見込み）。重いのは二人の網（反転で 4 体）と G5 の 130 の一人のポーズ。
 
-## 古い不具合 2 つの直し（カメラで見た箱・ほかの 3D の後ろの人形の線。SPEC FIGURE-01）— 2026-11-16、ブランチ native/figures（main には未統合）
+## 古い不具合 2 つの直し（カメラで見た箱・ほかの 3D の後ろの人形の線。SPEC FIGURE-01）— 2026-11-16、ブランチ native/figures、2026-11-16 に main に統合
 
 ### したこと
 - カメラで見た箱: `prim3d::edges` が、カメラのときに箱を `segments3d`（円柱・階段・床・背景・球・円錐・小物の辺）へ回していて、そこに箱の場合が無く、最後の else の床の格子（既定 8 本 → 18 本の 2 点の線）になっていた。今はカメラ無しと同じ角の道で 12 本の辺。面の向きはカメラが見るとおりの角と目で決める（新しい `mesh3d::in_view`: `turned` と `eye_of`。カメラ無しの道は 1 文字も変えていない）。`bbox` は前から角を写した点の枠で正しかった（確かめを足した）。
@@ -72,7 +88,7 @@
 ### 環境
 - Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
 
-## 人形のポーズ集（群 G4。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures（main には未統合）
+## 人形のポーズ集（群 G4。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
 
 ### したこと
 - 道具 `figure_poses`（service/studio_poses.cpp。MCP の道具の表・kAgentTools・tool_table・api/mcp_tools に足した。MCP は 43 道具。読むだけ: read_only で book_in_use・presence なし。ほかの道具と同じ Tools::call の道を通る）: 分類と数、絞り込み（分類・タグ・言葉〔空白で区切ると全部に合うもの〕・接地・支え・持つ物）、limit・offset、乱択（random・seed `fp-<16 桁>`、splitmix64 の部分 Fisher–Yates）、一覧の絵（sheet、24 まで、views・body）。付けるのは `apply_ops` の `pose_figure {pose_id, mirror, keep}`（op の確かめと承認の道のまま。乱択は op に入らない）。
@@ -109,7 +125,7 @@
 ### 次（G5）
 - 小物の形（hold の物を手の中に描く）、二人のポーズ（SPEC FIGURE-02 の設計どおり: 1 項目に二人分、`add_pair`・`pose_pair`、`pair` の鍵）、バッチ C（アクション・スポーツ・ダンス・ヒーロー・仕事と暮らし、カップル・二人）。
 
-## 人形のポーズ集（群 G3。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures（main には未統合）
+## 人形のポーズ集（群 G3。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
 
 ### したこと
 - ポーズ集 `native/src/core/data/figure_poses.json`（genko.poses@1）をプログラムに 1 バイトも変えずに組み込んだ（core/CMakeLists.txt、`figure_poses_data.cpp.in`）。読み込み `core/pose_library`（分類と数、id、`~m` の反転、絞り込み: 分類・タグ・語〔日本語・英語、ASCII の大小を問わない〕・支え・接地。G4 の画面・MCP・乱択はこれを使う）、確かめ `core/pose_checks`（ファイルの形、関節の範囲、支え・接地・重心、体の通り抜け、反転、描ける、小さな絵、keep: ground の一番低い所）。`core/figure_shape` の胴と頭の場を `torso_part`・`head_part` で取り出せるようにした（網は前と同じバイト: test_figure_mesh の控えのまま合格）。
@@ -145,7 +161,7 @@
 ### 次（G4）
 - `figure_poses` の道具（MCP・CLI `genko studio figure-poses`、乱択、`--sheet`。この群の絵の描き方は tests/support/pose_sheets.hpp）、画面の「ポーズ集…」、バッチ B（寝る・上半身・振り向く・指さし・感情・話す・小物 など）。
 
-## 生成の案内 guides/figures.png（群 G2。SPEC FIGURE-03）と体の比率の見直し — 2026-11-15、ブランチ native/figures（main には未統合）
+## 生成の案内 guides/figures.png（群 G2。SPEC FIGURE-03）と体の比率の見直し — 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
 
 ### 体の比率の見直し（FIGURE-01 の形の表）
 - なぜ: G1 の体は利用者の画像生成の 3D ポーズ制御（anima_3dpose。学習は写実の大人のなめらかな体）の体より細く、胴が筒のようで、腰に横の帯（胴を骨盤・腹・胸の 3 部位に分け、関節の近くだけなめらかにつないだ継ぎ目の陰）、女の太ももが腰の下で急にふくらみ、首が細く長かった。
@@ -163,7 +179,7 @@
 - 試験: 新しい test_figure_guide（人のいないコマは鍵もファイルも注記も増えず、ほかのコマに人形を置いても id が変わらない／2 人のコマのファイル・順・最初の注記・大きさ・RGB・四隅が黒・人ごとの色〔ベージュ・ラベンダー〕・陰の階調・同じバイトと id・控え・render の kind／1 と 4 スレッドで同じバイト／PS5 のプロファイルの大きさ〔1 辺 1024 以下、64 の倍数〕／台本の 2 人の領域／印刷が変わらない）。test_mcp_api_e2e に render の kind の確かめ（thePeoplesGuidesAreRenderKinds）。
 - 残ること: 顔の起伏は仮の形のまま（figures.png では鼻と唇が強めに見える）。小物（G5）は figures.png に入らない。人形と箱の机などの重なりは人だけで描く（机は描かない）。2 つの制御（3D ポーズと領域）を同時に受けられるかは PS5 側で確かめる必要がある。
 
-## なめらかな 3D の人形（群 G1。SPEC FIGURE-01）— 2026-11-15、ブランチ native/figures（main b1cba245 から。main には未統合）
+## なめらかな 3D の人形（群 G1。SPEC FIGURE-01）— 2026-11-15、ブランチ native/figures（main b1cba245 から）、2026-11-16 に main に統合
 
 ### 利用者の決定（2026-11-15）
 - 「滑らかにする直しも一緒に進めて」「サイトのようにポーズも充実させてください」「良いです、進めてください」。人形の見た目はネーム・校正の絵で変わってよい（印刷には出ない）。トレース済みの線は保存されたまま。設計（G1〜G5）は /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-plan.md。この節は G1（なめらかな体）。
