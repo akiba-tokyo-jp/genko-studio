@@ -93,11 +93,11 @@ std::string saved_text(const Document& doc) {
     return genko::core::dump_python_indent2(payload);
 }
 
-// The least each category holds (mirrors do not count): batch A (G3), then batch B (G4: plan §8 asked pinup 85,
-// relax_bed 36, lie 25 — the lying poses this body could not rest properly were taken out, docs/POSES.md).
+// The least each category holds (mirrors do not count): batch A (G3), then batch B (G4: plan §8's pinup 85, relax_bed
+// 36, lie 25 — the lying poses G4 left out were added in the pose pass of 2026-11-16, docs/POSES.md).
 const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},      {"fashion", 25},   {"walk", 10},        {"run", 10},
                                                          {"sit_chair", 30},  {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25},
-                                                         {"pinup", 78},      {"relax_bed", 33}, {"lie", 20},         {"upper_body", 35},
+                                                         {"pinup", 85},      {"relax_bed", 36}, {"lie", 25},         {"upper_body", 35},
                                                          {"turn", 10},       {"point", 8},      {"emotion", 25},     {"talk", 13},
                                                          {"hands_props", 24},
                                                          // (batch C, G5: the numbers delivered; plan §8 asked sports_action 35, action
