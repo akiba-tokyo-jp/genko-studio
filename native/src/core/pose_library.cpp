@@ -83,15 +83,51 @@ const Json* find(std::string_view id) {
 
 std::optional<Json> resolve(std::string_view id, bool mirror) {
     std::string_view base = id;
+    std::string role;
+    if (base.size() > 2 && base[base.size() - 2] == '#' && (base.back() == 'a' || base.back() == 'b')) {
+        role = std::string(1, base.back());
+        base.remove_suffix(2);
+    }
     if (base.size() > kMirror.size() && base.substr(base.size() - kMirror.size()) == kMirror) {
         base.remove_suffix(kMirror.size());
         mirror = !mirror;
     }
     const Json* pose = find(base);
-    if (pose == nullptr) return std::nullopt;
+    if (pose == nullptr || (!role.empty() && !is_pair(*pose))) return std::nullopt;
     Json out = mirror ? mirrored(*pose) : *pose;
     out["id"] = std::string(base) + (mirror ? std::string(kMirror) : std::string());
+    if (!role.empty()) return member(out, role);
     return out;
+}
+
+bool is_pair(const Json& pose) { return pose.is_object() && pose.contains("figures"); }
+
+Json member(const Json& pair, std::string_view role) {
+    const Json& figures = pair.at("figures");
+    const Json& f = figures.at(role == "b" ? 1 : 0);
+    Json out = Json::object();
+    out["id"] = pair.value("id", std::string()) + "#" + std::string(role);
+    for (const char* key : {"category", "ja", "en", "tags"}) out[key] = pair.value(key, Json());
+    for (const char* key : {"joints", "hands", "hold", "support", "seat_h", "contact"}) {
+        if (f.contains(key)) out[key] = f[key];
+    }
+    out["symmetric"] = false;
+    return out;
+}
+
+std::string mirror_id(std::string_view id) {
+    std::string name(id);
+    std::string role;
+    if (name.size() > 2 && name[name.size() - 2] == '#') {
+        role = name.substr(name.size() - 2);
+        name.resize(name.size() - 2);
+    }
+    if (name.size() > kMirror.size() && name.ends_with(kMirror)) {
+        name.resize(name.size() - kMirror.size());
+    } else {
+        name += kMirror;
+    }
+    return name + role;
 }
 
 Json mirrored_joints(const Json& joints) {
@@ -109,6 +145,33 @@ Json mirrored_joints(const Json& joints) {
 }
 
 Json mirrored(const Json& pose) {
+    if (is_pair(pose) && pose.at("figures").is_array()) {  // (each person mirrored; b's place and turn the other way; the touches' sides)
+        Json out = pose;
+        Json figures = Json::array();
+        for (const Json& f : pose.at("figures")) {
+            Json m = mirrored(f);
+            if (const auto it = f.find("offset"); it != f.end() && it->is_array() && !it->empty()) {
+                Json offset = *it;
+                offset[0] = negated(offset[0]);
+                m["offset"] = std::move(offset);
+            }
+            if (const auto it = f.find("turn"); it != f.end()) m["turn"] = negated(*it);
+            figures.push_back(std::move(m));
+        }
+        out["figures"] = std::move(figures);
+        if (const auto it = pose.find("touch"); it != pose.end() && it->is_array()) {
+            Json touch = Json::array();
+            for (const Json& t : *it) {
+                Json both = t;
+                if (t.is_object()) {
+                    for (const auto& [k, v] : t.items()) both[k] = v.is_string() ? Json(other_side(v.get<std::string>())) : v;
+                }
+                touch.push_back(std::move(both));
+            }
+            out["touch"] = std::move(touch);
+        }
+        return out;
+    }
     Json out = pose;
     if (const auto it = pose.find("joints"); it != pose.end()) out["joints"] = mirrored_joints(*it);
     for (const char* key : {"hands", "hold"}) {
@@ -153,12 +216,23 @@ std::vector<const Json*> list(const Filter& filter) {
     const std::vector<std::string> query = words(filter.query);
     for (const Json& p : library().at("poses")) {
         if (!filter.category.empty() && p.at("category").get_ref<const std::string&>() != filter.category) continue;
-        if (!filter.support.empty() && p.at("support").get_ref<const std::string&>() != filter.support) continue;
+        // (a pair: either of its people)
+        std::vector<const Json*> people;
+        if (is_pair(p)) {
+            for (const Json& f : p.at("figures")) people.push_back(&f);
+        } else {
+            people.push_back(&p);
+        }
+        const auto any = [&](const auto& test) { return std::any_of(people.begin(), people.end(), [&](const Json* f) { return test(*f); }); };
+        if (!filter.support.empty() && !any([&](const Json& f) { return f.at("support").get_ref<const std::string&>() == filter.support; })) continue;
         const Json& tags = p.at("tags");
         if (!std::all_of(filter.tags.begin(), filter.tags.end(), [&](const std::string& t) { return has_string(tags, t); })) continue;
-        const Json& contact = p.at("contact");
-        if (!std::all_of(filter.contact.begin(), filter.contact.end(), [&](const std::string& c) { return has_string(contact, c); })) continue;
-        if (filter.props && (p.contains("hold") && !p.at("hold").empty()) != *filter.props) continue;
+        if (!any([&](const Json& f) {
+                return std::all_of(filter.contact.begin(), filter.contact.end(), [&](const std::string& c) { return has_string(f.at("contact"), c); });
+            })) {
+            continue;
+        }
+        if (filter.props && any([](const Json& f) { return f.contains("hold") && !f.at("hold").empty(); }) != *filter.props) continue;
         const bool all = std::all_of(query.begin(), query.end(), [&](const std::string& word) {
             bool hit = false;
             for (const char* key : {"id", "ja", "en"}) hit = hit || lower(p.at(key).get_ref<const std::string&>()).find(word) != std::string::npos;
@@ -172,6 +246,36 @@ std::vector<const Json*> list(const Filter& filter) {
 }
 
 Json summary(const Json& pose) {
+    if (is_pair(pose)) {
+        Json people = Json::array();
+        Json contact = Json::array();
+        Json props = Json::array();
+        const char* const roles[] = {"a", "b"};
+        std::size_t i = 0;
+        for (const Json& f : pose.at("figures")) {
+            Json one = summary(f);
+            Json mine = Json::object({{"role", roles[std::min<std::size_t>(i++, 1)]}, {"hands", one["hands"]}, {"contact", one["contact"]},
+                                      {"support", one["support"]}, {"props", one["props"]}});
+            for (const Json& c : one["contact"]) {
+                if (std::find(contact.begin(), contact.end(), c) == contact.end()) contact.push_back(c);
+            }
+            for (const Json& c : one["props"]) props.push_back(c);
+            people.push_back(std::move(mine));
+        }
+        Json out = Json::object({{"id", pose.value("id", Json())},
+                                 {"ja", pose.value("ja", Json())},
+                                 {"en", pose.value("en", Json())},
+                                 {"category", pose.value("category", Json())},
+                                 {"tags", pose.value("tags", Json::array())},
+                                 {"hands", people.empty() ? Json::object() : people[0]["hands"]},
+                                 {"contact", std::move(contact)},
+                                 {"support", people.empty() ? Json() : people[0]["support"]},
+                                 {"props", std::move(props)},
+                                 {"symmetric", pose.value("symmetric", Json(false))},
+                                 {"pair", true},
+                                 {"figures", std::move(people)}});
+        return out;
+    }
     Json hands = Json::object();
     if (const auto it = pose.find("hands"); it != pose.end() && it->is_object()) {
         for (const char* side : {"l", "r"}) {
@@ -245,7 +349,7 @@ bool uses_figures_feature(const Json& prim) {
     const auto kind = prim.find("kind");
     if (kind == prim.end() || !kind->is_string()) return false;
     if (*kind == "figure") {
-        if (prim.contains("pose_id") || prim.contains("hold") || prim.contains("props")) return true;
+        if (prim.contains("pose_id") || prim.contains("hold") || prim.contains("props") || prim.contains("pair")) return true;
         if (const auto hands = prim.find("hands"); hands != prim.end() && hands->is_object()) {
             for (const auto& [side, hand] : hands->items()) {
                 if (is_hand_with_shape(hand)) return true;

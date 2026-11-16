@@ -96,7 +96,9 @@ const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},      {"fa
                                                          {"sit_chair", 30},  {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25},
                                                          {"pinup", 78},      {"relax_bed", 33}, {"lie", 20},         {"upper_body", 35},
                                                          {"turn", 10},       {"point", 8},      {"emotion", 25},     {"talk", 13},
-                                                         {"hands_props", 24}};
+                                                         {"hands_props", 24},
+                                                         // (batch C, G5: the numbers delivered)
+                                                         {"two_people", 1}};
 
 std::string issues_text(const std::vector<checks::Issue>& issues) {
     std::string out;
@@ -278,6 +280,23 @@ private slots:
         std::vector<genko::test::pose_sheets::Entry> entries;
         std::string failed;
         for (const Json* pose : library::list(filter)) {
+            if (library::is_pair(*pose)) {  // (a pair: both people and the two together, and the mirror of it)
+                const checks::PairReport pr = checks::check_pair(*pose);
+                if (!pr.ok()) failed += pr.id + issues_text(pr.issues) + "\n";
+                const Json mirror = library::mirrored(*pose);
+                if (library::mirrored(mirror) != *pose) failed += pr.id + "\n  mirror: the mirror of the mirror is not the pair\n";
+                const checks::PairReport pm = checks::check_pair(mirror);
+                if (!pm.ok()) failed += pr.id + " (mirrored)" + issues_text(pm.issues) + "\n";
+                // (the mirror's two are the reflection of the pair's two: b's pelvis across a's middle)
+                const auto two = checks::pair_figures(*pose);
+                const auto twin = checks::pair_figures(mirror);
+                if (std::fabs(two[1]["pos"][0].get<double>() + twin[1]["pos"][0].get<double>()) > 2e-4 ||
+                    std::fabs(two[1]["pos"][2].get<double>() - twin[1]["pos"][2].get<double>()) > 2e-4) {
+                    failed += pr.id + "\n  mirror: b is not where the reflection puts it\n";
+                }
+                entries.push_back({*pose, pr.a, pr});
+                continue;
+            }
             const checks::Report r = checks::check_pose(*pose);
             if (!r.ok()) failed += r.id + issues_text(r.issues) + "\n";
             const Json mirror = library::mirrored(*pose);
@@ -289,10 +308,17 @@ private slots:
                 const auto in = checks::check_inside(checks::figure_of(*pose, 120.0, Json::object({{"sex", sex}})));
                 if (!in.empty()) failed += r.id + " (" + sex + ")" + issues_text(in) + "\n";
             }
-            entries.push_back({*pose, r});
+            entries.push_back({*pose, r, std::nullopt});
         }
         if (!sheets_dir().empty()) {
-            for (const auto& e : entries) measured_.push_back(genko::test::pose_sheets::measured(e));
+            for (const auto& e : entries) {
+                const Json m = genko::test::pose_sheets::measured(e);
+                if (m.is_array()) {
+                    for (const Json& one : m) measured_.push_back(one);
+                } else {
+                    measured_.push_back(m);
+                }
+            }
             genko::test::pose_sheets::write(sheets_dir(), category.toStdString(), entries);
         }
         QVERIFY2(failed.empty(), failed.c_str());
@@ -344,20 +370,22 @@ private slots:
     // Thumbnails are the same bytes every time and on every thread (a pose's surface made in four threads at once), and
     // a few are pinned (G3's four, unchanged).
     void thumbnailsAreTheSameBytes() {
-        std::vector<Json> prims;
+        std::vector<std::vector<Json>> prims;  // (a pair's two)
         for (const auto& c : library::categories()) {
             library::Filter f;
             f.category = c.id;
             const auto list = library::list(f);
-            prims.push_back(checks::figure_of(*list.front()));
-            prims.push_back(checks::figure_of(library::mirrored(*list.back())));
+            QVERIFY2(!list.empty(), c.id.c_str());
+            for (const Json& pose : {*list.front(), library::mirrored(*list.back())}) {
+                prims.push_back(library::is_pair(pose) ? genko::render::figure_thumbs::figures_for(pose) : std::vector<Json>{checks::figure_of(pose)});
+            }
         }
         // (batch A's categories with G3's thumbnail, pinned; batch B's with the gallery's: render::figure_thumbs, which
         // draws a body lying down as large as it fits)
         const std::size_t batch_a = 16;
         const auto thumbs = [&](std::size_t first, std::size_t step, std::vector<std::string>& out) {
             for (std::size_t i = first; i < prims.size(); i += step) {
-                out[i] = i < batch_a ? checks::thumbnail(prims[i], 0.785, 60, 90)
+                out[i] = i < batch_a ? checks::thumbnail(prims[i][0], 0.785, 60, 90)
                                      : genko::render::figure_thumbs::grey(prims[i], 0.785, PoseGalleryWidth, PoseGalleryHeight, 2);
             }
         };
@@ -385,7 +413,7 @@ private slots:
         QCOMPARE(got, std::string(kThumbPins));
     }
 
-    // figures@1 is named while a prim says pose_id, hold, spread or thumb, and not otherwise; such a book is saved and read
+    // figures@1 is named while a prim says pose_id, hold, props, pair, spread or thumb, and not otherwise; such a book is saved and read
     // back with them as they were.
     void figuresFeature() {
         namespace storage = genko::storage;
@@ -401,7 +429,8 @@ private slots:
         for (const char* batch : {R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "stand/neutral"}])",
                                   R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": "pen"}}])",
                                   R"([{"op": "pose_figure", "page": 1, "id": "b", "hands": {"r": {"pose": "fist", "thumb": 0.1}}}])",
-                                  R"([{"op": "pose_figure", "page": 2, "id": "k", "spread": 0.5}])"}) {
+                                  R"([{"op": "pose_figure", "page": 2, "id": "k", "spread": 0.5}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "a", "props": false}])"}) {
             const Document d = bus().apply(doc, ops(batch), Actor("genko")).doc;
             QVERIFY2(library::uses_figures_feature(d), batch);
             QVERIFY2(has(features(d)), batch);

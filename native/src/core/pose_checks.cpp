@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <set>
+#include <tuple>
 
 #include "core/figure_shape.hpp"
 #include "core/pyconv.hpp"
@@ -42,6 +44,8 @@ const std::vector<BallRange> kBalls = {
 const char* const kFloorContacts[] = {"l_foot", "r_foot", "l_knee", "r_knee", "l_hand", "r_hand", "seat", "pelvis"};
 const char* const kContacts[] = {"l_foot", "r_foot", "l_knee", "r_knee", "l_hand", "r_hand", "seat", "pelvis", "back", "front", "side"};
 const char* const kPoseKeys[] = {"id", "category", "ja", "en", "tags", "joints", "hands", "hold", "support", "seat_h", "contact", "symmetric"};
+const char* const kPairKeys[] = {"id", "category", "ja", "en", "tags", "figures", "touch", "symmetric"};
+const char* const kPersonKeys[] = {"joints", "hands", "hold", "support", "seat_h", "contact", "offset", "turn"};
 
 bool has(const Json& list, std::string_view want) {
     return list.is_array() && std::any_of(list.begin(), list.end(), [&](const Json& v) { return v.is_string() && v.get_ref<const std::string&>() == want; });
@@ -243,6 +247,87 @@ std::array<double, 2> range_of(std::string_view joint, char axis) {
 
 // --- (1) the file ----------------------------------------------------------------------------------------------------
 
+// A person's keys of a pose (or of a pair's person): joints, hands, hold, support, seat_h, contact ("partner" a pair's own)
+template <typename In>
+void person_fields(const Json& p, const In& in, bool in_pair) {
+    const Json& joints = p.value("joints", Json());
+    if (!joints.is_object()) {
+        in("joints is {joint: {x, y, z}}");
+    } else {
+        for (const auto& [name, axes] : joints.items()) {
+            if (std::find(mesh3d::kFigureJoints.begin(), mesh3d::kFigureJoints.end(), name) == mesh3d::kFigureJoints.end()) in("unknown joint " + name);
+            if (!axes.is_object() || axes.empty()) {
+                in(name + " is {x, y, z}");
+                continue;
+            }
+            for (const auto& [axis, v] : axes.items()) {
+                if (axis != "x" && axis != "y" && axis != "z") in(name + ": unknown axis " + axis);
+                if (!v.is_number_float() || !std::isfinite(v.get<double>()) || !places(v.get<double>(), 4)) in(name + "." + axis + " is a number to 4 places");
+            }
+        }
+    }
+    const Json& hands = p.value("hands", Json());
+    if (!hands.is_object()) {
+        in("hands is {l, r}");
+    } else {
+        for (const auto& [side, hand] : hands.items()) {
+            if (side != "l" && side != "r") in("hands: unknown side " + side);
+            if (hand.is_string()) {
+                if (std::find(mesh3d::kHandPoses.begin(), mesh3d::kHandPoses.end(), hand.get<std::string>()) == mesh3d::kHandPoses.end()) in("hand " + hand.dump());
+                continue;
+            }
+            if (!hand.is_object() || !hand.contains("pose") || !hand["pose"].is_string() ||
+                std::find(mesh3d::kHandPoses.begin(), mesh3d::kHandPoses.end(), hand["pose"].get<std::string>()) == mesh3d::kHandPoses.end()) {
+                in("a hand is a pose or {pose, curls, spread, thumb}");
+                continue;
+            }
+            for (const auto& [k, v] : hand.items()) {
+                if (k == "pose") continue;
+                if (k == "curls") {
+                    bool ok = v.is_array() && v.size() == 5;
+                    for (const Json& c : ok ? v : Json::array()) ok = ok && c.is_number() && c.get<double>() >= 0.0 && c.get<double>() <= 1.0 && places(c.get<double>(), 3);
+                    if (!ok) in("curls are five numbers 0..1 to 3 places");
+                } else if (k == "spread" || k == "thumb") {
+                    if (!v.is_number() || !(v.get<double>() >= 0.0 && v.get<double>() <= 1.0) || !places(v.get<double>(), 3)) in(k + " is 0..1 to 3 places");
+                } else {
+                    in("hand: unknown key " + k);
+                }
+            }
+        }
+    }
+    if (p.contains("hold")) {
+        const Json& hold = p["hold"];
+        if (!hold.is_object() || hold.empty()) {
+            in("hold is {l, r: prop}");
+        } else {
+            for (const auto& [side, prop] : hold.items()) {
+                if (side != "l" && side != "r") in("hold: unknown side " + side);
+                if (!prop.is_string() || !pose_library::is_prop(prop.get<std::string>())) in("hold: unknown prop " + prop.dump());
+            }
+        }
+    }
+    const std::string support = p.value("support", std::string());
+    if (support != "floor" && support != "chair" && support != "none") in("support is floor, chair or none");
+    if ((support == "chair") != p.contains("seat_h")) in("seat_h is a chair's (and only a chair's)");
+    if (p.contains("seat_h") && (!p["seat_h"].is_number() || !places(p["seat_h"].get<double>(), 2))) in("seat_h is a number to 2 places");
+    const Json& contact = p.value("contact", Json());
+    if (!contact.is_array()) {
+        in("contact is a list");
+    } else {
+        std::set<std::string> seen;
+        for (const Json& c : contact) {
+            if (!c.is_string() || std::find(std::begin(kContacts), std::end(kContacts), c.get<std::string>()) == std::end(kContacts)) {
+                in("unknown contact " + c.dump());
+                continue;
+            }
+            if (!seen.insert(c.get<std::string>()).second) in("contact " + c.get<std::string>() + " twice");
+        }
+        if (support != "none" && contact.empty()) in("a body that rests on something touches it");
+        if (in_pair && support == "none" && !has(contact, pose_library::kPartner)) in("a person resting on nothing is held by the partner (contact partner)");
+        if (support == "chair" && !has(contact, "seat")) in("a chair's seat is a contact");
+    }
+}
+
 std::vector<Issue> check_file(const Json& file) {
     std::vector<Issue> out;
     const auto bad = [&](const std::string& what) { out.push_back({"file", what}); };
@@ -280,12 +365,19 @@ std::vector<Issue> check_file(const Json& file) {
         }
         const std::string id = p["id"].get<std::string>();
         const auto in = [&](const std::string& what) { bad(id + ": " + what); };
+        const bool pair = pose_library::is_pair(p);
         for (const auto& [k, v] : p.items()) {
-            if (std::find(std::begin(kPoseKeys), std::end(kPoseKeys), k) == std::end(kPoseKeys)) in("unknown key " + k);
+            const auto& keys = pair ? std::begin(kPairKeys) : std::begin(kPoseKeys);
+            const auto& keys_end = pair ? std::end(kPairKeys) : std::end(kPoseKeys);
+            if (std::find(keys, keys_end, k) == keys_end) in("unknown key " + k);
         }
-        for (const char* k : {"category", "ja", "en", "tags", "joints", "hands", "support", "contact", "symmetric"}) {
+        for (const char* k : {"category", "ja", "en", "tags", "symmetric"}) {
             if (!p.contains(k)) in(std::string("no ") + k);
         }
+        for (const char* k : {"joints", "hands", "support", "contact"}) {
+            if (!pair && !p.contains(k)) in(std::string("no ") + k);
+        }
+        if (pair && !p.contains("touch")) in("no touch");
         if (!ids.insert(id).second) in("twice");
         const std::string category = p.value("category", std::string());
         const auto at = std::find(categories.begin(), categories.end(), category);
@@ -318,80 +410,52 @@ std::vector<Issue> check_file(const Json& file) {
             }
             if (!tag_ja || !tag_en) in("tags in Japanese and in English");
         }
-        const Json& joints = p.value("joints", Json());
-        if (!joints.is_object()) {
-            in("joints is {joint: {x, y, z}}");
-        } else {
-            for (const auto& [name, axes] : joints.items()) {
-                if (std::find(mesh3d::kFigureJoints.begin(), mesh3d::kFigureJoints.end(), name) == mesh3d::kFigureJoints.end()) in("unknown joint " + name);
-                if (!axes.is_object() || axes.empty()) {
-                    in(name + " is {x, y, z}");
-                    continue;
-                }
-                for (const auto& [axis, v] : axes.items()) {
-                    if (axis != "x" && axis != "y" && axis != "z") in(name + ": unknown axis " + axis);
-                    if (!v.is_number_float() || !std::isfinite(v.get<double>()) || !places(v.get<double>(), 4)) in(name + "." + axis + " is a number to 4 places");
-                }
-            }
-        }
-        const Json& hands = p.value("hands", Json());
-        if (!hands.is_object()) {
-            in("hands is {l, r}");
-        } else {
-            for (const auto& [side, hand] : hands.items()) {
-                if (side != "l" && side != "r") in("hands: unknown side " + side);
-                if (hand.is_string()) {
-                    if (std::find(mesh3d::kHandPoses.begin(), mesh3d::kHandPoses.end(), hand.get<std::string>()) == mesh3d::kHandPoses.end()) in("hand " + hand.dump());
-                    continue;
-                }
-                if (!hand.is_object() || !hand.contains("pose") || !hand["pose"].is_string() ||
-                    std::find(mesh3d::kHandPoses.begin(), mesh3d::kHandPoses.end(), hand["pose"].get<std::string>()) == mesh3d::kHandPoses.end()) {
-                    in("a hand is a pose or {pose, curls, spread, thumb}");
-                    continue;
-                }
-                for (const auto& [k, v] : hand.items()) {
-                    if (k == "pose") continue;
-                    if (k == "curls") {
-                        bool ok = v.is_array() && v.size() == 5;
-                        for (const Json& c : ok ? v : Json::array()) ok = ok && c.is_number() && c.get<double>() >= 0.0 && c.get<double>() <= 1.0 && places(c.get<double>(), 3);
-                        if (!ok) in("curls are five numbers 0..1 to 3 places");
-                    } else if (k == "spread" || k == "thumb") {
-                        if (!v.is_number() || !(v.get<double>() >= 0.0 && v.get<double>() <= 1.0) || !places(v.get<double>(), 3)) in(k + " is 0..1 to 3 places");
-                    } else {
-                        in("hand: unknown key " + k);
-                    }
-                }
-            }
-        }
-        if (p.contains("hold")) {
-            const Json& hold = p["hold"];
-            if (!hold.is_object() || hold.empty()) {
-                in("hold is {l, r: prop}");
+        if (pose_library::is_pair(p)) {
+            const Json& figures = p["figures"];
+            if (!figures.is_array() || figures.size() != 2) {
+                in("figures is two people (a, b)");
             } else {
-                for (const auto& [side, prop] : hold.items()) {
-                    if (side != "l" && side != "r") in("hold: unknown side " + side);
-                    if (!prop.is_string() || !pose_library::is_prop(prop.get<std::string>())) in("hold: unknown prop " + prop.dump());
+                for (std::size_t k = 0; k < 2; ++k) {
+                    const Json& f = figures[k];
+                    const std::string role = k == 0 ? "a" : "b";
+                    const auto in_f = [&](const std::string& what) { in(role + ": " + what); };
+                    if (!f.is_object()) {
+                        in_f("a person is an object");
+                        continue;
+                    }
+                    for (const auto& [key, v] : f.items()) {
+                        if (std::find(std::begin(kPersonKeys), std::end(kPersonKeys), key) == std::end(kPersonKeys)) in_f("unknown key " + key);
+                    }
+                    for (const char* key : {"joints", "hands", "support", "contact"}) {
+                        if (!f.contains(key)) in_f(std::string("no ") + key);
+                    }
+                    if (k == 0 && (f.contains("offset") || f.contains("turn"))) in_f("a is where the pair is: no offset or turn");
+                    if (k == 1) {
+                        const Json& o = f.value("offset", Json());
+                        bool ok = o.is_array() && o.size() == 3;
+                        for (const Json& v : ok ? o : Json::array()) ok = ok && v.is_number() && std::isfinite(v.get<double>()) && places(v.get<double>(), 4);
+                        if (!ok) in_f("offset is [x, y, z] (u, to 4 places)");
+                        const Json& t = f.value("turn", Json());
+                        if (!t.is_number() || !std::isfinite(t.get<double>()) || !places(t.get<double>(), 4)) in_f("turn is a number (to 4 places)");
+                    }
+                    person_fields(f, in_f, true);
                 }
             }
-        }
-        const std::string support = p.value("support", std::string());
-        if (support != "floor" && support != "chair" && support != "none") in("support is floor, chair or none");
-        if ((support == "chair") != p.contains("seat_h")) in("seat_h is a chair's (and only a chair's)");
-        if (p.contains("seat_h") && (!p["seat_h"].is_number() || !places(p["seat_h"].get<double>(), 2))) in("seat_h is a number to 2 places");
-        const Json& contact = p.value("contact", Json());
-        if (!contact.is_array()) {
-            in("contact is a list");
+            const Json& touch = p.value("touch", Json());
+            if (!touch.is_array()) {
+                in("touch is a list of {a, b}");
+            } else {
+                for (const Json& t : touch) {
+                    const auto part = [&](const char* role) {
+                        const Json* v = t.is_object() ? get(t, role) : nullptr;
+                        return v != nullptr && v->is_string() &&
+                               std::find(std::begin(pose_library::kTouchParts), std::end(pose_library::kTouchParts), v->get<std::string>()) != std::end(pose_library::kTouchParts);
+                    };
+                    if (!t.is_object() || t.size() != 2 || !part("a") || !part("b")) in("a touch is {a: part, b: part} (" + t.dump() + ")");
+                }
+            }
         } else {
-            std::set<std::string> seen;
-            for (const Json& c : contact) {
-                if (!c.is_string() || std::find(std::begin(kContacts), std::end(kContacts), c.get<std::string>()) == std::end(kContacts)) {
-                    in("unknown contact " + c.dump());
-                    continue;
-                }
-                if (!seen.insert(c.get<std::string>()).second) in("contact " + c.get<std::string>() + " twice");
-            }
-            if (support != "none" && contact.empty()) in("a body that rests on something touches it");
-            if (support == "chair" && !has(contact, "seat")) in("a chair's seat is a contact");
+            person_fields(p, in, false);
         }
         if (!p.value("symmetric", Json()).is_boolean()) in("symmetric is true or false");
     }
@@ -552,6 +616,7 @@ Measure measure(const Json& prim, const mesh3d::Model& model, const Json& pose) 
         if (v[i][1] >= m.floor - kContactGap * u) patch.push_back({v[i][0], v[i][2]});
         if (support == "chair" && v[i][1] >= seat_low - kSeatBand * u && in_contact("seat", v[i], region[i], bones, sk)) patch.push_back({v[i][0], v[i][2]});
     }
+    m.rest = patch;
     m.balance = outside(hull(std::move(patch)), {m.mass[0], m.mass[2]}) / u;
     return m;
 }
@@ -594,7 +659,8 @@ std::vector<Issue> check_support(const Json& pose, const Measure& m) {
     if (support == "floor" && !faces && m.gap.at("torso") < kUnlistedGap) {
         out.push_back({"support", "the torso touches the floor but is not a contact (back, front or side)"});
     }
-    const bool leans = faces && !lying;
+    // (a lean on a wall, or on the partner of a pair: the pair's balance is the two together, check_pair)
+    const bool leans = (faces && !lying) || has(contact, pose_library::kPartner);
     if (support != "none" && !leans && category != "walk" && category != "run" && m.balance > kBalance) {
         out.push_back({"balance", "the centre of mass is " + fmt(m.balance) + " u beyond what the body rests on"});
     }
@@ -755,6 +821,227 @@ std::string thumbnail(const Json& prim, double turn, int width, int height) {
         out[i] = static_cast<char>(static_cast<int>(s * 254.0f + 0.5f));
     }
     return out;
+}
+
+}  // namespace genko::core::pose_checks
+
+namespace genko::core::pose_checks {
+
+// --- pairs (G5) ----------------------------------------------------------------------------------------------------
+
+std::pair<Json, Json> partner_place(const Json& a, const Json& offset, double turn) {
+    const mesh3d::Skeleton sk = mesh3d::figure_skeleton(a);
+    const double u = sk.unit;
+    static const Json kZero = Json::array({0, 0, 0});
+    Json rot = py_list(get_else(a, "rot", kZero));
+    for (int i = 0; i < 3; ++i) rot.push_back(0.0);
+    const Mat3 r = mesh3d::prim_rotation(rot);
+    const Vec3 o{to_float(offset.at(0)) * u, to_float(offset.at(1)) * u, to_float(offset.at(2)) * u};
+    const Vec3 d = matvec(r, o);
+    static const Json kPos = Json::array({100, 160, 0});
+    Json pos = py_list(get_else(a, "pos", kPos));
+    for (int i = 0; i < 3; ++i) pos.push_back(0.0);
+    Json at = Json::array();
+    for (int i = 0; i < 3; ++i) at.push_back(py_round(to_float(pos[static_cast<std::size_t>(i)]) + d[static_cast<std::size_t>(i)], 4));
+    Json turned = Json::array({to_float(rot[0]), py_round(to_float(rot[1]) + turn, 4), to_float(rot[2])});
+    return {at, turned};
+}
+
+std::array<Json, 2> pair_figures(const Json& pair, double height_mm, const Json& body, bool with_hold) {
+    std::array<Json, 2> out;
+    for (int k = 0; k < 2; ++k) {
+        const Json person = pose_library::member(pair, k == 0 ? "a" : "b");
+        out[static_cast<std::size_t>(k)] = figure_of(person, height_mm, body);
+        if (with_hold && person.contains("hold")) out[static_cast<std::size_t>(k)]["hold"] = person["hold"];
+    }
+    const Json& b = pair.at("figures").at(1);
+    auto [pos, rot] = partner_place(out[0], b.at("offset"), to_float(b.at("turn")));
+    out[1]["pos"] = std::move(pos);
+    out[1]["rot"] = std::move(rot);
+    return out;
+}
+
+namespace {
+
+// A person of a pair in the space of the pair (a's own): b's points turned and moved.
+struct Placed {
+    Json prim;
+    mesh3d::Skeleton sk;
+    Mat3 turn;  // (its own turn)
+    Vec3 at;    // (its pelvis)
+    std::vector<Bone> bones;  // (in the pair's space)
+    figure_shape::Part torso;
+    figure_shape::Part head;
+
+    Vec3 out(const Vec3& p) const { return matvec(turn, p) + at; }
+    Vec3 in(const Vec3& p) const {  // (turnᵀ (p − at))
+        const Vec3 d = p - at;
+        return Vec3{turn[0][0] * d[0] + turn[1][0] * d[1] + turn[2][0] * d[2], turn[0][1] * d[0] + turn[1][1] * d[1] + turn[2][1] * d[2],
+                    turn[0][2] * d[0] + turn[1][2] * d[1] + turn[2][2] * d[2]};
+    }
+};
+
+Placed placed(const Json& prim) {
+    Placed p{prim, mesh3d::figure_skeleton(prim), mesh3d::prim_rotation(prim.at("rot")), Vec3{to_float(prim["pos"][0]), to_float(prim["pos"][1]), to_float(prim["pos"][2])}, {}, {}, {}};
+    p.bones = bones_of(p.sk, prim);
+    for (Bone& b : p.bones) {
+        b.a = p.out(b.a);
+        b.b = p.out(b.b);
+    }
+    p.torso = figure_shape::torso_part(p.sk);
+    p.head = figure_shape::head_part(p.sk);
+    return p;
+}
+
+bool part_has(const std::string& part, const std::string& bone) {
+    if (part == "torso") return bone == "torso_low" || bone == "torso_high" || bone == "neck";
+    return part == bone;
+}
+
+constexpr int kPairSamples = 9;
+
+std::pair<Vec3, double> sample_of(const Bone& b, double from, int i) {
+    const double t = from + (1.0 - from) * static_cast<double>(i) / (kPairSamples - 1);
+    return {b.a + (b.b - b.a) * t, b.ra + (b.rb - b.ra) * t};
+}
+
+// How far x (the pair's space) is from the surface of `part` of person q (u; < 0 inside it)
+double from_surface(const Placed& q, const std::string& part, const Vec3& x) {
+    const double u = q.sk.unit;
+    if (part == "torso") return q.torso.at(q.in(x)) / u;
+    if (part == "head") return q.head.at(q.in(x)) / u;
+    for (const Bone& b : q.bones) {
+        if (b.name != part) continue;
+        double t = 0;
+        const double d = dist_seg(x, b.a, b.b, &t);
+        return d / u - (b.ra + (b.rb - b.ra) * t);
+    }
+    return std::numeric_limits<double>::infinity();
+}
+
+}  // namespace
+
+PairReport check_pair(const Json& pair, const Json& body) {
+    PairReport r;
+    r.id = pair.value("id", std::string());
+    const auto issue = [&](const std::string& check, const std::string& what) { r.issues.push_back({check, what}); };
+    const std::array<Json, 2> prims = pair_figures(pair, 120.0, body);
+    const char* const roles[] = {"a", "b"};
+    std::array<std::vector<int>, 2> region;
+    std::array<std::shared_ptr<const mesh3d::Model>, 2> models;
+    for (int k = 0; k < 2; ++k) {
+        const Json person = pose_library::member(pair, roles[k]);
+        Json own = prims[static_cast<std::size_t>(k)];
+        own["pos"] = Json::array({0.0, 0.0, 0.0});
+        own["rot"] = Json::array({0.0, 0.0, 0.0});
+        Report& one = k == 0 ? r.a : r.b;
+        one.id = person.value("id", std::string());
+        models[static_cast<std::size_t>(k)] = mesh3d::model_of(own);
+        one.measured = measure(own, *models[static_cast<std::size_t>(k)], person);
+        const auto lines = mesh3d::prim_lines(own, nullptr, 40.0);
+        one.inside = inside(own);
+        for (auto list : {check_ranges(person.value("joints", Json::object())), check_support(person, one.measured), check_inside(own), check_mirror(person),
+                          check_render(one.measured, lines ? lines->size() : 0)}) {
+            for (const Issue& i : list) issue(i.check, std::string(roles[k]) + ": " + i.what);
+        }
+        for (const char* sex : {"male", "female"}) {
+            for (const Issue& i : check_inside(figure_of(person, 120.0, Json::object({{"sex", sex}})))) issue(i.check, std::string(roles[k]) + " (" + sex + "): " + i.what);
+        }
+        const mesh3d::Skeleton sk = mesh3d::figure_skeleton(own);
+        region[static_cast<std::size_t>(k)] = regions(models[static_cast<std::size_t>(k)]->mesh.v, bones_of(sk, own), sk.unit);
+    }
+    const Placed a = placed(prims[0]);
+    const Placed b = placed(prims[1]);
+    const double u = a.sk.unit;
+    const Json& fa = pair.at("figures").at(0);
+    const Json& fb = pair.at("figures").at(1);
+    // the same floor: both on the floor (or a chair's) — their lowest points at one height
+    const std::string sa = fa.value("support", std::string());
+    const std::string sb = fb.value("support", std::string());
+    if (sa != "none" && sb != "none") {
+        const double floor_b = r.b.measured.floor + b.at[1];
+        r.floor = std::fabs(floor_b - r.a.measured.floor) / u;
+        if (r.floor > kContactGap) issue("pair", "b's floor is " + fmt(r.floor) + " u from a's");
+    }
+    // the two together over what they rest on, when one leans on or is held by the other
+    const bool leaning = has(fa.value("contact", Json::array()), pose_library::kPartner) || has(fb.value("contact", Json::array()), pose_library::kPartner);
+    if (leaning) {
+        std::vector<std::array<double, 2>> rest;
+        for (const auto& p : r.a.measured.rest) rest.push_back(p);
+        for (const auto& p : r.b.measured.rest) {
+            const Vec3 w = b.out(Vec3{p[0], 0.0, p[1]});
+            rest.push_back({w[0], w[2]});
+        }
+        const Vec3 mb = b.out(r.b.measured.mass);
+        const std::array<double, 2> mass{(r.a.measured.mass[0] + mb[0]) / 2, (r.a.measured.mass[2] + mb[2]) / 2};
+        r.balance = outside(hull(std::move(rest)), mass) / u;
+        if (r.balance > kBalance) issue("balance", "the pair's centre of mass is " + fmt(r.balance) + " u beyond what they rest on");
+        if (!pair.value("touch", Json::array()).is_array() || pair.value("touch", Json::array()).empty()) issue("pair", "a person leans on the partner but they touch nowhere");
+    }
+    // the touches: each named part of one within kTouchGap of the other's (its surface points: the other's surface)
+    std::set<std::pair<std::string, std::string>> exempt;
+    for (const Json& t : pair.value("touch", Json::array())) {
+        const std::string pa = t.value("a", std::string());
+        const std::string pb = t.value("b", std::string());
+        double gap = std::numeric_limits<double>::infinity();
+        const auto scan = [&](const Placed& me, int k, const std::string& mine, const Placed& other, const std::string& theirs) {
+            const mesh3d::Model& m = *models[static_cast<std::size_t>(k)];
+            const std::vector<Bone> own_bones = bones_of(me.sk, me.prim);
+            const std::size_t points = m.body_points();
+            for (std::size_t i = 0; i < points; i += 3) {  // (every third point: the surface is fine enough)
+                const std::string& bone = own_bones[static_cast<std::size_t>(region[static_cast<std::size_t>(k)][i])].name;
+                if (!part_has(mine, bone)) continue;
+                gap = std::min(gap, from_surface(other, theirs, me.out(m.mesh.v[i])));
+            }
+        };
+        scan(a, 0, pa, b, pb);
+        scan(b, 1, pb, a, pa);
+        r.touch.push_back(gap);
+        if (gap > kTouchGap) issue("touch", "a's " + pa + " and b's " + pb + " are " + fmt(gap) + " u apart");
+        if (gap < -kTouchDepth) issue("touch", "a's " + pa + " is " + fmt(-gap) + " u inside b's " + pb);
+        for (const Bone& x : a.bones) {
+            for (const Bone& y : b.bones) {
+                if (part_has(pa, x.name) && part_has(pb, y.name)) exempt.insert({x.name, y.name});
+            }
+        }
+    }
+    // between the two: no limb's axis in the other's torso or head deeper than kInside of its radius, no torso, neck or
+    // head axis in it at all (r.between.torso: the worst, as a part of what is allowed)
+    for (const auto& [me, other, label] : {std::tuple<const Placed*, const Placed*, const char*>{&a, &b, "a"}, {&b, &a, "b"}}) {
+        for (const Bone& x : me->bones) {
+            for (int i = 0; i < kPairSamples; ++i) {
+                const auto [p, rr] = sample_of(x, 0.0, i);
+                const Vec3 q = other->in(p);
+                const double depth = -std::min(other->torso.at(q), other->head.at(q)) / u;
+                const bool limb = x.chain >= 0;
+                const double worst = limb ? depth / (kInside * rr) : (depth > 0.0 ? 1.0 + depth : depth);
+                if (worst > r.between.torso) {
+                    r.between.torso = worst;
+                    r.between.torso_limb = std::string(label) + "'s " + x.name;
+                    r.between.head = depth;
+                }
+            }
+        }
+    }
+    if (r.between.torso > 1.0) issue("inside", r.between.torso_limb + " is " + fmt(r.between.head) + " u inside the other's body");
+    for (const Bone& x : a.bones) {
+        for (const Bone& y : b.bones) {
+            if (x.chain < 0 || y.chain < 0 || exempt.count({x.name, y.name}) != 0) continue;
+            for (int i = 0; i < kPairSamples; ++i) {
+                const auto [p, rp] = sample_of(x, 0.0, i);
+                for (int j = 0; j < kPairSamples; ++j) {
+                    const auto [q, rq] = sample_of(y, 0.0, j);
+                    const double over = ((rp + rq) * u - norm(p - q)) / (std::min(rp, rq) * u);
+                    if (over > r.between.overlap) {
+                        r.between.overlap = over;
+                        r.between.overlap_limbs = "a's " + x.name + " and b's " + y.name;
+                    }
+                }
+            }
+        }
+    }
+    if (r.between.overlap > kOverlap) issue("overlap", r.between.overlap_limbs + " overlap by " + fmt(r.between.overlap) + " of the thinner's radius");
+    return r;
 }
 
 }  // namespace genko::core::pose_checks

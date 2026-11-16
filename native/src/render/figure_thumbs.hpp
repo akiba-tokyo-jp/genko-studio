@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <array>
 #include <vector>
 
 #include "core/json.hpp"
@@ -34,14 +35,20 @@ struct Frame {
     double unit = 0;  // (u, mm)
 };
 
-// The prim a pose makes (pose_figure's joints and hands), with `body` (null: the usual one) and the height in mm.
+// The prim a pose makes (pose_figure's joints and hands, and what the hands hold), with `body` (null: the usual one) and
+// the height in mm; a pair pose's two (the first at 0, the second where it stands from it: G5).
 Json figure_for(const Json& pose, const Json& body = Json(), double height_mm = 120.0);
+std::vector<Json> figures_for(const Json& pose, const Json& body = Json(), double height_mm = 120.0);
 
-// The figure `prim` seen turned `turn`: its frame for a picture of width × height.
+// The figure `prim` (or figures, turned together about the first one's upright axis) seen turned `turn`: its frame for
+// a picture of width × height.
 Frame frame_of(const Json& prim, double turn, int width, int height);
+Frame frame_of(const std::vector<Json>& prims, double turn, int width, int height);
 
-// A grey picture of `prim` (one byte a pixel, 255 where there is no surface), width × height.
+// A grey picture of `prim` (or of the figures, as frame_of turns them) (one byte a pixel, 255 where there is no
+// surface), width × height.
 std::string grey(const Json& prim, double turn, int width, int height, int supersample = 2, Frame* frame = nullptr);
+std::string grey(const std::vector<Json>& prims, double turn, int width, int height, int supersample = 2, Frame* frame = nullptr);
 
 // The pictures of poses, remembered by (pose id with ~m, view, the body's digest, size): what the gallery and the tool
 // draw again and again. Safe from many threads; at most `capacity` kept (the oldest let go first).

@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/json.hpp"
@@ -108,6 +109,7 @@ struct Measure {
     Vec3 mass{};                         // the centre of mass (mm)
     std::size_t triangles = 0;
     double reach = 0;                    // the farthest point from the pelvis on any axis (u)
+    std::vector<std::array<double, 2>> rest;  // the points (x, z) it rests on: the floor's and the seat's (mm)
 };
 Measure measure(const Json& prim, const mesh3d::Model& model, const Json& pose);
 
@@ -148,6 +150,38 @@ struct Report {
     bool ok() const { return issues.empty(); }
 };
 Report check_pose(const Json& pose, const Json& body = Json());
+
+// --- pairs (G5: couple, two_people; core/pose_library.hpp) ---------------------------------------------------------
+
+// Where they touch: the named part of one within this of the other's surface, and sunk into it no deeper than this.
+inline constexpr double kTouchGap = 0.15;
+inline constexpr double kTouchDepth = 0.25;
+
+// Where b of a pair goes for figure a (its pos and rot): b's pelvis at a's + a's turn × offset × a's u (pos to 4
+// places), b turned `turn` more about its upright axis than a.
+std::pair<Json, Json> partner_place(const Json& a, const Json& offset, double turn);
+// The two figures a pair makes, a at 0 unturned and b from it (height and body as figure_of's; with what the hands
+// hold when asked).
+std::array<Json, 2> pair_figures(const Json& pair, double height_mm = 120.0, const Json& body = Json(), bool with_hold = false);
+
+// A pair's checks: each person's own (ranges, support, inside, mirror, drawn; a person with the contact "partner"
+// leans on or is held by the other: its own balance is not checked), and the two together: on the same floor (when
+// neither rests on nothing: their lowest points within kContactGap), their centre of mass over what they rest on
+// together when one leans on the other (kBalance), each touch named within kTouchGap and no deeper than kTouchDepth,
+// no limb's axis in the other's torso or head deeper than kInside of its radius and no torso, neck or head axis in it at
+// all, the limbs of the two overlapping by kOverlap at most (but the parts that touch).
+struct PairReport {
+    std::string id;
+    std::vector<Issue> issues;
+    Report a;
+    Report b;
+    std::vector<double> touch;  // (each touch's gap, u)
+    double floor = 0;           // (b's floor from a's, u)
+    double balance = 0;         // (the pair's, u, when one leans on the other)
+    Inside between;             // (torso: the deepest in the other's body; overlap: the largest of the two's limbs)
+    bool ok() const { return issues.empty(); }
+};
+PairReport check_pair(const Json& pair, const Json& body = Json());
 
 // --- for the ops and the pictures ---------------------------------------------------------------------------------
 

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,16 +39,18 @@ inline constexpr double kViews[] = {0.0, 0.785, 1.571};
 struct Entry {
     Json pose;
     checks::Report report;
+    std::optional<checks::PairReport> pair;  // (a pair pose: both people's, report is a's)
 };
 
 // One pose's three views and its label, at (x, y) of the painter.
 inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
-    const Json prim = render::figure_thumbs::figure_for(e.pose);  // (with what its hands hold)
+    const std::vector<Json> prims = render::figure_thumbs::figures_for(e.pose);  // (with what its hands hold; a pair's two)
+    const Json& prim = prims[0];
     const double u = e.report.measured.unit;
     for (int v = 0; v < 3; ++v) {
         const double turn = kViews[v];
         render::figure_thumbs::Frame f;
-        const std::string grey = render::figure_thumbs::grey(prim, turn, kCellW, kCellH, 2, &f);
+        const std::string grey = render::figure_thumbs::grey(prims, turn, kCellW, kCellH, 2, &f);
         const double k = f.px_per_mm;
         QImage cell(kCellW, kCellH, QImage::Format_RGB888);
         for (int py = 0; py < kCellH; ++py) {
@@ -70,13 +73,13 @@ inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
         painter.setPen(QPen(QColor(150, 120, 90), 1));
         const double fy = oy + (floor - box_y) * k;
         painter.drawLine(QPointF(ox + 4, fy), QPointF(ox + kCellW - 4, fy));
-        if (e.pose.value("support", std::string()) == "chair") {  // (the seat: a short line under the pelvis)
+        if (!e.pair && e.pose.value("support", std::string()) == "chair") {  // (the seat: a short line under the pelvis)
             const double sy = fy - e.report.measured.seat * u * k;
             painter.setPen(QPen(QColor(60, 90, 200), 2));
             const QPointF c = to_px(core::la::Vec3{0.0, 0.0, 0.0});
             painter.drawLine(QPointF(c.x() - 0.9 * u * k, sy), QPointF(c.x() + 0.9 * u * k, sy));
         }
-        for (const Json& c : e.pose.value("contact", Json::array())) {
+        for (const Json& c : (e.pair ? Json::array() : e.pose.value("contact", Json::array()))) {
             std::string name = c.get<std::string>();
             if (name == "back" || name == "front" || name == "side") {  // (lying on it: the ribcage's point; a lean on a wall: none)
                 if (e.report.measured.gap.at("torso") > checks::kContactGap) continue;
@@ -104,10 +107,11 @@ inline void draw_pose(QPainter& painter, int x, int y, const Entry& e) {
     big.setPixelSize(15);
     painter.setFont(big);
     painter.drawText(x + 4, y + 33, QString::fromStdString(e.pose.value("ja", std::string())));
-    if (!e.report.ok()) {
+    const std::vector<checks::Issue>& issues = e.pair ? e.pair->issues : e.report.issues;
+    if (!issues.empty()) {
         painter.setFont(small);
         painter.setPen(QColor(220, 30, 30));
-        painter.drawText(x + 3 * kCellW - 4 - 200, y + 14, 200, 16, Qt::AlignRight, QString::fromStdString(e.report.issues[0].check));
+        painter.drawText(x + 3 * kCellW - 4 - 200, y + 14, 200, 16, Qt::AlignRight, QString::fromStdString(issues[0].check));
         painter.setPen(QPen(QColor(220, 30, 30), 3));
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(x + 1, y + 1, 3 * kCellW - 3, kLabel + kCellH - 3);
@@ -139,17 +143,37 @@ inline std::vector<std::filesystem::path> write(const std::filesystem::path& dir
     return out;
 }
 
-// What a pose measured, for checks.json.
+inline Json measured_of(const checks::Report& report);
+
+// What a pose measured, for checks.json (a pair: each person's, as <id>#a and <id>#b, with the pair's issues and touches).
 inline Json measured(const Entry& e) {
-    const checks::Measure& m = e.report.measured;
+    if (!e.pair) return measured_of(e.report);
+    Json both = Json::array();
+    for (const checks::Report* one : {&e.pair->a, &e.pair->b}) {
+        Json m = measured_of(*one);
+        Json issues = Json::array();
+        for (const auto& i : e.pair->issues) issues.push_back(i.check + ": " + i.what);
+        m["ok"] = e.pair->ok();
+        m["issues"] = issues;
+        m["pair"] = Json::object({{"touch", Json(e.pair->touch)}, {"floor", e.pair->floor}, {"balance", e.pair->balance},
+                                  {"between", e.pair->between.torso}, {"between_what", e.pair->between.torso_limb},
+                                  {"overlap", e.pair->between.overlap}, {"overlap_limbs", e.pair->between.overlap_limbs}});
+        both.push_back(std::move(m));
+    }
+    return both;
+}
+
+inline Json measured_of(const checks::Report& report) {
+    const checks::Measure& m = report.measured;
+    const checks::Report& e_report = report;
     Json gaps = Json::object();
     for (const auto& [k, v] : m.gap) gaps[k] = std::isfinite(v) ? Json(std::round(v * 1000.0) / 1000.0) : Json(99.0);  // (no point of that part)
     Json lowest = Json::object();
     for (const auto& [k, p] : m.lowest) lowest[k] = Json::array({p[0] / m.unit, p[1] / m.unit, p[2] / m.unit});
     Json issues = Json::array();
-    for (const auto& i : e.report.issues) issues.push_back(i.check + ": " + i.what);
-    return Json::object({{"id", e.report.id},
-                         {"ok", e.report.ok()},
+    for (const auto& i : e_report.issues) issues.push_back(i.check + ": " + i.what);
+    return Json::object({{"id", e_report.id},
+                         {"ok", e_report.ok()},
                          {"issues", issues},
                          {"floor", m.floor / m.unit},
                          {"gap", gaps},
@@ -158,8 +182,8 @@ inline Json measured(const Entry& e) {
                          {"down", m.down},
                          {"balance", std::round(m.balance * 1000.0) / 1000.0},
                          {"mass", Json::array({m.mass[0] / m.unit, m.mass[1] / m.unit, m.mass[2] / m.unit})},
-                         {"inside", Json::object({{"torso", e.report.inside.torso}, {"head", e.report.inside.head}, {"overlap", e.report.inside.overlap},
-                                                  {"torso_limb", e.report.inside.torso_limb}, {"head_limb", e.report.inside.head_limb}, {"overlap_limbs", e.report.inside.overlap_limbs}})},
+                         {"inside", Json::object({{"torso", e_report.inside.torso}, {"head", e_report.inside.head}, {"overlap", e_report.inside.overlap},
+                                                  {"torso_limb", e_report.inside.torso_limb}, {"head_limb", e_report.inside.head_limb}, {"overlap_limbs", e_report.inside.overlap_limbs}})},
                          {"triangles", m.triangles},
                          {"reach", m.reach}});
 }

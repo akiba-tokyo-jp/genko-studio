@@ -24,7 +24,9 @@ class QThreadPool;
 // 保つ (on by default), ランダム (24 poses drawn from what is shown, by a seed), and the poses as a grid of small
 // pictures of the figure's own body, drawn on worker threads (render::figure_thumbs, remembered). A double-click or
 // Enter puts the pose on the figure: pose_figure {page, id, pose_id, mirror, keep: "ground" | "pelvis"} through the
-// window's ops — one change, one Undo. The window changes no book itself and stays open to try another.
+// window's ops — one change, one Undo. The window changes no book itself and stays open to try another. A pair pose
+// (couple, two_people: G5) goes on the figure as a and on its partner as b — the other figure of its pair on the page,
+// or a new figure added beside it (pose_figure's partner_id).
 
 namespace genko::app {
 
@@ -37,6 +39,7 @@ public:
         core::Json page;
         std::string id;
         core::Json body;
+        std::string partner;  // (the other figure of its pair on the page, when it has one: a pair pose goes on the two)
     };
     using TargetOf = std::function<std::optional<Target>()>;
     using Apply = std::function<bool(const core::Json& op)>;

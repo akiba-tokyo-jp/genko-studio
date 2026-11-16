@@ -984,6 +984,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("keep is pelvis or ground", "合わせる所は、腰か足もとです"));
         r.push_back(rule(R"(no pose (.*) \(figure_poses lists them\))", "「\\1」というポーズはありません（ポーズ集で選べます）"));
         r.push_back(rule("spread and thumb are numbers from 0 to 1", "指の開きと親指の向きは 0〜1 の数です"));
+        // (G5: what the hands hold, and the pair poses)
+        r.push_back(rule("props is true or false", "手に持つ物を描くかは、はい（描く）かいいえ（隠す）で決めます"));
+        r.push_back(rule(R"(a pair pose places two figures: give partner_id \(the other figure, or a new id to add it\))",
+                         "二人のポーズは人形 2 体に付けます。相手の人形を選ぶか、新しい名前で相手を足します"));
+        r.push_back(rule("partner_id is the other figure, not this one", "二人のポーズの相手には、この人形とは別の人形を選びます"));
+        r.push_back(rule("partner (.*) is not a figure", "「\\1」はデッサン人形ではないので、二人のポーズの相手にできません"));
         r.push_back(rule("height_mm must be between 10 and 400", "身長は 10〜400 mm です"));
         r.push_back(rule("joints is .*", "関節の設定が正しくありません"));
         r.push_back(rule("obj is the model's OBJ text", "3D モデルの中身（OBJ ファイルの文字）が要ります"));

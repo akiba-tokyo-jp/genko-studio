@@ -322,6 +322,68 @@ private slots:
         QVERIFY(!g->apply_chosen());
         QCOMPARE(s.ops.size(), m);
     }
+
+    // A pair pose (G5: couple, two_people) on the one figure there is: its partner is added beside it, both posed (a and
+    // b, one pair) by one pose_figure with a new partner_id — one change, one Undo; the pair's picture shows both. On a
+    // figure of a pair the pose goes on it and its partner (no third figure); Undo takes each back.
+    void applyingAPairPose() {
+        Studio s;
+        s.trigger("act_add_figure");
+        genko::app::GuidePanel* panel = s.window->guides();
+        panel->refresh();
+        panel->prims->setCurrentRow(0);
+        const Json before = *s.figure();
+        panel->gallery_button->click();
+        PoseGallery* g = panel->gallery();
+        for (int r = 0; r < g->categories->count(); ++r)
+            if (g->categories->item(r)->data(Qt::UserRole).toString() == QLatin1String("two_people")) g->categories->setCurrentRow(r);
+        g->search->setText(QStringLiteral("two_people/handshake"));
+        QCOMPARE(g->grid()->count(), 1);
+        QVERIFY(g->grid()->item(0)->toolTip().contains(QStringLiteral("二人のポーズ")));
+        QVERIFY(g->wait_pictures(60000));
+        const auto both = genko::render::figure_thumbs::figures_for(*library::resolve("two_people/handshake"), Json::object());
+        QCOMPARE(both.size(), std::size_t{2});
+        QVERIFY(g->picture_of(0) == genko::render::figure_thumbs::grey(both, genko::render::figure_thumbs::kThreeQuarter, PoseGallery::kWidth, PoseGallery::kHeight, 2));
+        g->grid()->setCurrentRow(0);
+        const std::size_t n = s.ops.size();
+        QVERIFY(g->apply_chosen());
+        QCOMPARE(s.ops.size(), n + 1);
+        const Json op = s.last();
+        QCOMPARE(op["op"], Json("pose_figure"));
+        QCOMPARE(op["id"], before["id"]);
+        QVERIFY(op["partner_id"].is_string() && op["partner_id"] != before["id"]);
+        const auto figures = [&] {
+            std::vector<Json> out;
+            for (const Json& p : s.page().prims)
+                if (p.value("kind", std::string()) == "figure") out.push_back(p);
+            return out;
+        };
+        std::vector<Json> two = figures();
+        QCOMPARE(two.size(), std::size_t{2});
+        QCOMPARE(two[0]["id"], before["id"]);
+        QCOMPARE(two[0]["pose_id"], Json("two_people/handshake#a"));
+        QCOMPARE(two[1]["id"], op["partner_id"]);
+        QCOMPARE(two[1]["pose_id"], Json("two_people/handshake#b"));
+        QCOMPARE(two[1]["pair"], two[0]["pair"]);
+        QCOMPARE(two[1]["size"], two[0]["size"]);
+        panel->refresh();
+        QVERIFY2(panel->prims->item(1)->text().contains(QStringLiteral("二人の")), qPrintable(panel->prims->item(1)->text()));
+        // on a figure of the pair: the pose on it and its partner, mirrored; no third figure
+        panel->prims->setCurrentRow(0);
+        g->mirror->setChecked(true);
+        g->grid()->setCurrentRow(0);
+        QVERIFY(g->apply_chosen());
+        QCOMPARE(s.last()["partner_id"], two[1]["id"]);
+        std::vector<Json> again = figures();
+        QCOMPARE(again.size(), std::size_t{2});
+        QCOMPARE(again[0]["pose_id"], Json("two_people/handshake~m#a"));
+        QCOMPARE(again[1]["pose_id"], Json("two_people/handshake~m#b"));
+        s.trigger("act_undo");
+        QCOMPARE(figures()[1]["pose_id"], Json("two_people/handshake#b"));
+        s.trigger("act_undo");
+        QCOMPARE(figures().size(), std::size_t{1});
+        QCOMPARE(*s.figure(), before);
+    }
 };
 
 QTEST_MAIN(TestGuiPoses)

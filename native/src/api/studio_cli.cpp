@@ -535,10 +535,18 @@ int figure_poses_command(const Json& ns, bool ascii) {
         Json failed_poses = Json::array();
         for (const auto& issue : checks::check_file(library::library())) failed_poses.push_back(Json::object({{"id", "(file)"}, {"issues", Json::array({issue.check + ": " + issue.what})}}));
         for (const Json& p : poses) {
-            std::vector<checks::Issue> found = checks::check_pose(p).issues;
-            const Json mirror = library::mirrored(p);
-            for (const auto& list : {checks::check_ranges(mirror["joints"]), checks::check_inside(checks::figure_of(mirror)), checks::check_mirror(mirror)}) {
-                found.insert(found.end(), list.begin(), list.end());
+            std::vector<checks::Issue> found;
+            if (library::is_pair(p)) {  // (a pair: both people and the two together, and its mirror)
+                found = checks::check_pair(p).issues;
+                const Json mirror = library::mirrored(p);
+                for (const auto& i : checks::check_pair(mirror).issues) found.push_back({i.check, "(mirrored) " + i.what});
+                if (library::mirrored(mirror) != p) found.push_back({"mirror", "the mirror of the mirror is not the pair"});
+            } else {
+                found = checks::check_pose(p).issues;
+                const Json mirror = library::mirrored(p);
+                for (const auto& list : {checks::check_ranges(mirror["joints"]), checks::check_inside(checks::figure_of(mirror)), checks::check_mirror(mirror)}) {
+                    found.insert(found.end(), list.begin(), list.end());
+                }
             }
             if (found.empty()) continue;
             Json issues = Json::array();

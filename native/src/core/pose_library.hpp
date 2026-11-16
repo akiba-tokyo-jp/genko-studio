@@ -24,6 +24,19 @@
 //
 // A mirrored pose is a toggle, not an entry of its own: its id is the pose's with "~m" (left and right swapped, each
 // joint (x, −y, −z): the mirror image of the body, exactly).
+//
+// A pair pose (G5: couple, two_people) holds two people in one entry, in place of joints … contact:
+//
+//   {"id", "category", "ja", "en", "tags",
+//    "figures": [{"joints", "hands", "hold"?, "support", "seat_h"?, "contact"},          (a: the one the op is given)
+//                {"joints", "hands", "hold"?, "support", "seat_h"?, "contact",           (b: placed from a)
+//                 "offset": [x, y, z] (b's pelvis from a's, in a's own frame, in a's unit u), "turn": y (b's turn from a's)}],
+//    "touch": [{"a": part, "b": part}, …] (where they touch each other: l_hand … r_foot, torso, head),
+//    "symmetric": false}
+//
+// A contact "partner" says the person leans on or is held up by the other. "<id>#a" and "<id>#b" name one person of it
+// as a pose of its own (what a figure of the pair keeps as its pose_id); "<id>~m#a" the mirror's. The mirror of a pair is
+// each person mirrored and b's offset x and turn the other way (the roles stay).
 
 namespace genko::core {
 struct Document;
@@ -50,8 +63,20 @@ std::vector<Category> categories();
 const Json* find(std::string_view id);
 
 // The pose an id names — "<id>" or "<id>~m" —, mirrored when the id says so or `mirror` is set (both: not mirrored),
-// its "id" the id it is kept under on a figure ("…~m" when mirrored). Nothing for an id the file does not have.
+// its "id" the id it is kept under on a figure ("…~m" when mirrored). Nothing for an id the file does not have. A pair's
+// id gives the pair; "<id>[~m]#a" or "#b" one person of it (a pose like any other, its id kept so, its category the
+// pair's).
 std::optional<Json> resolve(std::string_view id, bool mirror = false);
+
+// Whether a pose (as the file or resolve has it) is a pair; one person of a pair (role "a" or "b") as a pose.
+bool is_pair(const Json& pose);
+Json member(const Json& pair, std::string_view role);
+// The pair kinds' contacts and touching parts.
+inline constexpr std::string_view kPartner = "partner";
+inline constexpr std::string_view kTouchParts[] = {"l_hand", "r_hand", "l_fore", "r_fore", "l_upper", "r_upper", "l_thigh", "r_thigh",
+                                                   "l_shin", "r_shin", "l_foot", "r_foot", "torso", "head"};
+// An id with its mirror turned over: "<id>" ↔ "<id>~m", before a pair role ("#a", "#b") when it has one.
+std::string mirror_id(std::string_view id);
 
 // The mirror image of a pose (or of a figure's joints, hands and hold, the other keys kept): l_ and r_ swapped, each
 // joint (x, −y, −z), the hands and what they hold swapped, the contacts' sides swapped. Its own inverse.
@@ -74,7 +99,9 @@ struct Filter {
 std::vector<const Json*> list(const Filter& filter = {});
 
 // What the gallery and the figure_poses tool say of a pose: {id, ja, en, category, tags, hands {l, r: the hand's shape's
-// name}, contact, support, props [what the hands hold, l then r], symmetric}.
+// name}, contact, support, props [what the hands hold, l then r], symmetric}; a pair's: the same of its first person
+// (contact and props: both people's), and "pair": true with "figures": [{role, hands, contact, support, props}, …].
+// (A pair matches a filter's support and contact when one of its people does, props when one holds something.)
 Json summary(const Json& pose);
 
 // A random pick for the gallery and the tool (never inside an op): `n` poses of `from` (all of them when fewer), each
@@ -88,8 +115,8 @@ std::string seed_text(std::uint64_t seed);
 inline constexpr std::string_view kProps[] = {"cup", "phone", "paper", "bag", "umbrella", "book", "pen", "sword", "bat", "ball"};
 bool is_prop(std::string_view name);
 
-// figures@1: the book's prims say something a build of before would not keep or draw — a figure's `pose_id` or `hold`,
-// a hand's `spread` or `thumb` (a figure's hands, or a hand on its own). Named while one does (books without them are
+// figures@1: the book's prims say something a build of before would not keep or draw — a figure's `pose_id`, `hold`,
+// `props` or `pair`, a hand's `spread` or `thumb` (a figure's hands, or a hand on its own). Named while one does (books without them are
 // saved as before, byte for byte).
 inline constexpr std::string_view kFiguresFeature = "figures@1";
 bool uses_figures_feature(const Json& prim);

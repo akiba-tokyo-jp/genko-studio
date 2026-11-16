@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "app/look.hpp"
+#include "core/ids.hpp"
 #include "core/pose_library.hpp"
 #include "render/figure_thumbs.hpp"
 
@@ -197,7 +198,9 @@ void PoseGallery::show_ids(const std::vector<std::string>& ids, const QString& w
         const QString name = pose != nullptr ? QString::fromStdString(pose->value("ja", id)) : QString::fromStdString(id);
         auto* item = new QListWidgetItem(name);
         item->setData(Qt::UserRole, QString::fromStdString(id));
-        item->setToolTip(QStringLiteral("%1\n%2").arg(QString::fromStdString(id), pose != nullptr ? QString::fromStdString(pose->value("en", std::string())) : QString()));
+        const bool pair = pose != nullptr && library::is_pair(*pose);
+        item->setToolTip(QStringLiteral("%1\n%2%3").arg(QString::fromStdString(id), pose != nullptr ? QString::fromStdString(pose->value("en", std::string())) : QString(),
+                                                        pair ? QStringLiteral("\n二人のポーズ（選んだ人形と、その相手か新しい人形に付けます）") : QString()));
         item->setTextAlignment(Qt::AlignHCenter | Qt::AlignTop);
         grid_->addItem(item);
     }
@@ -267,15 +270,21 @@ bool PoseGallery::apply_chosen() {
         state->setText(QStringLiteral("ポーズを付けるデッサン人形がありません。先に人形を置いて選びます"));
         return false;
     }
-    const Json op = Json::object({{"op", "pose_figure"},
-                                  {"page", t->page},
-                                  {"id", t->id},
-                                  {"pose_id", item->data(Qt::UserRole).toString().toStdString()},
-                                  {"mirror", mirror->isChecked()},
-                                  {"keep", keep->isChecked() ? "ground" : "pelvis"}});
+    const std::string id = item->data(Qt::UserRole).toString().toStdString();
+    Json op = Json::object({{"op", "pose_figure"},
+                            {"page", t->page},
+                            {"id", t->id},
+                            {"pose_id", id},
+                            {"mirror", mirror->isChecked()},
+                            {"keep", keep->isChecked() ? "ground" : "pelvis"}});
+    const Json* pose = library::find(id);
+    const bool pair = pose != nullptr && library::is_pair(*pose);
+    if (pair) op["partner_id"] = t->partner.empty() ? core::new_id() : t->partner;  // (its partner, or a new figure beside it)
     const bool done = apply_ && apply_(op);
     if (done) {
-        state->setText(QStringLiteral("「%1」%2を付けました（元に戻す で取り消せます）").arg(item->text(), mirror->isChecked() ? QStringLiteral("（左右反転）") : QString()));
+        state->setText(QStringLiteral("「%1」%2を%3付けました（元に戻す で取り消せます）")
+                           .arg(item->text(), mirror->isChecked() ? QStringLiteral("（左右反転）") : QString(),
+                                pair ? (t->partner.empty() ? QStringLiteral("相手の人形を足して二人に") : QStringLiteral("二人に")) : QString()));
         follow_target();
     }
     return done;

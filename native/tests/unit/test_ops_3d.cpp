@@ -677,6 +677,124 @@ private slots:
         QCOMPARE((*prim(back, "fig"))["hold"], Json::object({{"l", "cup"}}));
     }
 
+    // A pair pose through the ops (SPEC FIGURE-02, G5): add_figure with a pair's id places two figures — the op's as a,
+    // its partner (partner_id) as b where the pair says, turned as it says, as tall and of the same body —, both keeping
+    // the pair's id with #a and #b and one pair key; mirror puts b on the other side; keep: ground keeps the pair's lowest
+    // point; pose_figure poses a figure and its partner (the one named, a new one, or the one of its pair); a figure's
+    // own pose (a drag, a preset, another pose) ends the pair for both; one person of a pair on a figure of its own; the
+    // refusals; props: false kept; saved and read back.
+    void pairPoses() {
+        namespace library = genko::core::pose_library;
+        namespace checks = genko::core::pose_checks;
+        namespace mesh3d = genko::core::mesh3d;
+        const auto apply = [&](const Document& doc, const std::string& batch) { return bus().apply(doc, ops(batch), Actor("genko")).doc; };
+        const Json& pair = *library::find("two_people/handshake");
+        QVERIFY(library::is_pair(pair));
+        const Json& off = pair["figures"][1]["offset"];
+        const double turn = pair["figures"][1]["turn"].get<double>();
+        // b where a's turn puts the offset (u of a), turned `turn` more
+        const auto expect_b = [&](const Json& a, double sign) {
+            const double u = mesh3d::figure_skeleton(a).unit;  // (its height / its heads)
+            const genko::core::la::Mat3 r = mesh3d::prim_rotation(a["rot"]);
+            const genko::core::la::Vec3 o{sign * off[0].get<double>() * u, off[1].get<double>() * u, off[2].get<double>() * u};
+            const genko::core::la::Vec3 d = genko::core::la::matvec(r, o);
+            return std::array<double, 4>{a["pos"][0].get<double>() + d[0], a["pos"][1].get<double>() + d[1], a["pos"][2].get<double>() + d[2],
+                                         a["rot"][1].get<double>() + sign * turn};
+        };
+        const auto placed_as = [&](const Json& a, const Json& b, double sign) {
+            const auto want = expect_b(a, sign);
+            for (int i = 0; i < 3; ++i) QVERIFY2(std::abs(b["pos"][i].get<double>() - want[static_cast<std::size_t>(i)]) < 2e-4, std::to_string(i).c_str());
+            QVERIFY(std::abs(b["rot"][1].get<double>() - want[3]) < 2e-4);
+            QCOMPARE(b["rot"][0], a["rot"][0]);
+        };
+        Document d = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "rot": [0, 0.3, 0], "height_mm": 100,
+                                       "body": {"sex": "female"}, "pose_id": "two_people/handshake", "partner_id": "b1"}])");
+        Json a = *prim(d, "a1");
+        Json b = *prim(d, "b1");
+        QCOMPARE(a["pose_id"], Json("two_people/handshake#a"));
+        QCOMPARE(b["pose_id"], Json("two_people/handshake#b"));
+        QVERIFY(a["pair"].is_string() && !a["pair"].get<std::string>().empty());
+        QCOMPARE(b["pair"], a["pair"]);
+        same(a["joints"], pair["figures"][0]["joints"], "a's joints");
+        same(b["joints"], pair["figures"][1]["joints"], "b's joints");
+        QCOMPARE(b["size"], a["size"]);
+        QCOMPARE(b["body"], a["body"]);
+        QCOMPARE(b["kind"], Json("figure"));
+        placed_as(a, b, 1.0);
+        QCOMPARE(prim(d, "a1") < prim(d, "b1"), true);  // (b after a, in the page's order)
+        // the mirror: each person mirrored, b on the other side
+        Document m = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "height_mm": 100,
+                                       "pose_id": "two_people/handshake", "partner_id": "b1", "mirror": true}])");
+        QCOMPARE((*prim(m, "a1"))["pose_id"], Json("two_people/handshake~m#a"));
+        QCOMPARE((*prim(m, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        same((*prim(m, "a1"))["joints"], library::mirrored_joints(pair["figures"][0]["joints"]), "a mirrored");
+        placed_as(*prim(m, "a1"), *prim(m, "b1"), -1.0);
+        // keep: ground — the lower of the two where a figure standing there has its feet
+        const Document grounded = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "pose_id": "two_people/handshake",
+                                                     "partner_id": "b1", "keep": "ground"},
+                                                    {"op": "add_figure", "page": 1, "id": "s1", "pos": [80, 150, 0]}])");
+        const Json& ga = *prim(grounded, "a1");
+        const Json& gb = *prim(grounded, "b1");
+        const double low = std::max(ga["pos"][1].get<double>() + checks::lowest(ga), gb["pos"][1].get<double>() + checks::lowest(gb));
+        QVERIFY(std::abs(low - 150.0 - checks::lowest(*prim(grounded, "s1"))) < 1e-3);
+        placed_as(ga, gb, 1.0);
+        // pose_figure: the pair's partner by its pair key (re-posed, mirrored), a partner named, a new partner added
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "a1", "pose_id": "two_people/handshake", "mirror": true}])");
+        QCOMPARE((*prim(d, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        QCOMPARE((*prim(d, "b1"))["pair"], a["pair"]);
+        placed_as(*prim(d, "a1"), *prim(d, "b1"), -1.0);
+        const Document named = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "c1", "pos": [150, 160, 0]},
+                                               {"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "c1"}])");
+        QCOMPARE((*prim(named, "c1"))["pose_id"], Json("two_people/handshake#b"));
+        QCOMPARE((*prim(named, "c1"))["pair"], (*prim(named, "fig"))["pair"]);
+        placed_as(*prim(named, "fig"), *prim(named, "c1"), 1.0);
+        const Document fresh = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "n1", "height_mm": 110}])");
+        QCOMPARE((*prim(fresh, "n1"))["size"], (*prim(fresh, "fig"))["size"]);
+        QCOMPARE((*prim(fresh, "n1"))["kind"], Json("figure"));
+        QCOMPARE(fresh.page(0).prims.size(), base_.page(0).prims.size() + 1);
+        placed_as(*prim(fresh, "fig"), *prim(fresh, "n1"), 1.0);
+        // a figure's own pose ends the pair, for both (a joint's touch does not)
+        QCOMPARE((*prim(apply(d, R"([{"op": "pose_figure", "page": 1, "id": "a1", "joints": {"head": {"y": 0.2}}}])"), "b1"))["pair"], a["pair"]);
+        for (const char* own : {R"({"drag": {"handle": "l_wrist", "to": [70, 100]}})", R"({"preset": "run"})", R"({"pose_id": "stand/wave"})", R"({"mirror": true})"}) {
+            Json op = ops(own);
+            op["op"] = "pose_figure";
+            op["page"] = 1;
+            op["id"] = "a1";
+            const Document ended = bus().apply(d, Json::array({op}), Actor("genko")).doc;
+            QVERIFY2(!(*prim(ended, "a1")).contains("pair") && !(*prim(ended, "b1")).contains("pair"), own);
+            QCOMPARE((*prim(ended, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        }
+        // one person of a pair, on a figure of its own
+        // (ids with "#" are built here: moc reads a "#" in a raw string as a directive)
+        const std::string role_b = std::string("two_people/handshake") + '#' + "b";
+        const Json one_op = Json::array({Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"}, {"pose_id", role_b}})});
+        const Document one = bus().apply(base_, one_op, Actor("genko")).doc;
+        QCOMPARE((*prim(one, "fig"))["pose_id"], Json("two_people/handshake#b"));
+        same((*prim(one, "fig"))["joints"], pair["figures"][1]["joints"], "b alone");
+        QVERIFY(!(*prim(one, "fig")).contains("pair"));
+        QCOMPARE((*prim(apply(one, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])"), "fig"))["pose_id"], Json("two_people/handshake~m#b"));
+        // the refusals
+        const auto says = [](const std::string& error, const std::string& reason) { return error.find(": " + reason + " \u2016") != std::string::npos; };
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake"}])")),
+                     "a pair pose places two figures: give partner_id (the other figure, or a new id to add it)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "fig"}])")),
+                     "partner_id is the other figure, not this one"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "hand"}])")),
+                     "partner hand is not a figure"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "add_figure", "page": 1, "id": "a1", "pose_id": "two_people/handshake", "partner_id": "fig"}])")), "3D fig exists"));
+        const std::string wave_a = std::string("stand/wave") + '#' + "a";
+        QVERIFY(says(error_of(base_, Json::array({Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"}, {"pose_id", wave_a}})})),
+                     "no pose " + wave_a + " (figure_poses lists them)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "props": "no"}])")), "props is true or false"));
+        // props: false is kept (what the hands hold is not drawn), true takes it away
+        const Document hidden = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink", "props": false}])");
+        QCOMPARE((*prim(hidden, "fig"))["props"], Json(false));
+        QVERIFY(!(*prim(apply(hidden, R"([{"op": "pose_figure", "page": 1, "id": "fig", "props": true}])"), "fig")).contains("props"));
+        // saved and read back as they were
+        const Document back = read(make_book(book_path(), d));
+        same(back.page(0).prims, d.page(0).prims, "the pair read back");
+    }
+
     // A box seen through the page's camera is traced as the box (it was a floor's grid): its twelve edges between the
     // corners project puts on the page, the ones at its back not drawn — a face is seen when the camera's eye is on its
     // outer side, worked out here on its own from the corners where the camera has them; with a camera that does not

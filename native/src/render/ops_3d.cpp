@@ -297,14 +297,7 @@ void mirror_figure(Json& prim) {
         if (turned.contains(key)) prim[key] = turned[key];
     }
     if (const Json* id = core::dict_get(prim, "pose_id"); id != nullptr && id->is_string()) {
-        std::string name = id->get<std::string>();
-        const std::string_view suffix = core::pose_library::kMirror;
-        if (name.size() > suffix.size() && name.ends_with(suffix)) {
-            name.resize(name.size() - suffix.size());
-        } else {
-            name += suffix;
-        }
-        prim["pose_id"] = name;
+        prim["pose_id"] = core::pose_library::mirror_id(id->get<std::string>());  // ("…~m" on or off, before a pair's "#a")
     }
     prim.erase("preset");
 }
@@ -324,6 +317,86 @@ void keep_ground(Json& prim, double lowest_before) {
     Json pos = prim["pos"];
     pos[1] = core::py_round(core::to_float(pos[1]) + drop, 4);
     prim["pos"] = std::move(pos);
+}
+
+// --- pairs (G5, SPEC FIGURE-02: a pair pose places two figures) ---------------------------------------------------
+
+// The pair a pose_id names (resolved, mirrored as asked), or nothing when it names one person or no pair.
+std::optional<Json> pair_pose(const Json* pose_id, bool mirror) {
+    if (!truthy(pose_id)) return std::nullopt;
+    const std::string id = pose_id->is_string() ? pose_id->get<std::string>() : core::py_str(*pose_id);
+    std::optional<Json> pose = core::pose_library::resolve(id, mirror);
+    if (!pose || !core::pose_library::is_pair(*pose)) return std::nullopt;
+    return pose;
+}
+
+// The other figures of a figure's pair on the page (those that keep the same pair id)
+std::vector<std::size_t> partners_of(const Page& page, const Json& pair_id, std::size_t self) {
+    std::vector<std::size_t> out;
+    if (!pair_id.is_string()) return out;
+    for (std::size_t i = 0; i < page.prims.size(); ++i) {
+        if (i == self) continue;
+        const Json* kind = core::dict_get(page.prims[i], "kind");
+        const Json* pair = core::dict_get(page.prims[i], "pair");
+        if (kind != nullptr && core::py_equals(*kind, Json("figure")) && pair != nullptr && *pair == pair_id) out.push_back(i);
+    }
+    return out;
+}
+
+// A pair no more: the key taken off the figure (`prim`, page.prims[at]'s next value) and off its partners on the page.
+void unpair(Page& page, std::size_t at, Json& prim) {
+    const Json* pair = core::dict_get(prim, "pair");
+    if (pair == nullptr) return;
+    const Json id = *pair;
+    for (const std::size_t i : partners_of(page, id, at)) page.prims[i].erase("pair");
+    prim.erase("pair");
+}
+
+// b of the pair put where a's pose says (its pos and rot from a's), both posed: a as the pair's "#a", b as its "#b".
+void pose_both(Json& a, Json& b, const Json& pair) {
+    const std::string id = pair["id"].get<std::string>();
+    library_pose(a, Json(id + "#a"), false);
+    library_pose(b, Json(id + "#b"), false);
+}
+
+void place_partner(const Json& a, Json& b, const Json& pair) {
+    const Json& f = pair["figures"][1];
+    auto [pos, rot] = core::pose_checks::partner_place(a, f["offset"], core::to_float(f["turn"]));
+    b["pos"] = std::move(pos);
+    b["rot"] = std::move(rot);
+}
+
+// The lowest point of the two (on the page's y, below a's pelvis): what keep: ground holds for a pair.
+double lowest_of_two(const Json& a, const Json& b) {
+    const double dy = core::to_float(b["pos"][1]) - core::to_float(a["pos"][1]);
+    return std::max(core::pose_checks::lowest(a), core::pose_checks::lowest(b) + dy);
+}
+
+void shift_both(Json& a, Json& b, double drop) {
+    for (Json* prim : {&a, &b}) {
+        Json pos = (*prim)["pos"];
+        pos[1] = core::py_round(core::to_float(pos[1]) + drop, 4);
+        (*prim)["pos"] = std::move(pos);
+    }
+}
+
+// A new figure for b: a's size, body (or the op's partner_body), lens and panel.
+Json new_partner(const Json& a, const Json& op, const std::string& id) {
+    Json b = Json::object();
+    b["id"] = id;
+    b["kind"] = "figure";
+    b["pos"] = a["pos"];
+    b["size"] = a["size"];
+    b["rot"] = a["rot"];
+    static const Json kNone = Json::object();
+    const Json* body = get(op, "partner_body");
+    b["body"] = truthy(body) ? body_of(*body) : get_else(a, "body", kNone);
+    b["joints"] = Json::object();
+    b["hands"] = Json::object();
+    for (const char* key : {"focal_mm", "frame_id"}) {
+        if (const Json* v = core::dict_get(a, key); v != nullptr) b[key] = *v;
+    }
+    return b;
 }
 
 // threeops._find: the first prim with the id, of one of the kinds
@@ -494,7 +567,14 @@ void add_figure(OpContext& c) {
         if (truthy(pose_id)) throw OpError("give preset or pose_id, not both");
         figure_preset(prim, core::py_str(*preset));
     }
-    if (truthy(pose_id)) {
+    const std::optional<Json> pair = pair_pose(pose_id, truthy(get(c.op, "mirror")));
+    std::optional<Json> partner;
+    if (pair) {  // (a pair pose: this figure is a, its partner b is added beside it)
+        const Json* partner_id = get(c.op, "partner_id");
+        partner = new_partner(prim, c.op, truthy(partner_id) ? core::py_str(*partner_id) : core::new_id());
+        if ((*partner)["id"] == prim["id"]) throw OpError("partner_id is the other figure, not this one");
+        pose_both(prim, *partner, *pair);
+    } else if (truthy(pose_id)) {
         library_pose(prim, *pose_id, truthy(get(c.op, "mirror")));
     } else if (truthy(get(c.op, "mirror"))) {
         mirror_figure(prim);
@@ -509,7 +589,17 @@ void add_figure(OpContext& c) {
     }
     if (const Json* hold = get(c.op, "hold"); hold != nullptr && !hold->is_null()) hold_into(prim, *hold);
     props_into(prim, c.op);
-    if (ground) {
+    if (partner) {
+        place_partner(prim, *partner, *pair);
+        const std::string pair_id = core::new_id();
+        prim["pair"] = pair_id;
+        (*partner)["pair"] = pair_id;
+        if (ground) {
+            core::require_finite(prim);
+            core::require_finite(*partner);
+            shift_both(prim, *partner, standing - lowest_of_two(prim, *partner));
+        }
+    } else if (ground) {
         core::require_finite(prim);
         keep_ground(prim, standing);
     }
@@ -517,10 +607,18 @@ void add_figure(OpContext& c) {
     for (const Json& p : page.prims) {
         const Json* id = core::dict_get(p, "id");
         if (core::py_equals(id != nullptr ? *id : Json(), prim["id"])) throw OpError("3D " + prim["id"].get<std::string>() + " exists");
+        if (partner && core::py_equals(id != nullptr ? *id : Json(), (*partner)["id"])) {
+            throw OpError("3D " + (*partner)["id"].get<std::string>() + " exists");
+        }
     }
     attach_frame(page, c.op, prim);
     core::require_finite(prim);
+    if (partner) {
+        if (const Json* frame = core::dict_get(prim, "frame_id"); frame != nullptr) (*partner)["frame_id"] = *frame;
+        core::require_finite(*partner);
+    }
     page.prims.push_back(std::move(prim));
+    if (partner) page.prims.push_back(std::move(*partner));
 }
 
 // owner.setdefault(key, {}): what is there (made when nothing is)
@@ -567,21 +665,48 @@ void pose_figure(OpContext& c) {
         return;
     }
     const bool ground = keeps_ground(c.op);
+    const Json* pose_id = get(c.op, "pose_id");
+    const std::optional<Json> pair = pair_pose(pose_id, truthy(get(c.op, "mirror")));
+    std::optional<Json> partner;  // (a pair pose: the other figure, b — on the page at partner_at, or new)
+    std::optional<std::size_t> partner_at;
+    if (pair) {
+        if (const Json* given = get(c.op, "partner_id"); truthy(given)) {
+            if (core::py_equals(*given, prim["id"])) throw OpError("partner_id is the other figure, not this one");
+            for (std::size_t i = 0; i < page.prims.size(); ++i) {
+                const Json* id_i = core::dict_get(page.prims[i], "id");
+                if (id_i == nullptr || !core::py_equals(*id_i, *given)) continue;
+                const Json* kind = core::dict_get(page.prims[i], "kind");
+                if (!(kind != nullptr && core::py_equals(*kind, Json("figure")))) throw OpError("partner " + core::py_str(*given) + " is not a figure");
+                partner_at = i;
+                break;
+            }
+            if (!partner_at) partner = new_partner(prim, c.op, core::py_str(*given));
+        } else {
+            const Json* mine = core::dict_get(prim, "pair");
+            const std::vector<std::size_t> found = mine != nullptr ? partners_of(page, *mine, at) : std::vector<std::size_t>{};
+            if (found.empty()) throw OpError("a pair pose places two figures: give partner_id (the other figure, or a new id to add it)");
+            partner_at = found.front();
+        }
+        if (partner_at) partner = page.prims[*partner_at];
+    }
     double before = 0.0;
     if (ground) {
         core::require_finite(prim);
-        before = core::pose_checks::lowest(prim);
+        before = partner_at ? lowest_of_two(prim, *partner) : core::pose_checks::lowest(prim);
     }
-    const Json* pose_id = get(c.op, "pose_id");
     if (const Json* preset = get(c.op, "preset"); truthy(preset)) {
         if (truthy(pose_id)) throw OpError("give preset or pose_id, not both");
         figure_preset(prim, core::py_str(*preset));
     }
-    if (truthy(pose_id)) {
+    if (pair) {
+        pose_both(prim, *partner, *pair);
+    } else if (truthy(pose_id)) {
         library_pose(prim, *pose_id, truthy(get(c.op, "mirror")));
     } else if (truthy(get(c.op, "mirror"))) {
         mirror_figure(prim);
     }
+    // (a change of this figure's own pose — a preset, another pose, its mirror alone, a drag — ends its pair)
+    const bool own_pose = !pair && (truthy(get(c.op, "preset")) || truthy(pose_id) || truthy(get(c.op, "mirror")) || truthy(get(c.op, "drag")));
     if (const Json* set = get(c.op, "set_joints")) {
         static const Json kNone = Json::object();
         prim["joints"] = joints_of(core::py_truthy(*set) ? *set : kNone);
@@ -623,7 +748,27 @@ void pose_figure(OpContext& c) {
         height = core::to_float(*height_value);
         prim["size"] = Json::array({*height / 2, *height, *height / 4});
     }
-    if (ground) {
+    if (pair) {
+        if (!partner_at) (*partner)["size"] = prim["size"];  // (a new partner as tall as a, as a is now)
+        place_partner(prim, *partner, *pair);
+        const Json* mine = core::dict_get(prim, "pair");
+        const Json* theirs = core::dict_get(*partner, "pair");
+        Json pair_id = mine != nullptr && theirs != nullptr && *mine == *theirs ? *mine : Json(core::new_id());
+        for (const Json* old_id : {mine, theirs}) {  // (a pair either was in before, with a third figure, ends)
+            if (old_id == nullptr || *old_id == pair_id) continue;
+            for (const std::size_t i : partners_of(page, *old_id, at)) {
+                if (!partner_at || i != *partner_at) page.prims[i].erase("pair");
+            }
+        }
+        prim["pair"] = pair_id;
+        (*partner)["pair"] = pair_id;
+        if (ground) {
+            if (height) require_finite_value(*height, "height_mm");
+            core::require_finite(prim);
+            core::require_finite(*partner);
+            shift_both(prim, *partner, before - lowest_of_two(prim, *partner));
+        }
+    } else if (ground) {
         if (height) require_finite_value(*height, "height_mm");
         core::require_finite(prim);
         keep_ground(prim, before);
@@ -648,6 +793,21 @@ void pose_figure(OpContext& c) {
     }
     if (height) require_finite_value(*height, "height_mm");
     core::require_finite(prim);
+    if (own_pose) unpair(page, at, prim);
+    if (partner) {
+        core::require_finite(*partner);
+        if (partner_at) {
+            page.prims[*partner_at] = std::move(*partner);
+        } else {
+            for (const Json& p : page.prims) {
+                const Json* id_p = core::dict_get(p, "id");
+                if (id_p != nullptr && core::py_equals(*id_p, (*partner)["id"])) throw OpError("3D " + (*partner)["id"].get<std::string>() + " exists");
+            }
+            page.prims[at] = std::move(prim);
+            page.prims.push_back(std::move(*partner));
+            return;
+        }
+    }
     page.prims[at] = std::move(prim);
 }
 

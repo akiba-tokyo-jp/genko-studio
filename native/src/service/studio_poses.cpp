@@ -28,7 +28,7 @@ namespace thumbs = render::figure_thumbs;
 constexpr std::size_t kMaxLimit = 500;
 constexpr std::size_t kMaxSheet = 24;  // (the poses a contact sheet shows at most)
 
-const char* const kContacts[] = {"l_foot", "r_foot", "l_knee", "r_knee", "l_hand", "r_hand", "seat", "pelvis", "back", "front", "side"};
+const char* const kContacts[] = {"l_foot", "r_foot", "l_knee", "r_knee", "l_hand", "r_hand", "seat", "pelvis", "back", "front", "side", "partner"};
 const std::pair<const char*, double> kViews[] = {{"front", thumbs::kFront}, {"three_quarter", thumbs::kThreeQuarter}, {"side", thumbs::kSide}};
 
 // The words of a list argument (a string or a list of strings), or why not.
@@ -82,7 +82,7 @@ ToolResult StudioService::figure_poses(const Json& a) {
     if (!contact) return refused("contact は接地の並び", "/contact");
     for (const std::string& c : *contact) {
         if (std::find_if(std::begin(kContacts), std::end(kContacts), [&](const char* k) { return c == k; }) == std::end(kContacts)) {
-            return refused("接地 " + c + " は無い（l_foot, r_foot, l_knee, r_knee, l_hand, r_hand, seat, pelvis, back, front, side）", "/contact");
+            return refused("接地 " + c + " は無い（l_foot, r_foot, l_knee, r_knee, l_hand, r_hand, seat, pelvis, back, front, side, partner）", "/contact");
         }
     }
     filter.contact = *contact;
@@ -147,7 +147,8 @@ ToolResult StudioService::figure_poses(const Json& a) {
     data["total"] = found.size();
     data["poses"] = std::move(poses);
     data["apply"] = "apply_ops: [{\"op\": \"pose_figure\", \"page\": N, \"id\": \"<人形の id>\", \"pose_id\": \"<id>\", \"mirror\": false, \"keep\": \"ground\"}]"
-                    "（新しい人形なら add_figure に pose_id。mirror: true で左右反転）";
+                    "（新しい人形なら add_figure に pose_id。mirror: true で左右反転。pair: true の二人のポーズは、その人形が a になり、"
+                    "partner_id の人形が b（無い id なら b を足す。add_figure では省くと新しい id で足す）。片方だけなら pose_id に <id>#a か <id>#b）";
     std::vector<std::string> images;
     if (core::py_truthy(a["sheet"])) {
         std::vector<Json> picked;

@@ -10,6 +10,7 @@
 #include "core/pose_checks.hpp"
 #include "core/pose_library.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
 
@@ -30,7 +31,36 @@ Json seen_at(const Json& prim, double turn) {
     return seen;
 }
 
+// The figures turned `turn` together about the first one's upright axis (the first at 0; a pair's second where it stands
+// from the first)
+std::vector<Json> seen_all(const std::vector<Json>& prims, double turn) {
+    std::vector<Json> out;
+    for (std::size_t i = 0; i < prims.size(); ++i) {
+        if (i == 0) {
+            out.push_back(seen_at(prims[0], turn));
+            continue;
+        }
+        Json seen = prims[i];
+        const Json& p0 = prims[0]["pos"];
+        const core::la::Vec3 d{core::to_float(seen["pos"][0]) - core::to_float(p0[0]), core::to_float(seen["pos"][1]) - core::to_float(p0[1]),
+                               core::to_float(seen["pos"][2]) - core::to_float(p0[2])};
+        const core::la::Vec3 at = core::la::matvec(mesh3d::prim_rotation(Json::array({0.0, turn, 0.0})), d);
+        seen["pos"] = Json::array({at[0], at[1], at[2]});
+        seen["rot"] = Json::array({0.0, core::to_float(seen["rot"][1]) - core::to_float(prims[0]["rot"][1]) + turn, 0.0});
+        out.push_back(std::move(seen));
+    }
+    return out;
+}
+
 }  // namespace
+
+std::vector<Json> figures_for(const Json& pose, const Json& body, double height_mm) {
+    if (core::pose_library::is_pair(pose)) {
+        const std::array<Json, 2> two = core::pose_checks::pair_figures(pose, height_mm, body, true);
+        return {two[0], two[1]};
+    }
+    return {figure_for(pose, body, height_mm)};
+}
 
 Json figure_for(const Json& pose, const Json& body, double height_mm) {
     Json prim = core::pose_checks::figure_of(pose, height_mm, body);
@@ -38,17 +68,20 @@ Json figure_for(const Json& pose, const Json& body, double height_mm) {
     return prim;
 }
 
-Frame frame_of(const Json& prim, double turn, int width, int height) {
-    const Json seen = seen_at(prim, turn);
+Frame frame_of(const Json& prim, double turn, int width, int height) { return frame_of(std::vector<Json>{prim}, turn, width, height); }
+
+Frame frame_of(const std::vector<Json>& prims, double turn, int width, int height) {
+    const std::vector<Json> seen = seen_all(prims, turn);
     Frame f;
-    f.unit = mesh3d::figure_skeleton(seen).unit;
-    const auto model = mesh3d::model_of(seen);
+    f.unit = seen.empty() ? 0.0 : mesh3d::figure_skeleton(seen[0]).unit;
     double x0 = std::numeric_limits<double>::infinity();
     double x1 = -x0;
     double y0 = x0;
     double y1 = -x0;
-    if (model && !model->mesh.v.empty()) {
-        const mesh3d::OnPage at = mesh3d::to_page(seen, model->mesh.v, nullptr);
+    for (const Json& one : seen) {
+        const auto model = mesh3d::model_of(one);
+        if (!model || model->mesh.v.empty()) continue;
+        const mesh3d::OnPage at = mesh3d::to_page(one, model->mesh.v, nullptr);
         for (const auto& p : at.pts) {
             x0 = std::min(x0, p[0]);
             x1 = std::max(x1, p[0]);
@@ -72,11 +105,14 @@ Frame frame_of(const Json& prim, double turn, int width, int height) {
 }
 
 std::string grey(const Json& prim, double turn, int width, int height, int supersample, Frame* frame) {
+    return grey(std::vector<Json>{prim}, turn, width, height, supersample, frame);
+}
+
+std::string grey(const std::vector<Json>& figures, double turn, int width, int height, int supersample, Frame* frame) {
     const int ss = std::max(1, supersample);
-    const Frame f = frame_of(prim, turn, width, height);
+    const Frame f = frame_of(figures, turn, width, height);
     if (frame != nullptr) *frame = f;
-    const Json seen = seen_at(prim, turn);
-    const std::vector<Json> prims{seen};
+    const std::vector<Json> prims = seen_all(figures, turn);
     const int w = width * ss;
     const int h = height * ss;
     const mesh3d::Raster r = mesh3d::raster(prims, w, h, f.px_per_mm * ss * 25.4, nullptr, nullptr, 0.35, f.left, f.top);
@@ -118,7 +154,7 @@ std::string Cache::get(std::string_view id, double turn, const Json& body, int w
     }
     const std::optional<Json> pose = core::pose_library::resolve(id);
     if (!pose) return {};
-    std::string made = grey(figure_for(*pose, body), turn, width, height, supersample);
+    std::string made = grey(figures_for(*pose, body), turn, width, height, supersample);
     const std::lock_guard<std::mutex> lock(mutex_);
     for (const Entry& e : entries_) {
         if (e.key == key) return e.grey;  // (another thread drew it meanwhile: the same bytes)
@@ -156,7 +192,7 @@ std::string sheet_png(const std::vector<Json>& poses, const std::vector<double>&
     for (int k = 0; k < n; ++k) {
         const int ox0 = gap + (k % per_row) * (views * cell_w + gap);
         const int oy = gap + (k / per_row) * (cell_h + gap);
-        const Json prim = figure_for(poses[static_cast<std::size_t>(k)], body);
+        const std::vector<Json> prim = figures_for(poses[static_cast<std::size_t>(k)], body);
         for (int v = 0; v < views; ++v) {
             const double turn = turns.empty() ? kThreeQuarter : turns[static_cast<std::size_t>(v)];
             Frame f;

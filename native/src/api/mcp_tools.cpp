@@ -35,7 +35,7 @@ Genko が検査・コマ割り・縦書き写植・プレビュー描画をす�
 進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
 コマ割りは緩急で決める（規則の「コマ割りの緩急」）。layout_ideas でそのページの案の束を出して選び、崩してから submit_name に出す。
-人形のポーズは figure_poses で選ぶ（分類・言葉・ランダム・一覧の絵）。付けるのは apply_ops の pose_figure {page, id, pose_id, mirror, keep: "ground"}。
+人形のポーズは figure_poses で選ぶ（分類・言葉・ランダム・一覧の絵。二人のポーズも）。付けるのは apply_ops の pose_figure {page, id, pose_id, mirror, keep: "ground"}（二人なら partner_id も）。
 作画: generation_request で依頼パックを受け取る → 自分の画像ツールで生成し、返された inbox フォルダに保存 →
 take_panel_art（取り込み・採用・足りなければ拡大・顔と人物の位置の報告を 1 回で）。2 枚以上を比べるときだけ import_images → candidates → review_candidates → adopt。
 作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（既定は png）。
@@ -254,7 +254,10 @@ const std::vector<ToolSpec>& table() {
         random=n: 条件に合うものから n ポーズをランダムに選ぶ。seed（fp- と 16 桁の 16 進数）を渡すと同じ選び方。省くと新しい seed を返す。
         sheet=true: 選んだポーズ（24 まで）の一覧の絵を返す（views: front / three_quarter / side、既定は 3 つ。body で体型）。
         付ける: apply_ops で pose_figure {page, id, pose_id, mirror（true で左右反転）, keep: "ground"（足もとの高さを保つ）}。新しい人形は add_figure に pose_id。
-        人形をドラッグすると pose_id は外れる。持つ物（props）の形はまだ描かない。)",
+        人形をドラッグすると pose_id は外れる。手に持つ物（hold: 剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）は手の中に描く（props: false で隠す）。
+        二人のポーズ（分類 couple・two_people。poses の pair: true、figures に二人分）: pose_figure {page, id, pose_id, partner_id} で id の人形が a、
+        partner_id の人形が b（その id の人形が無ければ b を足す。二人とも pose_id <id>#a・#b と同じ pair を持つ）。add_figure に pair の pose_id なら二人を置く。
+        片方だけに付けるなら pose_id に <id>#a か <id>#b。接地の partner は相手にもたれる・支えられる人。)",
          {{"project", Kind::Str, true, Json()},
           {"category", Kind::Str, true, Json(), R"({"description": "分類の id（stand, sit_chair, lie, emotion など。categories に全部）"})"},
           {"tags", Kind::ListStr, true, Json(), R"({"description": "タグ（日本語か英語）。全部を持つポーズ"})"},

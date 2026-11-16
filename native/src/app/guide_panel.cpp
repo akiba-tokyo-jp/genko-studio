@@ -286,8 +286,11 @@ void GuidePanel::refresh() {
             if (const std::string from = str_at(p, "pose_id"); !from.empty()) {  // (人形のポーズ集: the pose's name)
                 const auto named = core::pose_library::resolve(from);
                 if (named) {
-                    label += QStringLiteral("（%1%2）").arg(QString::fromStdString(named->value("ja", from)),
-                                                           from.ends_with(core::pose_library::kMirror) ? QStringLiteral("・反転") : QString());
+                    const bool pair_role = from.size() > 2 && from[from.size() - 2] == '#';  // (one of a pair: "#a" or "#b")
+                    const std::string base = pair_role ? from.substr(0, from.size() - 2) : from;
+                    label += QStringLiteral("（%1%2%3）").arg(QString::fromStdString(named->value("ja", from)),
+                                                             base.ends_with(core::pose_library::kMirror) ? QStringLiteral("・反転") : QString(),
+                                                             pair_role ? QStringLiteral("・二人の") + QString::fromStdString(from.substr(from.size() - 1)) : QString());
                 }
             } else if (!pose.empty()) {
                 label += QStringLiteral("（%1）").arg(has(stick_poses(), pose) ? label_of(stick_poses(), pose) : label_of(figure_poses(), pose));
@@ -565,7 +568,13 @@ void GuidePanel::pose_gallery() {
                 if (chosen == nullptr && str_at(p, "kind") == "figure") chosen = &p;
         }
         if (chosen == nullptr) return std::nullopt;
-        return PoseGallery::Target{page->index.json(), str_at(*chosen, "id"), chosen->contains("body") ? (*chosen)["body"] : Json::object()};
+        std::string partner;  // (the other figure of its pair on the page)
+        if (const auto pair = chosen->find("pair"); pair != chosen->end() && pair->is_string()) {
+            for (const Json& p : page->prims) {
+                if (&p != chosen && str_at(p, "kind") == "figure" && p.value("pair", Json()) == *pair && partner.empty()) partner = str_at(p, "id");
+            }
+        }
+        return PoseGallery::Target{page->index.json(), str_at(*chosen, "id"), chosen->contains("body") ? (*chosen)["body"] : Json::object(), partner};
     };
     if (!target()) {
         window_->flash(QStringLiteral("先にデッサン人形を置きます（3D → デッサン人形を置く）"), 3000);
