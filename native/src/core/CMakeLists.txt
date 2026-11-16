@@ -30,6 +30,16 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(font_catalog_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/font_catalog_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_FONT_CATALOG_FILE}")
 
+# The figure's pose library (SPEC FIGURE-02, genko.poses@1: core/pose_library) is embedded from data/figure_poses.json,
+# byte for byte; a change to the file re-runs CMake.
+set(GENKO_FIGURE_POSES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/figure_poses.json")
+file(READ "${GENKO_FIGURE_POSES_FILE}" _genko_poses_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," GENKO_FIGURE_POSES_BYTES "${_genko_poses_hex}")
+string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n"
+       GENKO_FIGURE_POSES_BYTES "${GENKO_FIGURE_POSES_BYTES}")
+configure_file(figure_poses_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/figure_poses_data.cpp" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_FIGURE_POSES_FILE}")
+
 # The Unicode names of Python's unicodedata.lookup (core/pyre's \N{…}), embedded from data/unicode_names.bin
 # (tools/migration/pyre_tables.py writes it); a change to the file re-runs CMake.
 set(GENKO_PYRE_NAMES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/unicode_names.bin")
@@ -121,10 +131,15 @@ genko_library(genko_core
     ops_vector.cpp
     linalg3.cpp
     mesh3d.cpp
+    figure_shape.cpp
+    figure_props.cpp
+    surface_nets.cpp
     prim3d.cpp
     persp3d.cpp
     mannequin.cpp
     poses.cpp
+    pose_library.cpp
+    pose_checks.cpp
     areas.cpp
     ops_arrange.cpp
     pyre.cpp
@@ -185,6 +200,7 @@ genko_library(genko_core
     pixel_aspect.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/font_catalog_data.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/figure_poses_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"
@@ -196,4 +212,12 @@ genko_library(genko_core
 # same with /fp:precise, and the intrinsics turned off by #pragma function in each file.)
 if(NOT MSVC)
   set_source_files_properties(pymath.cpp linalg3.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+endif()
+
+# The smooth figure's field and its mesher (SPEC FIGURE-01) are optimized in Debug too: unoptimized, a figure takes
+# about 40 times as long as in Release (about 5 s under ASan), and test_figure_poses meshes all 655 library poses. The
+# sanitizers still instrument both files; the arithmetic is the same IEEE double either way (the same mesh bytes are
+# pinned in Release and Debug alike).
+if(NOT MSVC)
+  set_source_files_properties(figure_shape.cpp surface_nets.cpp PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()

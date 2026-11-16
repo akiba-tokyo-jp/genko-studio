@@ -18,6 +18,10 @@
 // surfaces of boxes and scenes; seen through the page's camera, lit by one light, drawn as shaded surfaces (面) and as
 // the lines a pen would draw (seen edges and outlines, the hidden ones left out).
 //
+// The figure, the head and the hand are this build's own (SPEC FIGURE-01, core/figure_shape): one smooth surface without
+// seams, shaded smoothly (each point's light spread across its triangles), its lines the outlines where the surface
+// turns away from the eye. Boxes, scenes and imported models are drawn as Python draws them.
+//
 // Page space is mm: x to the right, y down the page, z away from the viewer. A prim is a JSON object as the book keeps
 // it ({"kind", "pos", "size", "rot", …}); every number is computed to the last bit as core/linalg3.hpp rounds
 // (numpy's rounding). A camera is the page's {turn, tip, roll, focal_mm, target}, passed on its own
@@ -49,6 +53,15 @@ const Json& sex_body();
 // {"pose", "curls": [five] | {finger: curl}}.
 std::array<double, 5> hand_curls(const Json& value);
 
+// A hand's whole shape (SPEC FIGURE-01): its curls (hand_curls), how far the fingers fan out and how far the thumb turns
+// to face them (0..1 each; the pose's own unless the value is {…, "spread", "thumb"}).
+struct HandShape {
+    std::array<double, 5> curls{};
+    double spread = 0.0;
+    double thumb = 0.0;
+};
+HandShape hand_shape(const Json& value);
+
 Mat3 rx(double t);  // swings +y toward −z (the viewer) for t > 0
 Mat3 ry(double t);
 Mat3 rz(double t);  // counter-clockwise on the page (y points down)
@@ -79,6 +92,19 @@ struct Mesh {
 struct Model {
     Mesh mesh;
     std::vector<std::vector<Vec3>> marks;
+    // The smooth figure, head and hand (SPEC FIGURE-01): triangles over mesh.v (mesh.f stays empty), a unit normal at
+    // each point, and the points that draw no outline (a hand's stub of the forearm, seen through the arm's own).
+    std::vector<std::array<std::int32_t, 3>> tris;
+    std::vector<Vec3> vn;
+    std::vector<std::uint8_t> nocontour;
+    // A figure's held props (SPEC FIGURE-02, `hold`: figure_shape::props): their flat faces follow the body's points
+    // among the triangles (from `body` on; 0: none), and their edges draw the pen's lines as a box's do (`creases`:
+    // figure_shape::Props::edges).
+    std::size_t body = 0;
+    std::vector<std::array<std::int32_t, 5>> creases;
+
+    bool smooth() const { return !tris.empty(); }
+    std::size_t body_points() const { return body != 0 ? body : mesh.v.size(); }
 };
 std::shared_ptr<const Model> model_of(const Json& prim);
 
@@ -100,8 +126,20 @@ Seen seen(const Json& prim, const Json* camera);
 // The camera a prim is seen with: the page's (page.extra["camera"]) when it is truthy, else the prim's own "camera".
 const Json* camera_of(const Json& prim, const Json* page_camera);
 
+// A smooth model's normals at its points as the prim is seen (its own turn, then the camera's): for a shading of
+// one's own (a material colour, a highlight) over raster's depth.
+std::vector<Vec3> seen_normals(const Json& prim, const Model& model, const Json* camera);
+
 // Each face's unit normal as the prim is seen (its own turn, then the camera's): _normals(_turned(…)).
 std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* camera);
+
+// Points of a prim's own space as it is seen (its own turn, then the camera's) and where the eye is among them (to_page's
+// projection centre): the side of a face the eye is on, for a box's edges seen through a camera.
+struct InView {
+    std::vector<Vec3> pts;
+    Vec3 eye{};
+};
+InView in_view(const Json& prim, std::span<const Vec3> local, const Json* camera);
 
 // Shaded surfaces (1 = lit white; float32 as numpy has them) and the depth buffer (inf where there is no surface),
 // for the prims with meshes, drawn at dpi over a picture of width × height px whose top-left is (box_x, box_y) mm.
@@ -130,10 +168,15 @@ struct Raster {
 Raster raster(std::span<const Json> prims, int width, int height, double dpi, const Json* camera, const Json* light,
               double ambient, double box_x = 0.0, double box_y = 0.0, const Window* window = nullptr);
 
-// The lines a pen would draw (page mm): outlines and creases of the meshes, the face guides, hidden parts left out.
-std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi = 40.0, double crease_deg = 40.0);
-// A mesh prim's pen lines (remembered while the prim and its camera are unchanged).
-std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi = 40.0);
+// The lines a pen would draw (page mm): outlines and creases of the meshes, the face guides, hidden parts left out. A
+// smooth model draws its outlines only (where the surface turns away from the eye, through its triangles), simplified
+// to within 0.03 mm. `hiders` are prims that draw no lines but whose surfaces hide them too, as raster draws them with
+// the same camera (SPEC FIGURE-01, 線: the other prims in front of a figure); none: the lines as before.
+std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi = 40.0, double crease_deg = 40.0,
+                         std::span<const Json> hiders = {});
+// A mesh prim's pen lines (remembered while the prim, its camera and its hiders are unchanged).
+std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi = 40.0,
+                                                     std::span<const Json> hiders = {});
 
 // The pen lines of the prims again, without what is remembered (the tests use this).
 void clear_caches();

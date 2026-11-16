@@ -184,7 +184,7 @@ GENKO_STYLE_CATALOG_TOKEN is sent as a bearer token.
 Genko makes no images. It writes a generation request, the agent generates with its own image tool, and Genko takes the result back as candidates.
 
 1. `next` gives the work in order: `make_sheet` → (person approves the sheet) → `gen_panel` → `import_pending` → `review_candidates` → `fix_panel` → `report_regions` → (person approves the art) → `upscale_panel` → `finish_page` → (person exports). Items another agent claimed (`next claim=true`, 10-minute lease) and items parked by `ask_human` show as blocked.
-2. `generation_request {page, frame_id}` (or `character_id` for a sheet, `location_id` for a background reference; `mode: edit|inpaint|upscale` with `parent`) → `studio/requests/<id>/request.json` with sizes (`suggested_px` ≈ 1 MP in multiples of 64, `tool_sizes` from `tools.json`, `print_px`), a prompt draft (`ja`, `en`, `tags`; character `tokens_en` as written), `avoid`, `keepout` (balloon areas, 0..1), `figures`, and files: `guides/composition.png`, `guides/pose.png`, `guides/keepout.png`, `refs/*` (approved sheets and faces, location images), `source.png`/`mask.png` for fixes. Same content → same id.
+2. `generation_request {page, frame_id}` (or `character_id` for a sheet, `location_id` for a background reference; `mode: edit|inpaint|upscale` with `parent`) → `studio/requests/<id>/request.json` with sizes (`suggested_px` ≈ 1 MP in multiples of 64, `tool_sizes` from `tools.json`, `print_px`), a prompt draft (`ja`, `en`, `tags`; character `tokens_en` as written), `avoid`, `keepout` (balloon areas, 0..1), `figures`, and files: `guides/composition.png`, `guides/pose.png`, `guides/keepout.png`, `refs/*` (approved sheets and faces, location images), `source.png`/`mask.png` for fixes. Same content → same id. A panel with 3D figures, heads or hands also gets `guides/figures.png` (the figures as smooth shaded meshes on black, a material colour per person: the control image of a 3D-mesh pose control) and `guides/regions.png` (a solid colour per person, black elsewhere: a regional control), named in `files.figures`, `files.regions`, `files.image_order` (figures first) and `request.control` (`px`: the output size, exactly the guides' size), with the first note saying how to use them (SPEC FIGURE-03, below).
 3. Save the generated images in `studio/inbox/<id>/` (or upload with `POST /v1/assets?path=PROJECT`, body = the image) and call `import_images {request_id, images: [{file | asset, origin: {kind, tool_id, model, prompt, params, refs_used}}]}`. Only the inbox and uploaded assets are read; 30 MB / 64 MP per image; the same image twice adds nothing. Each candidate gets `metrics` (aspect error, how busy the balloon areas are, brightness, edge overlap with the pose guide; lower `rank` is better).
 4. `candidates`, `render kind=compare` (the candidate with the name in red), `review_candidates`, then `adopt`. `report_regions` (faces and people, `box01` in the adopted image or `rect_mm`) feeds the balloon pass.
 5. After the person approves the art: `finish_page` (moves balloons off reported faces, turns `panel.fx` into effects, advances to finish). `preflight` lists what blocks the export; `export_proof` writes a 150 dpi proof with a 校正 watermark into `studio/proofs/`.
@@ -482,8 +482,9 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 
 ### J8 additions
 
-- `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset, joints {name: {x, y, z}},
-  hands {l, r}, rot}`; `pose_figure {id, joints (merged) | set_joints, body, hands, preset, rot, pos, drag {handle, to}}`
+- `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset | pose_id, mirror, keep,
+  joints {name: {x, y, z}}, hands {l, r}, hold, rot}`; `pose_figure {id, pose_id, mirror, keep, joints (merged) |
+  set_joints, body, hands, hold, preset, rot, pos, drag {handle, to}}`
   (joints: hip, spine, chest, neck, head, l/r_arm, l/r_elbow, l/r_wrist, l/r_leg, l/r_knee, l/r_ankle; x swings toward
   the viewer, y twists, z turns in the picture; presets stand, walk, run, sit, point, arms_up, think, kneel, peace;
   hands open, relaxed, fist, point, peace, grip).
@@ -494,6 +495,63 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 - `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts
   left out, and the lit surfaces as greys (with `tone`, the layer prints them as dots). `trace_prims` also leaves
   hidden lines out for figures, heads, hands and models.
+- The pose library (SPEC FIGURE-02, figures@1): over six hundred original poses in categories (stand, fashion, walk,
+  run, sit_chair, sit_floor, kneel_squat, everyday, pinup, relax_bed, lie, upper_body, turn, point, emotion, talk,
+  hands_props, sports_action, action, dance, heroic, work_life, and the pairs couple and two_people), each `"<category>/<name>"` with Japanese and English names and tags. `add_figure`/`pose_figure {pose_id}` puts its joints and hands in place as a preset does and keeps
+  `pose_id` (and `hold`, what its hands hold); `mirror: true` swaps left and right (`"<id>~m"`; without `pose_id`, the
+  figure's own pose); `keep: "ground"` keeps the figure's lowest point where it was (sitting down keeps the floor;
+  default `"pelvis"` keeps `pos`); `hold {l, r: cup|phone|paper|bag|umbrella|book|pen|sword|bat|ball | null}` is drawn
+  in the hand (shaded, traced, in guides/figures.png in the holder's colour; `props: false` hides it). A pair pose
+  (couple/…, two_people/…: `pair: true` in figure_poses) places two figures: `add_figure {pose_id, partner_id?,
+  partner_body?}` adds the partner b beside a; `pose_figure {id, pose_id, partner_id?}` poses the figure as a and its
+  partner (the figure named — a new id adds one — or the one with the same `pair` key) as b, b placed and turned from a.
+  Both keep `pose_id` `"<id>#a"`/`"#b"` and one `pair` key; a figure's own pose (drag, preset, another pose_id, mirror
+  alone) ends the pair for both. `"<id>#a"` alone is one person of a pair on one figure. A hand is also `{pose, curls, spread (fingers fanned 0..1), thumb (across the palm
+  0..1)}` (and `add_hand`/`pose_figure` of a hand take `spread`, `thumb`). A drag forgets `pose_id`. Unknown ids are
+  refused ("no pose <id> (figure_poses lists them)"). A book whose prims say any of these keys names `figures@1`.
+  The ids are in `native/src/core/data/figure_poses.json`; list them with the tool `figure_poses` (reads only, `project`
+  may be left out): `category`, `tags`, `query` (Japanese or English words, each to match), `contact`, `support`,
+  `props` (true: hands that hold something), `limit` (50) and `offset`; `random: n` picks n of those that match from
+  `seed` (`"fp-<16 hex>"`; left out, a new one comes back to ask the same pick again); `sheet: true` adds a picture of
+  them (24 at most; `views` front / three_quarter / side, `body` as add_figure's). It answers `categories` with counts,
+  `poses` (id, ja, en, category, tags, hands, contact, support, props, symmetric) and `total`. Put one on a figure with
+  `apply_ops` → `pose_figure {page, id, pose_id, mirror, keep: "ground"}`. From the shell: `genko studio figure-poses
+  [--category …] [--tags a,b] [--query …] [--random n --seed …] [--sheet DIR] [--check]`. In the app: 定規・3D →
+  ポーズ集… (or ツール → 3D → ポーズ集…).
+- Figures, heads and hands are one smooth, seamless, faceless body (SPEC FIGURE-01): a realistic adult build, a
+  neutral face relief without drawn features, hands with three-jointed fingers and a thumb (palms toward the body),
+  shaded smoothly. Their traced lines are outlines only (the silhouette, the outlines seen inside it, the fingers),
+  plus the head's pencil guides; no mesh edges. Boxes, scenes and imported models trace as before. Lines already
+  traced stay as they were.
+
+### Figures as generation guides (SPEC FIGURE-01..03)
+
+- `generation_request` for a panel (mode new; fixes and upscales keep their parent's size and get none) draws the panel's figures, heads and hands (those with
+  the panel's `frame_id`, or with no `frame_id` and their middle in the panel) into `guides/figures.png`: black ground,
+  each person a material colour from a fixed palette in the panel's order (warm beige, lavender, olive, teal, salmon,
+  green, orchid, amber, cornflower, terracotta, mint, rose), lit by the page's light (`set_light`) with a fill and a
+  highlight, seen by the page's camera (`set_camera`); no lines, no face marks. `guides/regions.png` paints each
+  person's silhouette (grown about 1 % of the long side) in the same colour, black where nobody is. Without 3D figures,
+  a panel with two or more people in the brief gets `guides/regions.png` from the brief's places; a panel with one
+  person or none gets neither (its request is as before, byte for byte).
+- Size: the request's `size.suggested_px` (≈ 1 MP, multiples of 64), or, when `tool` names a tool of `tools.json`, the
+  first of `size.tool_sizes` (the tool's size nearest the panel's shape; the panel in the middle, the rest of the
+  picture beyond it). The output image must be exactly `request.control.px`.
+- With the user's PS5 AI Anima: upload `guides/figures.png` (`POST /api/inputs`) and generate with `controlnet:
+  lllite_3dpose`, `control_image_id`, `control_strength: 1`, CFG 1 and exactly that width and height; for two or more
+  people `guides/regions.png` goes to the regional control (`lllite_regional`), ended early. Other tools: any 3D-mesh
+  pose control; a tool that only takes reference images gets `files.image_order` from the front.
+- Look before asking: `render {page, frame_id, kind: "guide:figures"}` (or `"guide:regions"`).
+- A tool profile for the PS5 (1024 px a side at most, 64 px steps), `genko studio tools set ps5:anima --file ps5.json`:
+
+```json
+{"label": "PS5 AI Anima",
+ "sizes_px": [[1024, 1024], [896, 1024], [1024, 896], [832, 1024], [1024, 832], [768, 1024], [1024, 768],
+              [704, 1024], [1024, 704], [640, 1024], [1024, 640], [576, 1024], [1024, 576], [512, 1024], [1024, 512]],
+ "notes": "guides/figures.png → lllite_3dpose, regions.png → lllite_regional; the output exactly request.control.px; CFG 1"}
+```
+
+  (Add `supports` as the tool really has them: without it a tool is taken to accept references, edits and masks.)
 
 ### J7 additions
 

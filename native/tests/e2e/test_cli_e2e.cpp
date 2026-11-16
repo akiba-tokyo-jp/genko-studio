@@ -23,8 +23,8 @@ using genko::core::Json;
 
 namespace {
 
-genko::test::Run genko_run(const QStringList& args) {
-    return genko::test::run(genko::test::genko_cli(), args, QProcessEnvironment::systemEnvironment(), 120000);
+genko::test::Run genko_run(const QStringList& args, int ms = 120000) {
+    return genko::test::run(genko::test::genko_cli(), args, QProcessEnvironment::systemEnvironment(), ms);
 }
 
 void write(const QString& path, const QByteArray& bytes) {
@@ -300,6 +300,50 @@ private slots:
     // prints the same batch, exactly the panels asked for, the knobs as JSON and a draft plan from a file (each idea
     // carrying its plan), the book left as it was; a preset it does not know is a usage error (exit 2), a count past
     // the tool's range a refusal (exit 1); `genko studio call … layout_ideas` takes it by name too.
+    // 人形のポーズ集 G4 (SPEC FIGURE-02): `genko studio figure-poses` — the tool figure_poses from the shell without a book:
+    // a category, comma-separated tags, a random pick from a seed (the same twice), --sheet DIR writing one picture per
+    // category, --check running the library's checks on what is listed (ok), a category it does not know (exit 1);
+    // `genko studio call BOOK figure_poses` takes it by name too.
+    void studioFigurePoses() {
+        const QString root = tmp_.path() + "/figure-poses";
+        QDir().mkpath(root);
+        const auto listed = genko_run({"studio", "figure-poses", "--category", "point", "--limit", "3"});
+        QVERIFY2(listed.exit_code == 0, listed.out.constData());
+        const Json page = one_line(listed.out);
+        QCOMPARE(page["ok"], Json(true));
+        QCOMPARE(page["poses"].size(), std::size_t{3});
+        for (const Json& p : page["poses"]) QCOMPARE(p["category"], Json("point"));
+        QVERIFY(page["total"].get<int>() >= 8);
+        const auto tagged = one_line(genko_run({"studio", "figure-poses", "--tags", "仰向け,phone"}).out);
+        QVERIFY(tagged["total"].get<int>() >= 1);
+        const QStringList random{"studio", "figure-poses", "--random", "4", "--seed", "fp-0000000000000042"};
+        const auto r1 = genko_run(random);
+        const auto r2 = genko_run(random);
+        QCOMPARE(r1.out, r2.out);
+        QCOMPARE(one_line(r1.out)["seed"], Json("fp-0000000000000042"));
+        // the sheets and the checks of one category
+        const QString sheets = root + "/sheets";
+        const auto checked = genko_run({"studio", "figure-poses", "--category", "point", "--sheet", sheets, "--check"}, 300000);
+        QVERIFY2(checked.exit_code == 0, checked.out.constData());
+        const Json c = one_line(checked.out);
+        QCOMPARE(c["failed"], Json::array());
+        QVERIFY(c["checked"].get<int>() >= 8);
+        QCOMPARE(c["files"].size(), std::size_t{1});
+        QVERIFY(QFileInfo(sheets + "/point_1.png").size() > 1000);
+        // refused
+        const auto unknown = genko_run({"studio", "figure-poses", "--category", "nope"});
+        QCOMPARE(unknown.exit_code, 1);
+        QCOMPARE(one_line(unknown.out)["issues"][0]["code"], Json("figure_poses_invalid"));
+        // the tool by name, with a book
+        const QString book = root + "/b.genko";
+        QCOMPARE(genko_run({"studio", "init", book, "--pages", "1"}).exit_code, 0);
+        const QString args = root + "/args.json";
+        write(args, R"({"category": "point", "limit": 3})");
+        const auto called = genko_run({"studio", "call", book, "figure_poses", args});
+        QVERIFY2(called.exit_code == 0, called.out.constData());
+        QCOMPARE(one_line(called.out)["poses"], page["poses"]);
+    }
+
     void studioLayoutIdeas() {
         const QString root = tmp_.path() + "/layout-ideas";
         QDir().mkpath(root);

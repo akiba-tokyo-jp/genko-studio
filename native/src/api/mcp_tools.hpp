@@ -8,7 +8,7 @@
 
 #include "core/json.hpp"
 
-// The tools and resources `genko mcp` serves (Python's genko/mcp/server.py on MCPServer of the MCP SDK 2): the 42 agent
+// The tools and resources `genko mcp` serves (Python's genko/mcp/server.py on MCPServer of the MCP SDK 2): the 43 agent
 // tools with their descriptions and input schemas, the arguments checked as the SDK's pydantic model checks them (the
 // same coercions, and on failure the same "Error executing tool …: N validation errors for <tool>Arguments …" text),
 // each tool handed to StudioService with Python's positional mapping, and Python's call(): the conversation's name
@@ -41,7 +41,7 @@ struct ToolSpec {
     std::vector<ToolParam> params;  // the function's parameters (session last)
 };
 
-// The 42 tools in Python's order of registration (layout_ideas, this build's own, after submit_name).
+// The 43 tools in Python's order of registration (layout_ideas and figure_poses, this build's own, after submit_name).
 const std::vector<ToolSpec>& tool_specs();
 const ToolSpec* find_tool(std::string_view name);
 

@@ -84,6 +84,8 @@ public:
     ToolResult apply_ops(const Json& a);
     // コマ割り K3: the batch of layout ideas for a page (studio_komawari.cpp; reads only)
     ToolResult layout_ideas(const Json& a);
+    // 人形のポーズ集 G4: the pose library's categories and poses, a random pick, a contact sheet (studio_poses.cpp; reads only)
+    ToolResult figure_poses(const Json& a);
     // --- reviews, requests, tickets and proposals ------------------------------------------------------------------------
     ToolResult record_review(const Json& a);
     ToolResult record_chat_approval(const Json& a);

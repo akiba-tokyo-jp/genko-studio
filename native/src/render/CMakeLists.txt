@@ -302,6 +302,8 @@ genko_library(genko_render
     pcraft_timeline.cpp
     # PC5 H-f (画素の縦横比: PSD's 1064)
     psd_pixel_aspect.cpp
+    # 人形のポーズ集 G4 (SPEC FIGURE-02: the gallery's and the tool's small pictures of a pose)
+    figure_thumbs.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

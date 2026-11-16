@@ -55,6 +55,7 @@ genko_library(genko_service
     preview.cpp
     sheets.cpp
     guide.cpp
+    figure_guide.cpp
     genreq.cpp
     importer.cpp
     atari.cpp
@@ -67,6 +68,7 @@ genko_library(genko_service
     studio_art.cpp
     studio_atari.cpp
     studio_komawari.cpp
+    studio_poses.cpp
     studio_output.cpp
     tool_table.cpp
     human_service.cpp

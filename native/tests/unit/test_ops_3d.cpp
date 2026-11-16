@@ -7,6 +7,8 @@
 
 #include <QTemporaryDir>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <filesystem>
 #include <functional>
@@ -19,6 +21,8 @@
 #include "core/limits.hpp"
 #include "core/linalg3.hpp"
 #include "core/model.hpp"
+#include "core/pose_checks.hpp"
+#include "core/pose_library.hpp"
 #include "core/poses.hpp"
 #include "core/pynum.hpp"
 #include "render/ops_registry.hpp"
@@ -595,6 +599,440 @@ private slots:
             qunsetenv("GENKO_CONFIG_DIR");
         } else {
             qputenv("GENKO_CONFIG_DIR", before);
+        }
+    }
+
+    // The pose library through the ops (SPEC FIGURE-02, figures@1): pose_id puts the library's joints and hands in place
+    // as a preset does and keeps the id and what the hands hold, mirror swaps left and right (the library's mirror, or the
+    // figure's own), keep: ground keeps the lowest point where it was, a drag forgets the id, a preset too; the hands'
+    // spread and thumb; the refusals; saved and read back as they were.
+    void libraryPoses() {
+        namespace library = genko::core::pose_library;
+        const auto apply = [&](const Document& doc, const std::string& batch) { return bus().apply(doc, ops(batch), Actor("genko")).doc; };
+        const Json& wave = *library::find("stand/wave");
+        Document d = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave"}])");
+        Json f = *prim(d, "fig");
+        same(f["joints"], wave["joints"], "joints");
+        QCOMPARE(f["pose_id"], Json("stand/wave"));
+        QVERIFY(!f.contains("preset"));  // (the walk preset is gone)
+        QVERIFY(!f.contains("hold"));
+        QCOMPARE(f["hands"]["r"], wave["hands"]["r"]);
+        // the mirror: the library's, with "~m"; and a figure's own mirror toggles it back
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave", "mirror": true}])");
+        f = *prim(d, "fig");
+        QCOMPARE(f["pose_id"], Json("stand/wave~m"));
+        same(f["joints"], library::mirrored_joints(wave["joints"]), "mirrored joints");
+        QCOMPARE(f["hands"]["l"], wave["hands"]["r"]);
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])");
+        f = *prim(d, "fig");
+        QCOMPARE(f["pose_id"], Json("stand/wave"));
+        QCOMPARE(genko::core::dump_python(f["joints"]), genko::core::dump_python(library::mirrored_joints(library::mirrored_joints(wave["joints"]))));
+        // what the hands hold comes with the pose (and goes with the next one that holds nothing)
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink"}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], Json::object({{"r", "cup"}}));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": null, "l": "book"}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], Json::object({{"l", "book"}}));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/neutral"}])");
+        QVERIFY(!(*prim(d, "fig")).contains("hold"));
+        // keep: ground — the lowest point stays (a figure sitting down on the floor keeps its feet's floor); pelvis: pos stays
+        const double floor_before = (*prim(d, "fig"))["pos"][1].get<double>() + genko::core::pose_checks::lowest(*prim(d, "fig"));
+        const Document sat = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "sit_floor/agura", "keep": "ground"}])");
+        const Json& s = *prim(sat, "fig");
+        QVERIFY(std::abs(s["pos"][1].get<double>() + genko::core::pose_checks::lowest(s) - floor_before) < 1e-3);
+        QVERIFY(s["pos"][1].get<double>() > (*prim(d, "fig"))["pos"][1].get<double>() + 10.0);  // (the pelvis came down)
+        QCOMPARE(s["pos"][0], (*prim(d, "fig"))["pos"][0]);
+        const Document kept = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "sit_floor/agura", "keep": "pelvis"}])");
+        QCOMPARE((*prim(kept, "fig"))["pos"], (*prim(d, "fig"))["pos"]);
+        const Document added = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "f9", "pos": [80, 150, 0], "pose_id": "sit_chair/upright", "keep": "ground"},
+                                               {"op": "add_figure", "page": 1, "id": "f8", "pos": [80, 150, 0]}])");
+        QVERIFY(std::abs((*prim(added, "f9"))["pos"][1].get<double>() + genko::core::pose_checks::lowest(*prim(added, "f9")) -
+                         150.0 - genko::core::pose_checks::lowest(*prim(added, "f8"))) < 1e-3);
+        // a drag forgets the pose's id (it is the person's own pose now), as a preset does
+        const Document dragged = apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "drag": {"handle": "l_wrist", "to": [70, 100]}}])");
+        QVERIFY(!(*prim(dragged, "fig")).contains("pose_id"));
+        QVERIFY(!(*prim(apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "preset": "run"}])"), "fig")).contains("pose_id"));
+        QCOMPARE((*prim(apply(sat, R"([{"op": "pose_figure", "page": 1, "id": "fig", "joints": {"head": {"y": 0.2}}}])"), "fig"))["pose_id"], Json("sit_floor/agura"));
+        // the hands' spread and thumb (figures@1): kept when given, as numbers 0..1 to 3 places
+        const Document spread = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hands": {"l": {"pose": "open", "spread": 0.71234, "thumb": 2}, "r": "fist"}},
+                                                {"op": "pose_figure", "page": 1, "id": "hand", "spread": 0.4, "thumb": 0.25},
+                                                {"op": "add_hand", "page": 1, "id": "h3", "pose": "grip", "thumb": 0.9}])");
+        QCOMPARE((*prim(spread, "fig"))["hands"]["l"], ops(R"({"pose": "open", "curls": [0.0, 0.0, 0.0, 0.0, 0.0], "spread": 0.712, "thumb": 1.0})"));
+        QCOMPARE((*prim(spread, "fig"))["hands"]["r"], Json("fist"));
+        QCOMPARE((*prim(spread, "hand"))["spread"], Json(0.4));
+        QCOMPARE((*prim(spread, "h3"))["thumb"], Json(0.9));
+        QVERIFY((*prim(base_, "fig"))["hands"].dump().find("spread") == std::string::npos);
+        // refusals (the reason first, then the op's keys)
+        const auto says = [](const std::string& error, const std::string& reason) { return error.find(": " + reason + " \u2016") != std::string::npos; };
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/nope"}])")), "no pose stand/nope (figure_poses lists them)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "add_figure", "page": 1, "pose_id": "stand/wave", "preset": "run"}])")), "give preset or pose_id, not both"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "stand/wave", "keep": "feet"}])")), "keep is pelvis or ground"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": "cake"}}])")),
+                     "a hand holds one of cup, phone, paper, bag, umbrella, book, pen, sword, bat, ball"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "hands": {"l": {"pose": "open", "spread": "wide"}}}])")),
+                     "spread and thumb are numbers from 0 to 1"));
+        // saved and read back as they were
+        const Document mirrored = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink~m", "hands": {"l": {"pose": "grip", "spread": 0.2}}}])");
+        const Document back = read(make_book(book_path(), mirrored));
+        same(back.page(0).prims, mirrored.page(0).prims, "prims read back");
+        QCOMPARE((*prim(back, "fig"))["hold"], Json::object({{"l", "cup"}}));
+    }
+
+    // A pair pose through the ops (SPEC FIGURE-02, G5): add_figure with a pair's id places two figures — the op's as a,
+    // its partner (partner_id) as b where the pair says, turned as it says, as tall and of the same body —, both keeping
+    // the pair's id with #a and #b and one pair key; mirror puts b on the other side; keep: ground keeps the pair's lowest
+    // point; pose_figure poses a figure and its partner (the one named, a new one, or the one of its pair); a figure's
+    // own pose (a drag, a preset, another pose) ends the pair for both; one person of a pair on a figure of its own; the
+    // refusals; props: false kept; saved and read back.
+    void pairPoses() {
+        namespace library = genko::core::pose_library;
+        namespace checks = genko::core::pose_checks;
+        namespace mesh3d = genko::core::mesh3d;
+        const auto apply = [&](const Document& doc, const std::string& batch) { return bus().apply(doc, ops(batch), Actor("genko")).doc; };
+        const Json& pair = *library::find("two_people/handshake");
+        QVERIFY(library::is_pair(pair));
+        const Json& off = pair["figures"][1]["offset"];
+        const double turn = pair["figures"][1]["turn"].get<double>();
+        // b where a's turn puts the offset (u of a), turned `turn` more
+        const auto expect_b = [&](const Json& a, double sign) {
+            const double u = mesh3d::figure_skeleton(a).unit;  // (its height / its heads)
+            const genko::core::la::Mat3 r = mesh3d::prim_rotation(a["rot"]);
+            const genko::core::la::Vec3 o{sign * off[0].get<double>() * u, off[1].get<double>() * u, off[2].get<double>() * u};
+            const genko::core::la::Vec3 d = genko::core::la::matvec(r, o);
+            return std::array<double, 4>{a["pos"][0].get<double>() + d[0], a["pos"][1].get<double>() + d[1], a["pos"][2].get<double>() + d[2],
+                                         a["rot"][1].get<double>() + sign * turn};
+        };
+        const auto placed_as = [&](const Json& a, const Json& b, double sign) {
+            const auto want = expect_b(a, sign);
+            for (int i = 0; i < 3; ++i) QVERIFY2(std::abs(b["pos"][i].get<double>() - want[static_cast<std::size_t>(i)]) < 2e-4, std::to_string(i).c_str());
+            QVERIFY(std::abs(b["rot"][1].get<double>() - want[3]) < 2e-4);
+            QCOMPARE(b["rot"][0], a["rot"][0]);
+        };
+        Document d = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "rot": [0, 0.3, 0], "height_mm": 100,
+                                       "body": {"sex": "female"}, "pose_id": "two_people/handshake", "partner_id": "b1"}])");
+        Json a = *prim(d, "a1");
+        Json b = *prim(d, "b1");
+        QCOMPARE(a["pose_id"], Json("two_people/handshake#a"));
+        QCOMPARE(b["pose_id"], Json("two_people/handshake#b"));
+        QVERIFY(a["pair"].is_string() && !a["pair"].get<std::string>().empty());
+        QCOMPARE(b["pair"], a["pair"]);
+        same(a["joints"], pair["figures"][0]["joints"], "a's joints");
+        same(b["joints"], pair["figures"][1]["joints"], "b's joints");
+        QCOMPARE(b["size"], a["size"]);
+        QCOMPARE(b["body"], a["body"]);
+        QCOMPARE(b["kind"], Json("figure"));
+        placed_as(a, b, 1.0);
+        QCOMPARE(prim(d, "a1") < prim(d, "b1"), true);  // (b after a, in the page's order)
+        // the mirror: each person mirrored, b on the other side
+        Document m = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "height_mm": 100,
+                                       "pose_id": "two_people/handshake", "partner_id": "b1", "mirror": true}])");
+        QCOMPARE((*prim(m, "a1"))["pose_id"], Json("two_people/handshake~m#a"));
+        QCOMPARE((*prim(m, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        same((*prim(m, "a1"))["joints"], library::mirrored_joints(pair["figures"][0]["joints"]), "a mirrored");
+        placed_as(*prim(m, "a1"), *prim(m, "b1"), -1.0);
+        // keep: ground — the lower of the two where a figure standing there has its feet
+        const Document grounded = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "a1", "pos": [80, 150, 0], "pose_id": "two_people/handshake",
+                                                     "partner_id": "b1", "keep": "ground"},
+                                                    {"op": "add_figure", "page": 1, "id": "s1", "pos": [80, 150, 0]}])");
+        const Json& ga = *prim(grounded, "a1");
+        const Json& gb = *prim(grounded, "b1");
+        const double low = std::max(ga["pos"][1].get<double>() + checks::lowest(ga), gb["pos"][1].get<double>() + checks::lowest(gb));
+        QVERIFY(std::abs(low - 150.0 - checks::lowest(*prim(grounded, "s1"))) < 1e-3);
+        placed_as(ga, gb, 1.0);
+        // pose_figure: the pair's partner by its pair key (re-posed, mirrored), a partner named, a new partner added
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "a1", "pose_id": "two_people/handshake", "mirror": true}])");
+        QCOMPARE((*prim(d, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        QCOMPARE((*prim(d, "b1"))["pair"], a["pair"]);
+        placed_as(*prim(d, "a1"), *prim(d, "b1"), -1.0);
+        const Document named = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "c1", "pos": [150, 160, 0]},
+                                               {"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "c1"}])");
+        QCOMPARE((*prim(named, "c1"))["pose_id"], Json("two_people/handshake#b"));
+        QCOMPARE((*prim(named, "c1"))["pair"], (*prim(named, "fig"))["pair"]);
+        placed_as(*prim(named, "fig"), *prim(named, "c1"), 1.0);
+        const Document fresh = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "n1", "height_mm": 110}])");
+        QCOMPARE((*prim(fresh, "n1"))["size"], (*prim(fresh, "fig"))["size"]);
+        QCOMPARE((*prim(fresh, "n1"))["kind"], Json("figure"));
+        QCOMPARE(fresh.page(0).prims.size(), base_.page(0).prims.size() + 1);
+        placed_as(*prim(fresh, "fig"), *prim(fresh, "n1"), 1.0);
+        // a figure's own pose ends the pair, for both (a joint's touch does not)
+        QCOMPARE((*prim(apply(d, R"([{"op": "pose_figure", "page": 1, "id": "a1", "joints": {"head": {"y": 0.2}}}])"), "b1"))["pair"], a["pair"]);
+        for (const char* own : {R"({"drag": {"handle": "l_wrist", "to": [70, 100]}})", R"({"preset": "run"})", R"({"pose_id": "stand/wave"})", R"({"mirror": true})"}) {
+            Json op = ops(own);
+            op["op"] = "pose_figure";
+            op["page"] = 1;
+            op["id"] = "a1";
+            const Document ended = bus().apply(d, Json::array({op}), Actor("genko")).doc;
+            QVERIFY2(!(*prim(ended, "a1")).contains("pair") && !(*prim(ended, "b1")).contains("pair"), own);
+            QCOMPARE((*prim(ended, "b1"))["pose_id"], Json("two_people/handshake~m#b"));
+        }
+        // one person of a pair, on a figure of its own
+        // (ids with "#" are built here: moc reads a "#" in a raw string as a directive)
+        const std::string role_b = std::string("two_people/handshake") + '#' + "b";
+        const Json one_op = Json::array({Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"}, {"pose_id", role_b}})});
+        const Document one = bus().apply(base_, one_op, Actor("genko")).doc;
+        QCOMPARE((*prim(one, "fig"))["pose_id"], Json("two_people/handshake#b"));
+        same((*prim(one, "fig"))["joints"], pair["figures"][1]["joints"], "b alone");
+        QVERIFY(!(*prim(one, "fig")).contains("pair"));
+        QCOMPARE((*prim(apply(one, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])"), "fig"))["pose_id"], Json("two_people/handshake~m#b"));
+        // the refusals
+        const auto says = [](const std::string& error, const std::string& reason) { return error.find(": " + reason + " \u2016") != std::string::npos; };
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake"}])")),
+                     "a pair pose places two figures: give partner_id (the other figure, or a new id to add it)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "fig"}])")),
+                     "partner_id is the other figure, not this one"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "two_people/handshake", "partner_id": "hand"}])")),
+                     "partner hand is not a figure"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "add_figure", "page": 1, "id": "a1", "pose_id": "two_people/handshake", "partner_id": "fig"}])")), "3D fig exists"));
+        const std::string wave_a = std::string("stand/wave") + '#' + "a";
+        QVERIFY(says(error_of(base_, Json::array({Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"}, {"pose_id", wave_a}})})),
+                     "no pose " + wave_a + " (figure_poses lists them)"));
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "props": "no"}])")), "props is true or false"));
+        // props: false is kept (what the hands hold is not drawn), true takes it away
+        const Document hidden = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "everyday/drink", "props": false}])");
+        QCOMPARE((*prim(hidden, "fig"))["props"], Json(false));
+        QVERIFY(!(*prim(apply(hidden, R"([{"op": "pose_figure", "page": 1, "id": "fig", "props": true}])"), "fig")).contains("props"));
+        // saved and read back as they were
+        const Document back = read(make_book(book_path(), d));
+        same(back.page(0).prims, d.page(0).prims, "the pair read back");
+    }
+
+    // A box seen through the page's camera is traced as the box (it was a floor's grid): its twelve edges between the
+    // corners project puts on the page, the ones at its back not drawn — a face is seen when the camera's eye is on its
+    // outer side, worked out here on its own from the corners where the camera has them; with a camera that does not
+    // turn the box is seen as without one.
+    void boxThroughTheCamera() {
+        namespace prim3d = genko::core::prim3d;
+        namespace mesh3d = genko::core::mesh3d;
+        namespace la = genko::core::la;
+        using namespace genko::core::la;  // (the element-wise operators)
+        using la::Vec3;
+        // corner i: x from bit 2, y from bit 1, z from bit 0
+        static constexpr int kBoxFaces[6][4] = {{0, 1, 3, 2}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 3, 7, 5}};
+        const auto expected_seen = [](const Json& box, const Json& camera) {
+            const Vec3 size{box["size"][0].get<double>(), box["size"][1].get<double>(), box["size"][2].get<double>()};
+            const Vec3 at{box["pos"][0].get<double>(), box["pos"][1].get<double>(), box["pos"][2].get<double>()};
+            const la::Mat3 turn = mesh3d::prim_rotation(box["rot"]);
+            const la::Mat3 view = mesh3d::prim_rotation(Json::array({camera.value("tip", 0.0), camera.value("turn", 0.0), camera.value("roll", 0.0)}));
+            const Vec3 target{camera["target"][0].get<double>(), camera["target"][1].get<double>(), 0.0};
+            const double focal = camera.value("focal_mm", 400.0);
+            std::array<Vec3, 8> c{};
+            for (int i = 0; i < 8; ++i) {
+                const Vec3 local{(i & 4 ? 0.5 : -0.5) * size[0], (i & 2 ? 0.5 : -0.5) * size[1], (i & 1 ? 0.5 : -0.5) * size[2]};
+                c[static_cast<std::size_t>(i)] = la::matvec(view, la::matvec(turn, local) + at - target);
+            }
+            Vec3 middle{0, 0, 0};
+            for (const Vec3& p : c) middle = middle + p / 8.0;
+            const Vec3 eye{0.0, 0.0, -focal};
+            std::array<bool, 6> seen{};
+            for (int f = 0; f < 6; ++f) {
+                Vec3 centre{0, 0, 0};
+                for (const int k : kBoxFaces[f]) centre = centre + c[static_cast<std::size_t>(k)] / 4.0;
+                seen[static_cast<std::size_t>(f)] = la::dot(centre - middle, eye - centre) > 0;
+            }
+            return seen;
+        };
+        const auto near = [](const prim3d::Point2& a, const prim3d::Point2& b) { return std::abs(a[0] - b[0]) < 1e-9 && std::abs(a[1] - b[1]) < 1e-9; };
+        const Json boxes[] = {ops(R"({"kind": "box", "pos": [100, 150, 0], "size": [30, 20, 25], "rot": [0.3, 0.6, 0]})"),
+                              ops(R"({"kind": "box", "pos": [70, 90, 40], "size": [50, 12, 18], "rot": [-0.4, 1.9, 0.2]})")};
+        const Json cameras[] = {ops(R"({"turn": 0.3, "tip": 0.2, "target": [91, 128.5]})"),
+                                ops(R"({"turn": 2.5, "tip": -0.4, "roll": 0.1, "focal_mm": 200, "target": [100, 150]})"),
+                                ops(R"({"turn": -1.2, "tip": 0.9, "focal_mm": 900, "target": [40, 200]})")};
+        for (const Json& box : boxes) {
+            for (const Json& camera : cameras) {
+                const std::vector<prim3d::Point2> corners = prim3d::project(box, &camera);
+                const std::vector<prim3d::Edge> edges = prim3d::edges(box, &camera);
+                QCOMPARE(edges.size(), std::size_t{12});
+                const std::array<bool, 6> faces = expected_seen(box, camera);
+                int faces_seen = 0;
+                for (const bool f : faces) faces_seen += f ? 1 : 0;
+                QVERIFY(faces_seen >= 1 && faces_seen <= 3);
+                std::size_t seen_edges = 0;
+                for (const prim3d::Edge& e : edges) {
+                    int a = -1;
+                    int b = -1;
+                    for (int i = 0; i < 8; ++i) {
+                        if (near(e.a, corners[static_cast<std::size_t>(i)])) a = i;
+                        if (near(e.b, corners[static_cast<std::size_t>(i)])) b = i;
+                    }
+                    QVERIFY2(a >= 0 && b >= 0 && std::popcount(static_cast<unsigned>(a ^ b)) == 1, "an edge between two corners next to each other");
+                    bool want = false;
+                    for (int f = 0; f < 6; ++f) {
+                        const auto& face = kBoxFaces[f];
+                        const bool has_a = std::find(std::begin(face), std::end(face), a) != std::end(face);
+                        const bool has_b = std::find(std::begin(face), std::end(face), b) != std::end(face);
+                        want = want || (faces[static_cast<std::size_t>(f)] && has_a && has_b);
+                    }
+                    QCOMPARE(e.seen, want);
+                    seen_edges += e.seen ? 1 : 0;
+                }
+                const std::vector<prim3d::Line2> traced = prim3d::trace(box, &camera);
+                QCOMPARE(traced.size(), seen_edges);
+                // its box on the page is its corners'
+                const auto [x, y, w, h] = prim3d::bbox(box, &camera);
+                double x0 = corners[0][0], x1 = x0, y0 = corners[0][1], y1 = y0;
+                for (const auto& p : corners) x0 = std::min(x0, p[0]), x1 = std::max(x1, p[0]), y0 = std::min(y0, p[1]), y1 = std::max(y1, p[1]);
+                QCOMPARE(x, x0);
+                QCOMPARE(y, y0);
+                QCOMPARE(w, x1 - x0);
+                QCOMPARE(h, y1 - y0);
+            }
+            // a camera that does not turn, aimed at the box's own centre: the box as it is seen without a camera
+            const Json still = Json::object({{"turn", 0}, {"tip", 0}, {"target", Json::array({box["pos"][0], box["pos"][1]})}});
+            const std::vector<prim3d::Edge> with = prim3d::edges(box, &still);
+            const std::vector<prim3d::Edge> without = prim3d::edges(box, nullptr);
+            QCOMPARE(with.size(), without.size());
+            for (std::size_t i = 0; i < with.size(); ++i) {
+                QVERIFY(near(with[i].a, without[i].a) && near(with[i].b, without[i].b));
+                QCOMPARE(with[i].seen, without[i].seen);
+            }
+        }
+        // through the op: the box's seen edges, joined, every point a corner of the box
+        Document doc = base_;
+        doc = bus().apply(doc, ops(R"([{"op": "set_camera", "page": 1, "turn": 0.3, "tip": 0.2},
+                                       {"op": "trace_prims", "page": 1, "layer_id": "pen", "ids": ["box"]}])"),
+                          Actor("genko"))
+                  .doc;
+        const Json camera = doc.page(0).extra["camera"];
+        const std::vector<prim3d::Point2> corners = prim3d::project(*prim(doc, "box"), &camera);
+        const auto& strokes = layer(doc, "pen")->strokes->items;
+        QVERIFY(!strokes.empty() && strokes.size() <= 3);  // (nine edges, three faces: joined into a few lines)
+        std::size_t segments = 0;
+        for (const auto& s : strokes) {
+            segments += s->points.size() - 1;
+            for (const auto& p : s->points) {
+                bool corner = false;
+                for (const auto& c : corners) corner = corner || (std::abs(p.x - c[0]) < 6e-4 && std::abs(p.y - c[1]) < 6e-4);
+                QVERIFY2(corner, "a point of the traced box is one of its corners");
+            }
+        }
+        std::size_t seen = 0;
+        for (const auto& e : prim3d::edges(*prim(doc, "box"), &camera)) seen += e.seen ? 1 : 0;
+        QCOMPARE(segments, seen);
+        QVERIFY(seen >= 4 && seen <= 9);
+    }
+
+    // A figure's lines are hidden where another prim is nearer to the viewer (SPEC FIGURE-01, 線): a box, a head or another
+    // figure in front of it, with the page's camera and without one; a prim behind it, in another panel, or seen with
+    // a camera of its own changes nothing; the same bytes each time.
+    void figureBehindAnotherPrim() {
+        namespace prim3d = genko::core::prim3d;
+        namespace mesh3d = genko::core::mesh3d;
+        Document doc = genko::core::new_episode("3D", Num(1), 1, genko::core::PageSpec::b5_doujin());
+        {
+            Layer pen;
+            pen.id = "pen";
+            pen.role = LayerRole::User;
+            pen.kind = LayerKind::Strokes;
+            doc.edit_page(0).layers.push_back(pen);
+        }
+        doc = bus().apply(doc, ops(R"([{"op": "add_figure", "page": 1, "id": "fig", "pos": [80, 130, 0], "preset": "walk"}])"), Actor("genko")).doc;
+        const auto with = [&](const Document& from, const std::string& batch) { return bus().apply(from, ops(batch), Actor("genko")).doc; };
+        // the figure's traced points (by trace_prims or render_prims' lines)
+        const auto traced = [&](const Document& from, const char* op = "trace_prims") {
+            mesh3d::clear_caches();
+            Json batch = ops(R"([{"page": 1, "layer_id": "pen", "ids": ["fig"]}])");
+            batch[0]["op"] = op;
+            if (std::string(op) == "render_prims") batch[0]["surfaces"] = false;
+            const Document d = bus().apply(from, batch, Actor("genko")).doc;
+            std::vector<prim3d::Line2> out;
+            for (const auto& s : layer(d, "pen")->strokes->items) {
+                prim3d::Line2 line;
+                for (const auto& p : s->points) line.push_back(prim3d::Point2{p.x, p.y});
+                out.push_back(std::move(line));
+            }
+            return out;
+        };
+        // how many of the points are inside (x0, y0)–(x1, y1)
+        const auto inside = [](const std::vector<prim3d::Line2>& lines, double x0, double y0, double x1, double y1) {
+            int n = 0;
+            for (const auto& line : lines) {
+                for (const auto& p : line) n += (p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1) ? 1 : 0;
+            }
+            return n;
+        };
+        // how many are more than `margin` mm inside the box's outline on the page (the hull of its corners)
+        const auto behind_box = [](const std::vector<prim3d::Line2>& lines, std::vector<prim3d::Point2> pts, double margin) {
+            std::sort(pts.begin(), pts.end());
+            const auto turn = [](const prim3d::Point2& o, const prim3d::Point2& a, const prim3d::Point2& b) {
+                return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+            };
+            std::vector<prim3d::Point2> hull;  // (Andrew's monotone chain: counter-clockwise in x right, y up)
+            for (int pass = 0; pass < 2; ++pass) {
+                const std::size_t start = hull.size();
+                for (const auto& p : pts) {
+                    while (hull.size() >= start + 2 && turn(hull[hull.size() - 2], hull.back(), p) <= 0) hull.pop_back();
+                    hull.push_back(p);
+                }
+                hull.pop_back();
+                std::reverse(pts.begin(), pts.end());
+            }
+            int n = 0;
+            for (const auto& line : lines) {
+                for (const auto& p : line) {
+                    bool in = true;
+                    for (std::size_t i = 0; i < hull.size() && in; ++i) {
+                        const auto& a = hull[i];
+                        const auto& b = hull[(i + 1) % hull.size()];
+                        in = turn(a, b, p) / std::hypot(b[0] - a[0], b[1] - a[1]) > margin;
+                    }
+                    n += in ? 1 : 0;
+                }
+            }
+            return n;
+        };
+        for (const bool camera : {false, true}) {
+            Document page = camera ? with(doc, R"([{"op": "set_camera", "page": 1, "turn": 0.3, "tip": 0.2, "target": [80, 130]}])") : doc;
+            const std::vector<prim3d::Line2> alone = traced(page);
+            QVERIFY(!alone.empty());
+            QCOMPARE(traced(page), alone);  // (the same each time)
+            // a thin box in front of the figure's middle: nothing of the figure inside it, the rest still there
+            const Document front = with(page, R"([{"op": "add_prim3d", "page": 1, "id": "wall", "kind": "box", "pos": [80, 130, -60], "size": [36, 40, 4], "rot": [0, 0, 0]}])");
+            const Json& extra = front.page(0).extra;
+            const Json* cam = mesh3d::camera_of(*prim(front, "wall"), extra.contains("camera") ? &extra["camera"] : nullptr);
+            const std::vector<prim3d::Point2> corners = prim3d::project(*prim(front, "wall"), cam);
+            const double by = prim3d::bbox(*prim(front, "wall"), cam)[1];
+            const std::vector<prim3d::Line2> hidden = traced(front);
+            QVERIFY2(behind_box(alone, corners, 2.0) > 20, "the figure has lines where the box is");
+            QCOMPARE(behind_box(hidden, corners, 2.0), 0);
+            QVERIFY(inside(hidden, 0, 0, 1000, by - 2) > 20);  // (the head and shoulders above the box)
+            QCOMPARE(traced(front), hidden);
+            const std::vector<prim3d::Line2> drawn = traced(front, "render_prims");  // (render_prims draws the same lines)
+            QVERIFY(!drawn.empty());
+            QCOMPARE(behind_box(drawn, corners, 2.0), 0);
+            // the same box behind the figure, a box in front in another panel, or one seen with a camera of its own
+            QCOMPARE(traced(with(page, R"([{"op": "add_prim3d", "page": 1, "id": "wall", "kind": "box", "pos": [80, 130, 60], "size": [36, 40, 4], "rot": [0, 0, 0]}])")), alone);
+            Document elsewhere = front;
+            for (Json& p : elsewhere.edit_page(0).prims) {
+                if (p.value("id", std::string()) == "wall") p["frame_id"] = elsewhere.page(0).leaf_frames().front()->id;
+            }
+            QCOMPARE(traced(elsewhere), alone);
+            for (Json& p : elsewhere.edit_page(0).prims) {
+                if (p.value("id", std::string()) == "fig") p["frame_id"] = elsewhere.page(0).leaf_frames().front()->id;
+            }
+            QCOMPARE(traced(elsewhere), hidden);  // (both in the one panel)
+            if (!camera) {
+                Document own = front;
+                for (Json& p : own.edit_page(0).prims) {
+                    if (p.value("id", std::string()) == "wall") p["camera"] = ops(R"({"turn": 0.3, "tip": 0.2, "target": [80, 130]})");
+                }
+                QCOMPARE(traced(own), alone);
+            }
+            // a head and another figure in front: less of the figure's lines; behind, the same lines
+            const auto length = [](const std::vector<prim3d::Line2>& lines) {
+                double sum = 0.0;
+                for (const auto& line : lines) {
+                    for (std::size_t i = 0; i + 1 < line.size(); ++i) sum += std::hypot(line[i + 1][0] - line[i][0], line[i + 1][1] - line[i][1]);
+                }
+                return sum;
+            };
+            const Document head = with(page, R"([{"op": "add_head", "page": 1, "id": "h", "pos": [80, 110, -60], "size_mm": 40}])");
+            qInfo("camera %d: the figure's lines %.1f mm, behind a head %.1f mm", camera, length(alone), length(traced(head)));
+            QVERIFY(length(traced(head)) < length(alone) - 20.0);
+            // (half in front of it: the camera's turn moves what is nearer to the right)
+            const Document other = with(page, camera ? R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [65, 135, -50], "preset": "stand"}])"
+                                                     : R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [95, 135, -50], "preset": "stand"}])");
+            qInfo("camera %d: behind another figure %.1f mm", camera, length(traced(other)));
+            QVERIFY(length(traced(other)) < length(alone) - 20.0);
+            QCOMPARE(traced(with(page, R"([{"op": "add_figure", "page": 1, "id": "f2", "pos": [95, 135, 50], "preset": "stand"}])")), alone);
         }
     }
 

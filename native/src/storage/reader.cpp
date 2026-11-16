@@ -41,6 +41,7 @@
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
 #include "core/font_catalog.hpp"
+#include "core/pose_library.hpp"
 #include "core/fukidashi.hpp"
 #include "core/komawari.hpp"
 // PC5 J-0 (制作の補助)
@@ -2189,7 +2190,9 @@ bool is_known_feature(std::string_view feature) {
            // fukidashi@2 (core/fukidashi.hpp)
            feature == core::kFukidashi2Feature ||
            // fonts@1 (core/font_catalog.hpp)
-           feature == core::fonts::kFontsFeature;
+           feature == core::fonts::kFontsFeature ||
+           // figures@1 (core/pose_library.hpp)
+           feature == core::pose_library::kFiguresFeature;
 }
 
 int project_version(const Json& payload) {

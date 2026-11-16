@@ -15,9 +15,12 @@
 #include "core/error.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
+#include "core/pose_checks.hpp"
+#include "core/pose_library.hpp"
 #include "core/poses.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/figure_thumbs.hpp"
 #include "render/not_yet_ported.hpp"
 #include "service/briefs.hpp"
 #include "service/evaluate.hpp"
@@ -137,6 +140,11 @@ std::vector<Command> commands() {
                                                opt("--preset", Json(), Type::Str, {"talk", "standard", "action", "showcase"}), opt("--knobs"), opt("--seed"),
                                                opt("--count", 12, Type::Int), opt("--base"), flag("--base-page"), opt("--variation", Json(), Type::Float),
                                                opt("--focus", Json(), Type::Int), opt("--plan")}));
+    // 人形のポーズ集 G4 (SPEC FIGURE-02): the pose library (the tool figure_poses; reads only, no book), its contact sheets
+    // into a folder, the library's checks
+    out.push_back({"figure-poses", {opt("--category"), opt("--tags"), opt("--query"), opt("--contact"), opt("--support", Json(), Type::Str, {"floor", "chair", "none"}),
+                                    opt("--props", Json(), Type::Str, {"yes", "no"}), opt("--limit", 50, Type::Int), opt("--offset", 0, Type::Int),
+                                    opt("--random", Json(), Type::Int), opt("--seed"), opt("--sheet"), flag("--check")}});
     out.push_back(project_cmd("record-review", {opt("--page", Json(), Type::Int, {}, true), opt("--notes", ""), opt("--score", Json(), Type::Float)}));
     out.push_back(project_cmd("request-approval", {opt("--gate", "name", Type::Str, {"name", "art", "sheet"}), opt("--pages", ""), opt("--character"), opt("--note", "")}));
     out.push_back(project_cmd("tickets", {flag("--all")}));
@@ -464,10 +472,99 @@ fs::path pure_path(const std::string& text) {
     return core::path_from_utf8(joined.empty() ? std::string(".") : joined);
 }
 
+// `genko studio figure-poses`: the tool figure_poses from the shell (comma-separated --tags and --contact); --sheet DIR
+// also writes the contact sheets of the poses listed there, a page of 24 a file per category (<category>_<n>.png:
+// front, three quarters and side), and --check runs the library's checks (core/pose_checks: the file's form, and each
+// pose listed and its mirror) and says what fails (exit 1 when anything does).
+int figure_poses_command(const Json& ns, bool ascii) {
+    namespace library = core::pose_library;
+    const auto split = [](const Json& text) {
+        Json out = Json::array();
+        if (!text.is_string()) return Json();
+        std::string word;
+        for (const char c : text.get<std::string>() + ",") {
+            if (c == ',') {
+                if (!word.empty()) out.push_back(word);
+                word.clear();
+            } else if (c != ' ') {
+                word += c;
+            }
+        }
+        return out;
+    };
+    Json kwargs = Json::object({{"category", ns["category"]}, {"tags", split(ns["tags"])}, {"query", ns["query"]}, {"contact", split(ns["contact"])},
+                                {"support", ns["support"]}, {"limit", ns["limit"]}, {"offset", ns["offset"]}, {"random", ns["random"]}, {"seed", ns["seed"]}});
+    if (ns["props"].is_string()) kwargs["props"] = ns["props"] == "yes";
+    const bool sheets = core::py_truthy(ns["sheet"]);
+    const bool check = core::py_truthy(ns["check"]);
+    if (sheets || check) {  // (every pose that matches, not a page of them)
+        kwargs["limit"] = 500;
+        kwargs["offset"] = 0;
+    }
+    StudioService service(fs::current_path(), "ai:cli");
+    Json reply = service.call("figure_poses", Json::array(), kwargs).to_dict();
+    if (!core::py_truthy(reply["ok"])) return print_reply(reply, ascii);
+    std::vector<Json> poses;
+    for (const Json& s : reply["poses"]) {
+        if (const Json* p = library::find(s["id"].get<std::string>())) poses.push_back(*p);
+    }
+    if (sheets) {
+        const fs::path dir = pure_path(ns["sheet"].get<std::string>());
+        fs::create_directories(dir);
+        std::vector<std::pair<std::string, std::vector<Json>>> by_category;
+        for (const Json& p : poses) {
+            const std::string c = p["category"].get<std::string>();
+            if (by_category.empty() || by_category.back().first != c) by_category.push_back({c, {}});
+            by_category.back().second.push_back(p);
+        }
+        Json files = Json::array();
+        const std::vector<double> turns{render::figure_thumbs::kFront, render::figure_thumbs::kThreeQuarter, render::figure_thumbs::kSide};
+        for (const auto& [category, list] : by_category) {
+            for (std::size_t first = 0, n = 1; first < list.size(); first += 24, ++n) {
+                const std::vector<Json> page(list.begin() + static_cast<std::ptrdiff_t>(first),
+                                             list.begin() + static_cast<std::ptrdiff_t>(std::min(list.size(), first + 24)));
+                const fs::path file = dir / (category + "_" + std::to_string(n) + ".png");
+                storage::write_atomic(file, render::figure_thumbs::sheet_png(page, turns, Json::object(), 120, 180, 2));
+                files.push_back(core::path_to_utf8(file));
+            }
+        }
+        reply["files"] = std::move(files);
+    }
+    if (check) {
+        namespace checks = core::pose_checks;
+        Json failed_poses = Json::array();
+        for (const auto& issue : checks::check_file(library::library())) failed_poses.push_back(Json::object({{"id", "(file)"}, {"issues", Json::array({issue.check + ": " + issue.what})}}));
+        for (const Json& p : poses) {
+            std::vector<checks::Issue> found;
+            if (library::is_pair(p)) {  // (a pair: both people and the two together, and its mirror)
+                found = checks::check_pair(p).issues;
+                const Json mirror = library::mirrored(p);
+                for (const auto& i : checks::check_pair(mirror).issues) found.push_back({i.check, "(mirrored) " + i.what});
+                if (library::mirrored(mirror) != p) found.push_back({"mirror", "the mirror of the mirror is not the pair"});
+            } else {
+                found = checks::check_pose(p).issues;
+                const Json mirror = library::mirrored(p);
+                for (const auto& list : {checks::check_ranges(mirror["joints"]), checks::check_inside(checks::figure_of(mirror)), checks::check_mirror(mirror)}) {
+                    found.insert(found.end(), list.begin(), list.end());
+                }
+            }
+            if (found.empty()) continue;
+            Json issues = Json::array();
+            for (const auto& i : found) issues.push_back(i.check + ": " + i.what);
+            failed_poses.push_back(Json::object({{"id", p["id"]}, {"issues", std::move(issues)}}));
+        }
+        reply["checked"] = poses.size();
+        reply["failed"] = failed_poses;
+        if (!failed_poses.empty()) reply["ok"] = false;
+    }
+    return print_reply(reply, ascii);
+}
+
 int run(const std::string& cmd, const Json& ns, bool ascii) {
     if (cmd == "tools") return tools_command(ns, ascii);
     if (cmd == "upscaler") return upscaler_command(ns, ascii);
     if (cmd == "eval-atari") return print_reply(service::evaluate::eval_atari(pure_path(ns["truth"].get<std::string>())), ascii);
+    if (cmd == "figure-poses") return figure_poses_command(ns, ascii);
     const fs::path path = resolved(ns["project"].get<std::string>());
     if (cmd == "approve") {
         HumanService human(path, actor_or_default(ns));

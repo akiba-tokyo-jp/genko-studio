@@ -68,6 +68,14 @@ genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genk
 genko_test(test_tones_effects SOURCES unit/test_tones_effects.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # 3D (M3-C): the ops, their refusals, Undo and saving, the pose library, the guides drawn.
 genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# The smooth figure, head and hands (SPEC FIGURE-01): closed, within budget, the same bytes on every run and thread, the
+# body numbers, the outlines; GENKO_FIGURE_OUT=<folder> writes the contact sheets.
+genko_test(test_figure_mesh SOURCES unit/test_figure_mesh.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
+# The pose library (SPEC FIGURE-02, genko.poses@1): the file, every pose's checks (joint ranges, support and contact,
+# limbs through the body, mirrors, within budget, thumbnails the same bytes), the ops' pose_id, mirror and keep, figures@1;
+# GENKO_POSE_SHEETS=<folder> writes the contact sheets. (655 poses: about 140 s in Release, about 5 times that under ASan, so
+# the limit, which only catches a hang, is 1800 s; it is not a performance pass value.)
+genko_test(test_figure_poses SOURCES unit/test_figure_poses.cpp DEPS genko_test_support genko_render_ops Qt6::Gui LABELS unit TIMEOUT 1800)
 # The ops of M3-A1 (layers, masks, pixels, fills, areas, paper).
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
@@ -455,6 +463,9 @@ genko_test(test_fukidashi_service SOURCES unit/test_fukidashi_service.cpp DEPS g
 genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 # komawari@1 (コマ割り K1): the name plan's layout keys, add_frame into/over, the batch of layout ideas, the monotony warnings.
 genko_test(test_layout_ideas SOURCES unit/test_layout_ideas.cpp DEPS genko_test_support genko_service LABELS unit)
+# The people's generation guides (SPEC FIGURE-03): guides/figures.png and regions.png of a panel's 3D figures, their
+# size, colours and order, the same bytes and request ids, a panel without people as before, print unchanged.
+genko_test(test_figure_guide SOURCES unit/test_figure_guide.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 genko_test(test_ledger_service_b SOURCES unit/test_ledger_service_b.cpp DEPS genko_test_support genko_service genko_api LABELS unit TIMEOUT 2400)
 set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=2300000")
 # import_psd (M4②b) and the PSD reader on the PSD and PSB files of psd_cases.json: hostile files refused without the
@@ -971,6 +982,10 @@ if(GENKO_BUILD_APP)
   # the same seed, the exact number of panels, variations and ガチャに戻る, an idea laid as real panels (one Undo, saved and
   # read back), the question first, the layout kept as a template and laid again (an inset's page, drawn panels)
   genko_test(test_gui_komawari SOURCES gui/test_gui_komawari.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # 人形のポーズ集 G4 (SPEC FIGURE-02): ツール → 3D → ポーズ集… and the panel's button — the categories and counts, the search,
+  # the views, 左右反転, 足もとを保つ, ランダム from a seed, the pictures on worker threads (the figure's body), a pose put on the
+  # figure by a double-click or Enter as one change (Undo)
+  genko_test(test_gui_poses SOURCES gui/test_gui_poses.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
   # processes (AC-SAVE 1, 8); `genko` alone
   genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)
@@ -1033,7 +1048,7 @@ endif()
 foreach(slow test_smart_stack test_gui_color
         test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_page_size
         test_gui_book test_gui_layout test_adjust test_contract_pyre test_contract_psd test_color_model
-        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi)
+        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines test_fukidashi test_figure_poses)
   if(TEST ${slow})
     get_test_property(${slow} TIMEOUT limit)
     math(EXPR function_ms "(${limit} - 100) * 1000")

@@ -1,6 +1,8 @@
 // Python's genko/mesh3d.py (and the figure geometry of genko/threeops.py), expression by expression: every product,
 // sum and conversion in the order Python evaluates it, numpy's matmul through core/linalg3, the math module through
-// core/pymath (libm called as CPython calls it).
+// core/pymath (libm called as CPython calls it). The figure's, the head's and the hand's surfaces, their smooth shading
+// and their outlines are this build's own (SPEC FIGURE-01: core/figure_shape, core/surface_nets); the skeleton, the
+// presets, the handles and everything else stay Python's.
 
 #include "core/mesh3d.hpp"
 
@@ -19,6 +21,7 @@
 
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/figure_shape.hpp"
 #include "core/limits.hpp"
 #include "core/persp3d.hpp"
 #include "core/prim3d.hpp"
@@ -141,47 +144,6 @@ struct Builder {
         add(verts, faces, part, true);
     }
 
-    // A limb from a to b: a tube with rounded ends.
-    void capsule(const Vec3& a, const Vec3& b, double r, int n = 10, int part = 0) {
-        const Vec3 axis = b - a;
-        const double length = la::norm(axis);
-        if (length < 1e-6) {
-            ellipsoid(a, Vec3{r, r, r}, nullptr, 14, 9, part);
-            return;
-        }
-        const Vec3 w = axis / length;
-        Vec3 u = la::cross(w, Vec3{0.0, 0.0, 1.0});
-        if (la::norm(u) < 1e-6) u = la::cross(w, Vec3{1.0, 0.0, 0.0});
-        u = u / la::norm(u);
-        const Vec3 v = la::cross(w, u);
-        std::vector<std::pair<Vec3, double>> rings;
-        const int caps = 3;
-        for (int k = 0; k <= caps; ++k) {  // the start cap
-            const double t = kPi / 2 * (1 - static_cast<double>(k) / caps);
-            rings.emplace_back(a - w * r * py_sin(t), r * py_cos(t));
-        }
-        for (int k = 0; k <= caps; ++k) {  // the end cap
-            const double t = kPi / 2 * k / caps;
-            rings.emplace_back(b + w * r * py_sin(t), r * py_cos(t));
-        }
-        std::vector<Vec3> verts;
-        std::vector<std::vector<std::int64_t>> faces;
-        for (const auto& [centre, rad] : rings) {
-            for (int i = 0; i < n; ++i) {
-                const double th = 2 * kPi * i / n;
-                verts.push_back(centre + (u * py_cos(th) + v * py_sin(th)) * rad);
-            }
-        }
-        for (std::size_t j = 0; j + 1 < rings.size(); ++j) {
-            for (int i = 0; i < n; ++i) {
-                const std::int64_t p = static_cast<std::int64_t>(j) * n + i;
-                const std::int64_t q = static_cast<std::int64_t>(j) * n + (i + 1) % n;
-                faces.push_back({p, q, q + n, p + n});
-            }
-        }
-        add(verts, faces, part, true);
-    }
-
     void box(const Vec3& centre, const Vec3& size, const Mat3* rot, int part = 0) {
         const double w = size[0];
         const double h = size[1];
@@ -199,133 +161,84 @@ struct Builder {
     }
 };
 
-// A hand at the wrist: the palm and five fingers of two bones, curled by the pose. `frame` is the forearm's turn
-// (its y points along the hand).
-void hand(Builder& b, const Vec3& wrist, const Mat3& frame, double length, const Json& pose, int side, int part) {
-    const std::array<double, 5> curls = hand_curls(pose);
-    const double palm_len = length * 0.5;
-    const double palm_w = length * 0.45;
-    const double thick = length * 0.14;
-    const Vec3 down = la::column(frame, 1);
-    const Vec3 across = la::column(frame, 0);
-    const Vec3 palm_c = wrist + down * palm_len / 2;
-    b.box(palm_c, Vec3{palm_w, palm_len, thick}, &frame, part);
-    for (int k = 0; k < 5; ++k) {
-        const double curl = curls[static_cast<std::size_t>(k)];
-        Vec3 base{};
-        Mat3 direction{};
-        if (k == 0) {  // the thumb: from the palm's side, toward the front
-            base = wrist + down * palm_len * 0.3 + across * (palm_w / 2) * side;
-            direction = matmul(rz(-0.7 * side), rx(0.4));
-        } else {
-            base = wrist + down * palm_len + across * (palm_w * (0.36 - 0.24 * (k - 1))) * side;
-            direction = la::identity3();
-        }
-        const double seg = length * (k == 1 || k == 2 || k == 3 ? 0.22 : 0.18);
-        Mat3 turn = matmul(frame, direction);
-        Vec3 p = base;
-        for (int bone = 0; bone < 2; ++bone) {
-            const Mat3 bend = rx(-curl * 1.3);  // curling toward the palm (its front)
-            turn = matmul(turn, bend);
-            const Vec3 q = p + la::column(turn, 1) * seg;
-            b.capsule(p, q, thick * 0.45, 6, part);
-            p = q;
-        }
-    }
-}
+// --- the smooth figure, head and hand (SPEC FIGURE-01: core/figure_shape) --------------------------------------------
 
-void head_mesh(Builder& b, const Vec3& centre, const Mat3& turn, double u, int part) {
-    b.ellipsoid(centre, Vec3{0.42 * u, 0.55 * u, 0.5 * u}, &turn, 16, 11, part);
-    // the jaw and chin, a little forward and down
-    b.ellipsoid(centre + matvec(turn, Vec3{0.0, 0.28 * u, -0.12 * u}), Vec3{0.3 * u, 0.28 * u, 0.3 * u}, &turn, 12, 8, part);
-}
-
-// The guide lines on a face: the centre line (front, top to chin), the eye line, the nose.
-std::vector<std::vector<Vec3>> head_marks(const Vec3& centre, const Mat3& turn, double u) {
-    const double rx_ = 0.42 * u;
-    const double ry_ = 0.55 * u;
-    const double rz_ = 0.5 * u;
-    const auto on = [&](double theta, double phi, double lift) {
-        const Vec3 p = Vec3{rx_ * py_sin(phi) * py_sin(theta), -ry_ * py_cos(phi), -rz_ * py_sin(phi) * py_cos(theta)} * lift;
-        return centre + matvec(turn, p);
-    };
-    std::vector<Vec3> centre_line;
-    for (int k = 3; k < 21; ++k) centre_line.push_back(on(0.0, kPi * k / 20, 1.01));
-    std::vector<Vec3> eye_line;
-    for (int k = 0; k < 21; ++k) eye_line.push_back(on(kPi * (k / 20.0 - 0.5) * 0.9, kPi * 0.55, 1.01));
-    std::vector<Vec3> nose{on(0, kPi * 0.62, 1.01), on(0, kPi * 0.66, 1.12), on(0, kPi * 0.7, 1.02)};
-    return {centre_line, eye_line, nose};
-}
-
-// --- figures ------------------------------------------------------------------------------------------------------
-
-std::shared_ptr<const Model> figure(const Json& prim) {
-    const Skeleton sk = figure_skeleton(prim);
-    const double u = sk.unit;
-    const double build = py_max(0.5, py_min(1.8, to_float(sk.body.at("build"))));
-    Builder b;
-    const double t = u * 0.2 * build;  // limb radius
-    const Mat3& chest_turn = sk.turn("chest");
-    // the torso: chest, belly and pelvis as eggs; the neck; the head
-    b.ellipsoid((sk.point("waist") + sk.point("neck")) / 2 + matvec(chest_turn, Vec3{0.0, 0.1 * u, 0.0}),
-                Vec3{0.95 * u * py_max(0.6, to_float(sk.body.at("shoulders"))) * 0.85 * py_pow(build, 0.3), 0.85 * u,
-                     0.5 * u * build},
-                &chest_turn, 14, 9, 1);
-    b.ellipsoid((sk.point("pelvis") + sk.point("waist")) / 2,
-                Vec3{0.62 * u * py_pow(build, 0.3) * py_max(0.6, to_float(sk.body.at("hips"))), 0.75 * u, 0.42 * u * build},
-                &sk.turn("spine"), 14, 9, 1);
-    const Json* sex = get(sk.body, "sex");
-    if (sex != nullptr && sex->is_string() && sex->get_ref<const std::string&>() == "female") {
-        // (the chest's shape, and a narrower waist)
-        const Vec3 chest = (sk.point("waist") + sk.point("neck")) / 2 + matvec(chest_turn, Vec3{0.0, 0.25 * u, 0.0});
-        for (const int s : {1, -1}) {
-            b.ellipsoid(chest + matvec(chest_turn, Vec3{s * 0.36 * u, 0.05 * u, -0.38 * u * build}), Vec3{0.3 * u, 0.28 * u, 0.26 * u},
-                        &chest_turn, 10, 7, 1);
-        }
-    }
-    b.capsule(sk.point("neck"), sk.point("head_base"), t * 0.8, 10, 1);
-    head_mesh(b, sk.point("head"), sk.turn("head"), u, 2);
-    static const Json kNoHands = Json::object();
-    const Json& hands = get_else(prim, "hands", kNoHands);
-    static const Json kRelaxed = "relaxed";
-    for (const auto& [p, s] : {std::pair<const char*, int>{"l", 1}, {"r", -1}}) {
-        const std::string side(p);
-        b.capsule(sk.point(side + "_shoulder"), sk.point(side + "_elbow"), t * 1.05, 10, 3);
-        b.capsule(sk.point(side + "_elbow"), sk.point(side + "_wrist"), t * 0.85, 10, 3);
-        const Json* pose = dict_get(hands, side);
-        hand(b, sk.point(side + "_wrist"), sk.turn(side + "_wrist"), 0.8 * u, pose != nullptr && py_truthy(*pose) ? *pose : kRelaxed,
-             s, 4);
-        b.capsule(sk.point(side + "_hip"), sk.point(side + "_knee"), t * 1.45, 10, 5);
-        b.capsule(sk.point(side + "_knee"), sk.point(side + "_ankle"), t * 1.1, 10, 5);
-        const Vec3 foot_mid = (sk.point(side + "_ankle") + sk.point(side + "_toe")) / 2;
-        const Mat3 foot = matmul(sk.turn(side + "_ankle"), rx(-1.35));
-        b.box(foot_mid, Vec3{0.4 * u, 0.3 * u, 1.0 * u}, &foot, 6);
-    }
+std::shared_ptr<const Model> smooth_model(figure_shape::Smooth mesh, std::vector<std::vector<Vec3>> marks) {
     auto model = std::make_shared<Model>();
-    model->mesh = std::move(b.m);
-    model->marks = head_marks(sk.point("head"), sk.turn("head"), u);
+    model->mesh.v = std::move(mesh.v);
+    model->vn = std::move(mesh.n);
+    model->tris = std::move(mesh.t);
+    model->nocontour = std::move(mesh.no_contour);
+    model->marks = std::move(marks);
     return model;
 }
 
-// _figure_cached: the last 64 figures, by their size, body, joints and hands
-struct FigureCache {
+std::shared_ptr<const Model> figure(const Json& prim) {
+    const Skeleton sk = figure_skeleton(prim);
+    static const Json kNoHands = Json::object();
+    const Json& hands = get_else(prim, "hands", kNoHands);
+    static const Json kRelaxed = "relaxed";
+    const auto shape = [&](const char* side) {
+        const Json* pose = dict_get(hands, side);
+        return hand_shape(pose != nullptr && py_truthy(*pose) ? *pose : kRelaxed);
+    };
+    const HandShape left = shape("l");
+    const HandShape right = shape("r");
+    figure_shape::FigureMesh made = figure_shape::figure(sk, left, right);
+    // what the hands hold (SPEC FIGURE-02: `hold`, drawn unless `props` is false)
+    const Json* hold = dict_get(prim, "hold");
+    const Json* shown = dict_get(prim, "props");
+    const auto held = [&](const char* side) {
+        const Json* v = hold != nullptr && hold->is_object() ? dict_get(*hold, side) : nullptr;
+        return v != nullptr && v->is_string() ? v->get<std::string>() : std::string();
+    };
+    const std::string held_l = held("l");
+    const std::string held_r = held("r");
+    if ((held_l.empty() && held_r.empty()) || (shown != nullptr && shown->is_boolean() && !shown->get<bool>())) {
+        return smooth_model(std::move(made.mesh), std::move(made.marks));
+    }
+    figure_shape::Props props = figure_shape::props(sk, held_l, held_r);
+    const auto body = made.mesh.v.size();
+    const auto base = static_cast<std::int32_t>(body);
+    figure_shape::Smooth& m = made.mesh;
+    m.v.insert(m.v.end(), props.mesh.v.begin(), props.mesh.v.end());
+    m.n.insert(m.n.end(), props.mesh.n.begin(), props.mesh.n.end());
+    m.no_contour.insert(m.no_contour.end(), props.mesh.no_contour.begin(), props.mesh.no_contour.end());
+    for (const auto& t : props.mesh.t) m.t.push_back({base + t[0], base + t[1], base + t[2]});
+    auto model = std::const_pointer_cast<Model>(smooth_model(std::move(made.mesh), std::move(made.marks)));
+    model->body = props.mesh.v.empty() ? 0 : body;
+    for (auto e : props.edges) {
+        for (int k = 0; k < 4; ++k) {
+            if (e[static_cast<std::size_t>(k)] >= 0) e[static_cast<std::size_t>(k)] += base;
+        }
+        model->creases.push_back(e);
+    }
+    return model;
+}
+
+// The smooth models made last (Python's lru_cache of 64 figures; these are larger: at most 64 of them and 64 MB)
+struct ModelCache {
     std::mutex mutex;
     std::list<std::pair<std::string, std::shared_ptr<const Model>>> items;  // most recent first
+    std::size_t bytes = 0;
 };
 
-FigureCache& figure_cache() {
-    static FigureCache cache;
+ModelCache& model_cache() {
+    static ModelCache cache;
     return cache;
 }
 
-std::shared_ptr<const Model> cached_figure(const Json& prim) {
-    Json key_value = Json::object();
-    for (const char* k : {"size", "body", "joints", "hands"}) {
-        const Json* v = dict_get(prim, k);
-        key_value[k] = v != nullptr ? *v : Json();
-    }
-    const std::string key = dump_canonical(key_value);
-    FigureCache& cache = figure_cache();
+std::size_t bytes_of(const Model& m) {
+    return m.mesh.v.size() * sizeof(Vec3) + m.vn.size() * sizeof(Vec3) + m.nocontour.size() + m.tris.size() * sizeof(m.tris[0]) +
+           m.creases.size() * sizeof(m.creases[0]) + 256;
+}
+
+constexpr std::size_t kModelCacheItems = 64;
+constexpr std::size_t kModelCacheBytes = std::size_t{64} << 20;
+
+template <typename Make>
+std::shared_ptr<const Model> cached_model(const std::string& key, Make make) {
+    ModelCache& cache = model_cache();
     {
         std::lock_guard lock(cache.mutex);
         for (auto it = cache.items.begin(); it != cache.items.end(); ++it) {
@@ -335,11 +248,36 @@ std::shared_ptr<const Model> cached_figure(const Json& prim) {
             }
         }
     }
-    std::shared_ptr<const Model> made = figure(key_value);
+    // (made outside the lock, on this thread alone: two threads that both miss make the same bytes)
+    std::shared_ptr<const Model> made = make();
     std::lock_guard lock(cache.mutex);
     cache.items.emplace_front(key, made);
-    while (cache.items.size() > 64) cache.items.pop_back();
+    cache.bytes += bytes_of(*made);
+    while (cache.items.size() > kModelCacheItems || (cache.bytes > kModelCacheBytes && cache.items.size() > 1)) {
+        cache.bytes -= bytes_of(*cache.items.back().second);
+        cache.items.pop_back();
+    }
     return made;
+}
+
+// _figure_cached: by the figure's size, body, joints and hands
+std::shared_ptr<const Model> cached_figure(const Json& prim) {
+    Json key_value = Json::object();
+    for (const char* k : {"size", "body", "joints", "hands"}) {
+        const Json* v = dict_get(prim, k);
+        key_value[k] = v != nullptr ? *v : Json();
+    }
+    for (const char* k : {"hold", "props"}) {  // (SPEC FIGURE-02: only when the figure has them)
+        if (const Json* v = dict_get(prim, k); v != nullptr) key_value[k] = *v;
+    }
+    return cached_model(dump_canonical(key_value), [&] { return figure(key_value); });
+}
+
+// a number's exact bits as text (std::to_chars: no locale)
+std::string bits_text(double v) {
+    char text[64];
+    const auto written = std::to_chars(text, text + sizeof text, v, std::chars_format::hex);
+    return std::string(text, written.ptr);
 }
 
 // --- the older guides' surfaces ------------------------------------------------------------------------------------
@@ -436,8 +374,10 @@ std::vector<double> light_vector(const Json* light) {
 
 // --- triangles ----------------------------------------------------------------------------------------------------
 
-// _fill_triangle over a w × h picture, for the pixels of out's window
-void fill_triangle(const std::array<Point2, 3>& p, const std::array<double, 3>& z, float value, int w, int h, Raster& out) {
+// _fill_triangle over a w × h picture, for the pixels of out's window. With `shades` (a smooth model's, FIGURE-01) each
+// pixel's shade is spread from its corners with the same weights as its depth; else the face's one value.
+void fill_triangle(const std::array<Point2, 3>& p, const std::array<double, 3>& z, float value, int w, int h, Raster& out,
+                   const std::array<double, 3>* shades = nullptr) {
     // (numpy's min and max: a NaN wins)
     const auto low = [](double a, double b) { return la::np_minimum(a, b); };
     const auto high = [](double a, double b) { return la::np_maximum(a, b); };
@@ -483,7 +423,7 @@ void fill_triangle(const std::array<Point2, 3>& p, const std::array<double, 3>& 
                                    static_cast<std::size_t>(xi - out.x0);
             if (depth < static_cast<double>(out.zbuf[at])) {
                 out.zbuf[at] = static_cast<float>(depth);
-                out.shade[at] = value;
+                out.shade[at] = shades == nullptr ? value : static_cast<float>(l1 * (*shades)[0] + l2 * (*shades)[1] + l3 * (*shades)[2]);
             }
         }
     }
@@ -538,6 +478,193 @@ std::vector<Line2> join_pieces(std::vector<Line2> pieces) {
     return out;
 }
 
+// --- the outlines of a smooth model (FIGURE-01) ---------------------------------------------------------------------
+
+// A line of the outline on the page: its points and their depth.
+struct Outline {
+    std::vector<Point2> pts;
+    std::vector<double> depth;
+};
+
+// Where the eye is in the space _turned gives (the prim's own turn, then the camera's): to_page's projection centre.
+Vec3 eye_of(const Json& prim, const Json* camera) {
+    static const Json kDefaultPos = Json::array({100, 150, 0});
+    Json pos = py_list(get_else(prim, "pos", kDefaultPos));
+    for (int i = 0; i < 3; ++i) pos.push_back(0);
+    if (camera != nullptr) {
+        const Vec3 at{to_float(pos[0]), to_float(pos[1]), to_float(pos[2])};
+        const Json* target_value = dict_get(*camera, "target");
+        const Json target = target_value != nullptr && py_truthy(*target_value) ? *target_value : Json::array({pos[0], pos[1]});
+        const double tx = to_float(subscript(target, 0));
+        const double ty = to_float(subscript(target, 1));
+        const Json* tip = dict_get(*camera, "tip");
+        const Json* turn = dict_get(*camera, "turn");
+        const Json* roll = dict_get(*camera, "roll");
+        const Mat3 view = prim_rotation(
+            Json::array({tip != nullptr ? *tip : Json(0), turn != nullptr ? *turn : Json(0), roll != nullptr ? *roll : Json(0)}));
+        const Vec3 rel = at - Vec3{tx, ty, 0.0};
+        const Vec3 off = la::rows_mt(std::span<const Vec3>(&rel, 1), view)[0];
+        const Json* focal_value = dict_get(*camera, "focal_mm");
+        double focal = 400.0;
+        if (focal_value != nullptr && py_truthy(*focal_value)) {
+            focal = to_float(*focal_value);
+        } else if (const Json* own = dict_get(prim, "focal_mm"); own != nullptr && py_truthy(*own)) {
+            focal = to_float(*own);
+        }
+        return Vec3{0.0, 0.0, -focal} - off;
+    }
+    const Json* focal_value = dict_get(prim, "focal_mm");
+    const double focal = focal_value == nullptr ? 400.0 : (py_truthy(*focal_value) ? to_float(*focal_value) : 400.0);
+    return Vec3{0.0, 0.0, -(focal + to_float(pos[2]))};
+}
+
+// The outline of a smooth model: where n · (p − eye) changes sign, a segment across each triangle (its ends on the
+// triangles' edges, shared by the two triangles of an edge), chained through the shared edges from the lowest
+// triangle on; the triangles touching a point marked nocontour draw nothing.
+void contours(const Json& prim, const Model& model, const Json* camera, std::vector<Outline>& out) {
+    const std::vector<Vec3>& v = model.mesh.v;
+    const std::vector<Vec3> q = turned(prim, v, camera);
+    const std::vector<Vec3> nq = turned(prim, model.vn, camera);
+    const Vec3 eye = eye_of(prim, camera);
+    std::vector<double> g(q.size());
+    for (std::size_t i = 0; i < q.size(); ++i) g[i] = la::dot(nq[i], q[i] - eye);
+    std::unordered_map<std::uint64_t, std::int32_t> crossing_of;
+    std::vector<Vec3> where;                          // (each crossing in the model's own space)
+    std::vector<std::array<std::int32_t, 2>> crossed;  // (each crossed triangle's two crossings)
+    std::vector<std::array<std::int32_t, 2>> tris_at;  // (each crossing's crossed triangles; −1 when none)
+    const auto crossing = [&](std::int32_t a, std::int32_t b) {
+        const std::int32_t lo = std::min(a, b);
+        const std::int32_t hi = std::max(a, b);
+        const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(lo)) << 32) | static_cast<std::uint32_t>(hi);
+        const auto [it, added] = crossing_of.emplace(key, static_cast<std::int32_t>(where.size()));
+        if (added) {
+            const auto l = static_cast<std::size_t>(lo);
+            const auto h = static_cast<std::size_t>(hi);
+            const double t = g[l] / (g[l] - g[h]);
+            where.push_back(v[l] + (v[h] - v[l]) * t);
+            tris_at.push_back({-1, -1});
+        }
+        return it->second;
+    };
+    for (const auto& t : model.tris) {
+        const auto a = static_cast<std::size_t>(t[0]);
+        const auto b = static_cast<std::size_t>(t[1]);
+        const auto c = static_cast<std::size_t>(t[2]);
+        if (model.nocontour[a] != 0 || model.nocontour[b] != 0 || model.nocontour[c] != 0) continue;
+        const bool sa = g[a] < 0.0;
+        const bool sb = g[b] < 0.0;
+        const bool sc = g[c] < 0.0;
+        if (sa == sb && sb == sc) continue;
+        std::array<std::int32_t, 2> two{};
+        int n = 0;
+        if (sa != sb) two[static_cast<std::size_t>(n++)] = crossing(t[0], t[1]);
+        if (sb != sc) two[static_cast<std::size_t>(n++)] = crossing(t[1], t[2]);
+        if (sc != sa) two[static_cast<std::size_t>(n++)] = crossing(t[2], t[0]);
+        const auto me = static_cast<std::int32_t>(crossed.size());
+        crossed.push_back(two);
+        for (const std::int32_t x : two) {
+            auto& slots = tris_at[static_cast<std::size_t>(x)];
+            if (slots[0] < 0) {
+                slots[0] = me;
+            } else if (slots[1] < 0) {
+                slots[1] = me;
+            }
+        }
+    }
+    if (crossed.empty()) return;
+    std::vector<std::uint8_t> done(crossed.size(), 0);
+    // from triangle `from`, out through crossing `via`: the crossings met, in order
+    const auto walk = [&](std::int32_t from, std::int32_t via) {
+        std::vector<std::int32_t> met;
+        std::int32_t here = from;
+        std::int32_t at = via;
+        for (;;) {
+            const auto& slots = tris_at[static_cast<std::size_t>(at)];
+            std::int32_t next = -1;
+            for (const std::int32_t s : slots) {
+                if (s >= 0 && s != here && done[static_cast<std::size_t>(s)] == 0) {
+                    next = s;
+                    break;
+                }
+            }
+            if (next < 0) break;
+            done[static_cast<std::size_t>(next)] = 1;
+            const auto& two = crossed[static_cast<std::size_t>(next)];
+            at = two[0] == at ? two[1] : two[0];
+            met.push_back(at);
+            here = next;
+        }
+        return met;
+    };
+    const OnPage on = to_page(prim, where, camera);
+    for (std::size_t t = 0; t < crossed.size(); ++t) {
+        if (done[t] != 0) continue;
+        done[t] = 1;
+        const auto me = static_cast<std::int32_t>(t);
+        std::vector<std::int32_t> back = walk(me, crossed[t][0]);
+        const std::vector<std::int32_t> ahead = walk(me, crossed[t][1]);
+        std::reverse(back.begin(), back.end());
+        back.push_back(crossed[t][0]);
+        back.push_back(crossed[t][1]);
+        back.insert(back.end(), ahead.begin(), ahead.end());
+        Outline chain;
+        for (const std::int32_t x : back) {
+            chain.pts.push_back(on.pts[static_cast<std::size_t>(x)]);
+            chain.depth.push_back(on.depth[static_cast<std::size_t>(x)]);
+        }
+        out.push_back(std::move(chain));
+    }
+}
+
+// Douglas–Peucker: the points of a line that keep it within `tolerance` (mm) of itself.
+Line2 simplified(const Line2& line, double tolerance) {
+    const std::size_t n = line.size();
+    if (n < 3) return line;
+    std::vector<std::uint8_t> keep(n, 0);
+    keep[0] = 1;
+    keep[n - 1] = 1;
+    std::vector<std::pair<std::size_t, std::size_t>> todo{{0, n - 1}};
+    while (!todo.empty()) {
+        const auto [i, j] = todo.back();
+        todo.pop_back();
+        if (j <= i + 1) continue;
+        const Point2& a = line[i];
+        const Point2& b = line[j];
+        const double dx = b[0] - a[0];
+        const double dy = b[1] - a[1];
+        const double len2 = dx * dx + dy * dy;
+        double far = -1.0;
+        std::size_t at = i;
+        for (std::size_t k = i + 1; k < j; ++k) {
+            const double px = line[k][0] - a[0];
+            const double py = line[k][1] - a[1];
+            double d2 = 0.0;
+            if (len2 > 0.0) {
+                const double cross = px * dy - py * dx;
+                d2 = cross * cross / len2;
+            } else {
+                d2 = px * px + py * py;
+            }
+            if (d2 > far) {
+                far = d2;
+                at = k;
+            }
+        }
+        if (far > tolerance * tolerance) {
+            keep[at] = 1;
+            todo.emplace_back(at, j);
+            todo.emplace_back(i, at);
+        }
+    }
+    Line2 out;
+    for (std::size_t k = 0; k < n; ++k) {
+        if (keep[k] != 0) out.push_back(line[k]);
+    }
+    return out;
+}
+
+constexpr double kOutlineTolerance = 0.03;  // mm (FIGURE-01: the outlines simplified within this)
+
 struct LinesCache {
     std::mutex mutex;
     std::list<std::pair<std::string, std::shared_ptr<const std::vector<Line2>>>> items;
@@ -579,6 +706,37 @@ std::array<double, 5> hand_curls(const Json& value) {
         return base;
     }
     return curls_of(str_or(&value, "relaxed"));
+}
+
+HandShape hand_shape(const Json& value) {
+    // (each pose's own fan of the fingers and turn of the thumb; an unknown name is relaxed, as its curls are)
+    static const std::pair<std::string_view, std::pair<double, double>> kShapes[] = {
+        {"open", {0.35, 0.0}}, {"relaxed", {0.12, 0.25}}, {"fist", {0.0, 0.8}},
+        {"point", {0.05, 0.7}}, {"peace", {0.7, 0.75}},  {"grip", {0.08, 0.55}},
+    };
+    HandShape out;
+    out.curls = hand_curls(value);
+    std::string name = "relaxed";
+    if (value.is_array()) {
+        name = "open";
+    } else if (value.is_object()) {
+        name = str_or(dict_get(value, "pose"), "relaxed");
+    } else {
+        name = str_or(&value, "relaxed");
+    }
+    std::pair<double, double> shape = kShapes[1].second;
+    for (const auto& [key, s] : kShapes) {
+        if (key == name) shape = s;
+    }
+    out.spread = shape.first;
+    out.thumb = shape.second;
+    if (value.is_object()) {
+        const Json* spread = dict_get(value, "spread");
+        if (spread != nullptr && spread->is_number()) out.spread = clamp01(to_float(*spread));
+        const Json* thumb = dict_get(value, "thumb");
+        if (thumb != nullptr && thumb->is_number()) out.thumb = clamp01(to_float(*thumb));
+    }
+    return out;
 }
 
 Mat3 rx(double t) {
@@ -739,27 +897,31 @@ std::shared_ptr<const Model> model_of(const Json& prim) {
         double height = to_float(size.is_array() ? subscript(size, 1) : size);
         if (height == 0.0) height = 30.0;
         const double u = height / 1.1;
-        Builder b;
-        head_mesh(b, Vec3{0.0, 0.0, 0.0}, la::identity3(), u, 2);
-        auto model = std::make_shared<Model>();
-        model->mesh = std::move(b.m);
-        model->marks = head_marks(Vec3{0.0, 0.0, 0.0}, la::identity3(), u);
-        return model;
+        return cached_model("head:" + bits_text(u), [u] {
+            figure_shape::FigureMesh made = figure_shape::head(u);
+            return smooth_model(std::move(made.mesh), std::move(made.marks));
+        });
     }
     if (py_equals(kind, Json("hand"))) {
         double length = to_float(size.is_array() ? subscript(size, 1) : size);
         if (length == 0.0) length = 20.0;
-        Builder b;
         const Json* side_value = dict_get(prim, "side");
         const int side = py_equals(side_value != nullptr ? *side_value : Json("r"), Json("l")) ? 1 : -1;
         const Json* pose_value = dict_get(prim, "pose");
         const Json pose = pose_value != nullptr && py_truthy(*pose_value) ? *pose_value : Json("relaxed");
         const Json* curls = dict_get(prim, "curls");
-        const Json shape = curls != nullptr && py_truthy(*curls) ? Json::object({{"pose", pose}, {"curls", *curls}}) : pose;
-        hand(b, Vec3{0.0, -length / 2, 0.0}, la::identity3(), length, shape, side, 4);
-        auto model = std::make_shared<Model>();
-        model->mesh = std::move(b.m);
-        return model;
+        Json shape_value = curls != nullptr && py_truthy(*curls) ? Json::object({{"pose", pose}, {"curls", *curls}}) : pose;
+        for (const char* key : {"spread", "thumb"}) {  // (FIGURE-01's own keys, when a prim has them)
+            const Json* v = dict_get(prim, key);
+            if (v == nullptr || v->is_null()) continue;
+            if (!shape_value.is_object()) shape_value = Json::object({{"pose", pose}});
+            shape_value[key] = *v;
+        }
+        const HandShape shape = hand_shape(shape_value);
+        std::string key = "hand:" + bits_text(length) + (side > 0 ? "l" : "r");
+        for (const double c : shape.curls) key += "," + bits_text(c);
+        key += "," + bits_text(shape.spread) + "," + bits_text(shape.thumb);
+        return cached_model(key, [&] { return smooth_model(figure_shape::hand(length, shape, side), {}); });
     }
     if (is_one_of(kind, {"box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"})) return solid(prim);
     if (py_equals(kind, Json("mesh"))) {
@@ -800,8 +962,15 @@ const Json* camera_of(const Json& prim, const Json* page_camera) {
     return truthy(get(prim, "camera"));
 }
 
+std::vector<Vec3> seen_normals(const Json& prim, const Model& model, const Json* camera) { return turned(prim, model.vn, truthy(camera)); }
+
 std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* camera) {
     return normals(turned(prim, mesh.v, truthy(camera)), mesh.f);
+}
+
+InView in_view(const Json& prim, std::span<const Vec3> local, const Json* camera) {
+    camera = truthy(camera);
+    return InView{turned(prim, local, camera), eye_of(prim, camera)};
 }
 
 OnPage to_page(const Json& prim, std::span<const Vec3> local, const Json* camera) {
@@ -912,6 +1081,30 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
     for (const Json& prim : prims) {
         const std::shared_ptr<const Model> model = model_of(prim);
         const Mesh& mesh = model->mesh;
+        if (model->smooth()) {  // (FIGURE-01: each point lit by its own normal, spread across its triangles)
+            if (lit.size() != 3) {
+                throw PyValueError("matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
+                                     "(n?,k),(k,m?)->(n?,m?) (size " + std::to_string(lit.size()) + " is different from 3)");
+            }
+            const OnPage at = to_page(prim, mesh.v, camera);
+            const std::vector<Vec3> n_all = turned(prim, model->vn, camera);
+            const Vec3 to_light{lit[0], lit[1], lit[2]};
+            std::vector<double> lit_at(n_all.size());
+            for (std::size_t i = 0; i < n_all.size(); ++i) {
+                const double d = la::dot(n_all[i], to_light);
+                lit_at[i] = ambient + (1 - ambient) * (d > 0.0 ? d : 0.0);
+            }
+            std::vector<Point2> px(at.pts.size());
+            for (std::size_t i = 0; i < at.pts.size(); ++i) px[i] = Point2{(at.pts[i][0] - box_x) * k, (at.pts[i][1] - box_y) * k};
+            for (const auto& t : model->tris) {
+                const auto a = static_cast<std::size_t>(t[0]);
+                const auto b = static_cast<std::size_t>(t[1]);
+                const auto c = static_cast<std::size_t>(t[2]);
+                const std::array<double, 3> shades{lit_at[a], lit_at[b], lit_at[c]};
+                fill_triangle({px[a], px[b], px[c]}, {at.depth[a], at.depth[b], at.depth[c]}, 0.0f, width, height, out, &shades);
+            }
+            continue;
+        }
         if (mesh.f.empty()) continue;
         const OnPage at = to_page(prim, mesh.v, camera);
         const std::vector<Vec3> n_all = normals(turned(prim, mesh.v, camera), mesh.f);
@@ -939,7 +1132,7 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
     return out;
 }
 
-std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi, double crease_deg) {
+std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double dpi, double crease_deg, std::span<const Json> hiders) {
     camera = truthy(camera);
     std::vector<Json> meshy;
     for (const Json& p : prims) {
@@ -954,8 +1147,41 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
         double zb;
     };
     std::vector<Seg> segs;
+    std::vector<Outline> chains;  // (the smooth models' outlines)
     for (const Json& prim : meshy) {
         const Seen s = seen(prim, camera);
+        if (s.model->smooth()) {
+            contours(prim, *s.model, camera, chains);
+            for (const OnPage& g : s.guides) {
+                for (std::size_t i = 0; i + 1 < g.pts.size(); ++i) segs.push_back(Seg{g.pts[i], g.pts[i + 1], g.depth[i] - 0.3, g.depth[i + 1] - 0.3});
+            }
+            if (!s.model->creases.empty()) {  // (what the hands hold: its edges where it turns away from the eye, and its creases)
+                const Model& m = *s.model;
+                const std::vector<Vec3> q = turned(prim, m.mesh.v, camera);
+                const std::vector<Vec3> nq = turned(prim, m.vn, camera);
+                const Vec3 eye = eye_of(prim, camera);
+                const double cos_crease = py_cos(crease_deg * (kPi / 180.0));
+                const auto facing = [&](std::int32_t at) {
+                    const auto i = static_cast<std::size_t>(at);
+                    return la::dot(nq[i], q[i] - eye) < 0.0;
+                };
+                for (const auto& e : m.creases) {
+                    bool keep = false;
+                    if (e[3] < 0) {
+                        keep = true;
+                    } else {
+                        const auto f0 = static_cast<std::size_t>(e[2]);
+                        const auto f1 = static_cast<std::size_t>(e[3]);
+                        keep = facing(e[2]) != facing(e[3]) || (e[4] == 0 && la::dot(nq[f0], nq[f1]) < cos_crease);
+                    }
+                    if (!keep) continue;
+                    const auto a = static_cast<std::size_t>(e[0]);
+                    const auto b = static_cast<std::size_t>(e[1]);
+                    segs.push_back(Seg{s.at.pts[a], s.at.pts[b], s.at.depth[a], s.at.depth[b]});
+                }
+            }
+            continue;
+        }
         if (s.model->mesh.v.empty() || s.model->mesh.f.empty()) continue;  // (seen gives no faces without points)
         const Mesh& mesh = s.model->mesh;
         const std::vector<Vec3> n_all = normals(turned(prim, mesh.v, camera), mesh.f);
@@ -1002,10 +1228,11 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
             for (std::size_t i = 0; i + 1 < g.pts.size(); ++i) segs.push_back(Seg{g.pts[i], g.pts[i + 1], g.depth[i] - 0.3, g.depth[i + 1] - 0.3});
         }
     }
-    if (segs.empty()) return {};
+    if (segs.empty() && chains.empty()) return {};
     // the box of every end (numpy's min and max: a NaN wins), 2 mm round
-    double x0 = segs[0].a[0];
-    double y0 = segs[0].a[1];
+    const Point2 first = !segs.empty() ? segs[0].a : chains[0].pts[0];
+    double x0 = first[0];
+    double y0 = first[1];
     double x1 = x0;
     double y1 = y0;
     const auto take = [&](const Point2& p) {
@@ -1016,6 +1243,9 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     };
     for (const Seg& s : segs) take(s.a);
     for (const Seg& s : segs) take(s.b);
+    for (const Outline& c : chains) {
+        for (const Point2& p : c.pts) take(p);
+    }
     x0 = x0 - 2;
     y0 = y0 - 2;
     x1 = x1 + 2;
@@ -1030,9 +1260,38 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     const double fh = py_max(1.0, int_of((y1 - y0) * k) + 2);
     // (a depth picture for the lines, at their own small resolution: one this big is a 3D far too large to trace)
     if (fw * fh > limits::kLineDepthPixels) throw Error("image_too_large", "the 3D is too large to draw at this resolution");
-    const Raster depth = raster(meshy, static_cast<int>(fw), static_cast<int>(fh), dpi, camera, nullptr, 0.35, x0, y0);
+    // (with the hiders' surfaces: the depth picture of all of them, the lines' own prims first)
+    std::vector<Json> surfaces = meshy;
+    surfaces.insert(surfaces.end(), hiders.begin(), hiders.end());
+    const Raster depth = raster(surfaces, static_cast<int>(fw), static_cast<int>(fh), dpi, camera, nullptr, 0.35, x0, y0);
     const double tolerance = py_max(0.8, 2.5 * 25.4 / dpi);  // (a pixel's worth of depth, and the rim of rounded parts)
     const float tolerance_f = static_cast<float>(tolerance);
+    // seen when some pixel beside it is empty or no nearer than it (the rim of a rounded part)
+    const auto visible_at = [&](const Point2& p, double z) {
+        const double fpx = int_of((p[0] - x0) * k);
+        const double fpy = int_of((p[1] - y0) * k);
+        // zbuf[max(0, py - 1):py + 2, max(0, px - 1):px + 2] (Python's slices: a negative end counts from the end)
+        const auto slice = [](double from, double to, int size) {
+            const auto norm = [size](double v) {
+                if (v < 0) v += size;
+                return v < 0 ? 0.0 : (v > size ? static_cast<double>(size) : v);
+            };
+            return std::pair<int, int>{static_cast<int>(norm(from)), static_cast<int>(norm(to))};
+        };
+        const auto [r0, r1] = slice(py_max(0.0, fpy - 1), fpy + 2, depth.height);
+        const auto [c0, c1] = slice(py_max(0.0, fpx - 1), fpx + 2, depth.width);
+        bool visible = r1 <= r0 || c1 <= c0;  // (an empty slice)
+        for (int r = r0; r < r1 && !visible; ++r) {
+            for (int c = c0; c < c1; ++c) {
+                const float near = depth.zbuf[static_cast<std::size_t>(r) * static_cast<std::size_t>(depth.width) + static_cast<std::size_t>(c)];
+                if (!std::isfinite(near) || z <= static_cast<double>(near + tolerance_f)) {
+                    visible = true;
+                    break;
+                }
+            }
+        }
+        return visible;
+    };
     std::vector<Line2> out;
     for (const Seg& s : segs) {
         const double length = la::np_hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
@@ -1043,30 +1302,7 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
             const double t = static_cast<double>(i) / static_cast<double>(n);
             const Point2 p{s.a[0] + (s.b[0] - s.a[0]) * t, s.a[1] + (s.b[1] - s.a[1]) * t};
             const double z = s.za + (s.zb - s.za) * t;
-            const double fpx = int_of((p[0] - x0) * k);
-            const double fpy = int_of((p[1] - y0) * k);
-            // zbuf[max(0, py - 1):py + 2, max(0, px - 1):px + 2] (Python's slices: a negative end counts from the end)
-            const auto slice = [](double from, double to, int size) {
-                const auto norm = [size](double v) {
-                    if (v < 0) v += size;
-                    return v < 0 ? 0.0 : (v > size ? static_cast<double>(size) : v);
-                };
-                return std::pair<int, int>{static_cast<int>(norm(from)), static_cast<int>(norm(to))};
-            };
-            const auto [r0, r1] = slice(py_max(0.0, fpy - 1), fpy + 2, depth.height);
-            const auto [c0, c1] = slice(py_max(0.0, fpx - 1), fpx + 2, depth.width);
-            bool visible = r1 <= r0 || c1 <= c0;  // (an empty slice)
-            for (int r = r0; r < r1 && !visible; ++r) {
-                for (int c = c0; c < c1; ++c) {
-                    const float near = depth.zbuf[static_cast<std::size_t>(r) * static_cast<std::size_t>(depth.width) + static_cast<std::size_t>(c)];
-                    // seen when some pixel beside it is empty or no nearer than it (the rim of a rounded part)
-                    if (!std::isfinite(near) || z <= static_cast<double>(near + tolerance_f)) {
-                        visible = true;
-                        break;
-                    }
-                }
-            }
-            if (visible) {
+            if (visible_at(p, z)) {
                 run.push_back(p);
             } else if (run.size() >= 2) {
                 out.push_back(std::move(run));
@@ -1077,20 +1313,60 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
         }
         if (run.size() >= 2) out.push_back(std::move(run));
     }
-    return join_pieces(std::move(out));
+    if (chains.empty()) return join_pieces(std::move(out));
+    // the outlines: each chain sampled as the segments are, its seen runs kept whole, then simplified
+    std::vector<Line2> result = join_pieces(std::move(out));
+    for (const Outline& c : chains) {
+        Line2 run;
+        const auto flush = [&] {
+            if (run.size() >= 2) result.push_back(simplified(run, kOutlineTolerance));
+            run.clear();
+        };
+        for (std::size_t s = 0; s + 1 < c.pts.size(); ++s) {
+            const Point2& a = c.pts[s];
+            const Point2& b = c.pts[s + 1];
+            const double length = la::np_hypot(b[0] - a[0], b[1] - a[1]);
+            const auto n = static_cast<std::int64_t>(py_max(2.0, int_of(length * k * 1.5)));
+            for (std::int64_t i = s == 0 ? 0 : 1; i <= n; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(n);
+                const Point2 p{a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t};
+                const double z = c.depth[s] + (c.depth[s + 1] - c.depth[s]) * t;
+                if (visible_at(p, z)) {
+                    run.push_back(p);
+                } else {
+                    flush();
+                }
+            }
+        }
+        flush();
+    }
+    return result;
 }
 
-std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi) {
+std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Json* camera, double dpi, std::span<const Json> hiders) {
     camera = truthy(camera);
-    Json own = Json::object();
-    if (prim.is_object()) {
-        for (const auto& [k, v] : prim.items()) {
-            if (k != "camera") own[k] = v;
+    const auto without_camera = [](const Json& p) {
+        Json own = Json::object();
+        if (p.is_object()) {
+            for (const auto& [k, v] : p.items()) {
+                if (k != "camera") own[k] = v;
+            }
+        } else {
+            raise_attribute_error(p, "items");
         }
-    } else {
-        raise_attribute_error(prim, "items");
-    }
+        return own;
+    };
+    const Json own = without_camera(prim);
     Json key_value = Json::object({{"camera", camera != nullptr ? *camera : Json()}, {"prim", own}});
+    std::vector<Json> others;  // (seen with the prim's camera, as raster has them)
+    if (!hiders.empty()) {
+        Json listed = Json::array();
+        for (const Json& h : hiders) {
+            others.push_back(without_camera(h));
+            listed.push_back(others.back());
+        }
+        key_value["hiders"] = std::move(listed);
+    }
     // (the resolution's exact bits as text: std::to_chars, which no locale changes — snprintf's %a takes its decimal point)
     char dpi_text[64];
     const auto written = std::to_chars(dpi_text, dpi_text + sizeof dpi_text, dpi, std::chars_format::hex);
@@ -1106,7 +1382,7 @@ std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Jso
         }
     }
     const std::vector<Json> one{own};
-    auto made = std::make_shared<const std::vector<Line2>>(lines(one, camera, dpi));
+    auto made = std::make_shared<const std::vector<Line2>>(lines(one, camera, dpi, 40.0, others));
     std::lock_guard lock(cache.mutex);
     cache.items.emplace_front(key, made);
     while (cache.items.size() > 128) cache.items.pop_back();
@@ -1115,9 +1391,10 @@ std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Jso
 
 void clear_caches() {
     {
-        FigureCache& cache = figure_cache();
+        ModelCache& cache = model_cache();
         std::lock_guard lock(cache.mutex);
         cache.items.clear();
+        cache.bytes = 0;
     }
     LinesCache& cache = lines_cache();
     std::lock_guard lock(cache.mutex);

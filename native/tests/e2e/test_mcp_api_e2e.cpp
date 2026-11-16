@@ -381,7 +381,7 @@ const char* const kTools[] = {"projects", "create_project", "status", "next", "i
                               "import_images", "candidates", "review_candidates", "adopt", "request_fix", "report_regions",
                               "finish_page", "preflight", "export_proof", "check", "undo", "export", "record_chat_approval",
                               "export_status", "upscale", "derive", "import_name", "analyze_name", "propose_lines", "proposals",
-                              "review_page", "ask_human", "set_bible", "set_script", "submit_name", "layout_ideas", "take_panel_art", "style_catalog",
+                              "review_page", "ask_human", "set_bible", "set_script", "submit_name", "layout_ideas", "figure_poses", "take_panel_art", "style_catalog",
                               "use_style", "apply_ops", "record_review", "request_approval", "tickets", "resolve_ticket"};
 
 }  // namespace
@@ -411,7 +411,7 @@ class TestMcpApiE2e : public QObject {
     }
 
 private slots:
-    // The server is an agent's: a person's actor is refused before anything is served; the 42 tools hold none of a
+    // The server is an agent's: a person's actor is refused before anything is served; the 43 tools hold none of a
     // person's (approvals, the chat switch, revocations, comments, proposals, tickets, the official export).
     void onlyAnAgentsTools() {
         const QString dir = fresh("tools");
@@ -431,15 +431,15 @@ private slots:
         for (const Json& t : listed["result"]["tools"]) names.push_back(str(t["name"]));
         QCOMPARE(names.size(), std::size(kTools));
         for (std::size_t i = 0; i < names.size(); ++i) QCOMPARE(names[i], std::string(kTools[i]));
-        // every tool's inputSchema as it is (komawari K3 added layout_ideas and submit_name's plan description; the
-        // others are pinned so that a change to one is seen)
+        // every tool's inputSchema as it is (komawari K3 added layout_ideas and submit_name's plan description; 人形の
+        // ポーズ集 G4 added figure_poses; the others are pinned so that a change to one is seen)
         {
             QCryptographicHash schemas(QCryptographicHash::Sha256);
             for (const Json& t : listed["result"]["tools"]) {
                 schemas.addData(QByteArray::fromStdString(str(t["name"]) + "\n" + genko::core::dump_python(t["inputSchema"]) + "\n"));
             }
             const QByteArray got = schemas.result().toHex();
-            QVERIFY2(got == QByteArrayLiteral("b451e079cd6e40093e1b1d3741d84806632a013d39990ca8e048e1ede1aeddfc"), got.constData());
+            QVERIFY2(got == QByteArrayLiteral("ec280269e34e99dc90a62b766e2701f1dee011c6bdf61caf9211ac4eea6ef7b8"), got.constData());
         }
         for (const char* person : {"approve", "approve_name", "approve_art", "approve_sheet", "chat_approval", "revoke", "comment",
                                    "accept_proposal", "reject_proposal", "close_ticket", "reopen_ticket", "export_book", "upscalers"}) {
@@ -485,6 +485,81 @@ private slots:
     // draft plan's own count when none is given), and the book is not changed by it; an idea's plan goes through
     // submit_name as it is, a plan with every layout key too; three dull pages running are warned of (after the other
     // issues, never stopped); a page a person approved is said so, and submit_name still refuses to change it.
+    // 人形のポーズ集 G4 (SPEC FIGURE-02): figure_poses through MCP — listed with its arguments (project may be left out),
+    // read only (the book and its folder as they were, no presence), the categories with counts, filters, a page of poses,
+    // the same seed the same random pick, a contact sheet as a picture, refusals in its own code; the pose it names put
+    // on a figure through apply_ops (pose_figure pose_id, mirror, keep) and undone.
+    void figurePosesThroughMcp() {
+        const QString dir = fresh("poses");
+        const QString book = dir + "/root/p.genko";
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        Json listed = mcp.request(1, "tools/list");
+        Json tool;
+        for (const Json& t : listed["result"]["tools"])
+            if (t["name"] == Json("figure_poses")) tool = t;
+        QVERIFY(tool.is_object());
+        const Json& props = tool["inputSchema"]["properties"];
+        for (const char* key : {"project", "category", "tags", "query", "contact", "support", "props", "limit", "offset", "random", "seed", "sheet", "views",
+                                "body", "session"}) {
+            QVERIFY2(props.contains(key), key);
+        }
+        QVERIFY(!tool["inputSchema"].contains("required"));
+        QCOMPARE(props["limit"]["default"], Json(50));
+        QVERIFY(str(tool["description"]).find("pose_figure") != std::string::npos);
+        QCOMPARE(Mcp::text(mcp.call("create_project", Json::object({{"name", "p.genko"}, {"title", "t"}, {"pages", 1}})))["ok"], Json(true));
+        const auto before = book_tree(book);
+        // the categories and a page of poses; project may be named or left out
+        const Json all = Mcp::text(mcp.call("figure_poses", Json::object()));
+        QVERIFY2(all["ok"] == Json(true), genko::core::dump_python(all).c_str());
+        std::size_t total = 0;
+        for (const Json& c : all["categories"]) total += c["count"].get<std::size_t>();
+        QCOMPARE(all["total"], Json(total));
+        QVERIFY(total >= 455);
+        QCOMPARE(all["poses"].size(), std::size_t{50});
+        for (const char* key : {"id", "ja", "en", "category", "tags", "hands", "contact", "support", "props", "symmetric"}) QVERIFY2(all["poses"][0].contains(key), key);
+        const Json lie = Mcp::text(mcp.call("figure_poses", Json::object({{"project", "p.genko"}, {"category", "lie"}, {"limit", 500}})));
+        QVERIFY(lie["total"].get<int>() >= 20);
+        for (const Json& p : lie["poses"]) QCOMPARE(p["category"], Json("lie"));
+        const Json held = Mcp::text(mcp.call("figure_poses", Json::object({{"props", true}, {"limit", 500}})));
+        QVERIFY(held["total"].get<int>() >= 24);
+        for (const Json& p : held["poses"]) QVERIFY(!p["props"].empty());
+        const Json words = Mcp::text(mcp.call("figure_poses", Json::object({{"query", "スマホ 寝る"}})));
+        QVERIFY(words["total"].get<int>() >= 1);
+        // random: the same seed, the same pick
+        const Json asked = Json::object({{"random", 5}, {"seed", "fp-00000000000000a5"}, {"category", "emotion"}});
+        const Json r1 = Mcp::text(mcp.call("figure_poses", asked));
+        const Json r2 = Mcp::text(mcp.call("figure_poses", asked));
+        QCOMPARE(r1["seed"], Json("fp-00000000000000a5"));
+        QCOMPARE(r1["poses"], r2["poses"]);
+        QCOMPARE(r1["poses"].size(), std::size_t{5});
+        const Json fresh_seed = Mcp::text(mcp.call("figure_poses", Json::object({{"random", 2}})));
+        QVERIFY(str(fresh_seed["seed"]).rfind("fp-", 0) == 0);
+        // a contact sheet: a picture after the text
+        const Json sheet = mcp.call("figure_poses", Json::object({{"category", "point"}, {"limit", 4}, {"sheet", true}, {"views", Json::array({"front", "side"})}}));
+        const Json& content = sheet["result"]["content"];
+        QCOMPARE(content.size(), std::size_t{2});
+        QCOMPARE(content[1]["type"], Json("image"));
+        QCOMPARE(Mcp::text(sheet)["sheet"]["views"], Json::array({"front", "side"}));
+        QCOMPARE(Mcp::text(sheet)["sheet"]["poses"].size(), std::size_t{4});
+        // refused in its own words
+        for (const Json& bad : {Json::object({{"category", "nope"}}), Json::object({{"support", "wall"}}), Json::object({{"random", 3}, {"seed", "km-1"}}),
+                                Json::object({{"contact", Json::array({"elbow"})}}), Json::object({{"views", Json::array({"top"})}})}) {
+            const Json reply = Mcp::text(mcp.call("figure_poses", bad));
+            QVERIFY2(reply["ok"] == Json(false), genko::core::dump_python(bad).c_str());
+            QCOMPARE(reply["issues"][0]["code"], Json("figure_poses_invalid"));
+        }
+        // read only: the book and its folder as they were
+        QCOMPARE(book_tree(book), before);
+        // the pose put on a figure through apply_ops, and undone
+        const Json ops = Json::array({Json::object({{"op", "add_figure"}, {"page", 1}, {"id", "f"}, {"pos", Json::array({80, 120, 0})}}),
+                                      Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "f"}, {"pose_id", "lie/back_knees_up"}, {"mirror", true}, {"keep", "ground"}})});
+        const Json applied = Mcp::text(mcp.call("apply_ops", Json::object({{"project", "p.genko"}, {"ops", ops}, {"commit", true}})));
+        QVERIFY2(applied["ok"] == Json(true), genko::core::dump_python(applied).c_str());
+        QVERIFY(genko::test::read_bytes(book + "/project.json").find("\"pose_id\": \"lie/back_knees_up~m\"") != std::string::npos);
+        QCOMPARE(Mcp::text(mcp.call("undo", Json::object({{"project", "p.genko"}})))["ok"], Json(true));
+    }
+
     void layoutIdeasThroughMcp() {
         const QString dir = fresh("komawari");
         const QString book = dir + "/root/k.genko";
@@ -959,6 +1034,27 @@ private slots:
         mcp.lines();
         const auto after = tree(dir + "/root/old.genko");
         QVERIFY2(after == before, tree_diff(before, after).c_str());
+    }
+
+    // The people's guides over MCP (SPEC FIGURE-03): render's kinds guide:figures and guide:regions answer with a picture
+    // of the panel (black where nobody is), and an unknown kind's refusal names them.
+    void thePeoplesGuidesAreRenderKinds() {
+        const QString dir = fresh("figures");
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        const std::string frame = make_book(mcp, "b.genko");
+        QVERIFY(!frame.empty());
+        for (const char* kind : {"guide:figures", "guide:regions"}) {
+            const Json reply = mcp.call("render", Json::object({{"project", "b.genko"}, {"page", 1}, {"frame_id", frame}, {"kind", kind}, {"max_px", 256}}));
+            const Json shown = Mcp::text(reply);
+            QVERIFY2(shown.is_object() && shown["ok"] == Json(true), genko::core::dump_python(reply).substr(0, 2000).c_str());
+            bool image = false;
+            for (const Json& block : reply["result"]["content"]) image = image || block.value("type", "") == "image";
+            QVERIFY2(image, kind);
+        }
+        const Json refused = Mcp::text(mcp.call("render", Json::object({{"project", "b.genko"}, {"page", 1}, {"frame_id", frame}, {"kind", "guide:nobody"}})));
+        QCOMPARE(refused["ok"], Json(false));
+        QVERIFY2(genko::core::dump_python(refused).find("guide:figures") != std::string::npos, genko::core::dump_python(refused).c_str());
     }
 
     // A person's upscaler: the agent names a registered one and a scale; the command line is the person's, with Genko's

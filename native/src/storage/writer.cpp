@@ -33,6 +33,7 @@
 #include "core/artboards.hpp"
 #include "core/pixel_aspect.hpp"
 #include "core/font_catalog.hpp"
+#include "core/pose_library.hpp"
 #include "core/fukidashi.hpp"
 #include "core/komawari.hpp"
 #include "core/type_text.hpp"
@@ -687,6 +688,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // where the face's file is missing
     std::erase(features, std::string(core::fonts::kFontsFeature));
     if (core::fonts::uses_feature(doc)) features.emplace_back(core::fonts::kFontsFeature);
+    // figures@1 (SPEC FIGURE-02, core/pose_library.hpp): a figure's pose_id or hold, a hand's spread or thumb — named
+    // while a prim says one (a book without them is saved as before, byte for byte)
+    std::erase(features, std::string(core::pose_library::kFiguresFeature));
+    if (core::pose_library::uses_figures_feature(doc)) features.emplace_back(core::pose_library::kFiguresFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

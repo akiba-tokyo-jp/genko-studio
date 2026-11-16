@@ -18,6 +18,205 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 人形（G1〜G5・古い不具合 2 つ）の出口 — 凍結 0bde467a で Linux の ASan・Release が合格（2026-11-16）
+- **凍結SHA**: `0bde467a`（native/figures。なめらかな人形 G1、生成の案内 G2、ポーズ集 G3〜G5〔655 ポーズ・二人組・手に持つ物〕、カメラで見た箱と 3D の後ろの人形の線の直し、ポーズ集の断りの文の日本語、下の ASan の重さの直し）。計画は `validation_policy.py --base b1cba245 --head 0bde467a --phase milestone`（tier full、71 の変更、理由 9）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。
+- 結果:
+  - linux-asan: 275/275 合格（2 並列、08:17〜11:03 UTC の 2 時間 45 分。QtTest の項目 6,756、SKIP 0、CLI23 合格）。1 回で走り切った（引き継ぎは起きていない）。test_figure_poses 682 秒、test_figure_mesh 185 秒。
+  - linux-release: 275/275 合格（2 並列、11:44〜12:06 UTC の 21 分。項目 6,682、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。test_figure_poses 63 秒。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 67 本すべて合格（項目 1,237。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で、1 回温めてから）: test_perf_app 2 回（開くまで 593 ms・600 ms、入力から画面まで p95 0.94 ms・0.91 ms、p99 2.52 ms・2.47 ms）、test_perf_render 合格（なめらかな人形: 作る 152〜214 ms〔合格値 600〕、40 dpi の線 7〜9 ms〔40〕、箱ともう 1 体の後ろで 15 ms〔40〕、B4 の校正 175 ms〔800〕）、test_perf_pipeline 合格（PERF-F 8 ページの校正 p95 5,165 ms）。
+  - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- 合格までの回（合格に数えていない）: 凍結 feb0c555 の回。ASan で test_figure_poses だけが ctest の上限 1,800 秒に掛かった（9 分類目まで合格のまま時間切れ）。ほかの 274 本は合格、サニタイザーの報告は無し。
+  - 原因: ASan のプリセットは Debug（最適化なし）で、人形 1 体の網（figure_shape の場と surface_nets）が Release の約 40 倍、約 5 秒かかり、655 ポーズを 1 体ずつ網にする試験が収まらなかった（gdb で止めて見た所はほぼ全部 `figure_shape::Field::at`）。
+  - 直し（確かめの中身・基準・上限は変えていない）: (1) e11ce224 `figure_shape.cpp`・`surface_nets.cpp` だけ Debug でも `-O2` で組む（サニタイザーの計測は付いたまま。網の固定値は Release・ASan とも同じで合格）。これで 1,647 秒。(2) 0bde467a test_figure_poses の `everyPose` で、ポーズを最大 4 つのスレッドに分けて確かめ、結果は元の順で合わせる。これで単独 603 秒、出口の中で 682 秒。
+  - 前の feb0c555 で、test_figure_poses の上限（止まりを見つけるためのもの。性能の合格値ではない）を 900 秒から 1,800 秒にし、遅い試験の一覧に入れている。
+  - コードを直したので、この出口は初めから流した（R4）。
+- **残る見た目の課題**（試験は通るが、絵として直したいもの。docs/POSES.md に記録）: 剣・バットが親指の向きに伸びて立つポーズがある（名前は見た目に合わせた）、傘を杖にするポーズの傘、紙を持つポーズの紙の向き、バットを構えるポーズのバット、二人組の「肩を組んで笑う」の腕、背もたれに腕を掛けるポーズ（背もたれが無い）、G4 で予定より少ない寝た姿勢（見せポーズ −7、ベッド・ソファ −3、寝る −5）。
+
+## 人形のポーズ集（群 G5。SPEC FIGURE-02）— 2026-11-16、ブランチ native/figures、2026-11-16 に main に統合
+
+### したこと
+- 持つ物の形（core/figure_props.cpp）: `hold` の 10 の物（剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）を、手の座標系の小さな平らな面の立体で描く。網では体の点の後ろに続き（`mesh3d::Model::body`・`creases`）、体の点と三角は持たないときと同じバイト。陰（render_prims・校正の案内）・トレースの線（物の辺: 表と裏の境と 40° の折れ。体の後ろでは隠れる。FIGURE-01 のほかの 3D の後ろの線も同じ）・生成の案内（figures.png・regions.png に持つ人の色）・ポーズ集の小さな絵に出る。鞄とカップは人形の下の向きでぶら下がる・立つ。剣・バット・傘は拳を通り、手のひらを下へ置くと手のひらの下から下へ。傘は親指が上なら開く。`props: false`（op の鍵、figures@1）で隠す。足もとを保つの一番低い所は体だけ。
+- 二人のポーズ: ポーズ集の 1 項目に二人分（`figures` の a と b〔offset・turn〕、`touch`、接地 `partner`）。`<id>#a`・`#b` が一人のポーズ、反転 `<id>~m#a`。op は G4 の設計の `add_pair`・`pose_pair` ではなく、`add_figure`・`pose_figure` に `partner_id`・`partner_body` を足した（新しい op 名を増やさず、承認・道具・ポーズ集の道を同じにするため。SPEC に設計の変更を書いた）。2 体に `pose_id` `#a`・`#b` と同じ `pair`。反転・足もとを保つ（二人を同じだけ動かす）。その人形自身のポーズの変更で 2 体から `pair` を外す。断り 4 つに日本語の言い換え（wording.cpp）。figures@1 は `props`・`pair` も数える。
+- 二人の確かめ（core/pose_checks の check_pair）: 一人ずつの今までの確かめ、同じ床（kContactGap）、もたれる二人の重心（kBalance、二人の床の点の凸包）、touch の各組の表面の間（新しい kTouchGap 0.15 u・kTouchDepth 0.25 u）、二人の間の手足の軸の深さ（kInside）・胴と頭の軸は入らない・手足のカプセルの重なり（kOverlap）。除くのは touch に挙げた部分（手が触れるときはその前腕も）だけで、相手の胴・頭に触れる手足は kTouchDepth で見る。今までの閾値は 1 つも変えていない（新しい 2 つと除き方は SPEC FIGURE-02 に理由つきで）。
+- 画面「ポーズ集…」: 二人のポーズは選んだ人形とその pair の相手（無ければ新しい人形を足す）に 1 つの変更で付ける。3D の一覧の名前に「・二人の a/b」。道具 `figure_poses`: 二人の要約（`pair: true`・`figures`）、説明文と apply の例、接地の絞り込みに partner（入力の schema は変えていない）。CLI `--check` は二人に check_pair。小さな絵（figure_thumbs）は二人を一緒に描き、寝た体（枠の 0.4 より低い）は最大 2 倍に大きく描く（G3 の `pose_checks::thumbnail` と控えは同じ）。
+- ポーズ: バッチ C（下の数）。作り方は G3・G4 と同じ道具を写した /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g5/（`build.py` に二人の組み立てと測った床、`lib_pair.py`〔二人の床の空間・相手の体の点へ手を伸ばす〕、`lib_g5.py`、`poses_s1..s4_*.py`・`poses_t_pairs.py`、`tools/propview.cpp`・`pairview.cpp`〔見直し用の拡大の絵。リポジトリには入れていない〕）。全ポーズを一覧の絵で見て docs/POSES.md に記録（194 行、外したものと理由、G3・G4 の持つポーズを物つきで見直した結果）。
+- 手引き: SPEC FIGURE-02（持つ物の形・二人のポーズ・G5 の分類・小さな絵）、schema-v4（`props`・`pair`）、AGENT.md J8、SKILL.md・drawing.md（写し 2 つも同じバイト）、ops_schema.json（2 つ）、MCP の道具の説明文。
+
+### 数
+- バッチ C 194 ポーズ（反転は数えない。二人のポーズは 1 項目で数える）: スポーツ 38・アクション 30・ダンス 20・ヒーロー 20・仕事と暮らし 26・カップル 30・二人 30（計画 §8 の 35・30・20・20・25・30・30 に足りている）。ポーズ集の全体は 655。ファイルは約 750 KB。
+- 外したもの: 横蹴り・尻もち・クラウチングスタート・腕立て伏せ・二人の手のハート・頭をなでる・手を引いて走る（代わりのポーズを入れた。理由は POSES.md）。
+
+### 控え
+- 変わらず: `figure_presets()` の sha256 `7eaa858c…a4e3`、鍵の無い本の project.json `81b68808…b615c`、G3 の小さな絵 4 枚（kThumbPins）、網・案内・ほかの 3D（test_figure_mesh の kWalkMesh・kWalkLines・kDrawn・kOtherKinds、test_figure_guide）、MCP の道具の inputSchema の sha256（test_mcp_api_e2e）、操作の数（test_gui_actions）、commands.json。
+- 変えた控え: 無い。test_figure_poses の kAtLeast に G5 の 7 分類（届けた数）を足し、全体の最低を 455 → 650 にした（緩めていない）。
+
+### 試験（Release、関係するものだけ）
+- test_figure_poses: 合格 約 140 秒（G4 の 81 秒から。655 ポーズとその反転、二人は check_pair を 2 回〔反転は男女と線を省く〕。150 秒の目安の中だが、ASan では約 5 倍の見込み）。新しい pairEntries、一覧の絵は二人も。
+- test_figure_mesh 17 秒（新しい theHandsHoldTheirProps: 10 の物が手の座標系で手に届く・腕を回しても手の座標系で同じ〔鞄・カップ・長い物は人形の下の向きで決まるので手のそばに残ること〕・反転で反対の手・props: false は体だけのバイト・剣の辺が線になる）、test_figure_guide 4.6 秒（新しい propsInTheHoldersColour）、test_ops_3d 9.9 秒（新しい pairPoses: 2 体の置き方・反転・足もとを保つ・partner_id の 3 つの場合・pair の外れ方・一人のポーズ・断り・保存と読み直し）、test_gui_poses 6.1 秒（新しい applyingAPairPose: 一体に二人のポーズで相手を足す・pair の相手に付け直す・元に戻す）。
+- test_gui_ledger_a 11.8 秒（全エラーが日本語）・test_gui_ledger_b 15.7・test_gui_ledger_c 3.5・test_ledger_service_a 3.1・test_ledger_service_b 31.3（手引きの写し 3 つ）・test_mcp_api_e2e 46.6・test_cli_e2e 4.6・test_command_bus 2.9・test_gui_guides 9.3・test_gui_prefs 10.6・test_gui_actions 12.5・test_contract_plugins 25.4・test_render_page 7.7・test_proof 0.6・test_perf_render 29.8・test_material_stamp 0.1: 合格。
+
+### 環境
+- Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
+
+### 残る見た目の課題・しなかったこと
+- 剣・バットの向きは手の向き（親指の側）で決まるので、ポーズによっては刃・バットが立つ（剣を立てて踏み込む・中段・バットを振り出す）。名前を絵に合わせた。G4 の `hands_props/umbrella_cane`（傘が床へ向かない）・紙を持つポーズ（紙が手の横に縦）・`bat_stance`（バットが後ろへ水平）は直していない。
+- 宙のポーズの一覧の絵は、一番低い所を床の線に描く（跳んだ高さは見せない）。
+- 計画の「時間があれば」（G4 で外した寝姿の試し直し・背もたれに腕をかけるポーズ）はしていない。寝た体の小さな絵の拡大はした（上）。
+- test_figure_poses が約 140 秒（ASan で 10 分を超える見込み）。重いのは二人の網（反転で 4 体）と G5 の 130 の一人のポーズ。
+
+## 古い不具合 2 つの直し（カメラで見た箱・ほかの 3D の後ろの人形の線。SPEC FIGURE-01）— 2026-11-16、ブランチ native/figures、2026-11-16 に main に統合
+
+### したこと
+- カメラで見た箱: `prim3d::edges` が、カメラのときに箱を `segments3d`（円柱・階段・床・背景・球・円錐・小物の辺）へ回していて、そこに箱の場合が無く、最後の else の床の格子（既定 8 本 → 18 本の 2 点の線）になっていた。今はカメラ無しと同じ角の道で 12 本の辺。面の向きはカメラが見るとおりの角と目で決める（新しい `mesh3d::in_view`: `turned` と `eye_of`。カメラ無しの道は 1 文字も変えていない）。`bbox` は前から角を写した点の枠で正しかった（確かめを足した）。
+- 人形の線とほかの 3D: `trace_prims`・`render_prims` は 3D を 1 つずつトレースしていて、3D どうしの隠れ方は人形の中（`mesh3d::lines` の深さの絵）にしか無かった（箱どうしも無い）。今は人形・頭・手・取り込んだモデルの線を、ページのほかの面を持つ 3D の面も描いた深さの絵で調べる（`mesh3d::lines`・`prim_lines`・`prim3d::trace` の引数 `hiders`、選ぶのは ops_3d の `hiders_of`）。手前の決め方・隠すものの選び方は SPEC FIGURE-01 の「ほかの 3D の後ろの線」。箱などの辺の線は変えていない。校正の案内（render/prims）と画面の 3D は前のまま 1 つずつ。
+
+### 変えた控え（意図した変更）
+- test_figure_mesh の theOtherKindsAreAsBefore `kOtherKinds` `e409e23f…f54a` → `6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1`。19 個の要素のうち変わったのはカメラで見た箱の trace の 1 つだけ: `{"count":18,"points":36,…6112465…}`（床の格子）→ `{"count":9,"points":18,"sha":"16458bd2…7e1f"}`（見える 9 本の辺）。陰の絵 2 つ・カメラ無しの全部・カメラのほかの 3D は同じ値。これがこの控えが箱 ＋ カメラを通っていた所で、直しの意図した結果。
+- ほかに変わった控えは無い（人形の後ろに手前の 3D がある控えは無かった）。
+
+### 足した試験
+- test_ops_3d `boxThroughTheCamera`（直す前は 12 本のところ 18 本で落ちた）: 2 つの箱 × 3 つのカメラで、12 本の辺が隣り合う角どうし、見える辺は試験の中で別に求めた面の向き（カメラの空間の角と目）と同じ、trace の本数、外枠、回らないカメラ = カメラ無し、op を通した線の点が箱の角。
+- test_ops_3d `figureBehindAnotherPrim`（直す前は箱の内に 317 点が残って落ちた）: カメラ無しと有りで、手前の薄い箱の輪郭の 2 mm 内に人形の線の点が 0（無いときは 20 より多い）、箱の上は残る、`render_prims` の線も同じ、奥の箱・別のコマの箱・自分のカメラの箱は前と同じ線、同じコマなら隠れる、手前の頭・人形で線が 20 mm 以上短くなる、奥の人形は前と同じ線、2 回で同じ。
+- test_perf_render smooth_figure: 手前に箱と 2 体目の人形があるトレースを同じ上限（kFigureTraceMs 40 ms）で（測って 11 ms。1 体だけは 7〜8 ms）。上限は 1 つも変えていない。
+
+### 試験（Release、関係するものだけ）
+- 合格: test_ops_3d 8.9 秒、test_figure_mesh 11.0 秒、test_figure_guide 3.8 秒、test_figure_poses 79.1 秒、test_ledger_service_b 30.3 秒、test_material_stamp 0.1 秒、test_render_page 6.6 秒、test_proof 0.5 秒、test_ink_edit 20.0 秒、test_page_size 1.7 秒、test_command_bus 2.7 秒、test_gui_guides 9.2 秒、test_gui_ledger_b 16.9 秒、test_gui_ledger_c 3.5 秒、test_perf_render 30.9 秒（人形: 作る 135〜137 ms、トレース 7〜8 ms、手前に 2 つ 11 ms、B4 の校正 182 ms。上限 600・40・800 ms）。
+- test_gui_ledger_a の test_every_error_reads_in_japanese は G4 のポーズの断り 6 つ（keep is pelvis or ground など）に日本語が無くて落ちる。直す前の a851ec0a でも同じに落ちる（この直しとは関係ない。まだ直していない）。
+
+### 環境
+- Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
+
+## 人形のポーズ集（群 G4。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
+
+### したこと
+- 道具 `figure_poses`（service/studio_poses.cpp。MCP の道具の表・kAgentTools・tool_table・api/mcp_tools に足した。MCP は 43 道具。読むだけ: read_only で book_in_use・presence なし。ほかの道具と同じ Tools::call の道を通る）: 分類と数、絞り込み（分類・タグ・言葉〔空白で区切ると全部に合うもの〕・接地・支え・持つ物）、limit・offset、乱択（random・seed `fp-<16 桁>`、splitmix64 の部分 Fisher–Yates）、一覧の絵（sheet、24 まで、views・body）。付けるのは `apply_ops` の `pose_figure {pose_id, mirror, keep}`（op の確かめと承認の道のまま。乱択は op に入らない）。
+- CLI `genko studio figure-poses`（本は要らない。`--tags a,b`・`--contact a,b`・`--props yes|no`・`--random`・`--seed`・`--sheet DIR`〔分類ごとに 24 ずつ PNG〕・`--check`〔ファイルの形と合うポーズ全部と反転の確かめ〕）。
+- 画面「ポーズ集…」（app/pose_gallery。定規・3D の「体型・手…」の隣と ツール → 3D → ポーズ集… act_pose_gallery。commands.json を作り直した）: 分類と数、さがす、正面・斜め・横、左右反転、足もとを保つ（既定オン）、ランダム、小さな絵の格子（作業スレッド 2 本、人形の体型で、覚える）。ダブルクリック・Enter で `pose_figure {page, id, pose_id, mirror, keep}` を 1 つの変更として当てる（元に戻すで戻る）。preset の一覧はそのまま。3D の一覧の人形の名前にポーズ集の名前を添える。
+- 小さな絵 render/figure_thumbs（13 u の枠、体が入らないときだけ縮める、2 倍で描いて整数で平均、同じバイト、覚え 4096 枚）。test_figure_poses の一覧の絵もこれで（寝た体が切れない）。G3 の `pose_checks::thumbnail` と控えの 4 枚は変えていない。
+- 確かめ（core/pose_checks。閾値は 1 つも変えていない）: (a) 脚のねじれを股関節の関節座標系の回旋で測る（範囲の数 [−0.9, 1.0] はそのまま。最短の振りの基準は曲げて開いた太ももで約 0.8 rad の見かけのねじれを足し、あぐらの膝が上がっていた。batch A の 209 ポーズは全部範囲の中のまま）。(b) 床に寝た体は back・front・side のどれかを挙げ、それが床へ向いた面であること。胸郭が床に触れるのに挙げないと落とす。寝た体は重心も確かめる。床から離れた back・front・side は前と同じもたれる印（横向きに寝た体は肩と腰で支わるので、この扱い）。(c) Measure に胸郭・頭・上腕の高さと床へ向いた面（checks.json と作る道具が使う）。
+- ポーズ: バッチ B（下の数）。あぐらの 4 つ（agura・agura_chin・meditation・agura_book）を作り直した（膝の関節の高さ 床から約 1.8 u → 約 0.6〜1.0 u、太ももを外へ低く、すねを前で重ね、足の外側を下に）。G3 で外した 8 つのうち `sit_chair/figure_four` は戻した。`sit_floor/butterfly` は試したが足先どうしが重なりまだ外したまま。残る 6 つは理由が股関節のねじれではないので試していない。
+- 手引き: SKILL.md・drawing.md（integrations の写し 2 つも同じバイト）に `figure_poses` と `pose_id`・`mirror`・`keep: "ground"`。MCP の instructions に 1 行。AGENT.md の J8、OTHER_AGENTS.md、ARCHITECTURE.md（43 道具）、hermes の config.example.yaml のネーム担当の道具に figure_poses。SPEC FIGURE-02 に G4 の分類・寝る体の支え・股関節のねじれ・道具・CLI・画面・小さな絵、二人のポーズの設計（G5 で作る。G4 では作っていない）。docs/POSES.md に全ポーズの見直し。
+
+### 数
+- バッチ B 251 ポーズ（反転は数えない）: 見せポーズ（グラビア・ピンナップ風）78、ベッド・ソファでくつろぐ 33、寝る・横になる 20、上半身の仕草 35、振り向く・回る 11、指さす 8、感情 26、話す 13、物を持つ 27。ほかに戻した sit_chair/figure_four 1。ポーズ集の全体は 461（G3 の 209 ＋ 252）。ファイルは 490 KB。
+- 計画 §8 の数に足りないもの: pinup 85 に 7、relax_bed 36 に 3、lie 25 に 5。作った寝姿のうち、うつ伏せで頭を横に向ける・腕を枕にする・手を前へ伸ばす、大の字・倒れている・片腕を投げ出す、横向きに肘をついて上体を起こす（3 つ）、頭の上へ両腕を伸ばす仰向け など 20 を、確かめに通らない（胴が床から浮く・重心が支えの外・手足の重なり）か絵で腰が浮いて見えたので外した（docs/POSES.md に 1 つずつ理由）。試験の最低の数（kAtLeast）は今の数に合わせた（pinup 78・relax_bed 33・lie 20）。
+- 作り方: G3 の道具（/tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g3/）を写した /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g4/（`build.py`・`kin.py`・`lib.py`・`lib_g4.py`・`lib_g4_lie.py`・`poses_l..r_*.py`・`iterate.sh`）。G3 のポーズは g3_poses.json から 1 バイトも変えずに残し、G4 の分だけ解く。寝姿のための足し: 胸郭・頭・肩・肘を含めた床の見積もり（core）、置いた手足を胴の高さへ寄せる比例の直し、足の甲を横にして一番浅く置く（high）、床に付けない足と手（touch False）、乱数の種を毎回同じに（G3 は文字列の hash で実行ごとに違った）、作るときの範囲に 0.01 の余裕（丸めても確かめの範囲の中）。解くのは 3 プロセス。
+
+### 控え
+- `figure_presets()` の JSON の sha256 `7eaa858c…a4e3`（変わらず）、鍵を持たない本の project.json の sha256 `81b68808…b615c`（変わらず）、小さな絵の 4 枚 `kThumbPins`（変わらず: 分類は batch A の 8 つの後ろに足し、kneel_squat の最後のポーズも変えていない）。網・案内・G2 の控え（test_figure_mesh・test_figure_guide）も変わらず。
+- 変えた控え（意図した変更）: test_mcp_api_e2e の道具の inputSchema の sha256 `b451e079…ddfc` → `ec280269e34e99dc90a62b766e2701f1dee011c6bdf61caf9211ac4eea6ef7b8`（figure_poses を足した。ほかの道具の schema は同じ）。test_gui_actions の操作の数 823 → 824（act_pose_gallery）。
+
+### 試験（Release、関係するものだけ）
+- test_figure_poses: 合格 81 秒（G3 の 37 秒から。461 ポーズとその反転と男女の体、一覧の絵なし。120 秒の目安の中）。新しい lyingNamesItsFace・hipTwistIsTheHipsOwn・picksAndSummaries、batch B の小さな絵の同じバイト（1 と 4 スレッド）。
+- test_gui_poses（新しい）: 合格 4.8 秒。test_ops_3d 4.3 秒・test_figure_mesh 11.3 秒・test_figure_guide 4.0 秒・test_ledger_service_b 30.6 秒（手引きの写し 3 つが同じ、SKILL の例の op で線が 10 本より多い）・test_mcp_api_e2e 46.7 秒・test_cli_e2e 5.2 秒・test_gui_prefs 10.3 秒（commands.json が窓のメニューと同じ）・test_contract_plugins 25.3 秒・test_command_bus 3.1 秒・test_gui_guides 8.9 秒・test_gui_actions 13.3 秒: 合格（Release）。
+- 一覧の絵（全分類、checks.json つき）: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g4/sheets_final/（G4 の分類は全部を絵で見た。docs/POSES.md）。画面の見た目: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g4/gallery.png（`GENKO_POSE_GALLERY_SHOT=<file> test_gui_poses thePictures` で撮れる）。
+
+### 環境
+- Linux（Ubuntu 24.04.5、カーネル 6.18）、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Qt 6.11.2、Release（build/linux-release）。ASan は流していない（工程の出口で流す）。
+
+### 残る見た目の課題
+- 寝姿の幅が狭い: うつ伏せ・大の字・横向きで肘をついて上体を起こす・腕を頭の上に投げ出す仰向け は外した（上の数）。これらは足と手を床に「置く」のでなく、胴を床に置いたまま手足の角度を測りながら合わせる道具が要る（G5 で、二人のポーズと一緒に）。
+- 横向きの寝姿は胸郭が床に付かない（肩と腰で支わる）ので、確かめはもたれる印として重心を見ない。絵では自然に見える。
+- pinup/arch_low_back（腰に両手を当てて胸を張る）は、横から見ると胸を張るより前へかがんで見える。pinup/sideways_back_arm・legs_crossed_lean と relax_bed/sofa_legs_crossed・sofa_arms_back の「背もたれに腕をかける」は、腕を横へまっすぐ伸ばした形（背もたれの物は無い）。
+- 小さな絵（13 u の枠）で寝姿は小さく描かれる（体が枠より大きいときだけ縮める）。画面では寝る・横になるの分類は小さく見える。
+
+### 次（G5）
+- 小物の形（hold の物を手の中に描く）、二人のポーズ（SPEC FIGURE-02 の設計どおり: 1 項目に二人分、`add_pair`・`pose_pair`、`pair` の鍵）、バッチ C（アクション・スポーツ・ダンス・ヒーロー・仕事と暮らし、カップル・二人）。
+
+## 人形のポーズ集（群 G3。SPEC FIGURE-02）— 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
+
+### したこと
+- ポーズ集 `native/src/core/data/figure_poses.json`（genko.poses@1）をプログラムに 1 バイトも変えずに組み込んだ（core/CMakeLists.txt、`figure_poses_data.cpp.in`）。読み込み `core/pose_library`（分類と数、id、`~m` の反転、絞り込み: 分類・タグ・語〔日本語・英語、ASCII の大小を問わない〕・支え・接地。G4 の画面・MCP・乱択はこれを使う）、確かめ `core/pose_checks`（ファイルの形、関節の範囲、支え・接地・重心、体の通り抜け、反転、描ける、小さな絵、keep: ground の一番低い所）。`core/figure_shape` の胴と頭の場を `torso_part`・`head_part` で取り出せるようにした（網は前と同じバイト: test_figure_mesh の控えのまま合格）。
+- op: `add_figure`・`pose_figure` の `pose_id`・`mirror`・`keep`（pelvis | ground）・`hold`、手の `spread`・`thumb`（人形の手と `add_hand`・手の `pose_figure`）。ドラッグと preset は `pose_id` を消す。preset と pose_id は一緒に断る。`hold` は鍵だけ（物の形は G5）。op の一覧（`core/data/ops_schema.json`・`docs/ops.schema.json`）。
+- 本: prim が `pose_id`・`hold`・`spread`・`thumb` を持つあいだ `features` に `figures@1`（storage/writer.cpp）、読み手は知る拡張に（storage/reader.cpp）。schema-v4.md に「人形のポーズ」。
+- 手引き: AGENT.md の J8（pose_id・mirror・keep・hold・spread/thumb・figures@1）、SPEC FIGURE-02、docs/POSES.md（全ポーズの見直しの記録）。SKILL.md・drawing.md は変えていない（ポーズ集を名指す道具が G4 で入るときに書く）。
+
+### 数
+- 209 ポーズ（反転は数えない）: 立つ 46、ファッション 27、歩く 11、走る 11、椅子に座る 32、床に座る 30、ひざまずく・しゃがむ 26、日常 26（plan §8 の最低 40・25・10・10・30・30・25・25 を満たす）。ファイルは 218 KB。
+- 作り方: どのポーズも短い動作の文（「腰に手を当てて立つ」など）から、足を置く所・手を置く所・胴の傾きを書き、そこから関節の角度を逆運動学で解いた（C++ の骨格をそのまま写した Python の道具。絵やデータはどこからも取っていない）。接地の高さは C++ の網で測った値から直した。道具は /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g3/（`build.py`・`kin.py`・`inside.py`・`lib.py`・`poses_*.py`、`iterate.sh` が「作る → 試験で測る → 直す」を回す）。G4・G5 のポーズもこれで足せる。
+
+### 確かめの最終の値（plan §3 の下書きから変えたもの）
+- 接地: 挙げた所は一番低い所から 0.03 u 以内（下書きどおり）、挙げていない所は 0.008 u より上。椅子: 座面の測った高さが seat_h の ±0.05 u（下書きどおり）、seat_h は 1.2〜3.6 u。座面は胴の下の部分と付け根から 0.8 u までの太もも。
+- 重心: 床や座面に触れた所（座面は一番低い所から 0.1 u まで）を上から見た凸包から 0.25 u 以内（新しく足した。歩く・走る・もたれる・none は除く）。
+- 通り抜け: 手足の軸が胴・頭の中へ半径の 0.5 まで（下書きどおり）、別の手足のカプセルの重なりは細い方の半径の 0.4 まで（下書きどおり）。両手どうしは除く（組む・合わせる）。カプセルの半径は体の太さに合わせた（上腕 0.21→0.15、前腕 0.16→0.115、手 0.055→0.04〔手のひらの厚み〕、太もも 0.33→0.21、すね 0.21→0.12、足 0.12→0.09 u）。男女と体型なしの 3 つの体で。
+- 範囲: 膝 x [−2.85, 0.05]（下書き −2.6 では正座ができない: 正座は約 −2.8）、足首 x [−1.6, 0.75]（正座で足の甲を床に付けるには足がすねの延長になる。足は 1 つの塊なので足首と足の中ほどの曲がりを合わせた値）。肩と股関節は軸ごとの範囲をやめて「骨の向きの円錐とねじれ」にした（オイラー角は 90° 曲げると z で膝が開かない＝座って膝を開けない。下書きの l_arm z [−0.6, 3.1] はこれに置き換えた）: 上がりの最大 腕 前 3.2・外 3.15・後ろ 1.2・内 1.6、脚 前 2.6・外 1.3・後ろ 0.8・内 0.6、ねじれ 腕 [−1.6, 1.9]（上がり 2.2 まで）・脚 [−0.9, 1.0]。ほかは SPEC FIGURE-02 の表。9 つの preset は全部の確かめに通る（立つ preset 5 つは接地と重心も）。
+- 確かめが捕まえた本当の誤り（直した）: 手が太ももの中、前腕が胸の中、腕組みの前腕どうし、つま先立ちで前へ倒れる、振り出した足が床に付く、正座でつま先が床の下、手が床に届かないのに付いている、など。docs/POSES.md に 49 件の直しと 8 件の外したもの。
+
+### 控え
+- `figure_presets()` の JSON の文字の sha256 `7eaa858c1fe794e06cba02c1f44e3f74a3beaa72519b3faedd3c73040271a4e3`（G3 の前のビルドで取った。preset は変えていない）。
+- 鍵を持たない本（人形 2 体・頭・手、preset と joints・hands の手直し）の project.json の sha256 `81b68808e67d7ba9ed3643c1ae8b9a6ba6152e4980b92f5deb50bdf9905b615c`（G3 の前のビルド e64e001d で取った。G3 の後も同じバイト）。
+- 小さな絵（60 × 90、斜め）4 枚: stand の最初 `21294bc3…6e071`、fashion の最後の反転 `02d65779…c2ea4`、sit_chair の最初 `36424809…83847`、kneel_squat の最後の反転 `9921041c…daf21`（全文は test_figure_poses の kThumbPins。2 回・別のプロセス・4 スレッドで同じバイト）。ポーズを直したらこの値も直す。
+
+### 一覧の絵と見直し
+- 絵: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/poses-g3/sheets/（分類ごとに 12 ポーズずつ: `stand_1.png` 〜 `everyday_3.png`、全 21 枚。正面・斜め・横、床の線、椅子の座面〔青〕、接地の点〔緑・赤〕、落ちたものは赤い枠）と checks.json（測った数）。`GENKO_POSE_SHEETS=<フォルダ> test_figure_poses` で同じものが書ける。
+- 全部をエージェントが絵で見た（docs/POSES.md）。利用者の目ではまだ見ていない。気づいて残したこと: あぐら系は股関節の範囲の中で膝を床まで下ろせず、膝を少し上げたあぐら。正座の足の甲は床から約 0.13 u 浮く（足首の円錐が甲より太い形のため）。
+
+### 試験（Release、関係するものだけ）
+- 新しい test_figure_poses（ファイルの形と分類の数、preset が前のまま、preset が確かめに通る、全ポーズ〔分類ごと〕と反転と男女の体、絞り込み、小さな絵が同じバイト〔1 と 4 スレッド〕と控え、figures@1 の付け外しと保存して読み直し、op の一覧の鍵、鍵の無い本が前と同じバイト）: 合格、36 秒（Release。遅い試験の一覧には入れていない: 1 つの関数の最長は約 8 秒）。
+- test_ops_3d に libraryPoses（pose_id・反転・hold・keep: ground と pelvis・ドラッグと preset で消える・spread と thumb・断る理由・保存して読み直し）: 合格。test_figure_mesh・test_figure_guide・test_command_bus・test_cli_e2e（`genko schema` が組み込んだファイル）・test_ledger_service_a（op の一覧と docs/ops.schema.json）・test_ledger_service_b・test_gui_guides: 合格。
+- ASan は流していない（工程の出口で流す。figure_shape の場は ASan で約 5 倍: test_figure_poses は約 3 分の見込み）。
+
+### 次（G4）
+- `figure_poses` の道具（MCP・CLI `genko studio figure-poses`、乱択、`--sheet`。この群の絵の描き方は tests/support/pose_sheets.hpp）、画面の「ポーズ集…」、バッチ B（寝る・上半身・振り向く・指さし・感情・話す・小物 など）。
+
+## 生成の案内 guides/figures.png（群 G2。SPEC FIGURE-03）と体の比率の見直し — 2026-11-15、ブランチ native/figures、2026-11-16 に main に統合
+
+### 体の比率の見直し（FIGURE-01 の形の表）
+- なぜ: G1 の体は利用者の画像生成の 3D ポーズ制御（anima_3dpose。学習は写実の大人のなめらかな体）の体より細く、胴が筒のようで、腰に横の帯（胴を骨盤・腹・胸の 3 部位に分け、関節の近くだけなめらかにつないだ継ぎ目の陰）、女の太ももが腰の下で急にふくらみ、首が細く長かった。
+- したこと（core/figure_shape.cpp の数だけ。骨格・体型の数の読み方・preset は前と同じ）: 胴を 1 つの部位（幅 0.3u のなめらかな最小値）にし、僧帽筋と大胸筋・胸はその上に細い幅（0.2u）で。骨盤の幅を太ももの付け根と同じ（股関節の間隔 + 0.3u）にし、太ももの上の球を骨盤の内へ寄せ、胴と太ももの結びを広く（0.32u・半径 1.1u）。胸郭の厚みを 0.48 → 0.55、腹を高く厚く、くびれを 女 0.82 → 0.93・指定なし 0.95 → 0.97、女の胸郭の幅 0.9 → 1.02、男の骨盤 0.86 → 0.95。上腕・三角筋・前腕を太く。首を太く（付け根 0.25 → 0.29u、上 0.21 → 0.24u）、胴と首の結びを広く（0.35u・半径 0.6u）、頭と首の結びをうなじへ（あごは首と結ばない）、頭の網の首の切り株の細め方を 0.01u → 0.004u（首の中ほどの光の帯が消えた）。
+- 測った形（arms_up、u 単位、前 → 後）: 正面の半幅 女 胸 0.56 → 0.67・くびれ 0.44 → 0.58・腰 0.97 → 0.92、男 胸 0.89 → 0.93・くびれ 0.56 → 0.71・腰 0.88 → 0.83、指定なし 胸 0.74 → 0.77・くびれ 0.52 → 0.65・腰 0.89 → 0.86。胸の厚み（中心線） 女 0.90 → 0.99、男 1.07 → 1.23、指定なし 0.96 → 1.10。腰／胸の比（test_figure_mesh）: 男 0.892、女 1.385、指定なし 1.126（試験の条件〔女 > 指定なし > 男、女 > 1.3 × 男〕は変えずに合格）。三角の数: walk 53,088 → 54,320、全 preset・性別・極端な体型の最大 61,424 → 62,584（上限 64,000 は変えていない）。速さ（test_perf_render smooth_figure）: 作る 132〜153 ms、B4 の校正 163 ms（上限は変えていない）。
+- 絵: 前 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/before/、後 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/after/、並べたもの /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/before_after_*.png（左が前、右が後）。
+
+### 生成の案内（SPEC FIGURE-03）
+- 利用者の画像生成（PS5 AI Anima の `lllite_3dpose`・`lllite_regional`。学習は黒地に人ごとの材質色の陰の付いた 3D の体）に合わせて、コマの依頼に `guides/figures.png`（黒地、人ごとの材質色、ページの光の主光・補助光・白いハイライト、線も顔の印も無し）と `guides/regions.png`（人ごとの単色、黒は誰もいない所、長い辺の約 1 % 広げる）を足した。色の順は暖かいベージュ・ラベンダー・オリーブ・ティール・サーモン…（12 色）。依頼に `files.figures`・`files.regions`・`files.image_order`（figures が先）・`request.control`（`px` は出力の大きさ）、`notes_for_agent` の最初に使い方（`lllite_3dpose`・`control_image_id`・`control_strength` 1・CFG 1、出力はちょうど W×H、2 人以上なら regions を `lllite_regional` に）。`render` の kind `guide:figures`・`guide:regions`、guide_sheet にも並ぶ（そのときだけ色）。
+- 新しいファイル: `service/figure_guide.{hpp,cpp}`（コマの人の prim の選び方、3 × 3 の点の Blinn-Phong の描画、領域の広げ方、台本の配置からの領域）。`genreq.cpp` の `control_guides`、`studio_art.cpp` の kind、`mcp_tools.cpp` の説明。
+- 大きさ: 依頼の `size.suggested_px`（約 1 MP、64 刻み。縦長のコマは 1 辺 1024 を越える: 例 704×1472）か、`tool` が tools.json のツールならその `size.tool_sizes` の 1 番目（コマは真ん中）。PS5 の例のプロファイル（1 辺 1024 まで、64 刻みの 15 の大きさ）は AGENT.md の「Figures as generation guides」と AI_PIPELINE.md §6.5。例: 縦長のコマ 512×1024・576×1024、横長 1024×512。
+- 決めたこと: 3D の人形が無く台本に 2 人以上いるコマにも、台本の配置から `regions.png` を付ける（id が変わる）。人がいない・台本に 1 人だけのコマの依頼は前と同じ。**確かめた**: 前のビルド（このブランチの 41f5f749 の genreq.cpp・studio_art.cpp）の `genko studio call … generation_request` と今のビルドで、人のいないコマ 2 つの request.json と全ファイルがバイトまで同じ（`diff -r` が空）。mode new だけ（edit・inpaint・upscale は元の候補の大きさなので付けない）。
+- 控え（test_figure_guide。2 人〔女 stand、男 walk〕の p2 の依頼、suggested_px の大きさ）: figures.png の PNG `9d221aec4182638c0f6c6cb4131e328a5e253527da489b2c4552a5f846f857e9`、regions.png の PNG `5d30b462e90bfb7cc6f36299133a15d441a696036209c8de7f247743a75dc1a1`（2 回・別のプロセスで同じ。1 と 4 スレッドで同じバイト）。依頼の id は本を作るたびに変わる（ページとコマの id が新しい）ので控えない。
+- 試すための例（PS5 で）: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/examples/（`cafe_*`: 向かい合って座る 2 人、`running_*`: 走る 2 人、`two_shot_*`: 指さしとピースの 2 人。`*_ps5_*` は PS5 のプロファイルの大きさ〔cafe 512×1024、running 1024×512、two_shot 576×1024〕、`*_suggested_*` は ~1 MP〔704×1472、1408×768、768×1344〕。それぞれ figures.png・regions.png・request.json）。並べた絵 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/pair_*.png。例: /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g2/examples/cafe_ps5_figures.png。`GENKO_FIGURE_GUIDE_OUT=<フォルダ> test_figure_guide` で同じものが書ける。
+- 試験: 新しい test_figure_guide（人のいないコマは鍵もファイルも注記も増えず、ほかのコマに人形を置いても id が変わらない／2 人のコマのファイル・順・最初の注記・大きさ・RGB・四隅が黒・人ごとの色〔ベージュ・ラベンダー〕・陰の階調・同じバイトと id・控え・render の kind／1 と 4 スレッドで同じバイト／PS5 のプロファイルの大きさ〔1 辺 1024 以下、64 の倍数〕／台本の 2 人の領域／印刷が変わらない）。test_mcp_api_e2e に render の kind の確かめ（thePeoplesGuidesAreRenderKinds）。
+- 残ること: 顔の起伏は仮の形のまま（figures.png では鼻と唇が強めに見える）。小物（G5）は figures.png に入らない。人形と箱の机などの重なりは人だけで描く（机は描かない）。2 つの制御（3D ポーズと領域）を同時に受けられるかは PS5 側で確かめる必要がある。
+
+## なめらかな 3D の人形（群 G1。SPEC FIGURE-01）— 2026-11-15、ブランチ native/figures（main b1cba245 から）、2026-11-16 に main に統合
+
+### 利用者の決定（2026-11-15）
+- 「滑らかにする直しも一緒に進めて」「サイトのようにポーズも充実させてください」「良いです、進めてください」。人形の見た目はネーム・校正の絵で変わってよい（印刷には出ない）。トレース済みの線は保存されたまま。設計（G1〜G5）は /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-plan.md。この節は G1（なめらかな体）。
+- 同じ日の追加（リード経由。利用者の画像生成は anima_3dpose の 3D ポーズ制御で、学習データは写実に近い大人のなめらかな体・中立の顔の起伏・指あり）: 頭に中立の顔の起伏（目のくぼみ・鼻・唇・あご・耳。線は描かない）、体の比率を写実に近く、指が見えること。陰の材質色とハイライトは G2（ここでは点ごとの見た向きの法線を `mesh3d::seen_normals` で出せるようにしただけ）。
+
+### したこと
+- 新しいファイル: `core/figure_shape.{hpp,cpp}`（部位ごとの距離の場: 丸い円錐・楕円体・角の丸い箱、部位の中の多項式のなめらかな最小値、関節の近くだけのなめらかな結合、左右の組は先にまとめる、足の裏の平面、顔の起伏〔details〕と目のくぼみ〔hollows〕、手〔3 節の指・親指・水かき〕、首と前腕の切り株）、`core/surface_nets.{hpp,cpp}`（8³ ブロックの Surface Nets、Newton 2 回、短い対角線、勾配の法線、遠いブロックと遠い部位を飛ばしても値が同じになる仕組み）。
+- `core/mesh3d`: `Model` に `tris`・`vn`・`nocontour`（なめらかなモデルは `mesh.f` が空）。`model_of` の figure・head・hand はこの網（モデルの控えは最大 64 個かつ 64 MB。head と hand も控える。前は人形だけ 64 個）。`hand_shape`（`spread`・`thumb` の形ごとの既定。op はまだ受け取らない＝G3）、`seen_normals`。`raster` はなめらかなモデルを Gouraud（点の明るさを深さと同じ重みで混ぜる）。`lines` はなめらかなモデルの輪郭（g = n·(p − 目) の符号の変わる所を三角ごとにつなぎ、前と同じ深さの判定で見える所、0.03 mm の Douglas–Peucker）と頭の案内線。箱・背景・取り込みモデルの道は前と同じ（同じ数の順）。
+- 頭は体とは別の格子（u/30、首の上 0.3u の切り株つき）、手は手の長さ/52 の格子（前腕の 0.15u の切り株つき）、体は u·max(1, √(build^0.75))/16。切り株は端で 0.01u 細くして体の網の内に収め（輪が出ない）、輪郭は手首 0.06u・首 0.12u の所で体と手・頭が入れ替わる。
+- 手は解剖のとおりの左右に直した（前の箱の手は左右が鏡に映した逆だった）。腕を下ろすと手のひらは体の側、親指は前。`add_hand` は手の甲がこちら。
+- 手引き: docs/AGENT.md の J8 に 1 項（なめらかな体・輪郭の線だけ）。SKILL.md（native/resources・integrations/hermes・integrations/claude-code の 3 つ、同じ文）の「線にする」に「3D の人形・頭・手は輪郭の線だけ」。SPEC.md に FIGURE-01。
+
+### 測った数（Release、4 CPU のクラウド機、ほかの仕事なし）
+- 三角の数: walk（指定なし）53,088（点 26,545）。内訳の例: 体 約 23,000、頭と首 約 9,300、手 1 つ 約 9,500。test_figure_mesh の全体（9 preset × 指定なし・男・女、build 0.5・1.8、極端な体型）の最大は 61,424（上限 64,000）。
+- 作る時間（test_perf_render の smooth_figure。walk・女・120 mm、控えを空にして）: 119〜147 ms。トレース（40 dpi、控えあり）7〜9 ms・20 本、16 dpi（画面）6〜7 ms。B4 のページに人形 1 体を校正 150 dpi で一から 150〜191 ms。新しい上限（前の上限は変えていない）: 作る 600 ms、トレース 40 ms、ページ 800 ms（どれも測った値の約 4 倍）。設計の目安 60 ms より遅い（頭と手を別の格子にし、法線と Newton を中心差分にしたため。中心差分は左右の鏡の一致に要る）。
+- `test_ledger_service_b.cpp:1642` の手引きの例: 人形 hina（point、110 mm、turn 0.6）のトレースだけで 24 本（マネキン 4 本・四角 1・線 1 を足して 30 本ほど）。試験は変えずに合格。
+
+### 新しい控え（test_figure_mesh。FIGURE-01 の形を変えたら値を取り直して、ここと試験を直す）
+- **G2 の比率の見直し（下の G2 の節）で取り直した。** 胴・首・腕・太ももの形を変えたので網・線・陰の値がすべて変わる（ほかの種類の値 e409e23f… は変わらない）。前の値は G1 のもの。
+- walk（指定なし、90 mm）の網: 前 `aa4e934277a89fb7dae89bb955bd06241ba62cd3f3b24795bb894d484ed55811` → 後 `cc8a7dc26f6e8a084e75fc25a835a33ea0a1d87fb47530e71c81be1a3b8d08cd`（点・法線・三角・nocontour・案内線のバイト）。
+- walk の線（40 dpi）: 前 `{"count":29,"points":807,"sha":"1ee327eec70395a1758b88710e77c8aa1c74617aed1b8d6c36bc15d89e5cf382"}` → 後 `{"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"}`。
+- walk と fist の手の 60 dpi の陰（zbuf と shade の sha256 を続けたもの）: 前 `65324a1ca2d7e5ee572da85c54889f3ae052ea8c879a288a3d708ff29c214984` + `657c49acec45e069b2df8eccd2d141df8eded120cf32dfdc7f8af1c2d216bc1f` → 後 `08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f58` + `9255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae`。
+- 箱・円柱・階段・部屋・球・円錐・椅子・取り込みモデル（カメラ無しと有り）の陰と線: `e409e23fb070dbc71bec9c449236bb21af6a5d096c658aa93538c930a241f54a`。**この値は FIGURE-01 の前のビルド（main b1cba245 の mesh3d）で取った**（theOtherKindsAreAsBefore）。前の控え・許容は 1 つも変えていない。
+
+### 試験（Release、関係するものだけ＝R1）
+- 新しい test_figure_mesh（10 項目）: 閉じた網・上限・単位の法線・外向き、2 回と 4 スレッドで同じバイト（網・陰・線）、体型の数（脚・頭身・肩・腰・build・男女の腰と胸の比〔女 1.733、男 0.976、指定なし 1.203〕）、手（握りこぶし・指さし・開き・親指・左右の鏡）、足の裏（立ち姿で 1.07u の長さが平ら、いちばん低い）、左右を入れ替えた姿勢が鏡の体（1e-7u 以内）、線が輪郭（外形の 100% に線、外れた線なし、本数 31・11）、ほかの種類が前と同じ。合格。
+- 合格: test_ops_3d（geometryBasics・drawnWhereGuidesAre は変えずに）、test_ledger_service_b（1642 と SKILL の写しの一致）、test_material_stamp、test_command_bus、test_ink_edit、test_page_size、test_render_page、test_proof、test_gui_guides、test_gui_ledger_b、test_gui_ledger_c、test_perf_render（SKIP は前からの psd_of_groups の 1 つ）、tools/acceptance/m3_kind_check.py。
+- 絵（見た上で直した）: 前 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/before/、後 /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/after/、並べたもの /tmp/claude-0/-home-user-genko-studio/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/figures-g1/before_after_*.png（presets_male・presets_female: 9 preset の正面と 3/4、陰と線。close_*: 立つ・座る・走る・考える の正面・3/4・横。parts: 頭・手・足・握りこぶしの近く。hands: 6 つの手の形の左右、甲・手のひら・横 2 方向。heads）。`GENKO_FIGURE_OUT=<フォルダ> test_figure_mesh` で同じ絵が書ける。
+
+### 残ること・気づいたこと
+- 素材「3d-デッサン人形」の見本の絵（`:/genko/materials/24eaed0d….png`）は前の人形のまま（取り直していない）。
+- `render_prims` の線は prim ごとの深さで隠すので、人形の線はほかの prim（箱の机など）の後ろでも見える（陰は正しく隠れる）。前からの振る舞いで G1 では変えていない（変えると箱の線の扱いも変わる）。
+- 前からの不具合（G1 では変えない。箱は前と同じバイト）: ページのカメラ（`set_camera`）があると、箱の線（`trace_prims`・ネームの絵・画面）が床の格子になる。最小の例: `add_prim3d {kind: box, pos: [100,150,0], size: [60,40,30]}` → `set_camera {turn: 0.3, tip: 0.2}` → `trace_prims` で 15 本の 2 点の線（カメラ無しは箱の辺）。原因は core/prim3d.cpp の `segments3d` に box の場合が無く、最後の `else`（floor の格子）に落ちること（`edges` はカメラがあると箱を `segments3d` へ回す）。陰（`render_prims` の面）は mesh3d の箱なので正しい。
+- 顔の起伏は控えめな仮の形（目のくぼみ・鼻・唇・耳）。G2 の figures.png を生成で試してから整える余地がある。
+- ASan は流していない（工程の出口で流す）。figure_shape の場は ASan で約 5 倍。
+- 次: G2（guides/figures.png。黒地・人ごとの材質色・Blinn-Phong。plan §9）。
+
 ## 書体の追加（F1・F2）とフキダシの追加の出口 — 凍結 7046eea6 で Linux の ASan・Release が合格（2026-11-15）
 - **凍結SHA**: `7046eea6`（native/fonts-fukidashi2。書体の追加 F1・F2、フキダシの追加 群 1・群 2 とレビューの直し、書体の決定 2 件、範囲の細分〔native/validation-scope の取り込み 3584d348〕、レビュー 3 の直し、test_fukidashi の ASan の重さの直し）。計画は `validation_policy.py --base da6acebd --head 7046eea6 --phase milestone`（tier full、203 の変更、理由 13。写真加工の試験も ASan に入る）。
 - 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.3GHz）/ RAM 16GB（プロセスは 14 GB の memory cgroup の中）/ Ubuntu 24.04.5 / kernel 6.18.44。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。

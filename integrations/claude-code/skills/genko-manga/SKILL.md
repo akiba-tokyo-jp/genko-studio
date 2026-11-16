@@ -106,7 +106,12 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
      `height_mm`（全身の高さ。`add_figure` は 10〜400）はショットで決める: ロング（引き）はコマの高さの 1/3〜1/2、フル（全身）はコマに収まる高さ、
      バストはコマの高さの 2 倍ほど、アップは 3〜4 倍（頭と肩だけがコマに入り、腰はコマの下の外になる）。
      向きは `rot`（`[tip, turn, lean]`、ラジアン。turn 1.57 で横向き、3.14 で後ろ向き）、手足は `pose_figure`・`pose_mannequin`。
-  3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（隠れた線は省かれる）。
+     ポーズ集（立つ・座る・寝る・感情・話す・物を持つ・スポーツ・アクション・ダンスなど六百あまり）から選ぶなら、`mcp__genko__figure_poses` で一覧を見て（`category`・`query` の言葉・
+     `random` でランダム・`sheet: true` で一覧の絵）、その `id` を `add_figure` か `pose_figure` の `pose_id` に渡す
+     （`mirror: true` で左右反転、`keep: "ground"` で足もとの高さを保つ）。手に持つ物（`hold`: 剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）は手の中に描かれる。
+     二人のポーズ（分類 `couple`・`two_people`、一覧で `pair: true`）は、`add_figure` に `pose_id` を渡すと相手（`partner_id`）も一緒に置かれ、
+     `pose_figure` なら `partner_id` の人形（無い id なら足す）が相手になる。
+  3. 線にする: `trace_prims`（`layer_id`、`ids` に人物の id、`kind: "pencil"`）で、人形が鉛筆の線になってネームのレイヤーに入る（3D の人形・頭・手は輪郭の線だけ。隠れた線は省かれる）。
   4. 物と背景: `add_shape`（`layer_id`、`shape` は rect・ellipse・line・polyline・curve・polygon、`kind: "pencil"`）で机・窓・建物の箱や地面の線を描く。
      3D の小物（`add_prim3d` の `kind: "prop"`）や背景（`add_scene`）を置いて `trace_prims` してもよい。
   5. ほかの線: `add_stroke`（`layer_id`、`points` はページの mm、`kind: "pencil"`）で、視線や動きの向き、効果の目印などを少し足す。
@@ -170,6 +175,13 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画、�
   - 参照画像（`files.references`: 設定画・顔・場所・`refs/style_pilot.png`）は、画像ツールが受け付けるなら必ず添える。
     `files.composition`（構図）と `files.pose`（人物の位置と向き）も参考として添えてよい。線をなぞらせる必要はない。
     `notes_for_agent` にマネキンの注記があるときは、`files.pose` の棒人形がポーズの指定。体の向きと手足の角度を合わせる。
+  - コマに 3D の人形（`add_figure`・`add_head`・`add_hand`）があると `files.figures`（`guides/figures.png`: 黒地に人ごとの色の、
+    陰とハイライトの付いた顔の無い人形。ページのカメラと光）と `files.regions`（`guides/regions.png`: 人ごとの単色の領域、黒は誰もいない所。
+    同じ色・同じ順）が付き、`notes_for_agent` の最初に使い方が書かれる。画像ツールに 3D メッシュのポーズの制御があれば
+    `guides/figures.png` を制御画像にする（例: PS5 AI Anima は `controlnet: lllite_3dpose`、`POST /api/inputs` で上げた id を
+    `control_image_id`、`control_strength` 1、CFG 1）。出力の大きさは `request.control.px` ちょうど（制御画像と同じ）。
+    2 人以上なら `guides/regions.png` を領域の制御（`lllite_regional`）にも渡す。参照画像として渡すときは `files.image_order` の順
+    （1 枚なら figures、2 枚なら figures と references_sheet）。台本に 2 人以上いて 3D の人形が無いコマは regions だけ（台本の配置から）。
   - サイズは `size.suggested_px`。画像ツールが決まったサイズしか出せないときは `size.tool_sizes` の先頭を使う（切れる方向が書いてある）。
   - `keepout` の場所（台詞が入る）は静かに空けておく。プロンプトの下書きにも書いてある。
   - ふつうは 1 枚作り、`inbox` に保存して下の `take_panel_art` で取り込む。比べて選びたいときだけ 2〜4 枚作って一度に `import_images` する。

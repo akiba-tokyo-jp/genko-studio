@@ -47,6 +47,7 @@ genko_library(genko_app
     navigator.cpp
     templates.cpp
     komawari_dialog.cpp
+    pose_gallery.cpp
     dialogs.cpp
     save_status.cpp
     ime.cpp

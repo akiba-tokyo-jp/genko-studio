@@ -90,6 +90,12 @@ genko export PROJ ./sns --format sns --long-edge 1600 --spreads          # 見�
 - プリセット: `stand`、`walk`、`run`、`sit`（横向き）、`point`、`look_back`、`arms_up`。
 - マネキンはネームと校正にだけ描かれ、印刷には出ない。コマの中にあると、そのコマの依頼パックの `guides/pose.png` に描かれ、
   `notes_for_agent` に「マネキンがポーズの指定」と入る。
+- 3D の人形（`add_figure`・`add_head`・`add_hand`）がコマの中にあると、そのコマの依頼パックに `guides/figures.png`（黒地に人ごとの色の
+  陰の付いた人形。3D メッシュのポーズの制御画像）と `guides/regions.png`（人ごとの領域）が付く。出力はちょうど `request.control.px`。
+  使い方は `notes_for_agent` の最初と AGENT.md の「Figures as generation guides」（SPEC FIGURE-03）。
+- 3D の人形のポーズは、ポーズ集（立つ・座る・寝る・感情・話す・物を持つなど 400 あまり。SPEC FIGURE-02）から選べる。エージェントは道具
+  `figure_poses`（分類・言葉・ランダム・一覧の絵。読むだけ）で id を見て、`apply_ops` の `pose_figure {page, id, pose_id, mirror, keep: "ground"}`
+  で付ける。人間は `genko studio figure-poses --category … --sheet DIR` で一覧の絵を書き出せる。アプリでは 定規・3D の「ポーズ集…」。
 
 ## 内容の制限（M9-2）
 
