@@ -13,9 +13,10 @@
 // ellipsoids, capsules and boxes side by side). The shape is a field: each part of the body (the torso, an upper arm,
 // a finger…) is the distance to a few rounded pieces set in the skeleton's bones — round cones, ellipsoids, rounded
 // boxes and lofts (a form along a bone whose oval section changes smoothly along it: the ribcage, the waist, a thigh
-// with its taper) —; the parts meet by the plain minimum, and, near the joint between two parts that the skeleton
-// joins, by a smooth minimum whose width falls off with the distance from the joint (so an arm laid on the belly shows
-// a crease, never a web). core/surface_nets makes the triangles.
+// with its taper) —, with its low relief as swells of that surface (a shoulder blade, an eyelid); the parts meet by
+// the plain minimum, and, near the joint between two parts that the skeleton joins, by a smooth minimum whose width
+// falls off with the distance from the joint (so an arm laid on the belly shows a crease, never a web).
+// core/surface_nets makes the triangles.
 //
 // Every number is made with + − × ÷, the square root, min and max, in a fixed order (the bones' turns keep their
 // sines and cosines, as core/mesh3d makes them): the same bytes on every run and every thread.
@@ -34,9 +35,12 @@ struct Station {
 };
 
 // One rounded piece. A cone's and a box's distance is the true one; an ellipsoid's and a loft's is the first-order
-// one (the true distance at the surface, never more than it elsewhere).
+// one (the true distance at the surface, never more than it elsewhere). A swell is no solid of its own: it lifts (or,
+// with a negative amount, sinks) the surface of what is before it in the part, by its amount at its middle, falling to
+// nothing at the rim of its ellipsoid as (1 − r²)³ does (r 0 at the middle, 1 at the rim) — a low relief with no
+// edge anywhere: a shoulder blade, the furrow of the spine, a collarbone, an eyelid.
 struct Piece {
-    enum class Kind : std::uint8_t { Cone, Ellipsoid, Box, Loft };
+    enum class Kind : std::uint8_t { Cone, Ellipsoid, Box, Loft, Swell };
     Vec3 centre{};  // a ball that holds the piece
     double reach = 0;
     double steep = 1;     // (past that ball the piece's value is at least the distance from the ball / steep)
@@ -47,10 +51,10 @@ struct Piece {
     bool rest = false;    // set in the part's rest space (Part::bend): the trunk, which bends with the spine
     Vec3 a{};       // cone: one end; ellipsoid, box: the centre; loft: where y = 0 is
     Vec3 b{};       // cone: the other end
-    double ra = 0;  // cone: the radius at a; loft: the height of the dome that closes its first end
+    double ra = 0;  // cone: the radius at a; loft: the height of the dome that closes its first end; swell: its amount
     double rb = 0;  // cone: the radius at b; loft: of its last end
-    Mat3 axes{};    // ellipsoid, box, loft: its axes as columns (a turn; a loft runs along y)
-    Vec3 size{};    // ellipsoid: its radii; box: its half sizes
+    Mat3 axes{};    // ellipsoid, box, loft, swell: its axes as columns (a turn; a loft runs along y)
+    Vec3 size{};    // ellipsoid, swell: its radii; box: its half sizes; loft: how full its two domes are
     double round = 0;  // box: the rounding
     std::vector<double> loft;  // loft: its stations and the cubics between them (see loft())
 
@@ -60,13 +64,20 @@ struct Piece {
 Piece cone(const Vec3& a, double ra, const Vec3& b, double rb);
 Piece ellipsoid(const Vec3& centre, const Mat3& axes, const Vec3& radii);
 Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round);
+Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount);
 // A loft from the first station to the last (y rising; two or more) in the frame `axes` at `origin`: between the
 // stations the section's numbers run as cubics through them, and each end is closed by half an ellipsoid as high as
-// cap0 and cap1. The cubics' slopes at the stations are `slopes` (each number's change per unit of y, in its place in
+// cap0 and cap1 (its middle going on as zc slopes at the end: a dome that leans). A run is best begun and ended where
+// the form is widest (flat there, narrowing after): the dome then carries the form on with no turn in its curve — a
+// run that ends narrowing, flat at its end, has one there, and a wide blend with another part shows it as a line.
+// full0 and full1 (0..1) make a dome fuller: 0 is the half ellipsoid, toward 1 it leaves its base more slowly (its
+// profile √(1 − (1 − f) t² − f t⁴), t the height over the cap's) — set so the dome curves at its base as the run does. The cubics' slopes at the stations are `slopes` (each number's change per unit of y, in its place in
 // a Station), or without them those of the smoothest run through the stations that is flat at both ends (run_slopes).
-Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& stations, double cap0, double cap1, const std::vector<Station>* slopes = nullptr);
-// The slopes at each station of the cubic spline through them (its curvature unbroken; flat at both ends).
-std::vector<Station> run_slopes(const std::vector<Station>& stations);
+Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& stations, double cap0, double cap1, const std::vector<Station>* slopes = nullptr,
+           double full0 = 0.0, double full1 = 0.0);
+// The slopes at each station of the cubic spline through them (its curvature unbroken; flat at both ends, or with the
+// slopes `first` and `last` there).
+std::vector<Station> run_slopes(const std::vector<Station>& stations, const Station* first = nullptr, const Station* last = nullptr);
 
 // The bend of a trunk: its rest space is the body standing straight (the pelvis at 0, the waist `waist` above it on
 // −y); a point of the figure is carried there by the pelvis's turn below the pelvis, the spine's between the two
@@ -87,11 +98,10 @@ struct Bend {
 };
 
 // A part: its pieces joined in their order by a smooth minimum (each by its own width, or the part's k; 0: the plain
-// minimum), a carved piece taken away from what is before it; then, when `cut` is set, only the side of the plane
-// where n·x − d ≤ 0 is kept (with the edge rounded by `cut_k`: a sole flattened, a stub cut off); when `fade` is set
-// the part thins by fade × (n·x − d0) past the plane n·x = d0 (a stub narrowing toward its cut end, under the other
-// mesh of the same limb); and the whole part is `inset` thinner (the head's own piece of the neck, kept under the
-// body's coarser mesh of the same neck).
+// minimum), a carved piece taken away from what is before it, a swell lifting it; then, when `cut` is set, only the
+// side of the plane where n·x − d ≤ 0 is kept (with the edge rounded by `cut_k`: a sole flattened, a stub cut off);
+// and when `fade` is set the part thins by fade × (n·x − d0) past the plane n·x = d0 (a stub narrowing toward its cut
+// end, under the other mesh of the same limb; the neck's two meshes crossing at their seam).
 struct Part {
     std::vector<Piece> pieces;
     double k = 0;
@@ -102,7 +112,6 @@ struct Part {
     double fade = 0;
     Vec3 fade_n{};
     double fade_d = 0;
-    double inset = 0;
     Bend bend;  // (the pieces marked `rest` are worked out in its rest space)
     bool no_contour = false;  // (its points draw no outline: a hand's stub of the forearm, seen through the body's own)
 
@@ -124,7 +133,8 @@ struct Field {
     std::vector<Part> parts;
     std::vector<Joint> joints;
 
-    // The field at x from the parts marked in `use` (null: all). `d` has room for one value per part; `nearest` (when
+    // The field at x from the parts marked in `use` (null: all). `d` has room for one value per part (a part's own, or
+    // for a cut part too far past its plane to matter, the plane's distance: less than its own); `nearest` (when
     // given) is the part nearest to x.
     double at(const Vec3& x, const std::uint8_t* use, double* d, int* nearest = nullptr) const;
     // The widest blend a part takes part in.

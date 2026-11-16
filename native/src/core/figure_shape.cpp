@@ -75,12 +75,6 @@ Piece with_blend(Piece p, double blend) {
     return p;
 }
 
-Piece carved(Piece p, double blend) {
-    p.blend = blend;
-    p.carve = true;
-    return p;
-}
-
 void pair(std::vector<Piece>& list, Piece one, Piece other, double blend = -1.0) {
     one.paired = true;
     one.blend = blend;
@@ -244,19 +238,26 @@ Part head_part(const Vec3& centre, const Mat3& turn, double u) {
     p.push_back(ellipsoid(at(0.0, 0.14, -0.1), turn, r(0.29, 0.39, 0.335)));     // the face
     p.push_back(with_blend(ellipsoid(at(0.0, 0.4, -0.235), turn, r(0.16, 0.125, 0.135)), 0.14 * u));  // the chin
     pair(p, ellipsoid(at(0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), ellipsoid(at(-0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), 0.14 * u);  // the jaw's corners
-    p.push_back(with_blend(ellipsoid(at(0.0, -0.03, -0.24), turn, r(0.3, 0.12, 0.2)), 0.1 * u));      // the brow
-    // the eyes: shallow sockets under the brow, beside the nose's bridge
-    pair(p, carved(ellipsoid(at(0.15, 0.06, -0.5), turn, r(0.1, 0.07, 0.085)), 0.1 * u), carved(ellipsoid(at(-0.15, 0.06, -0.5), turn, r(0.1, 0.07, 0.085)), 0.1 * u),
-         0.1 * u);
-    pair(p, ellipsoid(at(0.15, 0.062, -0.34), turn, r(0.075, 0.05, 0.075)), ellipsoid(at(-0.15, 0.062, -0.34), turn, r(0.075, 0.05, 0.075)), 0.05 * u);  // their lids
+    p.push_back(with_blend(ellipsoid(at(0.0, -0.04, -0.24), turn, r(0.3, 0.12, 0.2)), 0.14 * u));     // the brow
     // the nose: its bridge down to the tip, the wings
-    p.push_back(with_blend(cone(at(0.0, 0.01, -0.405), 0.036 * u, at(0.0, 0.165, -0.475), 0.042 * u), 0.07 * u));
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.185, -0.44), turn, r(0.062, 0.04, 0.055)), 0.05 * u));
-    // the mouth: the round of the teeth under it, the two lips closed on each other
+    p.push_back(with_blend(cone(at(0.0, 0.0, -0.385), 0.05 * u, at(0.0, 0.165, -0.462), 0.055 * u), 0.1 * u));
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.183, -0.437), turn, r(0.066, 0.045, 0.06)), 0.09 * u));
+    // the round of the teeth under the mouth
     p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.13)), 0.08 * u));
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.286, -0.36), turn, r(0.075, 0.03, 0.05)), 0.03 * u));
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.32, -0.355), turn, r(0.062, 0.03, 0.05)), 0.03 * u));
-    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.05 * u);  // the ears
+    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.06 * u);  // the ears
+    // The face's low relief, as swells (no edge anywhere, whatever the grid): the eyes — a shallow socket under the
+    // brow beside the nose's bridge, the closed lid in it —, the two lips closed on each other, the hollow of each ear.
+    const auto both = [&](double x, double y, double z, const Vec3& size, double amount) {
+        Piece one = swell(at(x, y, z), turn, size, amount * u);
+        one.paired = true;
+        p.push_back(std::move(one));
+        p.push_back(swell(at(-x, y, z), turn, size, amount * u));
+    };
+    both(0.15, 0.065, -0.39, r(0.14, 0.105, 0.14), -0.024);
+    both(0.152, 0.072, -0.385, r(0.105, 0.08, 0.12), 0.011);
+    p.push_back(swell(at(0.0, 0.28, -0.41), turn, r(0.11, 0.045, 0.09), 0.012 * u));
+    p.push_back(swell(at(0.0, 0.335, -0.405), turn, r(0.095, 0.045, 0.09), 0.012 * u));
+    both(0.35, 0.1, 0.062, r(0.05, 0.062, 0.036), -0.013);
     return head;
 }
 
@@ -275,6 +276,24 @@ void plain_outline(Smooth& mesh, const Part& head, double u) {
                      plain.at(Vec3{x[0], x[1], x[2] + e}) - plain.at(Vec3{x[0], x[1], x[2] - e})};
         const double len = length(g);
         if (len > 0.0) mesh.outline[i] = Vec3{g[0] / len, g[1] / len, g[2] / len};
+    }
+}
+
+// The directions of the light on a part that thins toward a seam (Part::fade), where `where` says so: those of the
+// same field with the part unthinned — the seam's two meshes then take the light as one surface.
+template <typename Where>
+void plain_normals(Smooth& mesh, Field field, const std::vector<int>& parts, double u, Where where) {
+    for (const int part : parts) field.parts[static_cast<std::size_t>(part)].fade = 0.0;
+    std::vector<double> d(field.parts.size());
+    const double e = 0.02 * u;
+    const auto at = [&](double x, double y, double z) { return field.at(Vec3{x, y, z}, nullptr, d.data()); };
+    for (std::size_t i = 0; i < mesh.v.size(); ++i) {
+        if (std::find(parts.begin(), parts.end(), static_cast<int>(mesh.part[i])) == parts.end()) continue;
+        const Vec3& x = mesh.v[i];
+        if (!where(x)) continue;
+        const Vec3 g{at(x[0] + e, x[1], x[2]) - at(x[0] - e, x[1], x[2]), at(x[0], x[1] + e, x[2]) - at(x[0], x[1] - e, x[2]), at(x[0], x[1], x[2] + e) - at(x[0], x[1], x[2] - e)};
+        const double len = length(g);
+        if (len > 0.0) mesh.n[i] = Vec3{g[0] / len, g[1] / len, g[2] / len};
     }
 }
 
@@ -430,17 +449,38 @@ Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round) 
     return p;
 }
 
-std::vector<Station> run_slopes(const std::vector<Station>& stations) {
+Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount) {
+    Piece p;
+    p.kind = Piece::Kind::Swell;
+    p.a = centre;
+    p.axes = axes;
+    p.size = radii;
+    p.ra = amount;
+    p.centre = centre;
+    p.reach = std::max(radii[0], std::max(radii[1], radii[2]));
+    return p;
+}
+
+std::vector<Station> run_slopes(const std::vector<Station>& stations, const Station* first, const Station* last) {
     const std::size_t n = stations.size();
     std::vector<Station> out(n);
     for (std::size_t i = 0; i < n; ++i) out[i].y = stations[i].y;
-    if (n < 3) return out;
+    if (n == 0) return out;
+    const auto of = [](const Station* st, int which) { return st == nullptr ? 0.0 : (which == 0 ? st->rx : (which == 1 ? st->rz : st->zc)); };
+    if (n < 3) {
+        for (int which = 0; which < 3; ++which) {
+            (which == 0 ? out[0].rx : (which == 1 ? out[0].rz : out[0].zc)) = of(first, which);
+            (which == 0 ? out[n - 1].rx : (which == 1 ? out[n - 1].rz : out[n - 1].zc)) = of(n == 1 ? first : last, which);
+        }
+        return out;
+    }
     // (the clamped spline's own equations, h[i] m[i−1] + 2 (h[i−1] + h[i]) m[i] + h[i−1] m[i+1] = 3 (h[i] s[i−1] + h[i−1] s[i]),
-    // with m 0 at both ends: one sweep down, one back)
+    // with m given at both ends (0, or `first` and `last`): one sweep down, one back)
     for (int which = 0; which < 3; ++which) {
         const auto v = [&](std::size_t i) { return which == 0 ? stations[i].rx : (which == 1 ? stations[i].rz : stations[i].zc); };
         std::vector<double> upper(n, 0.0);
         std::vector<double> right(n, 0.0);
+        right[0] = of(first, which);
         for (std::size_t i = 1; i + 1 < n; ++i) {
             const double h0 = stations[i].y - stations[i - 1].y;
             const double h1 = stations[i + 1].y - stations[i].y;
@@ -450,6 +490,8 @@ std::vector<Station> run_slopes(const std::vector<Station>& stations) {
             right[i] = (rhs - h1 * right[i - 1]) / pivot;
         }
         std::vector<double> m(n, 0.0);
+        m[0] = of(first, which);
+        m[n - 1] = of(last, which);
         for (std::size_t i = n - 2; i >= 1; --i) m[i] = right[i] - upper[i] * m[i + 1];
         for (std::size_t i = 0; i < n; ++i) (which == 0 ? out[i].rx : (which == 1 ? out[i].rz : out[i].zc)) = m[i];
     }
@@ -458,9 +500,11 @@ std::vector<Station> run_slopes(const std::vector<Station>& stations) {
 
 // (a loft's numbers: the count n; the n stations' y; then for each of the n − 1 spans 1 / its length and the cubics'
 // four coefficients of rx, rz and zc, in the span's own 0..1)
-Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& stations, double cap0, double cap1, const std::vector<Station>* slopes) {
+Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& stations, double cap0, double cap1, const std::vector<Station>* slopes, double full0,
+           double full1) {
     Piece p;
     p.kind = Piece::Kind::Loft;
+    p.size = Vec3{full0, full1, 0.0};
     p.a = origin;
     p.axes = axes;
     p.ra = cap0;
@@ -493,10 +537,14 @@ Piece loft(const Vec3& origin, const Mat3& axes, const std::vector<Station>& sta
         ratio = std::min(ratio, std::min(st.rx, st.rz) / std::max(st.rx, st.rz));
         ratio = std::min(ratio, std::min(cap0, cap1) / std::max(st.rx, st.rz));
     }
-    const double y0 = stations.front().y;
-    const double y1 = stations.back().y;
+    // (the ball that holds it: about the middle of its whole length, domes and all; a dome that leans reaches further
+    // across)
+    const double y0 = stations.front().y - cap0;
+    const double y1 = stations.back().y + cap1;
+    const double half = (y1 - y0) * 0.5;
+    const double across = 1.1 * widest + std::max(std::fabs(own.front().zc) * cap0, std::fabs(own.back().zc) * cap1);
     p.centre = add(origin, out_of(axes, Vec3{0.0, (y0 + y1) * 0.5, 0.0}));
-    p.reach = (y1 - y0) * 0.5 + std::max(cap0, cap1) + 1.1 * widest;
+    p.reach = std::sqrt(half * half + across * across);
     p.steep = 1.0 / (0.6 * std::min(1.0, ratio));
     return p;
 }
@@ -512,6 +560,22 @@ inline double ellipsoid_at(double x, double y, double z, double rx, double ry, d
     if (!(k0 > 0.0)) return -std::min(rx, std::min(ry, rz));
     const double gx = qx / rx;
     const double gy = qy / ry;
+    const double gz = qz / rz;
+    return (k0 - 1.0) * k0 / std::sqrt(gx * gx + gy * gy + gz * gz);
+}
+
+// The same for the dome that closes a loft's end: half an ellipsoid (rx, ry, rz), fuller by `full` (its profile
+// √(1 − (1 − full) t² − full t⁴)), whose middle moves by dzc for each unit of y (x, y, z from the middle at y = 0). At
+// y = 0 it is the loft's own value where the loft's section is flat there but for its middle's slope.
+inline double dome_at(double x, double y, double z, double rx, double ry, double rz, double full, double dzc) {
+    const double qx = x / rx;
+    const double qy = y / ry;
+    const double qz = z / rz;
+    const double y2 = qy * qy;
+    const double k0 = std::sqrt(qx * qx + qz * qz + y2 * ((1.0 - full) + full * y2));
+    if (!(k0 > 0.0)) return -std::min(rx, std::min(ry, rz));
+    const double gx = qx / rx;
+    const double gy = qy * ((1.0 - full) + 2.0 * full * y2) / ry - qz * dzc / rz;
     const double gz = qz / rz;
     return (k0 - 1.0) * k0 / std::sqrt(gx * gx + gy * gy + gz * gz);
 }
@@ -569,6 +633,9 @@ double Piece::at(const Vec3& x) const {
             const double t = (q[1] - ys[0]) * c[0];
             const double rx = std::max(c[1] + c[2] * t, 0.3 * c[1]);
             const double rz = std::max(c[5] + c[6] * t, 0.3 * c[5]);
+            // (a flat end — a run's own — may lean and be fuller; an end the form goes on through, at a joint, is the
+            // plain half ellipsoid)
+            if (c[2] == 0.0 && c[6] == 0.0) return dome_at(q[0], q[1] - ys[0], q[2] - (c[9] + c[10] * t), rx, ra, rz, size[0], c[10] * c[0]);
             return ellipsoid_at(q[0], q[1] - ys[0], q[2] - (c[9] + c[10] * t), rx, ra, rz);
         }
         if (!(q[1] < ys[n - 1])) {
@@ -579,6 +646,9 @@ double Piece::at(const Vec3& x) const {
             const double rx = std::max(rx1 + (c[2] + 2.0 * c[3] + 3.0 * c[4]) * t, 0.3 * rx1);
             const double rz = std::max(rz1 + (c[6] + 2.0 * c[7] + 3.0 * c[8]) * t, 0.3 * rz1);
             const double zc = c[9] + c[10] + c[11] + c[12] + (c[10] + 2.0 * c[11] + 3.0 * c[12]) * t;
+            const double drx = c[2] + 2.0 * c[3] + 3.0 * c[4];
+            const double drz = c[6] + 2.0 * c[7] + 3.0 * c[8];
+            if (drx == 0.0 && drz == 0.0) return dome_at(q[0], q[1] - ys[n - 1], q[2] - zc, rx, rb, rz, size[1], (c[10] + 2.0 * c[11] + 3.0 * c[12]) * c[0]);
             return ellipsoid_at(q[0], q[1] - ys[n - 1], q[2] - zc, rx, rb, rz);
         }
         int i = 0;
@@ -604,6 +674,7 @@ double Piece::at(const Vec3& x) const {
         const double gz = uz / rz;
         return (e - 1.0) / std::sqrt(gx * gx + gz * gz + along * along);
     }
+    case Kind::Swell: break;  // (no solid: Part::at lifts the surface by it)
     }
     return std::numeric_limits<double>::infinity();
 }
@@ -620,6 +691,18 @@ inline bool beyond(const Piece& p, const Vec3& x, double least) {
     const double dy = x[1] - p.centre[1];
     const double dz = x[2] - p.centre[2];
     return dx * dx + dy * dy + dz * dz >= r * r;
+}
+
+// How far a swell lifts the surface at x: its amount × (1 − r²)³ within its ellipsoid.
+inline double lift_of(const Piece& p, const Vec3& x) {
+    const Vec3 r = sub(x, p.a);
+    if (!(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] < p.reach * p.reach)) return 0.0;  // (outside the ball that holds it)
+    const Vec3 q = into(p.axes, r);
+    const double qx = q[0] / p.size[0];
+    const double qy = q[1] / p.size[1];
+    const double qz = q[2] / p.size[2];
+    const double t = 1.0 - (qx * qx + qy * qy + qz * qz);
+    return t > 0.0 ? p.ra * (t * t * t) : 0.0;
 }
 
 }  // namespace
@@ -641,12 +724,15 @@ double Part::at(const Vec3& x) const {
         qc[1] = qc[1] - bend.waist;
         const double t1 = clamp((-0.5 * (qh[1] + qs[1]) - bend.from[0]) / bend.over[0], 0.0, 1.0);
         const double t2 = clamp((-0.5 * (qs[1] + qc[1]) - bend.from[1]) / bend.over[1], 0.0, 1.0);
-        const double s1 = t1 * t1 * (3.0 - 2.0 * t1);
-        const double s2 = t2 * t2 * (3.0 - 2.0 * t2);
+        // (the mix rises as t³ (10 − 15 t + 6 t²): its slope and its curvature both begin and end at nothing, so
+        // the bent trunk's curve has no step where a stretch begins)
+        const double s1 = t1 * t1 * t1 * (10.0 + t1 * (6.0 * t1 - 15.0));
+        const double s2 = t2 * t2 * t2 * (10.0 + t2 * (6.0 * t2 - 15.0));
         const Vec3 hs = sub(qs, qh);
         const Vec3 sc = sub(qc, qs);
         q = add(add(qh, mul(hs, s1)), mul(sc, s2));
-        const double steeper = 6.0 * t1 * (1.0 - t1) / bend.over[0] * length(hs) + 6.0 * t2 * (1.0 - t2) / bend.over[1] * length(sc);
+        const double steeper =
+            30.0 * t1 * t1 * (1.0 - t1) * (1.0 - t1) / bend.over[0] * length(hs) + 30.0 * t2 * t2 * (1.0 - t2) * (1.0 - t2) / bend.over[1] * length(sc);
         less = 1.0 / (1.0 + steeper);
     }
     const auto value = [&](const Piece& p) { return p.rest ? less * p.at(q) : p.at(x); };
@@ -665,8 +751,17 @@ double Part::at(const Vec3& x) const {
     }
     for (; i < count; ++i) {
         const Piece& p = all[i];
-        const double kk = p.blend >= 0.0 ? p.blend : k;
         const bool two = p.paired && i + 1 < count;
+        if (p.kind == Piece::Kind::Swell) {  // (a left and right pair: summed first, the same either way round)
+            double lift = lift_of(p, p.rest ? q : x);
+            if (two) {
+                ++i;
+                lift = lift + lift_of(all[i], all[i].rest ? q : x);
+            }
+            v = v - lift;
+            continue;
+        }
+        const double kk = p.blend >= 0.0 ? p.blend : k;
         const double least = p.carve ? kk - v : v + (two ? 1.25 * kk : kk);
         if (far(p, least) && (!two || far(all[i + 1], least))) {
             if (two) ++i;
@@ -684,7 +779,6 @@ double Part::at(const Vec3& x) const {
         v = cut_k > 0.0 ? -blend_min(-v, -g, cut_k) : std::max(v, g);
     }
     if (fade > 0.0) v = v + fade * std::max(0.0, dot3(fade_n, x) - fade_d);
-    v = v + inset;
     return v;
 }
 
@@ -696,7 +790,18 @@ double Field::at(const Vec3& x, const std::uint8_t* use, double* d, int* nearest
             d[i] = std::numeric_limits<double>::infinity();
             continue;
         }
-        d[i] = parts[i].at(x);
+        const Part& part = parts[i];
+        if (part.cut && best >= 0) {
+            // (a cut part is never nearer than its cutting plane: past the plane by more than what is nearest so far
+            // and the widest blend it takes part in, it cannot change the field — the plane's distance stands for it,
+            // and the part is not worked out: the same field, sooner. The head's mesh carries the torso this way.)
+            const double g = dot3(part.cut_n, x) - part.cut_d;
+            if (g >= f + 1.25 * blend_of(static_cast<int>(i))) {
+                d[i] = g;
+                continue;
+            }
+        }
+        d[i] = part.at(x);
         if (d[i] < f || best < 0) {
             f = d[i];
             best = static_cast<int>(i);
@@ -733,8 +838,10 @@ void Field::bounds(Vec3& lo, Vec3& hi) const {
     double k = 0.0;
     for (const Joint& j : joints) k = std::max(k, j.k);
     for (const Part& part : parts) {
+        Vec3 plo{inf, inf, inf};
+        Vec3 phi{-inf, -inf, -inf};
         for (const Piece& p : part.pieces) {
-            if (p.carve) continue;
+            if (p.carve || p.kind == Piece::Kind::Swell) continue;
             const double kk = std::max(k, std::max(part.k, p.blend));
             // (a piece of a bending trunk: where each of its three turns would put it)
             std::vector<Vec3> centres{p.centre};
@@ -745,21 +852,51 @@ void Field::bounds(Vec3& lo, Vec3& hi) const {
                            add(part.bend.waist_at, out_of(part.bend.chest, above))};
             }
             for (const Vec3& c : centres) {
-                for (int a = 0; a < 3; ++a) {
-                    lo[a] = std::min(lo[a], c[a] - p.reach - kk);
-                    hi[a] = std::max(hi[a], c[a] + p.reach + kk);
+                for (std::size_t a = 0; a < 3; ++a) {
+                    plo[a] = std::min(plo[a], c[a] - p.reach - kk);
+                    phi[a] = std::max(phi[a], c[a] + p.reach + kk);
                 }
             }
+        }
+        if (!(plo[0] <= phi[0])) continue;
+        if (part.cut) {
+            // (a cut part: only what is on the kept side of its plane — the box of its pieces, as far along each axis
+            // as the plane lets a point of the box go; the cut's rounding and the blends reach a little past it)
+            const double past = part.cut_d + part.cut_k + k;
+            Vec3 clo = plo;
+            Vec3 chi = phi;
+            for (std::size_t a = 0; a < 3; ++a) {
+                const double n = part.cut_n[a];
+                if (!(std::fabs(n) > 1e-6)) continue;
+                double rest = 0.0;  // (the least the other two axes can add to n · x in the box)
+                for (std::size_t o = 0; o < 3; ++o) {
+                    if (o != a) rest = rest + std::min(part.cut_n[o] * plo[o], part.cut_n[o] * phi[o]);
+                }
+                const double at = (past - rest) / n;
+                if (n > 0.0) {
+                    chi[a] = std::min(chi[a], at);
+                } else {
+                    clo[a] = std::max(clo[a], at);
+                }
+            }
+            plo = clo;
+            phi = chi;
+            if (!(plo[0] <= phi[0] && plo[1] <= phi[1] && plo[2] <= phi[2])) continue;
+        }
+        for (std::size_t a = 0; a < 3; ++a) {
+            lo[a] = std::min(lo[a], plo[a]);
+            hi[a] = std::max(hi[a], phi[a]);
         }
     }
 }
 
 namespace {
 
-// The torso's pieces and what the limbs share with it (the balls at the shoulders).
+constexpr std::size_t kTrunkAndTrapezius = 3;  // (the torso's first pieces: the trunk and the two sides of the trapezius)
+
+// The torso's pieces.
 struct Torso {
     Part part;
-    double r_shoulder = 0;  // (the ball at each shoulder, which the upper arm starts as)
 };
 
 Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
@@ -769,7 +906,6 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     const Sex& sx = d.sx;
     const Vec3& P0 = sk.point("pelvis");
     const Vec3& W = sk.point("waist");
-    const Vec3& N = sk.point("neck");
     const Mat3& H = sk.turn("hip");
     const Mat3& S = sk.turn("spine");
     const Mat3& C = sk.turn("chest");
@@ -787,20 +923,16 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     Torso out;
     Part& p = out.part;
     p.k = 0.12 * u;
-    // The trunk's sections from the neck's base down to the hips, as one run: the top of the ribcage, under the
-    // armpits, the fullest ribs, the lowest ribs (where the chest turns on the waist), the waist, above the hips, the
-    // hips (where the spine turns on the pelvis).
-    const Station top = st(-2.74, 0.58 * r_chest, 0.33 * d_chest, 0.1 * dd);
-    const Station armpit = st(-2.38, 0.9 * r_chest, 0.5 * d_chest, 0.03 * dd);
+    // The trunk's sections as one run from the fullest ribs down to the crest of the hips: the lowest ribs (where the
+    // chest turns on the waist), the waist, the crest. Above the ribs the ribcage closes as a dome that leans back to
+    // the neck's base; below the crest the pelvis closes as a dome between the thighs, down to the crotch — the hips'
+    // sides and the fronts beside it are the thighs' own tops, which start above the hip joints (figure()). So the fold
+    // of the groin runs from the hip bone down and in to the crotch, and no line crosses the front.
     const Station ribs = st(-1.92, r_chest, 0.55 * d_chest, -0.015 * dd);
     const Station low = st(-1.3, r_ribs, 0.47 * d_chest, -0.035 * dd);
     const Station waist = st(-0.92, r_waist, 0.4 * dd, -0.035 * dd);
-    const Station flank = st(-0.4, 0.42 * r_waist + 0.58 * r_pelvis, 0.42 * dd, -0.025 * dd);
-    const Station hips = st(0.0, r_pelvis, 0.43 * dd, -0.02 * dd);
-    // (and the pelvis: from the hips' section it narrows between the thighs to the crotch — the hips' sides are the
-    // thighs' own tops)
-    const Station groin = st(0.2, 0.62 * d.hw + 0.14 * g, 0.385 * dd, 0.025 * dd);
-    const Station crotch = st(0.35, 0.12 * g + 0.2 * (d.hw - 0.5), 0.2 * dd, 0.09 * dd);
+    const Station crest = st(-0.3, 0.42 * r_waist + 0.58 * r_pelvis, 0.425 * dd, -0.025 * dd);
+    const Station lean{0.0, 0.0, 0.0, -0.14 * dd};  // (the ribcage's dome: its middle goes back by this for each u up)
     // The trunk is this one run, set in the body standing straight; it bends with the spine (Bend): rigid with the
     // pelvis below the pelvis joint, with the chest above the waist joint and what is 0.35 u over it, and the two
     // turns mixed over the 0.7 u above each joint. No form meets another at a joint, so nothing shows there, straight
@@ -816,56 +948,100 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     p.bend.over[0] = 0.7 * u;
     p.bend.from[1] = 0.95 * u;
     p.bend.over[1] = 0.7 * u;
-    Piece trunk = loft(Vec3{0.0, 0.0, 0.0}, kIdentity, {top, armpit, ribs, low, waist, flank, hips, groin, crotch}, 0.22 * u, 0.07 * u);
+    const std::vector<Station> run{ribs, low, waist, crest};
+    const std::vector<Station> slopes = run_slopes(run, &lean);
+    Piece trunk = loft(Vec3{0.0, 0.0, 0.0}, kIdentity, run, 1.0 * u, 0.8 * u, &slopes);
     trunk.rest = true;
     p.pieces.push_back(std::move(trunk));
+    // the shoulders: the trapezius sloping from the neck out to each (the ball of the shoulder is the upper arm's own
+    // top, which the torso runs into at the joint: two copies of it, one in each part, would swell where they blend)
+    const Vec3& ls = sk.point("l_shoulder");
+    const Vec3& rs = sk.point("r_shoulder");
+    const auto rest = [u](double x, double y, double z) { return Vec3{x * u, y * u, z * u}; };
+    // (a frame whose first axis runs along `dir`, its third level: for a form laid along a bone)
+    const auto frame_along = [](const Vec3& dir) {
+        const Vec3 e0 = unit(dir);
+        const Vec3 e2 = unit(Vec3{-e0[2], 0.0, e0[0]});
+        const Vec3 e1{e2[1] * e0[2] - e2[2] * e0[1], e2[2] * e0[0] - e2[0] * e0[2], e2[0] * e0[1] - e2[1] * e0[0]};
+        Mat3 m{};
+        for (std::size_t r = 0; r < 3; ++r) m[r] = Vec3{e0[r], e1[r], e2[r]};
+        return m;
+    };
+    // (the shoulders in the body standing straight)
+    const auto shoulder_rest = [&](const Vec3& at) {
+        Vec3 q = into(C, sub(at, W));
+        q[1] = q[1] - 1.3 * u;
+        return q;
+    };
+    const Vec3 lsr = shoulder_rest(ls);
+    const Vec3 rsr = shoulder_rest(rs);
+    {
+        const auto trapezius = [&](const Vec3& shoulder, double side) {
+            const Vec3 inner = rest(side * 0.1, -2.86, 0.1);
+            const Vec3 outer = add(shoulder, rest(-side * 0.1, -0.03, 0.03));
+            Piece e = ellipsoid(mul(add(inner, outer), 0.5), frame_along(sub(outer, inner)), Vec3{0.5 * length(sub(outer, inner)) + 0.1 * u, 0.17 * u * g, 0.2 * u * g});
+            e.rest = true;
+            return e;
+        };
+        pair(p.pieces, trapezius(lsr, 1.0), trapezius(rsr, -1.0), 0.3 * u);
+    }
     // the buttocks
     const double gx = 0.52 * d.hw + 0.02 * g;
     pair(p.pieces, ellipsoid(off(P0, H, gx, 0.1, 0.2 * dd), H, radii(0.34 * g * sx.glute, 0.42, 0.37 * dd * sx.glute)),
          ellipsoid(off(P0, H, -gx, 0.1, 0.2 * dd), H, radii(0.34 * g * sx.glute, 0.42, 0.37 * dd * sx.glute)), 0.22 * u);
-    // the shoulders: the trapezius sloping from the neck to each, the ball of each (the upper arm starts as the same
-    // ball, so the deltoid runs into the chest and the back however the arm is raised)
-    out.r_shoulder = 0.245 * u * d.arm;
-    const Vec3& ls = sk.point("l_shoulder");
-    const Vec3& rs = sk.point("r_shoulder");
-    pair(p.pieces, cone(off(N, C, 0.14, -0.16, 0.1), 0.15 * u * d.gs, off(ls, C, -0.12, -0.03, 0.03), 0.16 * u * g),
-         cone(off(N, C, -0.14, -0.16, 0.1), 0.15 * u * d.gs, off(rs, C, 0.12, -0.03, 0.03), 0.16 * u * g), 0.3 * u);
-    pair(p.pieces, ellipsoid(ls, C, Vec3{out.r_shoulder, out.r_shoulder, out.r_shoulder}), ellipsoid(rs, C, Vec3{out.r_shoulder, out.r_shoulder, out.r_shoulder}),
-         0.25 * u);
-    // the collarbones: a low ridge from the pit of the neck out to each shoulder
+    // (the pectoral's outer part, from the chest to the arm: the chest runs into the shoulder with no groove)
     {
-        // (set under the chest's front between its top section and the one under the armpits: 0.012 u above it)
-        const double front_top = 0.1 * dd - 0.33 * d_chest;
-        const double front_armpit = 0.03 * dd - 0.5 * d_chest;
-        const double z = front_top + 0.39 * (front_armpit - front_top) + 0.068 + (sx.chest == 2 ? 0.024 : 0.0);
-        const double out_z = sx.chest == 2 ? -0.01 : -0.04;
-        pair(p.pieces, cone(off(N, C, 0.1, 0.15, z), 0.07 * u, off(ls, C, -0.18, -0.06, out_z), 0.07 * u),
-             cone(off(N, C, -0.1, 0.15, z), 0.07 * u, off(rs, C, 0.18, -0.06, out_z), 0.07 * u), 0.16 * u);
+        const auto tail = [&](const Vec3& shoulder) {
+            Piece e = ellipsoid(Vec3{0.66 * shoulder[0], -2.42 * u, -0.16 * d_chest * u}, kIdentity, radii(0.3 * g, 0.27, 0.15 * g));
+            e.rest = true;
+            return e;
+        };
+        pair(p.pieces, tail(lsr), tail(rsr), 0.3 * u);
     }
-    // (a low form on the trunk is a full ellipsoid set deep in it, only its crown above the surface: its edge soft
-    // where the two surfaces part slowly, firmer where they part fast — a pectoral's lower edge)
-    // the shoulder blades
-    pair(p.pieces, ellipsoid(off(W, C, 0.4 * sh * g, -0.98, 0.1 * d_chest), C, radii(0.33 * g, 0.4, 0.41 * d_chest)),
-         ellipsoid(off(W, C, -0.4 * sh * g, -0.98, 0.1 * d_chest), C, radii(0.33 * g, 0.4, 0.41 * d_chest)), 0.12 * u);
-    // the chest: the pectorals (a man's fuller), or the breasts on the ribcage
+    // a woman's breasts: each a drop — narrow where it leaves the chest under the collarbone, full below
     if (sx.chest == 2) {
-        pair(p.pieces, ellipsoid(off(W, C, 0.33 * sh * g + 0.04, -0.66, -0.4 * d_chest), C, radii(0.27 * g, 0.29 * g, 0.26 * g)),
-             ellipsoid(off(W, C, -0.33 * sh * g - 0.04, -0.66, -0.4 * d_chest), C, radii(0.27 * g, 0.29 * g, 0.26 * g)), 0.3 * u);
-    } else {
-        const double full = sx.chest == 1 ? 1.0 : 0.4;
-        const double z = (0.04 - 0.018 * full) * d_chest;
-        pair(p.pieces, ellipsoid(off(W, C, 0.38 * sh * g, -0.95, z), C, radii(0.43 * sh * g, 0.44, 0.5 * d_chest)),
-             ellipsoid(off(W, C, -0.38 * sh * g, -0.95, z), C, radii(0.43 * sh * g, 0.44, 0.5 * d_chest)), 0.1 * u);
+        const double bx = 0.33 * sh * g + 0.04;
+        pair(p.pieces, cone(off(W, C, bx - 0.03, -1.05, -0.17 * d_chest), 0.11 * u * g, off(W, C, bx, -0.66, -0.4 * d_chest), 0.265 * u * g),
+             cone(off(W, C, -bx + 0.03, -1.05, -0.17 * d_chest), 0.11 * u * g, off(W, C, -bx, -0.66, -0.4 * d_chest), 0.265 * u * g), 0.3 * u);
     }
-    // the furrow of the spine down the back (shallow), along the chest and along the waist
+    // The low relief of the trunk, as swells of its surface (no edge anywhere), set in the body standing straight:
+    const auto relief = [&p](Piece one) {
+        one.rest = true;
+        p.pieces.push_back(std::move(one));
+    };
+    const auto relief_pair = [&p](Piece one, Piece other) {
+        one.rest = true;
+        other.rest = true;
+        one.paired = true;
+        p.pieces.push_back(std::move(one));
+        p.pieces.push_back(std::move(other));
+    };
+    // the shoulder blades
     {
-        Piece furrow_high = carved(cone(Vec3{0.0, -2.25 * u, 0.6 * d_chest * u}, 0.04 * u, Vec3{0.0, -1.3 * u, 0.495 * d_chest * u}, 0.055 * u), 0.14 * u);
-        Piece furrow_low = carved(cone(Vec3{0.0, -1.3 * u, 0.495 * d_chest * u}, 0.055 * u, Vec3{0.0, -0.5 * u, 0.455 * dd * u}, 0.045 * u), 0.14 * u);
-        furrow_high.rest = true;
-        furrow_low.rest = true;
-        pair(p.pieces, furrow_high, furrow_low, 0.14 * u);
-        p.pieces[p.pieces.size() - 2].carve = true;
-        p.pieces[p.pieces.size() - 1].carve = true;
+        const double bx = 0.37 * sh * g;
+        const Vec3 size = radii(0.3 * g, 0.36, 0.25);
+        relief_pair(swell(rest(bx, -2.2, 0.47 * d_chest), kIdentity, size, 0.03 * u * g), swell(rest(-bx, -2.2, 0.47 * d_chest), kIdentity, size, 0.03 * u * g));
+    }
+    // the furrow of the spine, deepest at the small of the back, fading out toward the neck and toward the pelvis
+    relief(swell(rest(0.0, -1.45, 0.46 * dd), kIdentity, radii(0.15, 1.2, 0.3), -0.022 * u));
+    // the collarbones: a low ridge from the pit of the neck out toward each shoulder, fading at both ends
+    {
+        const double sx_ = 0.9 * (0.4 + 0.4 * sh) * g;  // (about where the shoulder's ball begins)
+        const auto bone = [&](double side) {
+            const Vec3 inner = rest(side * 0.04, -2.75, 0.1 * dd - 0.33 * d_chest - 0.02);
+            const Vec3 outer = rest(side * sx_, -2.71, -0.1);
+            return swell(mul(add(inner, outer), 0.5), frame_along(sub(outer, inner)), Vec3{0.52 * length(sub(outer, inner)), 0.12 * u, 0.22 * u}, 0.02 * u);
+        };
+        relief_pair(bone(1.0), bone(-1.0));
+    }
+    // the chest: the pectorals (a man's fuller), each a broad swell with a firmer lower edge
+    if (sx.chest != 2) {
+        const double full = sx.chest == 1 ? 1.0 : 0.4;
+        const double px = 0.36 * sh * g;
+        relief_pair(swell(rest(px, -2.2, -0.47 * d_chest), kIdentity, radii(0.4 * sh * g, 0.36, 0.28), 0.036 * u * full),
+                    swell(rest(-px, -2.2, -0.47 * d_chest), kIdentity, radii(0.4 * sh * g, 0.36, 0.28), 0.036 * u * full));
+        relief_pair(swell(rest(px, -2.1, -0.49 * d_chest), kIdentity, radii(0.38 * sh * g, 0.25, 0.25), 0.01 * u * full),
+                    swell(rest(-px, -2.1, -0.49 * d_chest), kIdentity, radii(0.38 * sh * g, 0.25, 0.25), 0.01 * u * full));
     }
     return out;
 }
@@ -902,14 +1078,38 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
     f.parts.push_back(std::move(torso.part));  // 0 the torso as one smooth body
     const Vec3 neck_low = off(N, C, 0.0, 0.1, 0.05);
     const Vec3 neck_top = off(HB, Hd, 0.0, -0.05, 0.1);
-    const double r_neck_low = 0.3 * u * gs * sx.neck;
-    const double r_neck_top = 0.25 * u * gs * sx.neck;
-    {  // 1 the neck (the head is meshed on its own, finer grid, with the neck's top: below)
+    const Vec3 down = unit(sub(neck_low, neck_top));
+    // The neck: a run of sections from its base (widest: it runs into the trapezius) up into the skull (the back of the
+    // head runs into it high, as the neck's muscles hold the skull), narrowest two thirds up to the skull's base. The body's mesh draws it up to 0.2 u below its top and the head's own, finer mesh from there up,
+    // with the jaw (below): each thins fast past that ring (by half of how far past), so the two cross steeply — a
+    // clean ring, where two meshes of one surface laid on each other would show through each other in patches — and
+    // the directions of the light there are the unthinned neck's on both (plain_normals), so nothing shows.
+    const double neck_len = length(sub(neck_top, neck_low));
+    const double nk = gs * sx.neck;
+    Piece neck;
+    {
+        const Vec3 up = mul(down, -1.0);
+        const Vec3 cx = la::column(C, 0);
+        const Vec3 e0 = unit(sub(cx, mul(up, dot3(cx, up))));
+        const Vec3 e2{e0[1] * up[2] - e0[2] * up[1], e0[2] * up[0] - e0[0] * up[2], e0[0] * up[1] - e0[1] * up[0]};
+        Mat3 m{};
+        for (std::size_t r = 0; r < 3; ++r) m[r] = Vec3{e0[r], up[r], e2[r]};
+        neck = loft(neck_low, m,
+                    {Station{0.0, 0.33 * u * nk, 0.3 * u * nk, 0.0}, Station{0.62 * neck_len, 0.25 * u * nk, 0.25 * u * nk, 0.012 * u},
+                     Station{neck_len, 0.25 * u * nk, 0.24 * u * nk, 0.02 * u}, Station{neck_len + 0.2 * u, 0.245 * u * nk, 0.235 * u * nk, 0.0}},
+                    0.3 * u, 0.3 * u);
+    }
+    const double ring = dot3(down, neck_top) + 0.2 * u;  // (where down · x is this)
+    {  // 1 the neck
         Part p;
-        p.pieces.push_back(cone(neck_low, r_neck_low, neck_top, r_neck_top));
+        p.pieces.push_back(neck);
+        p.fade = 0.5;
+        p.fade_n = mul(down, -1.0);
+        p.fade_d = -(ring + 0.01 * u);
         f.parts.push_back(std::move(p));
     }
-    f.joints.push_back(Joint{kTorso, kNeck, off(N, C, 0.0, 0.1, 0.03), 0.3 * u, 0.6 * u, 0.0});
+    const Joint neck_joint{kTorso, kNeck, off(N, C, 0.0, 0.1, 0.03), 0.3 * u, 0.6 * u, 0.5};
+    f.joints.push_back(neck_joint);
 
     struct Arm {
         int fore;
@@ -955,7 +1155,7 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             f.parts.push_back(std::move(p));
         }
         const int fore = upper + 1;
-        f.joints.push_back(Joint{kTorso, upper, shoulder, 0.2 * u, 1.1 * u, 0.55});
+        f.joints.push_back(Joint{kTorso, upper, shoulder, 0.3 * u, 1.1 * u, 0.55});
         f.joints.push_back(Joint{upper, fore, elbow, 0.07 * u * std::min(1.0, bend_of(arm_r, fore_r) / 0.3), 0.3 * u, 0.3});
         arms[side] = Arm{fore, elbow, wrist, f.parts[static_cast<std::size_t>(fore)].pieces, f.parts[static_cast<std::size_t>(fore)].k, wrist_radii};
 
@@ -971,19 +1171,20 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         const double med = -sg;  // (toward the other leg)
         // (the leg's sections from the hip to the ankle, one run through the knee: thick at the top, the knee a little
         // forward, the shin straight in front and the calf behind, narrow to the ankle)
-        const std::vector<Station> leg_run{st(0.0, 0.39 * leg, 0.41 * leg, -0.01 * leg),      st(0.85 * legs, 0.335 * leg, 0.365 * leg, -0.025),
+        const std::vector<Station> leg_run{st(0.1, 0.395 * leg, 0.41 * leg, -0.01 * leg),     st(0.85 * legs, 0.335 * leg, 0.365 * leg, -0.025),
                                            st(1.6 * legs, 0.262 * g, 0.275 * g, -0.012),      st(2.0 * legs, r_knee, 1.05 * r_knee, -0.03 * g),
                                            st(2.25 * legs, 0.228 * g, 0.24 * g, -0.005 * g),  st(2.6 * legs, 0.232 * g, 0.258 * g, 0.05 * g),
                                            st(3.3 * legs, 0.165 * g, 0.175 * g, 0.02 * g),    st(3.95 * legs, r_ankle, 1.08 * r_ankle, 0.01)};
         const std::vector<Station> leg_slopes = run_slopes(leg_run);
-        {  // the thigh: a ball in the hip
+        {  // the thigh: widest just under the hip joint, and above it a dome up to the crest of the pelvis — the hip's
+            // own side, and its front beside the belly
             Part p;
             p.k = 0.1 * u;
             const std::vector<Station> slopes = stations_of(leg_slopes, 0, 3, 0.0);
-            p.pieces.push_back(loft(hip, thigh_r, stations_of(leg_run, 0, 3, 0.0), 0.36 * u * leg, r_knee * u, &slopes));
+            p.pieces.push_back(loft(hip, thigh_r, stations_of(leg_run, 0, 3, 0.0), 0.5 * u * leg, r_knee * u, &slopes, 0.7));
             // (the inner thigh: the two meet under the crotch, when the build fills the room between the hips)
             const double inner = std::max(0.0, std::min(dm.hw - 0.3 * leg, 0.26 * leg));
-            p.pieces.push_back(with_blend(cone(off(hip, thigh_r, med * inner, 0.2, 0.01), 0.3 * u * leg, off(hip, thigh_r, med * 0.03, 1.35 * legs, 0.0), 0.2 * u * leg), 0.25 * u));
+            p.pieces.push_back(with_blend(ellipsoid(off(hip, thigh_r, med * (0.6 * inner + 0.02), 0.72 * legs, 0.01), thigh_r, radii(0.3 * leg, 0.82 * legs, 0.3 * leg)), 0.25 * u));
             f.parts.push_back(std::move(p));
         }
         const int thigh = static_cast<int>(f.parts.size()) - 1;
@@ -1019,7 +1220,7 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             f.parts.push_back(std::move(p));
         }
         const int foot = shin + 1;
-        f.joints.push_back(Joint{kTorso, thigh, hip, 0.16 * u, 1.0 * u, 0.4});
+        f.joints.push_back(Joint{kTorso, thigh, hip, 0.3 * u, 1.15 * u, 0.5});
         f.joints.push_back(Joint{thigh, shin, knee, 0.09 * u * std::min(1.0, bend_of(thigh_r, shin_r) / 0.3), 0.4 * u, 0.3});
         f.joints.push_back(Joint{shin, foot, ankle, 0.07 * u, 0.3 * u, 0.0});
     }
@@ -1034,28 +1235,44 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             if (dot3(sub(out.mesh.v[i], arm.wrist), e) < 0.06 * u) out.mesh.no_contour[i] = 1;
         }
     }
+    // (the neck's directions of the light above the ring: the unthinned neck's)
+    plain_normals(out.mesh, f, {kNeck}, u, [&](const Vec3& x) { return dot3(down, x) < ring + 0.03 * u; });
     {  // the head and the neck's top, on a grid of u / kHeadCells: the face's relief needs it
         Field hf;
         hf.parts.push_back(head_part(Hc, Hd, u));
         Part stub;
-        // (the neck's own cone, 0.004 u thinner — it stays under the body's coarser mesh of the same neck, which is the
-        // neck one sees —, kept down to 0.3 u below the neck's top. The head runs into it at the nape; under the jaw the
-        // two meet in a plain crease, which the body's neck crosses cleanly)
-        stub.pieces.push_back(cone(neck_low, r_neck_low, neck_top, r_neck_top));
-        const Vec3 down = unit(sub(neck_low, neck_top));
+        // (the neck's own run from its top down to 0.37 u below it, thinning under the ring. The head runs into it at
+        // the nape, and the jaw into it by a narrower blend: an overhang with a soft fold under it)
+        stub.pieces.push_back(neck);
         stub.cut = true;
         stub.cut_n = down;
-        stub.cut_d = dot3(down, neck_top) + 0.3 * u;
-        stub.inset = 0.004 * u;
+        stub.cut_d = ring + 0.14 * u;
+        stub.fade = 0.5;
+        stub.fade_n = down;
+        stub.fade_d = ring - 0.01 * u;
         hf.parts.push_back(std::move(stub));
-        hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.22), 0.25 * u, 0.5 * u, 0.0});  // (at the nape: the chin stays clear of the neck)
+        // (and the torso where the neck's base runs into it, thinned and cut the same way: the neck at the ring is
+        // the body's own)
+        Part under = f.parts[kTorso];
+        under.pieces.resize(kTrunkAndTrapezius);  // (what the neck's base runs into: the trunk and the trapezius)
+        under.cut = true;
+        under.cut_n = down;
+        under.cut_d = ring + 0.14 * u;
+        under.fade = 0.5;
+        under.fade_n = down;
+        under.fade_d = ring - 0.01 * u;
+        hf.parts.push_back(std::move(under));
+        hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.22), 0.24 * u, 0.5 * u, 0.0});  // (at the nape)
+        hf.joints.push_back(Joint{0, 1, neck_top, 0.15 * u, 0.5 * u, 0.5});                        // (under the jaw)
+        hf.joints.push_back(Joint{2, 1, neck_joint.at, neck_joint.k, neck_joint.radius, neck_joint.flat});
         Smooth hm = surface_nets::mesh(hf, u / kHeadCells);
-        // (the outline of the neck changes from the body's to the head's 0.12 u below the neck's top)
+        plain_normals(hm, hf, {1, 2}, u, [&](const Vec3& x) { return dot3(down, x) > ring - 0.03 * u; });
+        // (the outline of the neck changes from the body's to the head's at the ring)
         for (std::size_t i = 0; i < hm.v.size(); ++i) {
-            if (hm.part[i] == 1 && dot3(sub(hm.v[i], neck_top), down) > 0.12 * u) hm.no_contour[i] = 1;
+            if (hm.part[i] != 0 && dot3(down, hm.v[i]) > ring) hm.no_contour[i] = 1;
         }
         for (std::size_t i = 0; i < out.mesh.v.size(); ++i) {
-            if (out.mesh.part[i] == kNeck && dot3(sub(out.mesh.v[i], neck_top), down) < 0.12 * u) out.mesh.no_contour[i] = 1;
+            if (out.mesh.part[i] == kNeck && dot3(down, out.mesh.v[i]) < ring) out.mesh.no_contour[i] = 1;
         }
         plain_outline(hm, hf.parts[0], u);
         append(out.mesh, hm, [](const Vec3& c) { return c; }, [](const Vec3& c) { return c; }, false);
