@@ -1193,17 +1193,24 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             p.k = 0.1 * u;
             const std::vector<Station> slopes = stations_of(leg_slopes, 0, 3, 0.0);
             p.pieces.push_back(loft(hip, thigh_r, stations_of(leg_run, 0, 3, 0.0), 0.5 * u * leg, r_knee * u, &slopes, 0.7));
-            // (the inner thigh: the two meet under the crotch, when the build fills the room between the hips)
+            // The inner thigh. With the usual hips (and narrower) a long form beside the thigh's own, a little toward
+            // the other leg. With wide hips — more room between the legs than that fills — it gives way (by `wide`,
+            // 0..1) to a cone from just under the crotch, where it is fullest, down to above the knee, where it ends
+            // inside the thigh: the inner outline is one straight taper from the crotch to the knee, with no swell
+            // at mid-thigh. The two legs never come nearer than three of the grid's cells (a thinner slit between two
+            // forms would be drawn ragged).
             const double inner = std::max(0.0, std::min(dm.hw - 0.3 * leg, 0.26 * leg));
-            // (and with wide hips it reaches almost to the middle: the gap between the legs stays small and low)
-            // (with wide hips it reaches further toward the other leg, fullest just under the crotch and shorter: the
-            // gap between the legs is narrow at its top and opens downward. The two never come nearer than two of
-            // the grid's cells — a thinner slit between two forms would be drawn ragged)
             const double usual = 0.6 * inner + 0.02;
-            const double toward = std::max(usual, dm.hw - 0.3 * leg - 0.075);
-            const double more = toward - usual;
-            p.pieces.push_back(
-                with_blend(ellipsoid(off(hip, thigh_r, med * toward, (0.72 - 2.5 * more) * legs, 0.01), thigh_r, radii(0.3 * leg, (0.82 - 2.5 * more) * legs, 0.3 * leg)), 0.25 * u));
+            const double wide = std::min(1.0, std::max(0.0, dm.hw - 0.3 * leg - 0.075 - usual) / 0.05);
+            if (wide < 1.0) {
+                p.pieces.push_back(
+                    with_blend(ellipsoid(off(hip, thigh_r, med * usual * (1.0 - wide), 0.72 * legs, 0.01), thigh_r, radii(0.3 * leg, 0.82 * legs, 0.3 * leg)), 0.25 * u));
+            }
+            if (wide > 0.0) {
+                const double top = 0.395 * leg + wide * std::min(std::max(0.0, dm.hw - 0.09 - 0.395 * leg), 0.15 * leg);  // (how far it reaches toward the other leg)
+                p.pieces.push_back(with_blend(cone(off(hip, thigh_r, med * (top - 0.3 * leg), 0.3, 0.01), 0.3 * u * leg, off(hip, thigh_r, med * 0.09 * g, 1.7 * legs, 0.0), 0.15 * u * g),
+                                              0.25 * u));
+            }
             f.parts.push_back(std::move(p));
         }
         const int thigh = static_cast<int>(f.parts.size()) - 1;
