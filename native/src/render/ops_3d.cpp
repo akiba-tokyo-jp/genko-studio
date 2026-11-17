@@ -236,7 +236,8 @@ void figure_preset(Json& prim, const std::string& name) {
 
 // --- the pose library (SPEC FIGURE-02, figures@1) ------------------------------------------------------------------
 
-// hold: {l, r: prop} (what each hand holds — drawn from G5 on; kept now), merged into the figure's; null takes a side's away
+// hold: {l, r: prop | "prop:way"} (what each hand holds, and how — core/pose_library.hpp), merged into the figure's; null
+// takes a side's away
 void hold_into(Json& prim, const Json& raw) {
     if (!raw.is_object()) throw OpError("hold is {l, r: " + join(core::pose_library::kProps) + "}");
     Json held = prim.contains("hold") && prim["hold"].is_object() ? prim["hold"] : Json::object();
@@ -246,9 +247,9 @@ void hold_into(Json& prim, const Json& raw) {
             held.erase(side);
             continue;
         }
-        if (!prop.is_string() || !core::pose_library::is_prop(prop.get_ref<const std::string&>())) {
-            throw OpError("a hand holds one of " + join(core::pose_library::kProps));
-        }
+        if (!prop.is_string()) throw OpError("a hand holds one of " + join(core::pose_library::kProps));
+        // ("<prop>", or "<prop>:<way>" for a prop that can be held another way: figures@2)
+        if (const std::string problem = core::pose_library::hold_problem(prop.get_ref<const std::string&>()); !problem.empty()) throw OpError(problem);
         held[side] = prop;
     }
     if (held.empty()) {

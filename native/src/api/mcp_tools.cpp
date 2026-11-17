@@ -255,6 +255,8 @@ const std::vector<ToolSpec>& table() {
         sheet=true: 選んだポーズ（24 まで）の一覧の絵を返す（views: front / three_quarter / side、既定は 3 つ。body で体型）。
         付ける: apply_ops で pose_figure {page, id, pose_id, mirror（true で左右反転）, keep: "ground"（足もとの高さを保つ）}。新しい人形は add_figure に pose_id。
         人形をドラッグすると pose_id は外れる。手に持つ物（hold: 剣・バット・傘・鞄・カップ・スマホ・紙・本・ペン・ボール）は手の中に描く（props: false で隠す）。
+        持ち方を選べる物は hold の値を「物:持ち方」で書く: sword・bat・umbrella は forward（前腕の向きに続けて突き出す）・down（逆手）、
+        bag は shoulder（その側の肩に紐をかけ、鞄は腰の横。手は紐を握る）・elbow（肘にかける）。物だけなら今までどおりの持ち方。poses の props はその値のまま。
         二人のポーズ（分類 couple・two_people。poses の pair: true、figures に二人分）: pose_figure {page, id, pose_id, partner_id} で id の人形が a、
         partner_id の人形が b（その id の人形が無ければ b を足す。二人とも pose_id <id>#a・#b と同じ pair を持つ）。add_figure に pair の pose_id なら二人を置く。
         片方だけに付けるなら pose_id に <id>#a か <id>#b。接地の partner は相手にもたれる・支えられる人。)",

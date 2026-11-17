@@ -549,6 +549,228 @@ private slots:
         QVERIFY(bare->creases.empty());
     }
 
+    // How a held thing sits (SPEC FIGURE-02, figures@2: a hold's value "<prop>:<way>"). The props held the usual way are
+    // the bytes they were before there were ways (the digest was taken with the build before them: native/figures-finish
+    // 7da5b234). A sword, a bat and an umbrella held forward lie 60° from the thumb's way toward the fingers, in the
+    // hand's own frame however the arm turns, and with the wrist bent 30° to the little finger's side they carry on
+    // the forearm's line; held down they leave the fist the other way. A bag on the shoulder has its strap over the
+    // shoulder, through the fist and outside the torso (the usual body, a man's and a woman's), the bag beside the
+    // hip; a bag on the elbow hangs under the forearm near the elbow. Each is drawn after the body's points (the body
+    // the same bytes), mirrored with the body, the same bytes on every run and thread; a way the prop does not have
+    // draws nothing.
+    void theWaysAThingIsHeld() {
+        namespace library = genko::core::pose_library;
+        const auto prop_digest = [](const mesh3d::Model& m) {
+            std::string bytes;
+            for (const auto& e : m.creases) bytes.append(reinterpret_cast<const char*>(e.data()), sizeof e);
+            return mesh_digest(m) + genko::test::sha256(bytes);
+        };
+        Json plain = figure_prim("stand", "", 0.0);
+        plain["hands"] = ops(R"({"l": "grip", "r": "grip"})");
+        plain["joints"]["r_arm"] = ops(R"({"x": 0.9, "z": -0.2})");
+        plain["joints"]["r_elbow"] = ops(R"({"x": 1.1})");
+        const auto bare = mesh3d::model_of(plain);
+        const double u = 90.0 / 7.5;
+        const double hand = shape::hand_length(mesh3d::figure_skeleton(plain));
+        {
+            std::string all;
+            for (const std::string_view name : library::kProps) all += prop_digest(*mesh3d::model_of(with(plain, "hold", Json::object({{"r", std::string(name)}}))));
+            qInfo("the props held the usual way: %s", genko::test::sha256(all).c_str());
+            QCOMPARE(genko::test::sha256(all), std::string(kPlainProps));
+        }
+        const auto sub = [](const mesh3d::Vec3& a, const mesh3d::Vec3& b) { return mesh3d::Vec3{a[0] - b[0], a[1] - b[1], a[2] - b[2]}; };
+        const auto dot = [](const mesh3d::Vec3& a, const mesh3d::Vec3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+        const auto len = [&](const mesh3d::Vec3& a) { return std::sqrt(dot(a, a)); };
+        // (a point of the figure in the right hand's bone frame, Tᵀ (p − wrist): x −n·side, y along the fingers, z against the thumb)
+        const auto in_hand = [&](const Json& prim, const mesh3d::Vec3& p) {
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(prim);
+            const mesh3d::Mat3& T = sk.turn("r_wrist");
+            const mesh3d::Vec3 d = sub(p, sk.point("r_wrist"));
+            return mesh3d::Vec3{T[0][0] * d[0] + T[1][0] * d[1] + T[2][0] * d[2], T[0][1] * d[0] + T[1][1] * d[1] + T[2][1] * d[2],
+                                T[0][2] * d[0] + T[1][2] * d[1] + T[2][2] * d[2]};
+        };
+        const mesh3d::Vec3 grip{0.16 * hand, 0.58 * hand, 0.0};  // (the middle of a handle through the right fist, there)
+        // the way a long prop points: from the fist's middle to its far end (the middle of its points within a fifth of a
+        // hand of the farthest: a sword's tip, the ring that ends a bat), in the hand's frame
+        const auto points = [&](const Json& prim) {
+            const auto m = mesh3d::model_of(prim);
+            double most = -1.0;
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) most = std::max(most, len(sub(in_hand(prim, m->mesh.v[i]), grip)));
+            mesh3d::Vec3 far{};
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) {
+                const mesh3d::Vec3 d = sub(in_hand(prim, m->mesh.v[i]), grip);
+                if (len(d) > most - 0.2 * hand) far = mesh3d::Vec3{far[0] + d[0], far[1] + d[1], far[2] + d[2]};
+            }
+            const double n = len(far);
+            return mesh3d::Vec3{far[0] / n, far[1] / n, far[2] / n};
+        };
+        const auto drawn_after_the_body = [&](const Json& prim, const std::string& what) {
+            const auto m = mesh3d::model_of(prim);
+            QVERIFY2(m->smooth() && m->body == bare->mesh.v.size(), what.c_str());
+            QVERIFY2(m->mesh.v.size() > m->body && !m->creases.empty() && m->tris.size() > bare->tris.size(), what.c_str());
+            for (std::size_t i = 0; i < m->body; ++i) QVERIFY(m->mesh.v[i] == bare->mesh.v[i] && m->vn[i] == bare->vn[i]);
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) {
+                QCOMPARE(m->nocontour[i], std::uint8_t{1});
+                QVERIFY(std::fabs(std::hypot(m->vn[i][0], m->vn[i][1], m->vn[i][2]) - 1.0) < 1e-9);
+            }
+            QCOMPARE(mesh_digest(*mesh3d::model_of(with(prim, "props", false))), mesh_digest(*bare));  // (props: false — the body alone)
+        };
+        // the mirror: the other hand holds it the same way, the mirrored body and prop
+        const auto mirrors = [&](const Json& held, const std::string& value) {
+            const auto m = mesh3d::model_of(held);
+            Json other = mirrored(held);
+            other["hold"] = Json::object({{"l", value}});
+            const auto o = mesh3d::model_of(other);
+            QCOMPARE(o->mesh.v.size(), m->mesh.v.size());
+            QCOMPARE(o->body, m->body);
+            std::vector<std::array<double, 3>> x;
+            std::vector<std::array<double, 3>> y;
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) x.push_back({-m->mesh.v[i][0], m->mesh.v[i][1], m->mesh.v[i][2]});
+            for (std::size_t i = o->body; i < o->mesh.v.size(); ++i) y.push_back({o->mesh.v[i][0], o->mesh.v[i][1], o->mesh.v[i][2]});
+            std::sort(x.begin(), x.end());
+            std::sort(y.begin(), y.end());
+            double most = 0.0;
+            for (std::size_t i = 0; i < x.size(); ++i) {
+                for (int a = 0; a < 3; ++a) most = std::max(most, std::fabs(x[i][static_cast<std::size_t>(a)] - y[i][static_cast<std::size_t>(a)]));
+            }
+            QVERIFY2(most < 1e-7 * u, (value + " " + std::to_string(most)).c_str());
+        };
+        const double c60 = 0.5;
+        const double s60 = std::sqrt(3.0) / 2.0;
+        for (const char* name : {"sword", "bat", "umbrella"}) {
+            const std::string what(name);
+            const Json forward = with(plain, "hold", Json::object({{"r", what + ":forward"}}));
+            const Json down = with(plain, "hold", Json::object({{"r", what + ":down"}}));
+            drawn_after_the_body(forward, what + ":forward");
+            drawn_after_the_body(down, what + ":down");
+            // forward: 60° from the thumb's way (−z there) toward the fingers (y); down: against the thumb's way
+            const mesh3d::Vec3 f = points(forward);
+            QVERIFY2(dot(f, mesh3d::Vec3{0.0, s60, -c60}) > 0.9995, (what + " " + std::to_string(f[0]) + " " + std::to_string(f[1]) + " " + std::to_string(f[2])).c_str());
+            const mesh3d::Vec3 d = points(down);
+            QVERIFY2(dot(d, mesh3d::Vec3{0.0, 0.0, 1.0}) > 0.9995, (what + " " + std::to_string(d[2])).c_str());
+            // the same in the hand however the arm turns and wherever the figure's down is (the usual way goes by it)
+            Json turned = forward;
+            turned["joints"]["r_arm"] = ops(R"({"x": 2.4, "z": -0.6})");
+            turned["joints"]["r_elbow"] = ops(R"({"x": 1.6, "y": 0.4})");
+            turned["joints"]["r_wrist"] = ops(R"({"x": 0.3, "z": 0.2})");
+            QVERIFY2(dot(points(turned), f) > 1.0 - 1e-9, what.c_str());
+            QCOMPARE(mesh3d::model_of(turned)->mesh.v.size() - mesh3d::model_of(turned)->body, mesh3d::model_of(forward)->mesh.v.size() - mesh3d::model_of(forward)->body);
+            // the wrist bent 30° to the little finger's side: the prop carries on the forearm's line (within 1°)
+            Json thrust = forward;
+            thrust["joints"]["r_wrist"] = ops(R"({"x": -0.5236})");
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(thrust);
+            const mesh3d::Vec3 fore = sub(sk.point("r_wrist"), sk.point("r_elbow"));
+            const mesh3d::Mat3& T = sk.turn("r_wrist");
+            const mesh3d::Vec3 p = points(thrust);
+            const mesh3d::Vec3 way{T[0][0] * p[0] + T[0][1] * p[1] + T[0][2] * p[2], T[1][0] * p[0] + T[1][1] * p[1] + T[1][2] * p[2],
+                                   T[2][0] * p[0] + T[2][1] * p[1] + T[2][2] * p[2]};
+            const double cosine = dot(way, fore) / len(fore);
+            QVERIFY2(cosine > std::cos(1.0 * 3.141592653589793 / 180.0), (what + " " + std::to_string(cosine)).c_str());
+            mirrors(forward, what + ":forward");
+            mirrors(down, what + ":down");
+        }
+        // a bag on the shoulder, on the usual body, a man's and a woman's
+        for (const char* sex : {"", "male", "female"}) {
+            Json person = plain;
+            if (*sex != 0) person["body"] = Json::object({{"sex", sex}});
+            person["joints"]["r_arm"] = ops(R"({"x": 0.35, "z": -0.1})");
+            person["joints"]["r_elbow"] = ops(R"({"x": 2.2})");
+            const Json held = with(person, "hold", Json::object({{"r", "bag:shoulder"}}));
+            const std::string what = std::string("bag:shoulder ") + sex;
+            const auto m = mesh3d::model_of(held);
+            const auto alone = mesh3d::model_of(person);
+            QVERIFY2(m->body == alone->mesh.v.size() && m->mesh.v.size() > m->body && !m->creases.empty(), what.c_str());
+            for (std::size_t i = 0; i < m->body; ++i) QVERIFY(m->mesh.v[i] == alone->mesh.v[i] && m->vn[i] == alone->vn[i]);
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(held);
+            const double hand_here = shape::hand_length(sk);
+            const shape::Part torso = shape::torso_part(sk);
+            const mesh3d::Vec3& shoulder = sk.point("r_shoulder");
+            const mesh3d::Vec3& hip = sk.point("r_hip");
+            double nearest_torso = 1e300, deepest = 1e300, highest = 1e300, at_fist = 1e300, lowest = -1e300, at_hip = 1e300;
+            mesh3d::Vec3 top{};
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) {
+                const mesh3d::Vec3& p = m->mesh.v[i];
+                const double d = torso.at(p);
+                deepest = std::min(deepest, d);
+                nearest_torso = std::min(nearest_torso, std::fabs(d));
+                if (p[1] < highest) {
+                    highest = p[1];
+                    top = p;
+                }
+                lowest = std::max(lowest, p[1]);
+                at_fist = std::min(at_fist, len(sub(in_hand(held, p), mesh3d::Vec3{0.16 * hand_here, 0.58 * hand_here, 0.0})));
+                at_hip = std::min(at_hip, len(sub(p, hip)));
+            }
+            QVERIFY2(deepest > 0.0, (what + " inside the torso by " + std::to_string(-deepest / u)).c_str());     // (nowhere in the torso)
+            QVERIFY2(nearest_torso < 0.05 * u, (what + " " + std::to_string(nearest_torso / u)).c_str());         // (it lies on it)
+            // over the shoulder: its highest point above the shoulder's joint, between the neck and the arm
+            QVERIFY2(highest < shoulder[1] && highest > shoulder[1] - 0.6 * u, (what + " " + std::to_string((highest - shoulder[1]) / u)).c_str());
+            QVERIFY2(top[0] < -0.25 * u && top[0] > shoulder[0], (what + " " + std::to_string(top[0] / u)).c_str());
+            QVERIFY2(at_fist < 0.4 * hand_here, (what + " " + std::to_string(at_fist / hand_here)).c_str());  // (through the fist)
+            // the bag beside the hip: down to the thigh, within reach of the hip's joint
+            QVERIFY2(lowest > hip[1] + 0.3 * u && lowest < hip[1] + 1.2 * u, (what + " " + std::to_string((lowest - hip[1]) / u)).c_str());
+            QVERIFY2(at_hip < 0.9 * u, (what + " " + std::to_string(at_hip / u)).c_str());
+            mirrors(held, "bag:shoulder");
+            QCOMPARE(mesh_digest(*mesh3d::model_of(with(held, "props", false))), mesh_digest(*alone));
+        }
+        // a bag on the elbow: the handles over the forearm near the elbow, the bag under it
+        {
+            Json person = plain;
+            person["joints"]["r_arm"] = ops(R"({"x": 0.1})");
+            person["joints"]["r_elbow"] = ops(R"({"x": 1.5})");
+            const Json held = with(person, "hold", Json::object({{"r", "bag:elbow"}}));
+            const auto m = mesh3d::model_of(held);
+            const auto alone = mesh3d::model_of(person);
+            QVERIFY(m->body == alone->mesh.v.size() && m->mesh.v.size() > m->body && !m->creases.empty());
+            for (std::size_t i = 0; i < m->body; ++i) QVERIFY(m->mesh.v[i] == alone->mesh.v[i] && m->vn[i] == alone->vn[i]);
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(held);
+            const mesh3d::Vec3& elbow = sk.point("r_elbow");
+            const mesh3d::Vec3& wrist = sk.point("r_wrist");
+            double highest = 1e300, lowest = -1e300, at_elbow = 1e300, at_wrist = 1e300;
+            for (std::size_t i = m->body; i < m->mesh.v.size(); ++i) {
+                const mesh3d::Vec3& p = m->mesh.v[i];
+                highest = std::min(highest, p[1]);
+                lowest = std::max(lowest, p[1]);
+                at_elbow = std::min(at_elbow, len(sub(p, elbow)));
+                at_wrist = std::min(at_wrist, len(sub(p, wrist)));
+            }
+            const double fore_y = std::min(elbow[1], wrist[1]);
+            QVERIFY2(highest < fore_y && highest > fore_y - 0.4 * u, std::to_string((highest - fore_y) / u).c_str());  // (the handles go over the forearm)
+            QVERIFY2(lowest > std::max(elbow[1], wrist[1]) + 0.8 * hand, std::to_string(lowest / u).c_str());          // (the bag hangs under it)
+            QVERIFY2(at_elbow < 0.4 * u && at_wrist > 0.5 * u, (std::to_string(at_elbow / u) + " " + std::to_string(at_wrist / u)).c_str());
+            mirrors(held, "bag:elbow");
+        }
+        // a way that is not the prop's (the ops refuse one: this is a book's prim written by hand) draws nothing
+        for (const char* value : {"sword:sideways", "cup:forward", "bag:forward", "sword:", "bag:shoulder:left"}) {
+            const auto m = mesh3d::model_of(with(plain, "hold", Json::object({{"r", value}})));
+            QVERIFY2(m->body == 0 && m->creases.empty(), value);
+            QCOMPARE(mesh_digest(*m), mesh_digest(*bare));
+        }
+        // the same bytes on every run and on four threads
+        {
+            Json person = plain;
+            person["joints"]["l_arm"] = ops(R"({"x": 0.35, "z": 0.1})");
+            person["joints"]["l_elbow"] = ops(R"({"x": 2.2})");
+            const mesh3d::Skeleton sk = mesh3d::figure_skeleton(person);
+            const auto digest = [&] {
+                const shape::Props made = shape::props(sk, "bag:shoulder", "sword:forward");
+                std::string bytes;
+                for (const auto& e : made.edges) bytes.append(reinterpret_cast<const char*>(e.data()), sizeof e);
+                return smooth_digest(made.mesh) + genko::test::sha256(bytes);
+            };
+            const std::string first = digest();
+            QVERIFY(!shape::props(sk, "bag:shoulder", "sword:forward").mesh.v.empty());
+            std::vector<std::string> got(4);
+            std::vector<std::thread> pool;
+            for (std::size_t t = 0; t < got.size(); ++t) pool.emplace_back([&, t] { got[t] = digest(); });
+            for (auto& t : pool) t.join();
+            for (const std::string& g : got) QCOMPARE(g, first);
+            const shape::Props elbow = shape::props(sk, "bag:elbow", "umbrella:down");
+            const shape::Props again = shape::props(sk, "bag:elbow", "umbrella:down");
+            QCOMPARE(smooth_digest(elbow.mesh), smooth_digest(again.mesh));
+        }
+    }
+
     // Boxes, scenes and imported models are drawn and traced exactly as before FIGURE-01 (the digests were taken with
     // the build before it), but for the box traced through the camera: its own edges since the fix of 2026-11-16 (it
     // was the floor's grid; docs/cpp-migration/HANDOFF.md).
@@ -584,6 +806,7 @@ private:
     static constexpr const char* kDrawn =
         "897d67a6e2f65168b430e0cad78986eed08229901a33feb430bcedfef3fdb7f260af09d0401635f858d4704b65d5662cc691ac392e66b05d1314ceb8077f9c5a";
     static constexpr const char* kOtherKinds = "6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1";
+    static constexpr const char* kPlainProps = "bd710185ef67d05e401ca9dc0c8cc597323bee1cc748f5fee0d4755b1b86b420";
 };
 
 QTEST_GUILESS_MAIN(TestFigureMesh)

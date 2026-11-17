@@ -2191,8 +2191,8 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kFukidashi2Feature ||
            // fonts@1 (core/font_catalog.hpp)
            feature == core::fonts::kFontsFeature ||
-           // figures@1 (core/pose_library.hpp)
-           feature == core::pose_library::kFiguresFeature;
+           // figures@1, figures@2 (core/pose_library.hpp)
+           feature == core::pose_library::kFiguresFeature || feature == core::pose_library::kFigures2Feature;
 }
 
 int project_version(const Json& payload) {

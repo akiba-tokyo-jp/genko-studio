@@ -692,6 +692,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // while a prim says one (a book without them is saved as before, byte for byte)
     std::erase(features, std::string(core::pose_library::kFiguresFeature));
     if (core::pose_library::uses_figures_feature(doc)) features.emplace_back(core::pose_library::kFiguresFeature);
+    // figures@2 (SPEC FIGURE-02): a figure's hold that says how the thing is held ("bag:shoulder", "sword:forward"), which
+    // a build that knows figures@1 alone would not draw — named while a figure's hold says one
+    std::erase(features, std::string(core::pose_library::kFigures2Feature));
+    if (core::pose_library::uses_figures2_feature(doc)) features.emplace_back(core::pose_library::kFigures2Feature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
