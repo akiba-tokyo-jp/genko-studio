@@ -54,8 +54,9 @@ std::array<int, 3> colour(std::size_t i);
 
 // guides/figures.png: the prims shaded on black (RGB), 3 × 3 samples a pixel.
 render::Image figures(const core::Page& page, std::span<const Json> prims, const View& view);
-// guides/regions.png: each prim's own silhouette (the nearest where they overlap), grown by `grow` px, in its colour;
-// black elsewhere (RGB). grow < 0: about 1 % of the image's long side.
+// guides/regions.png: each prim's own silhouette (the nearest where they overlap) made one clean shape — the slits and
+// notches narrower than 2 × `grow` px closed: between an arm and the body beside it — and grown by `grow` px, in its
+// colour; black elsewhere (RGB). grow < 0: about 1 % of the image's long side; 0: the silhouette as it is.
 render::Image regions(const core::Page& page, std::span<const Json> prims, const View& view, int grow = -1);
 // The same from the cast's places when a panel has people but no 3D figures (where places overlap, the person whose
 // head is nearest across; the first of equals).

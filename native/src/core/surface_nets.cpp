@@ -40,7 +40,7 @@ constexpr int kEdges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {
 
 }  // namespace
 
-Smooth mesh(const Field& field, double h) {
+Smooth mesh(const Field& field, double h, double normal_steps) {
     Smooth out;
     const std::size_t parts = field.parts.size();
     if (parts == 0 || !(h > 0.0) || !std::isfinite(h)) return out;
@@ -128,6 +128,7 @@ Smooth mesh(const Field& field, double h) {
 
     // 2. a point in each cell the surface crosses
     const double step = h * 0.05;  // (the gradient's step)
+    const double normal_step = h * normal_steps;
     for (Brick& b : bricks) {
         const auto f = [&](const Vec3& x) { return field.at(x, b.use.data(), d.data()); };
         const auto gradient = [&](const Vec3& x, double e) {
@@ -161,9 +162,12 @@ Smooth mesh(const Field& field, double h) {
                         ++count;
                     }
                     Vec3 p{base[0] + sum[0] / count * h, base[1] + sum[1] / count * h, base[2] + sum[2] / count * h};
-                    // two Newton steps onto the surface, kept within half a cell of the cell
+                    // two Newton steps onto the surface, kept within half a cell of the cell (the second only when the
+                    // first has not reached it); the part nearest to the point
+                    int nearest = 0;
                     for (int it = 0; it < 2; ++it) {
-                        const double fp = f(p);
+                        const double fp = field.at(p, b.use.data(), d.data(), &nearest);
+                        if (it == 1 && std::fabs(fp) < 1e-4 * h) break;  // (on the surface already)
                         const Vec3 g = gradient(p, step);
                         const double gx = g[0] / (2.0 * step);
                         const double gy = g[1] / (2.0 * step);
@@ -173,12 +177,13 @@ Smooth mesh(const Field& field, double h) {
                         const double s = fp / g2;
                         const Vec3 q{p[0] - gx * s, p[1] - gy * s, p[2] - gz * s};
                         for (int a = 0; a < 3; ++a) p[a] = std::min(base[a] + 1.5 * h, std::max(base[a] - 0.5 * h, q[a]));
+                        if (it == 1) (void)field.at(p, b.use.data(), d.data(), &nearest);
                     }
-                    const Vec3 g = gradient(p, step);
+                    // (the normal: the field's slope over a wider step, 0.4 h or what is asked — along a crease it turns from one side's
+                    // to the other's over the points beside it, so the light shows a clean fold, not a ragged one)
+                    const Vec3 g = gradient(p, normal_step);
                     const double n2 = g[0] * g[0] + g[1] * g[1] + g[2] * g[2];
                     const double len = std::sqrt(n2);
-                    int nearest = 0;
-                    (void)field.at(p, b.use.data(), d.data(), &nearest);
                     b.vertex[static_cast<std::size_t>((z * kCells + y) * kCells + x)] = static_cast<std::int32_t>(out.v.size());
                     out.v.push_back(p);
                     out.n.push_back(len > 0.0 ? Vec3{g[0] / len, g[1] / len, g[2] / len} : Vec3{0.0, 0.0, -1.0});

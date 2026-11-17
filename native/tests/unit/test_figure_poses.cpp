@@ -93,11 +93,11 @@ std::string saved_text(const Document& doc) {
     return genko::core::dump_python_indent2(payload);
 }
 
-// The least each category holds (mirrors do not count): batch A (G3), then batch B (G4: plan §8 asked pinup 85,
-// relax_bed 36, lie 25 — the lying poses this body could not rest properly were taken out, docs/POSES.md).
+// The least each category holds (mirrors do not count): batch A (G3), then batch B (G4: plan §8's pinup 85, relax_bed
+// 36, lie 25 — the lying poses G4 left out were added in the pose pass of 2026-11-16, docs/POSES.md).
 const std::pair<const char*, std::size_t> kAtLeast[] = {{"stand", 40},      {"fashion", 25},   {"walk", 10},        {"run", 10},
                                                          {"sit_chair", 30},  {"sit_floor", 30}, {"kneel_squat", 25}, {"everyday", 25},
-                                                         {"pinup", 78},      {"relax_bed", 33}, {"lie", 20},         {"upper_body", 35},
+                                                         {"pinup", 85},      {"relax_bed", 36}, {"lie", 25},         {"upper_body", 35},
                                                          {"turn", 10},       {"point", 8},      {"emotion", 25},     {"talk", 13},
                                                          {"hands_props", 24},
                                                          // (batch C, G5: the numbers delivered; plan §8 asked sports_action 35, action
@@ -112,10 +112,10 @@ std::string issues_text(const std::vector<checks::Issue>& issues) {
 }
 
 // The sha256 of four thumbnails (60 × 90 at three quarters: stand's first, fashion's last mirrored, sit_chair's first,
-// kneel_squat's last mirrored), taken with this build.
+// kneel_squat's last mirrored), taken with this build (again after the body's anatomy pass of 2026-11-16).
 const char* const kThumbPins =
-    "21294bc3cc48111e8be475fa9f1686697e3b043efe7690ad762e69345ec6e071 02d657798c14cdb463ba280f7b3227e4fad1227eb9214e9986b83376147c2ea4 "
-    "36424809c0632dd85ce0ece0b3903ba6cf1ac2972167d790eea0ff62ce683847 9921041c628a8e3101b334d3783283bf57674d1dcad0fd3e9b42bda7b5cdaf21 ";
+    "2ac00a4ecf4880832b2ad495c9d65e57cca21d033f89fa6b17e4a52215504059 1a2c7c68a436bd3fde150c81d08dfe3eb6cafc91a1928b4a58c9698d42d1fba7 "
+    "1cf8a694e543d7ee8085e9b3fa7ba8e14e7c194586ba66745dc2657129344214 b9be8243e7f600b07f8ba3528472ca5a1f2ea6bc9842f94b42d762ee4622e40b ";
 
 std::string sheets_dir() { return qEnvironmentVariable("GENKO_POSE_SHEETS").toStdString(); }
 

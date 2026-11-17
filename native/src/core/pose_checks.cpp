@@ -88,8 +88,9 @@ double hand_length(const Json& hands, const char* side) {
     return 0.8 * (1.0 - 0.45 * mean);
 }
 
-// The bones the surface's points are told apart by, and the limbs' tapered capsules (u: about the body's own girths,
-// figure_shape's cones and the muscles on them, at each end)
+// The bones the surface's points are told apart by, and the limbs' tapered capsules (u: the body's own girths at each
+// end, measured on figure_shape's body — a measure, not a threshold: taken again when the body's forms change, last
+// with the anatomy pass of 2026-11-16)
 struct Bone {
     std::string name;
     Vec3 a;
@@ -117,11 +118,11 @@ std::vector<Bone> bones_of(const mesh3d::Skeleton& sk, const Json& prim) {
         const Vec3 along = (sk.point(s + "_hand") - wrist) / norm(sk.point(s + "_hand") - wrist);
         const Mat3& foot = sk.turn(s + "_ankle");
         const Vec3& ankle = sk.point(s + "_ankle");
-        out.push_back({s + "_upper", sk.point(s + "_shoulder"), sk.point(s + "_elbow"), 0.21, 0.15, side, 0.45});
-        out.push_back({s + "_fore", sk.point(s + "_elbow"), wrist, 0.16, 0.115, side, 0.0});
-        out.push_back({s + "_hand", wrist, wrist + along * (hand_length(hands, s.c_str()) * u), 0.055, 0.04, side, 0.0});  // (the palm's thickness)
-        out.push_back({s + "_thigh", sk.point(s + "_hip"), sk.point(s + "_knee"), 0.33, 0.21, 2 + side, 0.55});
-        out.push_back({s + "_shin", sk.point(s + "_knee"), ankle, 0.21, 0.12, 2 + side, 0.0});
+        out.push_back({s + "_upper", sk.point(s + "_shoulder"), sk.point(s + "_elbow"), 0.235, 0.165, side, 0.45});
+        out.push_back({s + "_fore", sk.point(s + "_elbow"), wrist, 0.165, 0.1, side, 0.0});
+        out.push_back({s + "_hand", wrist, wrist + along * (hand_length(hands, s.c_str()) * u), 0.06, 0.045, side, 0.0});  // (the palm's thickness)
+        out.push_back({s + "_thigh", sk.point(s + "_hip"), sk.point(s + "_knee"), 0.4, 0.245, 2 + side, 0.55});
+        out.push_back({s + "_shin", sk.point(s + "_knee"), ankle, 0.245, 0.142, 2 + side, 0.0});
         out.push_back({s + "_foot", ankle + matvec(foot, Vec3{0.0, 0.17 * u, 0.1 * u}), ankle + matvec(foot, Vec3{0.0, 0.25 * u, -0.85 * u}), 0.12, 0.09,
                        2 + side, 0.0});
     }

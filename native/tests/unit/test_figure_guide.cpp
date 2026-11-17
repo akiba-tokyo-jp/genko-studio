@@ -109,6 +109,50 @@ std::array<int, 3> rgb_at(const render::Image& image, int x, int y) {
 
 bool black(const std::array<int, 3>& c) { return c[0] == 0 && c[1] == 0 && c[2] == 0; }
 
+// The guide's look up close (the pictures a person judges the body and the material by, not a test): one figure an
+// image, as guides/figures.png shades it — seated, standing, the torso, the back, the head; look_<name>.png.
+void write_looks(const fs::path& to) {
+    const auto figure = [](const char* joints, const char* sex, double turn, double tip, const char* hands = "{}") {
+        Json prim{{"id", "f"}, {"kind", "figure"}, {"pos", Json::array({0.0, 0.0, 0.0})}, {"size", Json::array({100.0, 200.0, 50.0})},
+                  {"rot", Json::array({tip, turn, 0.0})}, {"body", *sex != '\0' ? Json{{"sex", sex}} : Json::object()},
+                  {"joints", genko::core::parse_python_json(joints)}, {"hands", genko::core::parse_python_json(hands)}};
+        return prim;
+    };
+    const char* const seated =
+        R"({"spine": {"x": 0.1, "z": -0.06}, "l_leg": {"x": 1.25, "z": 0.75}, "l_knee": {"x": -1.25}, "r_leg": {"x": 0.95, "z": -0.35}, "r_knee": {"x": -1.0},
+            "l_ankle": {"x": -0.5}, "r_ankle": {"x": -0.5}, "l_arm": {"z": 0.25, "x": -0.15}, "r_arm": {"z": -0.2, "x": -0.1}, "l_elbow": {"x": 0.25}, "r_elbow": {"x": 0.2},
+            "head": {"y": 0.15}})";
+    const char* const stand = R"({"l_arm": {"z": 0.25}, "r_arm": {"z": -0.25}, "l_leg": {"z": 0.08}, "r_leg": {"z": -0.08}})";
+    const char* const reach = R"({"l_arm": {"z": 1.5}, "r_arm": {"z": -2.8}, "l_leg": {"x": 0.5}, "l_knee": {"x": -0.9}, "spine": {"y": 0.25}})";
+    struct Look {
+        const char* name;
+        Json prim;
+        fg::Box box;
+        std::array<int, 2> px;
+    };
+    const std::vector<Look> looks{
+        {"seated_female", figure(seated, "female", 0.35, 0.0), {-90.0, -140.0, 220.0, 330.0}, {768, 1152}},
+        {"seated_male", figure(seated, "male", -0.5, 0.0), {-110.0, -140.0, 220.0, 330.0}, {768, 1152}},
+        {"stand_male", figure(stand, "male", 0.5, 0.0), {-75.0, -115.0, 150.0, 225.0}, {768, 1152}},
+        {"stand_female", figure(stand, "female", -0.5, 0.0), {-75.0, -115.0, 150.0, 225.0}, {768, 1152}},
+        {"stand_neither", figure(stand, "", 0.0, 0.0), {-75.0, -115.0, 150.0, 225.0}, {768, 1152}},
+        {"back_male", figure(stand, "male", 2.7, 0.0), {-75.0, -115.0, 150.0, 225.0}, {768, 1152}},
+        {"back_female", figure(stand, "female", 3.5, 0.0), {-75.0, -115.0, 150.0, 225.0}, {768, 1152}},
+        {"reach_female", figure(reach, "female", 0.4, 0.0, R"({"l": "open", "r": "open"})"), {-90.0, -150.0, 180.0, 270.0}, {768, 1152}},
+        {"torso_male", figure(stand, "male", 0.4, 0.0), {-45.0, -112.0, 90.0, 135.0}, {768, 1152}},
+        {"torso_female", figure(stand, "female", 0.4, 0.0), {-45.0, -112.0, 90.0, 135.0}, {768, 1152}},
+        {"head_male", figure(stand, "male", 0.5, 0.0), {-24.0, -122.0, 48.0, 48.0}, {768, 768}},
+        {"head_female", figure(stand, "female", -0.4, 0.0), {-24.0, -122.0, 48.0, 48.0}, {768, 768}},
+    };
+    const genko::core::Page page;
+    for (const Look& look : looks) {
+        const std::vector<Json> prims{look.prim};
+        const fg::View view = fg::view_of(look.box, look.px, false);
+        const std::string png = render::write_png(fg::figures(page, prims, view));
+        std::ofstream(to / (std::string("look_") + look.name + ".png"), std::ios::binary) << png;
+    }
+}
+
 bool any_note(const Json& request, const std::string& words) {
     for (const Json& n : request.value("notes_for_agent", Json::array())) {
         if (n.is_string() && n.get<std::string>().find(words) != std::string::npos) return true;
@@ -403,6 +447,8 @@ private slots:
         if (out.isEmpty()) return;
         const fs::path to = genko::core::path_from_utf8(out.toStdString());
         fs::create_directories(to);
+        write_looks(to);
+        if (qEnvironmentVariableIsSet("GENKO_FIGURE_GUIDE_LOOKS_ONLY")) return;
         // (the book of the first test, its panels p1 and p2 without people: to ask with another build)
         fs::remove_all(to / "book_none");
         fs::copy(folder(QStringLiteral("none")), to / "book_none", fs::copy_options::recursive);
@@ -443,8 +489,8 @@ private:
                     {"notes", "制御画像（guides/figures.png・regions.png）は出力と同じ大きさ。CFG 1"}};
     }
 
-    static constexpr const char* kFiguresPng = "9d221aec4182638c0f6c6cb4131e328a5e253527da489b2c4552a5f846f857e9";
-    static constexpr const char* kRegionsPng = "5d30b462e90bfb7cc6f36299133a15d441a696036209c8de7f247743a75dc1a1";
+    static constexpr const char* kFiguresPng = "024b6ebfbbf0c7c1916bb50c558107edf8f3fe57439ae38a70d1744be8f6ae27";
+    static constexpr const char* kRegionsPng = "6a16f09e7e7be1fd6ab3f1c74e49d558c950037158df782855e34913d140a8c9";
 };
 
 QTEST_GUILESS_MAIN(TestFigureGuide)

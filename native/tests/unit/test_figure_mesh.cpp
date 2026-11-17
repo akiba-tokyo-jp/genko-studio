@@ -3,7 +3,8 @@
 // and the soles are as a person sees them, a mirrored pose gives the mirrored body, the lines are the outlines; and the
 // other kinds of 3D (boxes, scenes, imported models) are drawn exactly as before (their digests were taken with the
 // build before FIGURE-01).
-// GENKO_FIGURE_OUT=<folder> also writes the contact sheets there (the pictures a person looks at).
+// GENKO_FIGURE_OUT=<folder> also writes the contact sheets there (the pictures a person looks at; GENKO_FIGURE_ONLY=torso,hip
+// only the anatomy sheets named; GENKO_FIGURE_VIEW={…} one look asked for by hand, tests/support/figure_sheets.hpp).
 
 #include <QtTest>
 
@@ -39,6 +40,7 @@ std::string mesh_digest(const mesh3d::Model& m) {
     const auto put = [&](const void* p, std::size_t n) { bytes.append(static_cast<const char*>(p), n); };
     for (const auto& v : m.mesh.v) put(v.data(), sizeof v);
     for (const auto& v : m.vn) put(v.data(), sizeof v);
+    for (const auto& v : m.outline) put(v.data(), sizeof v);
     for (const auto& t : m.tris) put(t.data(), sizeof t);
     put(m.nocontour.data(), m.nocontour.size());
     for (const auto& line : m.marks) {
@@ -206,7 +208,7 @@ private slots:
 
     // The same bytes every time: the figure, a hand and the head made twice (the cache emptied between), on four
     // threads at once, drawn and traced twice; and the pins (taken when FIGURE-01 was made, again after G2's proportion
-    // pass).
+    // pass and after the anatomy pass of 2026-11-16).
     void theSameBytesOnEveryRunAndThread() {
         const Json walk = figure_prim("walk", "", 0.0);
         const Json fist = ops(R"({"kind": "hand", "size": [25, 25, 25], "side": "l", "pose": "fist"})");
@@ -567,14 +569,15 @@ private slots:
     void cleanupTestCase() {
         const QByteArray out = qgetenv("GENKO_FIGURE_OUT");
         if (out.isEmpty()) return;
-        genko::test::figures::write_all(std::filesystem::path(out.toStdString()));
+        genko::test::figures::write_all(std::filesystem::path(out.toStdString()), qgetenv("GENKO_FIGURE_ONLY").toStdString(),
+                                        qgetenv("GENKO_FIGURE_VIEW").toStdString());
     }
 
 private:
-    static constexpr const char* kWalkMesh = "cc8a7dc26f6e8a084e75fc25a835a33ea0a1d87fb47530e71c81be1a3b8d08cd";
-    static constexpr const char* kWalkLines = R"({"count":35,"points":779,"sha":"75273a3c6b3787e38d22c5f51877e9ffef7c72b0821243b9c9983308cd329849"})";
+    static constexpr const char* kWalkMesh = "95f78dee587e161bbc7ad8c2cce28b3dfbc67c50a8a3524a28138e09e9bad731";
+    static constexpr const char* kWalkLines = R"({"count":24,"points":741,"sha":"ef9c4c3831dbc07d6a14c89e9bfc70216d2485c5f78f68e907ea096e1d948c6f"})";
     static constexpr const char* kDrawn =
-        "08ccdef4df52bcc0ac63a432f59324b4d823493427b57945ff89c3e588122f589255237ced8ae109131c3e7645271f423bc0b82b8d2d860c1b65c8c7a18b5eae";
+        "1bad6e090a6d7ac380785199b0aa8d7d591f1c3e286f37de58353e504a53f3abf0cf1499ea3ba583da9dc25814eb8c6ad7bf3a570074c6ce02bdc1138ef7190c";
     static constexpr const char* kOtherKinds = "6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1";
 };
 
