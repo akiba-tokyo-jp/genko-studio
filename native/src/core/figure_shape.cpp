@@ -1023,10 +1023,15 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     const Station waist = st(-0.92, r_waist, 0.4 * dd, -0.035 * dd);
     // (the crest is never much narrower than the thighs' tops beside the hip joints — wide hips flare from the waist
     // to the crest and on to the trochanters in one curve, with no step out to the thigh)
-    // (with the hips far apart a round form about each hip joint carries the hips' sides — below —, and the crest
-    // stays inside its curve)
-    const double r_crest = std::max(0.42 * r_waist + 0.58 * r_pelvis, d.hw + 0.395 * d.leg - sx.crest * g) - 0.16 * d.apart;
-    const Station crest = st(-0.3 + 0.12 * d.apart, r_crest, 0.425 * dd, -0.025 * dd);
+    const double r_crest0 = std::max(0.42 * r_waist + 0.58 * r_pelvis, d.hw + 0.395 * d.leg - sx.crest * g);
+    // With the hips far wider than the build fills (apart), the run's last section is no longer the crest above the
+    // hip joints but the hips themselves: lower (down to the trochanters' height), as wide as the thighs' outsides
+    // and as deep as the thighs — the trunk carries the whole hip, so the outline from the waist over the hip into
+    // the thigh is one curve (a pear) and no form stands apart beside the pelvis. The dome under it is as much
+    // shorter, so the crotch stays where it is.
+    const double r_crest = r_crest0 + d.apart * (d.hw + 0.395 * d.leg - 0.02 - r_crest0);
+    const double d_crest = 0.425 * dd + d.apart * std::max(0.0, 0.45 * d.leg - 0.425 * dd);
+    const Station crest = st(-0.3 + 0.42 * d.apart, r_crest, d_crest, -0.025 * dd);
     const Station lean{0.0, 0.0, 0.0, -0.14 * dd};  // (the ribcage's dome: its middle goes back by this for each u up)
     // The trunk is this one run, set in the body standing straight; it bends with the spine (Bend): rigid with the
     // pelvis below the pelvis joint, with the chest above the waist joint and what is 0.35 u over it, and the two
@@ -1045,7 +1050,7 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     p.bend.over[1] = 0.7 * u;
     const std::vector<Station> run{ribs, low, waist, crest};
     const std::vector<Station> slopes = run_slopes(run, &lean);
-    Piece trunk = loft(Vec3{0.0, 0.0, 0.0}, kIdentity, run, 1.0 * u, 0.8 * u, &slopes);
+    Piece trunk = loft(Vec3{0.0, 0.0, 0.0}, kIdentity, run, 1.0 * u, (0.8 - 0.42 * d.apart) * u, &slopes);
     trunk.rest = true;
     p.pieces.push_back(std::move(trunk));
     // the shoulders: the trapezius sloping from the neck out to each (the ball of the shoulder is the upper arm's own
@@ -1086,23 +1091,12 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
         pair(p.pieces, trapezius(lsr, 1.0), trapezius(rsr, -1.0), 0.3 * u);
     }
     // the buttocks
-    // (with the hips far apart they stay by the middle, under the pelvis's own dome: two small buttocks set a hip's
-    // width apart were a flat floor between the legs)
-    const double gx = 0.52 * d.hw + 0.02 * g - 0.2 * d.apart;
-    pair(p.pieces, ellipsoid(off(P0, H, gx, 0.1, 0.2 * dd), H, radii(0.34 * g * sx.glute, 0.42, 0.37 * dd * sx.glute)),
-         ellipsoid(off(P0, H, -gx, 0.1, 0.2 * dd), H, radii(0.34 * g * sx.glute, 0.42, 0.37 * dd * sx.glute)), 0.22 * u);
-    // With the hips far wider than the build fills, the hip's side: a round form about each hip joint, up to the
-    // crest (the pelvis's own, so it stays when the thigh turns) — the outline from the waist to the thigh is one
-    // round curve, where the crest alone was a box's corner.
-    if (d.apart > 0.0) {
-        const double a = std::min(1.0, 2.0 * d.apart);
-        // (from a thigh's thickness under the joint — never below a raised thigh — up to the crest)
-        const double up = 0.5 * d.leg + 0.25 * d.apart;
-        const double under = 0.41 * d.leg;
-        const Vec3 size = radii(0.395 * d.leg * a, 0.5 * (up + under) * a, 0.41 * d.leg * a);
-        const double yc = 0.15 + 0.5 * (under - up);
-        pair(p.pieces, ellipsoid(off(P0, H, d.hw, yc, -0.01 * d.leg), H, size), ellipsoid(off(P0, H, -d.hw, yc, -0.01 * d.leg), H, size), 0.25 * u * a);
-    }
+    // (with the hips far apart each is as wide as its half of the pelvis: two buttocks from the middle to the hips'
+    // sides, and nothing between a buttock and the hip beside it)
+    const double gx = 0.52 * d.hw + 0.02 * g;
+    const double gr = 0.34 * g * sx.glute + d.apart * std::max(0.0, 0.5 * d.hw - 0.34 * g * sx.glute);
+    pair(p.pieces, ellipsoid(off(P0, H, gx, 0.1, 0.2 * dd), H, radii(gr, 0.42, 0.37 * dd * sx.glute)),
+         ellipsoid(off(P0, H, -gx, 0.1, 0.2 * dd), H, radii(gr, 0.42, 0.37 * dd * sx.glute)), 0.22 * u);
     // (the pectoral's outer part, from the chest to the arm: the chest runs into the shoulder with no groove)
     {
         const auto tail = [&](const Vec3& shoulder) {
