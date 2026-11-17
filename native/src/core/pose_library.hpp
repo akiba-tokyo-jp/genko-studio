@@ -17,7 +17,7 @@
 //    "categories": [{"id", "ja", "en"}, …],
 //    "poses": [{"id": "<category>/<name>", "category", "ja", "en", "tags": [Japanese and English words],
 //               "joints": {joint: {x, y, z}} (as add_figure's), "hands": {l, r: pose | {pose, curls, spread, thumb}},
-//               "hold": {l, r: prop}? (what the hand holds: drawn from G5 on), "support": floor | chair | none,
+//               "hold": {l, r: prop | "prop:way"}? (what the hand holds, and how: below), "support": floor | chair | none,
 //               "seat_h": u? (chair: the seat's height above the floor, in the figure's unit u = height / heads),
 //               "contact": [l_foot, r_foot, l_knee, r_knee, l_hand, r_hand, seat, pelvis, back, front, side],
 //               "symmetric": bool}, …]}
@@ -99,7 +99,8 @@ struct Filter {
 std::vector<const Json*> list(const Filter& filter = {});
 
 // What the gallery and the figure_poses tool say of a pose: {id, ja, en, category, tags, hands {l, r: the hand's shape's
-// name}, contact, support, props [what the hands hold, l then r], symmetric}; a pair's: the same of its first person
+// name}, contact, support, props [what the hands hold, l then r: each as the pose says it, "bag" or "bag:shoulder"],
+// symmetric}; a pair's: the same of its first person
 // (contact and props: both people's), and "pair": true with "figures": [{role, hands, contact, support, props}, …].
 // (A pair matches a filter's support and contact when one of its people does, props when one holds something.)
 Json summary(const Json& pose);
@@ -115,11 +116,40 @@ std::string seed_text(std::uint64_t seed);
 inline constexpr std::string_view kProps[] = {"cup", "phone", "paper", "bag", "umbrella", "book", "pen", "sword", "bat", "ball"};
 bool is_prop(std::string_view name);
 
+// How a held thing sits (SPEC FIGURE-02, figures@2): a hold's value is "<prop>", as it always was, or "<prop>:<way>"
+// for the props that can be held another way —
+//   sword, bat, umbrella: "forward" (tilted in the fist so that it carries on the forearm's line: a thrust, a point),
+//                         "down" (the reverse grip: out of the little finger's side);
+//   bag:                  "shoulder" (on a strap over the shoulder of that side, the bag at the hip, the strap through
+//                         the hand), "elbow" (hanging from the crook of that arm).
+// The other props have no way. "<prop>" alone is drawn exactly as before there were ways.
+inline constexpr std::string_view kLongWays[] = {"forward", "down"};
+inline constexpr std::string_view kBagWays[] = {"shoulder", "elbow"};
+struct Held {
+    std::string_view prop;  // (the text before the first ':', or all of it)
+    std::string_view way;   // (the text after it; empty without one)
+    bool has_way = false;   // (whether there is a ':')
+};
+Held held_of(std::string_view value);
+// The ways a prop may be held (none for most).
+std::vector<std::string_view> ways_of(std::string_view prop);
+// Why a hold's value is not one ("a hand holds one of …" for a prop it does not know, "a bag's way is shoulder or elbow
+// (bag:shoulder), not "forward"" for a way that is not the prop's, "a cup has no way (…)" for a prop without ways);
+// empty when it is one.
+std::string hold_problem(std::string_view value);
+
 // figures@1: the book's prims say something a build of before would not keep or draw — a figure's `pose_id`, `hold`,
 // `props` or `pair`, a hand's `spread` or `thumb` (a figure's hands, or a hand on its own). Named while one does (books without them are
 // saved as before, byte for byte).
 inline constexpr std::string_view kFiguresFeature = "figures@1";
 bool uses_figures_feature(const Json& prim);
 bool uses_figures_feature(const Document& doc);
+
+// figures@2: a figure's `hold` says a way ("<prop>:<way>"), which a build that knows figures@1 alone keeps but does not
+// draw (it knows no such prop: the hand is drawn empty). Named while a figure's hold says one; figures@1 is named for
+// exactly what it was (a book without a way is saved as before, byte for byte).
+inline constexpr std::string_view kFigures2Feature = "figures@2";
+bool uses_figures2_feature(const Json& prim);
+bool uses_figures2_feature(const Document& doc);
 
 }  // namespace genko::core::pose_library

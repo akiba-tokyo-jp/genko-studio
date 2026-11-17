@@ -299,11 +299,15 @@ void person_fields(const Json& p, const In& in, bool in_pair) {
     if (p.contains("hold")) {
         const Json& hold = p["hold"];
         if (!hold.is_object() || hold.empty()) {
-            in("hold is {l, r: prop}");
+            in("hold is {l, r: prop or prop:way}");
         } else {
             for (const auto& [side, prop] : hold.items()) {
                 if (side != "l" && side != "r") in("hold: unknown side " + side);
-                if (!prop.is_string() || !pose_library::is_prop(prop.get<std::string>())) in("hold: unknown prop " + prop.dump());
+                if (!prop.is_string() || !pose_library::is_prop(pose_library::held_of(prop.get_ref<const std::string&>()).prop)) {
+                    in("hold: unknown prop " + prop.dump());
+                } else if (const std::string problem = pose_library::hold_problem(prop.get_ref<const std::string&>()); !problem.empty()) {
+                    in("hold: " + problem);  // (a way that is not the prop's: SPEC FIGURE-02, figures@2)
+                }
             }
         }
     }

@@ -677,6 +677,71 @@ private slots:
         QCOMPARE((*prim(back, "fig"))["hold"], Json::object({{"l", "cup"}}));
     }
 
+    // How a held thing sits, through the ops (SPEC FIGURE-02, figures@2): hold takes "<prop>:<way>" for the props that
+    // have ways and keeps it as given; a hold without a way is kept as it always was; the mirror swaps the sides and
+    // keeps the way; null takes a side away; a way that is not the prop's is refused, and a way on a prop without
+    // ways; saved and read back as it was.
+    void theWaysOfHolding() {
+        namespace library = genko::core::pose_library;
+        const auto apply = [&](const Document& doc, const std::string& batch) { return bus().apply(doc, ops(batch), Actor("genko")).doc; };
+        Document d = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": "sword:forward", "l": "bag:shoulder"}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], ops(R"({"r": "sword:forward", "l": "bag:shoulder"})"));  // (in the order given)
+        // merged side by side: a way put on, changed, taken off; null takes the side away
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": "sword:down"}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], ops(R"({"r": "sword:down", "l": "bag:shoulder"})"));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"l": "bag"}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], ops(R"({"r": "sword:down", "l": "bag"})"));
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"l": "bag:elbow", "r": null}}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], ops(R"({"l": "bag:elbow"})"));
+        // the figure's own mirror: the other hand, the same way (and back)
+        const Document turned = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])");
+        QCOMPARE((*prim(turned, "fig"))["hold"], ops(R"({"r": "bag:elbow"})"));
+        QCOMPARE((*prim(apply(turned, R"([{"op": "pose_figure", "page": 1, "id": "fig", "mirror": true}])"), "fig"))["hold"], (*prim(d, "fig"))["hold"]);
+        d = apply(d, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"l": null}}])");
+        QVERIFY(!(*prim(d, "fig")).contains("hold"));
+        // add_figure takes them too; every way of every prop that has ways
+        const Document added = apply(base_, R"([{"op": "add_figure", "page": 1, "id": "f7", "pos": [80, 150, 0], "hold": {"l": "umbrella:forward", "r": "bat:down"}}])");
+        QCOMPARE((*prim(added, "f7"))["hold"], ops(R"({"l": "umbrella:forward", "r": "bat:down"})"));
+        for (const std::string_view name : library::kProps) {
+            const std::string value(name);
+            for (const std::string_view way : library::ways_of(name)) {
+                const Document one = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": ")" + value + ":" + std::string(way) + R"("}}])");
+                QCOMPARE((*prim(one, "fig"))["hold"]["r"], Json(value + ":" + std::string(way)));
+            }
+        }
+        QCOMPARE(library::ways_of("sword"), (std::vector<std::string_view>{"forward", "down"}));
+        QCOMPARE(library::ways_of("bag"), (std::vector<std::string_view>{"shoulder", "elbow"}));
+        QVERIFY(library::ways_of("cup").empty() && library::ways_of("phone").empty() && library::ways_of("ball").empty());
+        // a library pose's way comes with the pose, and its mirror's on the other side
+        const Json& bag = *library::find("fashion/shoulder_bag");
+        QCOMPARE(bag["hold"], ops(R"({"l": "bag:shoulder"})"));
+        d = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "pose_id": "fashion/shoulder_bag~m"}])");
+        QCOMPARE((*prim(d, "fig"))["hold"], ops(R"({"r": "bag:shoulder"})"));
+        // refusals (the reason first, then the op's keys)
+        const auto says = [](const std::string& error, const std::string& reason) { return error.find(": " + reason + " ‖") != std::string::npos; };
+        const auto hold = [&](const std::string& value) {
+            return error_of(base_, ops(R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"r": ")" + value + R"("}}])"));
+        };
+        QVERIFY2(says(hold("bag:forward"), R"(a bag's way is shoulder or elbow (bag:shoulder), not "forward")"), hold("bag:forward").c_str());
+        QVERIFY2(says(hold("sword:shoulder"), R"(a sword's way is forward or down (sword:forward), not "shoulder")"), hold("sword:shoulder").c_str());
+        QVERIFY2(says(hold("umbrella:up"), R"(an umbrella's way is forward or down (umbrella:forward), not "up")"), hold("umbrella:up").c_str());
+        QVERIFY2(says(hold("bat:"), R"(a bat's way is forward or down (bat:forward), not "")"), hold("bat:").c_str());
+        QVERIFY2(says(hold("sword:forward:down"), R"(a sword's way is forward or down (sword:forward), not "forward:down")"), hold("sword:forward:down").c_str());
+        QVERIFY2(says(hold("cup:forward"), "a cup has no way (sword, bat, umbrella: forward, down; bag: shoulder, elbow)"), hold("cup:forward").c_str());
+        QVERIFY2(says(hold("phone:"), "a phone has no way (sword, bat, umbrella: forward, down; bag: shoulder, elbow)"), hold("phone:").c_str());
+        QVERIFY2(says(hold("cake:forward"), "a hand holds one of cup, phone, paper, bag, umbrella, book, pen, sword, bat, ball"), hold("cake:forward").c_str());
+        QVERIFY2(says(hold(":forward"), "a hand holds one of cup, phone, paper, bag, umbrella, book, pen, sword, bat, ball"), hold(":forward").c_str());
+        QVERIFY2(says(hold("Sword:forward"), "a hand holds one of cup, phone, paper, bag, umbrella, book, pen, sword, bat, ball"), hold("Sword:forward").c_str());
+        QVERIFY(says(error_of(base_, ops(R"([{"op": "add_figure", "page": 1, "hold": {"l": "bag:hip"}}])")), R"(a bag's way is shoulder or elbow (bag:shoulder), not "hip")"));
+        // (a refused op changes nothing)
+        QVERIFY(!(*prim(base_, "fig")).contains("hold"));
+        // saved and read back as it was
+        const Document held = apply(base_, R"([{"op": "pose_figure", "page": 1, "id": "fig", "hold": {"l": "bag:shoulder", "r": "umbrella:down"}}])");
+        const Document back = read(make_book(book_path(), held));
+        same(back.page(0).prims, held.page(0).prims, "prims read back");
+        QCOMPARE((*prim(back, "fig"))["hold"], ops(R"({"l": "bag:shoulder", "r": "umbrella:down"})"));
+    }
+
     // A pair pose through the ops (SPEC FIGURE-02, G5): add_figure with a pair's id places two figures — the op's as a,
     // its partner (partner_id) as b where the pair says, turned as it says, as tall and of the same body —, both keeping
     // the pair's id with #a and #b and one pair key; mirror puts b on the other side; keep: ground keeps the pair's lowest

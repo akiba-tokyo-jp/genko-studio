@@ -980,6 +980,9 @@ const std::vector<Rule>& rules() {
         // (the pose library, SPEC FIGURE-02)
         r.push_back(rule("a hand holds one of .*", "手に持たせられる物は、決まった物の中から選びます"));
         r.push_back(rule(R"(hold is \{l, r: .*\})", "手に持たせる物は、左手（l）・右手（r）ごとに決めます"));
+        // (how a held thing sits, figures@2)
+        r.push_back(rule("an? .* has no way .*", "その物の持ち方は 1 つだけです（持ち方を選べるのは剣・バット・傘と鞄です）"));
+        r.push_back(rule("an? .*'s way is .*", "その物の持ち方は、決まった中から選びます（剣・バット・傘は forward か down、鞄は shoulder か elbow）"));
         r.push_back(rule("give preset or pose_id, not both", "見本とポーズ集のポーズは、どちらか一方を選びます"));
         r.push_back(rule("keep is pelvis or ground", "合わせる所は、腰か足もとです"));
         r.push_back(rule(R"(no pose (.*) \(figure_poses lists them\))", "「\\1」というポーズはありません（ポーズ集で選べます）"));

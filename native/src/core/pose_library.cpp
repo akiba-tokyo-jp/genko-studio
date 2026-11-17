@@ -344,6 +344,35 @@ std::string seed_text(std::uint64_t seed) {
 
 bool is_prop(std::string_view name) { return std::find(std::begin(kProps), std::end(kProps), name) != std::end(kProps); }
 
+Held held_of(std::string_view value) {
+    const std::size_t colon = value.find(':');
+    if (colon == std::string_view::npos) return Held{value, {}, false};
+    return Held{value.substr(0, colon), value.substr(colon + 1), true};
+}
+
+std::vector<std::string_view> ways_of(std::string_view prop) {
+    if (prop == "sword" || prop == "bat" || prop == "umbrella") return {std::begin(kLongWays), std::end(kLongWays)};
+    if (prop == "bag") return {std::begin(kBagWays), std::end(kBagWays)};
+    return {};
+}
+
+std::string hold_problem(std::string_view value) {
+    const Held held = held_of(value);
+    if (!is_prop(held.prop)) {
+        std::string all;
+        for (const std::string_view p : kProps) all += (all.empty() ? "" : ", ") + std::string(p);
+        return "a hand holds one of " + all;
+    }
+    if (!held.has_way) return {};
+    const std::vector<std::string_view> ways = ways_of(held.prop);
+    const std::string prop(held.prop);
+    const std::string article = prop == "umbrella" ? "an " : "a ";
+    if (ways.empty()) return article + prop + " has no way (sword, bat, umbrella: forward, down; bag: shoulder, elbow)";
+    if (std::find(ways.begin(), ways.end(), held.way) != ways.end()) return {};
+    return article + prop + "'s way is " + std::string(ways[0]) + " or " + std::string(ways[1]) + " (" + prop + ":" + std::string(ways[0]) + "), not \"" +
+           std::string(held.way) + "\"";
+}
+
 bool uses_figures_feature(const Json& prim) {
     if (!prim.is_object()) return false;
     const auto kind = prim.find("kind");
@@ -366,6 +395,28 @@ bool uses_figures_feature(const Document& doc) {
         if (!page || !page->prims.is_array()) continue;
         for (const Json& prim : page->prims) {
             if (uses_figures_feature(prim)) return true;
+        }
+    }
+    return false;
+}
+
+bool uses_figures2_feature(const Json& prim) {
+    if (!prim.is_object()) return false;
+    const auto kind = prim.find("kind");
+    if (kind == prim.end() || !kind->is_string() || *kind != "figure") return false;
+    const auto hold = prim.find("hold");
+    if (hold == prim.end() || !hold->is_object()) return false;
+    for (const auto& [side, what] : hold->items()) {
+        if (what.is_string() && held_of(what.get_ref<const std::string&>()).has_way) return true;
+    }
+    return false;
+}
+
+bool uses_figures2_feature(const Document& doc) {
+    for (const auto& page : doc.pages) {
+        if (!page || !page->prims.is_array()) continue;
+        for (const Json& prim : page->prims) {
+            if (uses_figures2_feature(prim)) return true;
         }
     }
     return false;

@@ -89,6 +89,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `fukidashi@2` | フキダシの追加 群 1 | 台詞（と文字レイヤーの記録）の種類 `heart`・`star`・`flower`・`diamond`、スタイルの鍵 `pen_swell`・`pen_angle`・`pen_taper`・`pen_strokes`・`drip_mm`・`drips`・`drip_width_mm`・`drip_seed`・`points`・`fill_tone`・`fill_gradient`。SPEC BALLOON-02、この文書の「フキダシの追加」 |
 | `fonts@1` | 書体の追加 F2 | 追加の 40 書体のキー（`antique_genei`・`gothic_kiwami`・`dot16` など。`native/resources/fonts/FONTS.json` の `storage` が `file` の書体）を、台詞の `style.font`・ルビの `font`・文字（type@1）の文字属性の `font`・文字スタイルの `font`・本の `font_path` のどれかが名指ししているあいだ。この文書の「書体」 |
 | `figures@1` | 人形 G3・G5 | 3D の人形の prim の `pose_id`（ポーズ集の id、反転は `~m`、二人のポーズの一人は `#a`・`#b`）・`hold`（手に持つ物）・`props`（false で持つ物を描かない）・`pair`（二人のポーズの組の id）、人形の手（`hands.l`・`hands.r` の {pose, curls, …}）か手だけの prim の `spread`・`thumb`。SPEC FIGURE-02、この文書の「人形のポーズ」 |
+| `figures@2` | 人形の持ち方 | 3D の人形の prim の `hold` の値が持ち方を言う（`"bag:shoulder"`・`"sword:forward"` など「物:持ち方」）。持ち方を知らない版（`figures@1` だけを知る版）は、その手に何も描かないので、読み取り専用で開く。SPEC FIGURE-02 の「持ち方」、この文書の「人形のポーズ」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -628,12 +629,13 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - **エージェントへの一覧**（`inspect` の `target: "fonts"`）: `bundled` は前からの 7 行（前と同じ）の後に追加の 40 行 `{key, label, category, use, kanji, fallback?, available}`。`available` は、このパソコンにその大きさのファイルがあるか。`categories` は区分の `{id, label}`。HTTP の `font_path` は、追加のキーならキーのまま（パスに直さない）。MCP の道具の入力の形（inputSchema）は変えていない。
 - **配布物**: 40 個の書体ファイルと `FONTS.json` を `share/genko-studio/fonts/` に置く（`GenkoPackage.cmake`。一覧が 40 個でない・一覧の書体ファイルが 1 つでも無いと、構成で止まる: `cmake/GenkoFontList.cmake`）。SBOM のパッケージは `fonts-lettering`（OFL の 36 個）・`fonts-genei`（源暎の 2 個。OFL）・`fonts-littlelimit`（k8x12・美咲の 2 個。`LicenseRef-LittleLimit-Free`）。`genko doctor` は 40 個があるか・大きさが合うかを見て、その本が名指しした書体だけ SHA-256 まで読む。本が名指しした書体の問題は `problems`（`ok: false`）、ほかは `installation`（本の `ok` は変えない。問題があるときだけの鍵）。
 
-## 人形のポーズ（figures@1。SPEC FIGURE-02、人形 G3。利用者の決定 2026-11-15）
+## 人形のポーズ（figures@1・figures@2。SPEC FIGURE-02、人形 G3。利用者の決定 2026-11-15、持ち方は 2026-11-17）
 
 - **新しい一番上の鍵は無い**。足すのはページの `prims` の、kind `figure` の鍵 `pose_id`・`hold`・`props`・`pair` と、手の形の鍵 `spread`・`thumb`（人形の `hands` の各手の {pose, curls, spread, thumb}、kind `hand` の prim）だけ。どれも任意で、持たない prim は前と同じバイトで書く。
 - **`pose_id`**: 文字。ポーズ集（`native/src/core/data/figure_poses.json`、genko.poses@1）の id（`stand/wave` など）。左右反転は `stand/wave~m`。そのポーズの関節と手を置いたしるしで、描くのは prim の `joints`・`hands` のまま（ポーズ集が後で変わっても、本の人形は変わらない）。ドラッグで消える。
-- **`hold`**: `{"l"?: 物, "r"?: 物}`。物は `cup`・`phone`・`paper`・`bag`・`umbrella`・`book`・`pen`・`sword`・`bat`・`ball`。手の中に小さな立体として描く（G5。SPEC FIGURE-02 の「持つ物の形」）。空なら鍵ごと消す。
+- **`hold`**: `{"l"?: 物, "r"?: 物}`。物は `cup`・`phone`・`paper`・`bag`・`umbrella`・`book`・`pen`・`sword`・`bat`・`ball`。手の中に小さな立体として描く（G5。SPEC FIGURE-02 の「持つ物の形」）。空なら鍵ごと消す。持ち方のある物は、値を「物:持ち方」とも書ける（2026-11-17）: `sword`・`bat`・`umbrella` に `forward`（前腕の向きに続ける）・`down`（逆手）、`bag` に `shoulder`（肩に紐をかけ、鞄は腰の横）・`elbow`（肘にかける）。例 `{"l": "bag:shoulder", "r": "sword:forward"}`。物だけの値は前と同じ意味・同じバイト。
 - **`props`**: `false` だけを持つ（G5）。手に持つ物を描かない。`true` は鍵を消す。
 - **`pair`**: 文字（G5）。二人のポーズを付けた 2 体が同じ値を持つ（本の中で一意の id）。`pose_id` は `couple/hug#a`・`couple/hug~m#b` のように一人を示す。その人形自身のポーズを変える（ドラッグ・preset・別の pose_id・pose_id なしの反転）と、2 体とも鍵を消す。片方を消しても、もう片方の鍵は残る（そのページに相手が居ないだけ）。
 - **`spread`・`thumb`**: 0〜1 の数（小数 3 桁）。指の開きと、親指を手のひらの前へ向ける度合い。無ければ形の名前ごとの既定（SPEC FIGURE-01）。
 - **拡張 `figures@1`**: どの prim かが上のどれかを持つあいだ、`features` に加える（鍵があるかどうかで決める）。無くなれば外す。知らない読み手は未知の拡張として読み取り専用で開く（前の版は鍵を読み飛ばして保存で落とすため）。
+- **拡張 `figures@2`**（2026-11-17）: 人形の prim の `hold` の値のどれかが「物:持ち方」のあいだ、`figures@1` に加えて `features` に加える（値に `:` があるかどうかで決める）。持ち方が無くなれば外す。持ち方の無い本は `features` もバイトも前と同じ。

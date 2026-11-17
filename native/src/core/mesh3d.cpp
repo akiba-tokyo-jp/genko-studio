@@ -186,7 +186,7 @@ std::shared_ptr<const Model> figure(const Json& prim) {
     const HandShape left = shape("l");
     const HandShape right = shape("r");
     figure_shape::FigureMesh made = figure_shape::figure(sk, left, right);
-    // what the hands hold (SPEC FIGURE-02: `hold`, drawn unless `props` is false)
+    // what the hands hold (SPEC FIGURE-02: `hold`, "<prop>" or "<prop>:<way>", drawn unless `props` is false)
     const Json* hold = dict_get(prim, "hold");
     const Json* shown = dict_get(prim, "props");
     const auto held = [&](const char* side) {

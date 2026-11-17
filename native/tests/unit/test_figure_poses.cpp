@@ -114,8 +114,8 @@ std::string issues_text(const std::vector<checks::Issue>& issues) {
 // The sha256 of four thumbnails (60 × 90 at three quarters: stand's first, fashion's last mirrored, sit_chair's first,
 // kneel_squat's last mirrored), taken with this build (again after the body's anatomy pass of 2026-11-16).
 const char* const kThumbPins =
-    "2ac00a4ecf4880832b2ad495c9d65e57cca21d033f89fa6b17e4a52215504059 1a2c7c68a436bd3fde150c81d08dfe3eb6cafc91a1928b4a58c9698d42d1fba7 "
-    "1cf8a694e543d7ee8085e9b3fa7ba8e14e7c194586ba66745dc2657129344214 b9be8243e7f600b07f8ba3528472ca5a1f2ea6bc9842f94b42d762ee4622e40b ";
+    "197a24f58480cf39ee5ee2f912652e9137b70978c3e48ada0e11d700ab2983a9 530c96f243c15b7813b1503433d2cddd5e90c0e597da0dae88715e73d20f78d9 "
+    "93c9acfdcb0a8800d8a6bde96d718e0d187ad71ecfb6388c6b47f80f99f34fa5 421db376314c9b64256174bc2fb7b4a02a8ac4e995c78b4dc5fa868dffbc35b1 ";
 
 std::string sheets_dir() { return qEnvironmentVariable("GENKO_POSE_SHEETS").toStdString(); }
 
@@ -536,6 +536,126 @@ private slots:
         for (std::size_t p = 0; p < posed.pages.size(); ++p) QCOMPARE(loaded.document.page(p).prims, posed.page(p).prims);
         QCOMPARE(loaded.document.page(0).prims[0]["pose_id"], Json("everyday/drink~m"));
         QCOMPARE(loaded.document.page(0).prims[0]["hold"], Json::object({{"l", "cup"}}));
+    }
+
+    // figures@2 is named while a figure's hold says how the thing is held ("<prop>:<way>"), and not otherwise — a hold
+    // without a way names figures@1 alone, as it always did; this build knows the feature; such a book is saved and read
+    // back with its prims as they were, and saved and read once more as the same bytes; and a pose that says a way passes
+    // the checks (one that says a way its prop does not have fails the file's).
+    void figures2Feature() {
+        namespace storage = genko::storage;
+        const Document doc = book_of_before();
+        const auto features = [](const Document& d) {
+            QTemporaryDir dir;
+            storage::AssetStore store(std::filesystem::path(dir.path().toStdString()));
+            return storage::project_payload_v4(d, store)["features"];
+        };
+        const auto has = [](const Json& list, const char* feature) { return std::find(list.begin(), list.end(), Json(feature)) != list.end(); };
+        QVERIFY(!has(features(doc), "figures@2") && !has(features(doc), "figures@1"));
+        QVERIFY(!library::uses_figures2_feature(doc));
+        QCOMPARE(std::string(library::kFigures2Feature), std::string("figures@2"));
+        QVERIFY(storage::is_known_feature("figures@1") && storage::is_known_feature("figures@2") && !storage::is_known_feature("figures@3"));
+        // without a way: figures@1 alone, as before
+        for (const char* batch : {R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": "bag", "r": "sword"}}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "everyday/drink"}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": "umbrella"}, "props": false}])"}) {
+            const Document d = bus().apply(doc, ops(batch), Actor("genko")).doc;
+            QVERIFY2(has(features(d), "figures@1") && !has(features(d), "figures@2"), batch);
+            QVERIFY2(!library::uses_figures2_feature(d), batch);
+        }
+        // with a way: both
+        for (const char* batch : {R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"r": "sword:forward"}}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "b", "hold": {"l": "bag:elbow", "r": "pen"}}])",
+                                  R"([{"op": "pose_figure", "page": 1, "id": "a", "pose_id": "fashion/shoulder_bag~m"}])",
+                                  R"([{"op": "add_figure", "page": 2, "id": "n", "pos": [60, 120, 0], "hold": {"l": "bat:down"}, "props": false}])"}) {
+            const Document d = bus().apply(doc, ops(batch), Actor("genko")).doc;
+            QVERIFY2(has(features(d), "figures@1") && has(features(d), "figures@2"), batch);
+            QVERIFY2(library::uses_figures2_feature(d), batch);
+        }
+        // the way taken off again (the prop alone, or nothing): figures@2 goes
+        const Document with_way = bus().apply(doc, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"r": "sword:forward", "l": "bag:shoulder"}}])"), Actor("genko")).doc;
+        const Document one_left = bus().apply(with_way, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"r": "sword"}}])"), Actor("genko")).doc;
+        QVERIFY(has(features(one_left), "figures@2"));
+        const Document no_way = bus().apply(one_left, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": null}}])"), Actor("genko")).doc;
+        QVERIFY(has(features(no_way), "figures@1") && !has(features(no_way), "figures@2"));
+        const Document nothing = bus().apply(no_way, ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"r": null}}])"), Actor("genko")).doc;
+        QVERIFY(!has(features(nothing), "figures@1") && !has(features(nothing), "figures@2"));
+        QCOMPARE(saved_text(nothing), saved_text(doc));  // (and the book is the bytes it was)
+        // saved, read back, saved again: the same prims, the same features, the same bytes
+        QTemporaryDir tmp;
+        const std::filesystem::path dir = std::filesystem::path(tmp.path().toStdString()) / "ways.genko";
+        {
+            storage::ProjectLock lock(dir);
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.ops = Json::array();
+            storage::Saver(lock).save(with_way, request);
+        }
+        const auto loaded = storage::load_document(dir);
+        QVERIFY2(loaded.report.clean(), loaded.report.to_json().dump().c_str());  // (no unknown feature: the book opens for writing)
+        QVERIFY(std::find(loaded.document.features.begin(), loaded.document.features.end(), "figures@2") != loaded.document.features.end());
+        QVERIFY(std::find(loaded.document.features.begin(), loaded.document.features.end(), "figures@1") != loaded.document.features.end());
+        for (std::size_t p = 0; p < with_way.pages.size(); ++p) QCOMPARE(loaded.document.page(p).prims, with_way.page(p).prims);
+        QCOMPARE(loaded.document.page(0).prims[0]["hold"], ops(R"({"r": "sword:forward", "l": "bag:shoulder"})"));
+        {  // (the book read back, saved once more and read again is the same bytes: nothing of a way is lost or added)
+            const std::filesystem::path second = std::filesystem::path(tmp.path().toStdString()) / "again.genko";
+            {
+                storage::ProjectLock lock(second);
+                lock.try_acquire();
+                storage::SaveRequest request;
+                request.ops = Json::array();
+                storage::Saver(lock).save(loaded.document, request);
+            }
+            Document again = storage::load_document(second).document;
+            again.revision = loaded.document.revision;  // (the save's own count)
+            const std::string a = saved_text(again);
+            const std::string b = saved_text(loaded.document);
+            std::size_t at = 0;
+            while (at < a.size() && at < b.size() && a[at] == b[at]) ++at;
+            QVERIFY2(a == b, ("differs at " + std::to_string(at) + ": " + a.substr(at > 60 ? at - 60 : 0, 160) + " | " + b.substr(at > 60 ? at - 60 : 0, 160)).c_str());
+            QVERIFY(a.find("\"figures@2\"") != std::string::npos && a.find("\"bag:shoulder\"") != std::string::npos);
+        }
+        // a pose that says a way passes the checks, as the pose that does not; a way its prop does not have fails the file's
+        Json pose = *library::find("action/sword_middle");
+        const checks::Report plain = checks::check_pose(pose);
+        QVERIFY2(plain.ok(), issues_text(plain.issues).c_str());
+        for (const char* value : {"sword:forward", "sword:down"}) {
+            pose["hold"] = Json::object({{"r", value}});
+            const checks::Report r = checks::check_pose(pose);
+            QVERIFY2(r.ok(), (std::string(value) + " " + issues_text(r.issues)).c_str());
+            QVERIFY(library::mirrored(library::mirrored(pose)) == pose);
+            QCOMPARE(library::mirrored(pose)["hold"], Json::object({{"l", value}}));
+            QCOMPARE(library::summary(pose)["props"], Json::array({value}));
+        }
+        Json file = library::library();
+        QVERIFY(checks::check_file(file).empty());
+        const auto file_says = [&](const char* value) {
+            Json changed = file;
+            for (Json& p : changed["poses"]) {
+                if (p["id"] == "action/sword_middle") p["hold"] = Json::object({{"r", value}});
+            }
+            return issues_text(checks::check_file(changed));
+        };
+        QVERIFY2(file_says("sword:forward").empty(), file_says("sword:forward").c_str());
+        QVERIFY2(file_says("bag:elbow").empty(), file_says("bag:elbow").c_str());
+        QVERIFY2(file_says("sword:shoulder").find(R"(hold: a sword's way is forward or down (sword:forward), not "shoulder")") != std::string::npos, file_says("sword:shoulder").c_str());
+        QVERIFY2(file_says("pen:down").find("hold: a pen has no way") != std::string::npos, file_says("pen:down").c_str());
+        QVERIFY2(file_says("cake").find("hold: unknown prop \"cake\"") != std::string::npos, file_says("cake").c_str());
+        QVERIFY2(file_says("cake:forward").find("hold: unknown prop \"cake:forward\"") != std::string::npos, file_says("cake:forward").c_str());
+    }
+
+    // A book whose figures hold things the usual way (no "<prop>:<way>") is saved as the build before the ways saved it
+    // (the sha256 of its project.json was taken with that build: native/figures-finish 7da5b234): figures@1 alone, the
+    // hold as it was.
+    void booksWithoutAWaySaveAsBefore() {
+        const Document held = bus().apply(book_of_before(), ops(R"([{"op": "pose_figure", "page": 1, "id": "a", "hold": {"l": "bag", "r": "sword"}},
+                                                                    {"op": "pose_figure", "page": 1, "id": "b", "hold": {"r": "umbrella"}, "props": false},
+                                                                    {"op": "pose_figure", "page": 1, "id": "a", "mirror": true}])"),
+                                          Actor("genko")).doc;
+        const std::string text = saved_text(held);
+        qInfo("a book that holds things the usual way: %s", sha256_of(text).c_str());
+        QVERIFY(text.find("\"figures@1\"") != std::string::npos && text.find("figures@2") == std::string::npos);
+        QCOMPARE(sha256_of(text), std::string("d5fdb24abbe4868647bd7b49eee2f7c27e0c413ce785454fd3f4b041222c5ab6"));
     }
 
     // The op catalogue (`genko schema`) says the new keys.
