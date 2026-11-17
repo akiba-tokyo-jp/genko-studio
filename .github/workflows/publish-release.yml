@@ -1,7 +1,7 @@
 name: publish-release
 
 # 下書きの Release を正式版（Latest）として公開する。手動で流すときだけ動く（push や PR では動かない）。
-# 利用者の指示（2026-11-15）: v0.1.0-20261115 を正式版として公開。流したあとはこのファイルも disabled-workflows に移す。
+# 利用者の指示（2026-11-15）: v0.1.0-20261115 を正式版として公開。2026-11-17: v0.1.0-20261117 も同じ手順で公開。流したあとはこのファイルも disabled-workflows に移す。
 on:
   workflow_dispatch:
     inputs:
