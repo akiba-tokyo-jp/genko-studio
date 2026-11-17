@@ -18,7 +18,21 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
-## 持つ物の持ち方（hold の「物:持ち方」）とポーズの残りの直し（SPEC FIGURE-02、figures@2）— 2026-11-17、ブランチ native/figures-finish（下の体の仕上げ 7da5b234 の上。まだ main に入れていない）
+## 人形の残る見た目の課題（体の仕上げ・持つ物の持ち方・ポーズの残りの直し）の出口 — 凍結 480793d3 で Linux の ASan・Release が合格（2026-11-17）
+- **凍結SHA**: `480793d3`（native/figures-finish。体の仕上げ 3 回、hold の「物:持ち方」〔figures@2〕、ポーズ 13 個の直し〔670 ポーズの id はそのまま〕）。計画は `validation_policy.py --base fd85dcfb --head 480793d3 --phase milestone`（tier full、25 の変更、理由 7。写真加工の試験 78 本は ASan から外す＝利用者の決定 2026-11-14、Release では流す）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.30GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v553。root から CAP_DAC_OVERRIDE・DAC_READ_SEARCH・FOWNER を外して実行。途中の再起動は無く、どの段も 1 回で走り切った（`--resume` の引き継ぎは無し、失敗のあとの走らせ直しは 0 件）。
+- 結果:
+  - linux-asan: 197/197 合格（2 並列、08:30〜10:22 UTC の 107 分。QtTest の項目 5,709、SKIP 0、CLI23 合格、サニタイザーの報告は無し）。test_figure_poses 696 秒（上限 1,800）、test_figure_mesh 326 秒（上限 900）、test_ops_3d 90 秒、test_figure_guide 54 秒、test_gui_poses 46 秒。
+  - linux-release: 275/275 合格（2 並列、11:04〜11:27 UTC の 20 分。項目 6,686、既知の SKIP 32 はどれも ASan の同じ項目の PASS と対になる。CLI23 合格）。test_figure_poses 83 秒、test_figure_mesh 38 秒。
+  - 実 xcb の GUI（Release、Xvfb 1920x1080）: 67 本すべて合格（項目 1,237。SKIP は既知の TestGuiSave::initTestCase の 1 つ）。
+  - 性能（静かな機械で、1 回温めてから）: test_perf_render 合格（なめらかな人形: 作る 176〜261 ms〔合格値 600〕・51,212 三角形、40 dpi の線 7〜10 ms〔40〕、箱ともう 1 体の後ろで 11 ms〔40〕、B4 の校正 244 ms〔800〕）、test_perf_app 2 回（開くまで 482 ms・1,269 ms、入力から画面まで p95 0.72 ms・1.40 ms、p99 1.82 ms・2.58 ms。記録のための計測で合格値は無い。開くまでの時間は回ごとに 2 倍ほど揺れる〔前の出口は 1,065 ms・603 ms〕。原因は調べていない）、test_perf_pipeline 合格（PERF-F 8 ページの校正 p95 5,269 ms）。合格値はどれも変えていない。
+  - **流していないもの**: linux-debug と `--phase final`（最終配布の前に 1 回。利用者の決定 2026-11-13・11-14）、`--pair`（Debug と Windows が無いので合格にならない）、Windows（deferred。最終配布の前の実機受入は残す）。
+- 試験・検査の側で変えた所（差分で確かめた）: 体の仕上げは固定値（網・線・案内の絵・サムネイル）の取り直しと、腰幅最大・体格最小の体を確かめる 1 か所の追加だけ。持ち方は試験の追加だけ（theWaysAThingIsHeld、theWaysOfHolding、figures2Feature、booksWithoutAWaySaveAsBefore。消した行は無い）。pose_checks は hold の新しい形を知るようにしただけ（合わない持ち方を断る＝厳しくなる向き）。しきい値・関節の範囲・fixture・性能の合格値は緩めていない。skip も無い。
+- 公開の取り決めの変更（利用者の指示 2026-11-17「残っている見た目の課題は修正してください」による）: hold の値に `物:持ち方` を書ける。名前だけの値は今までと 1 バイトも変わらない。持ち方を使った本だけが `figures@2` を名乗る。MCP の inputSchema の sha（`ec280269…`）と操作の数（824）は動いていない（変わったのは figure_poses の説明文と ops の schema の hold の説明）。
+- リードが絵で見た確かめ: 体は 3 回（1 回目は眉の棒・腹の汚れ・骨盤の分かれで戻した。2 回目は顔のまぶたのこぶで戻した）、持ち方とポーズは 1 回（13 個の前後と持ち方ごとの絵を等倍で見て受け入れた）。絵は作業の置き場にあり、リポジトリには入れていない。
+- **残る見た目の課題**（試験は通る。下の 2 つの節と docs/POSES.md に記録）: 顔はやわらかく、まぶたや目の形は無い（参考のマネキンより彫りが浅い）。腹筋は無い。足の指の分かれは無い。電話のポーズは手首が首の横までで、ひじが胸の前に来る（腕の長さの比）。上着を肩にかけるポーズはひじが肩の高さで張り出す。`bag:shoulder` は腕を下げると紐が手まで三角に引かれ、細い紐の後ろの線が所々透ける。`bag:elbow` は取っ手が斜めになる。walk/stroll_pockets・work_life/lift_box・sit_chair/slumped_desk は直していない。
+
+## 持つ物の持ち方（hold の「物:持ち方」）とポーズの残りの直し（SPEC FIGURE-02、figures@2）— 2026-11-17、ブランチ native/figures-finish（下の体の仕上げ 7da5b234 の上。2026-11-17 に main に統合）
 
 ### なぜ
 - 下の出口の「残る見た目の課題」の前半。(1) 物は手の座標系に 1 通りで固定なので、肩の鞄は肩の横の拳から下がり、突きの剣は腕と直角に立つ（関節だけでは手首の範囲が足りず直せなかった）。(2) 電話の手が耳でなく頬。(3) `fashion/jacket_over_shoulder` の拳が肩の上に浮く。(4) 前かがみの見せポーズ 3 つの肩の傾きが 3〜5 度。
@@ -76,7 +90,7 @@
 - ASan・全体の試験・実 xcb は工程の出口で。
 
 
-## 人形の体の仕上げ（男の胸・顔・わきの下・細い体の骨盤・起伏。SPEC FIGURE-01）— 2026-11-17、ブランチ native/figures-finish（main fd85dcfb から。まだ main に入れていない）
+## 人形の体の仕上げ（男の胸・顔・わきの下・細い体の骨盤・起伏。SPEC FIGURE-01）— 2026-11-17、ブランチ native/figures-finish（main fd85dcfb から。2026-11-17 に main に統合）
 
 ### なぜ
 - 下の出口の「残る見た目の課題」の体の 5 つ: 男の胸が斜めから円盤に見える、顔が大写しでやわらかく目の近くにむら・あごの線が陰の境だけ、わきの下の輪郭の小さな角、腰 1.6・体格 0.5 で骨盤が箱、参考のマネキンより起伏が浅い（腹筋・肋骨・へそ・膝・足の指）。利用者が直すよう求めた。
