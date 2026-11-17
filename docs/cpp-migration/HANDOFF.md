@@ -18,6 +18,64 @@
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
+## 持つ物の持ち方（hold の「物:持ち方」）とポーズの残りの直し（SPEC FIGURE-02、figures@2）— 2026-11-17、ブランチ native/figures-finish（下の体の仕上げ 7da5b234 の上。まだ main に入れていない）
+
+### なぜ
+- 下の出口の「残る見た目の課題」の前半。(1) 物は手の座標系に 1 通りで固定なので、肩の鞄は肩の横の拳から下がり、突きの剣は腕と直角に立つ（関節だけでは手首の範囲が足りず直せなかった）。(2) 電話の手が耳でなく頬。(3) `fashion/jacket_over_shoulder` の拳が肩の上に浮く。(4) 前かがみの見せポーズ 3 つの肩の傾きが 3〜5 度。
+- 利用者が (1) のために `hold` の入力の形を変えることを許した。ほかの公開の約束（op の名前・本の形式・id・MCP の入力の形）は変えていない。
+
+### したこと
+1. **持ち方**（9f9901cc・0cc1acad）: `hold` の値は今までどおりの「物」か「物:持ち方」。形は文字 1 つにした（新しい鍵を足さない）。理由: `hold` を読む・確かめる・反転する・保存する・一覧に出す所がどれも「側 → 文字」のまま変わらず、物だけの値・古い本・ポーズ集のファイルの形がそのまま通る。兄弟の鍵にすると、op の足し消し（null）・反転・ポーズ集・二人のポーズ・figure_thumbs の全部で 2 つの鍵を揃えて運ぶことになる。
+   - 剣・バット・傘: `forward`（拳の中で親指の向きから指の向きへ 60° 傾ける。角度は絵で決めた: 手首がまっすぐなら前腕から 30° 上がった構えに見え、手首を小指の側へ 0.5236〔範囲 ±0.6 の内〕曲げると前腕の線に続く）、`down`（逆手）。
+   - 鞄: `shoulder`（紐がその側の肩を越え、拳の中を通り、鞄は腰の横）、`elbow`（取っ手が前腕を越え、鞄は前腕の下・体の横）。形の決め方は SPEC FIGURE-02 の「持ち方」。紐と鞄の置き場所は、手の骨格の数ではなく胴の面（figure_shape::torso_part の場）から決めるので、男・女・指定なしの体のどれでも胴に入らない（試験が 3 つの体で測る）。
+   - ほかの物に持ち方は無い。その物に無い持ち方は op と確かめが断る（文は SPEC）。
+   - 物だけの値は 1 バイトも変わらない: 10 個の物の網と辺の sha256（`kPlainProps` `bd710185ef67d05e401ca9dc0c8cc597323bee1cc748f5fee0d4755b1b86b420`）を、持ち方を足す前の figure_props.cpp でも取って同じと確かめた。
+   - 本: 人形の `hold` が持ち方を言うあいだ `features` に **`figures@2`** を加える（`figures@1` は前のまま）。持ち方の無い本は features もバイトも同じ: `hold` を持つ本の project.json の sha256 `d5fdb24abbe4868647bd7b49eee2f7c27e0c413ce785454fd3f4b041222c5ab6` を、前の writer.cpp でも取って同じと確かめた。鍵の無い本の `81b68808…b615c` も前のまま。
+   - 一覧（`figure_poses`・`summary` の `props`）はポーズが言うとおりの文字（`bag` か `bag:shoulder`）。絞り込みの `props`（true・false）は「何か持つか」で、持ち方では変わらない。
+   - MCP: 変えたのは道具 `figure_poses` の説明文だけ。inputSchema の sha256 は `ec280269e34e99dc90a62b766e2701f1dee011c6bdf61caf9211ac4eea6ef7b8` のまま（説明文は inputSchema の外）。操作の数 824 のまま。op の一覧（`native/src/core/data/ops_schema.json` と `docs/ops.schema.json`）は `hold` の説明を同じ文に揃えて変えた。持ち方も op（`add_figure`・`pose_figure`）の道だけを通る（承認を回る道は無い）。
+2. **ポーズ集**（9f9901cc・5eb2b921・3131ec3a）: 13 ポーズ。id は 670 のまま、名前・タグ・接地・順も同じ。詳しくは docs/POSES.md の各行と最後の節。
+   - `bag:shoulder`: `fashion/shoulder_bag`・`hands_props/bag_over_shoulder`・`everyday/carry_bag`。`sword:forward`: `action/sword_thrust`・`heroic/sword_raised`。
+   - 電話を耳へ: `everyday/phone_call`・`work_life/phone_and_notes`・`sit_chair/phone_call`・`talk/phone_talk_walk`。
+   - `fashion/jacket_over_shoulder`（拳が肩の上に乗る）。
+   - 肩の傾き: `pinup/hip_hands_front_lean`（肩 +5.1 → +12.5 度、骨盤 −10.3）、`pinup/lean_hand_thigh`（−3.1 → −12.5、骨盤 +9.7）、`pinup/lean_hands_behind`（−3.5 → −12.5、骨盤 +8.6）。頭は −12.7・+11.5・+10.4 度（肩と同じ向きにさらに倒れていた）→ +2・−2・−2 度。
+   - そのままにしたもの: `walk/carry_bag`・`everyday/waiting`・`work_life/shopping_bags`（名前どおり手に提げる鞄）、構え・切り下ろし・かつぐ・地に立てる剣、傘、バット（絵で見て、そのまま読める）。`walk/stroll_pockets`・`work_life/lift_box`・`sit_chair/slumped_desk` は直していない（下）。
+
+### できなかったこと・足りない所
+- **電話**: 「手首をあごの高さで頭の横、肘は肩より下」は、この人形の骨の長さでは両立しない。肩の関節は耳から 1.2 u 下にあり、上腕 1.5 u・前腕 1.3 u なので、手首を耳の横のあごの高さに置くと、肘の届く円の一番低い所でも肩の高さ（±0.1 u）になる。肘を下げる方を取り、手首はあごの下（頭の中心から 0.7〜0.78 u 下、首の横）、手をまっすぐ上へ伸ばして指先とスマホの上の端が耳、頭を電話の側へ 11〜17 度傾けた。肘は肩より 0.6〜0.9 u 下だが、前へ 1.0〜1.3 u・内へ 0.6 u（胸の前の中央寄り）に来る。スマホの下の端は首の横で、口には向かない。手は開いてスマホの背に添える形（握っていない）。スマホと頭の間は 0.05〜0.10 u 空く（指が先に頭に触れる）。
+- **肩の鞄**: 紐は幅 0.13 u の細い帯で、線の隠れ方（線の深さの絵で 3×3 の近傍を見る規則）は細い物の後ろの線を隠しきれないので、紐の後ろの線（体の輪郭、紐の向こう側の辺）が点々と見える所がある（前からの鞄の取っ手・ペンと同じ。線の規則は変えていない）。紐は胴と、鞄の横の太ももには入らないが、腕は見ていない（腕が紐の通り道にあるポーズでは腕を通る）。手が紐の線から遠い（腕を下げる）と、紐は手まで引かれて三角になる。握る手の手首は内へ深く曲がる（z 0.75〜1.17、範囲 1.4 の内）。
+- **上着**: 拳は肩に乗ったが、肘が肩の高さ（0.3 u 上）で前・横へ張る。手首の x は 0.598（範囲 0.6 のぎりぎり）。上着そのものは描かない。
+- **見せポーズ 3**: `lean_hand_thigh` の右手は腿の上で 0.3 u 腰の側へ動いた（肩が上がり、まっすぐの腕が元の所へ届かない）。
+- **直さなかった「弱い」3 つ**: `walk/stroll_pockets` は肩を −11 度に傾けてみたが、弱さの元（手がポケットに入って見えず、腿の前に下がる）は変わらず、右腕が元の手の所へ 0.08 u 届かなくなったので戻した。`work_life/lift_box`・`sit_chair/slumped_desk` は両手で同じことをする左右対称の動作で、肩を傾けると手の場所が崩れるので触っていない。
+- `down` と `elbow` はポーズ集ではまだ使っていない（op と試験と一覧の絵だけ）。`bag:elbow` の鞄は、体に入らない所まで横へ出すので、取っ手が斜めになる。
+- 利用者の目ではまだ見ていない。
+
+### 控え
+- 動いたもの: 無い。`kWalkMesh` `5404f6d9…6a93`・`kWalkLines`・`kDrawn`・`kOtherKinds` `6ffc48c3…36f1`（test_figure_mesh）、`kFiguresPng` `7411b0b4…c640`・`kRegionsPng` `217c552f…dfe5`（test_figure_guide）、`kThumbPins` `197a24f5… 530c96f2… 93c9acfd… 421db376…`・`figure_presets()` の sha256・鍵の無い本の project.json `81b68808…b615c`（test_figure_poses）、MCP の inputSchema `ec280269…f7b8`（test_mcp_api_e2e）、操作の数 824（test_gui_actions）は、どれも試験が前の値のまま合格。小さな絵の 4 ポーズ（stand/neutral・fashion/kneel_pose~m・sit_chair/upright・kneel_squat/kneel_hands_thighs~m）は変えていない。
+- 足したもの（前のビルドの値を控えた 2 つ）: test_figure_mesh `kPlainProps` `bd710185…b420`、test_figure_poses の `hold` を持つ本の project.json `d5fdb24a…5ab6`。
+- ポーズ集のファイル figure_poses.json の sha256: `df37192be94a71a7e6424d295bc8b147ddc46643ba744b7e53fb7613aec72248`（13 行が変わった）。
+
+### 測った数（Release、4 CPU のクラウド機）
+- 物を作る時間（`figure_shape::props`、20 回の一番速い回）: `bag` 0.006 ms・72 点、`bag:shoulder` 0.39 ms・256 点、`bag:elbow` 0.03 ms・232 点、`sword` と `sword:forward` 0.019 ms・168 点。人形そのもの（約 187 ms）に比べて小さい。
+- 13 ポーズの測り（指定なしの体。紐・鞄・手は男・女でも）: スマホと頭の間 0.086・0.082・0.104・0.054 u、電話の手と頭・胴の間 0 以上、上着の拳と胴の間 −0.007 u（触れている。前は +0.435 u）、肩の鞄の紐・鞄と胴の間 0.003〜0.013 u（3 つの体で 0 以上）、握る拳と胴の間 0.07 u（女の胸で 0〜0.036 u）、突きと掲げる剣の刃と前腕の角 0.0 度。
+- test_figure_poses（670 ポーズ）: 72〜77 秒（前 72〜75 秒）。
+
+### 試験（Release、関係するものだけ。最後の変更〔0cc1acad〕の後に流した。権限を落とした setpriv の包みで）
+- 合格（ctest、2 並列、163 秒、27 本）: test_figure_mesh 33.5 秒、test_figure_guide 5.6 秒、test_figure_poses 72.1 秒、test_gui_poses 7.2 秒、test_ops_3d 11.5 秒、test_render_page 7.0 秒、test_mcp_api_e2e 50.7 秒、test_cli_e2e 5.1 秒、test_gui_actions 12.9 秒、test_gui_guides 8.9 秒、test_command_bus 2.7 秒、test_ledger_service_a 3.3 秒、test_ledger_service_b 31.7 秒、test_ledger_service_c 1.8 秒、test_gui_ledger_a 11.7 秒、test_gui_ledger_b 14.7 秒、test_gui_ledger_c 3.7 秒、test_gui_studio 15.7 秒、test_save_e2e 1.5 秒、test_storage 0.08 秒、test_contract_storage 0.23 秒、test_features 0.06 秒、test_migrate_e2e 1.7 秒、test_migration 0.04 秒、test_font_catalog 0.05 秒、test_brushes_model 0.07 秒、test_session 22.3 秒。別に 1 本だけで test_perf_render 28.2 秒（合格。なめらかな人形を作る 178〜227 ms〔合格値 600〕）。
+- 足した試験: test_figure_mesh `theWaysAThingIsHeld`（物だけの値が前のバイト、forward は 60°・手首を曲げて前腕と 1° 以内・腕が回っても手の中で同じ、down は逆、肩の鞄は 3 つの体で紐が肩を越え・拳を通り・胴に入らず・鞄が腰の横、肘の鞄、反転、props: false、知らない持ち方は何も描かない、4 スレッドで同じバイト）、test_ops_3d `theWaysOfHolding`（op が受け取る・足し消し・反転・ポーズ集のポーズと反転・断る文 11 通り・保存して読み直す）、test_figure_poses `figures2Feature`（持ち方があるときだけ figures@2、読み手が知る、保存 → 読む → 保存 → 読むで同じバイト、持ち方のあるポーズが確かめに通る・無い持ち方はファイルの確かめに落ちる）・`booksWithoutAWaySaveAsBefore`。
+- 前からの試験・基準・上限・許容・閾値は 1 つも変えていない。SKIP は増やしていない（test_gui_save は Release では前から自分で SKIP するので、上の数に入れていない）。ASan と全体の試験は流していない（工程の出口で流す）。途中の commit（9f9901cc・5eb2b921・3131ec3a）ごとには流していない（流したのは最後の状態）。
+
+### 絵（前と後）
+- /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/finish-props/after/ — `ba_<ポーズ>.png` 13 枚（上の段が前〔7da5b234 のポーズ〕、下の段が後。正面・斜め・横ともう 1 つの向き。電話・上着・鞄は下に大写し）、`way_forward.png`・`way_forward_close.png`・`way_down.png`・`way_bag_shoulder.png`・`way_bag_elbow.png`（まっすぐ立った人形に持ち方ごと）。絵はどれも体の今の形で描いた。
+- 道具は /tmp/claude-0/-home-user/b91dd1b8-ab69-5dd4-a8e2-431a48989c3c/scratchpad/finish-props/tools/（リポジトリには入れていない。腕を解く Python の道具と、手・物の面と胴・頭の場の間を測る C++ の道具）。
+
+### 環境
+- Claude Code クラウドコンテナ、4 CPU（Intel Xeon 2.30 GHz）、メモリ 16 GB、Ubuntu 24.04.5 LTS、カーネル 6.18.44-fc-v553、Qt 6.11.2、Release（build/linux-release）。
+
+### 残ること
+- 上の「できなかったこと・足りない所」。
+- ASan・全体の試験・実 xcb は工程の出口で。
+
+
 ## 人形の体の仕上げ（男の胸・顔・わきの下・細い体の骨盤・起伏。SPEC FIGURE-01）— 2026-11-17、ブランチ native/figures-finish（main fd85dcfb から。まだ main に入れていない）
 
 ### なぜ

@@ -495,20 +495,27 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
 - `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts
   left out, and the lit surfaces as greys (with `tone`, the layer prints them as dots). `trace_prims` also leaves
   hidden lines out for figures, heads, hands and models.
-- The pose library (SPEC FIGURE-02, figures@1): over six hundred original poses in categories (stand, fashion, walk,
+- The pose library (SPEC FIGURE-02, figures@1, figures@2): over six hundred original poses in categories (stand, fashion, walk,
   run, sit_chair, sit_floor, kneel_squat, everyday, pinup, relax_bed, lie, upper_body, turn, point, emotion, talk,
   hands_props, sports_action, action, dance, heroic, work_life, and the pairs couple and two_people), each `"<category>/<name>"` with Japanese and English names and tags. `add_figure`/`pose_figure {pose_id}` puts its joints and hands in place as a preset does and keeps
   `pose_id` (and `hold`, what its hands hold); `mirror: true` swaps left and right (`"<id>~m"`; without `pose_id`, the
   figure's own pose); `keep: "ground"` keeps the figure's lowest point where it was (sitting down keeps the floor;
   default `"pelvis"` keeps `pos`); `hold {l, r: cup|phone|paper|bag|umbrella|book|pen|sword|bat|ball | null}` is drawn
-  in the hand (shaded, traced, in guides/figures.png in the holder's colour; `props: false` hides it). A pair pose
+  in the hand (shaded, traced, in guides/figures.png in the holder's colour; `props: false` hides it). A prop that can
+  be held another way takes `"<prop>:<way>"` in place of the prop's name: `sword`, `bat`, `umbrella` — `forward`
+  (tilted in the fist so that it carries on the forearm's line when the wrist bends 0.52 to the little finger's side: a
+  thrust, a point) or `down` (the reverse grip); `bag` — `shoulder` (on a strap over that hand's shoulder, the bag at
+  the hip, the strap through the fist: put the fist before the chest, below the shoulder) or `elbow` (hanging from the
+  crook of that arm). The prop alone is held as it always was; a way that is not the prop's is refused ("a bag's way
+  is shoulder or elbow (bag:shoulder), not …", "a cup has no way (…)"); mirror keeps the way. A pair pose
   (couple/…, two_people/…: `pair: true` in figure_poses) places two figures: `add_figure {pose_id, partner_id?,
   partner_body?}` adds the partner b beside a; `pose_figure {id, pose_id, partner_id?}` poses the figure as a and its
   partner (the figure named — a new id adds one — or the one with the same `pair` key) as b, b placed and turned from a.
   Both keep `pose_id` `"<id>#a"`/`"#b"` and one `pair` key; a figure's own pose (drag, preset, another pose_id, mirror
   alone) ends the pair for both. `"<id>#a"` alone is one person of a pair on one figure. A hand is also `{pose, curls, spread (fingers fanned 0..1), thumb (across the palm
   0..1)}` (and `add_hand`/`pose_figure` of a hand take `spread`, `thumb`). A drag forgets `pose_id`. Unknown ids are
-  refused ("no pose <id> (figure_poses lists them)"). A book whose prims say any of these keys names `figures@1`.
+  refused ("no pose <id> (figure_poses lists them)"). A book whose prims say any of these keys names `figures@1`
+  (and `figures@2` while a figure's `hold` says a way).
   The ids are in `native/src/core/data/figure_poses.json`; list them with the tool `figure_poses` (reads only, `project`
   may be left out): `category`, `tags`, `query` (Japanese or English words, each to match), `contact`, `support`,
   `props` (true: hands that hold something), `limit` (50) and `offset`; `random: n` picks n of those that match from
