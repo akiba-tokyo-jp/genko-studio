@@ -223,8 +223,9 @@ Field hand_field(double length, const HandShape& shape, const Stub& stub) {
 }
 
 // --- the head: an egg of a skull, the face in front of and below it, the chin and the jaw's corners, cut flat under
-// the jaw (the jaw's line); a mannequin's face: the brow's ridge, the eyes as smooth shallow hollows under it, the nose
-// and its bridge, closed lips; small ears flat against the head between the eyes' and the nose's height -------------
+// the jaw (the jaw's line); a mannequin's face: a low brow over each eye (no ridge across the forehead), under it a
+// shallow oval hollow with the closed lid in it, the nose narrow at its root and wider to the tip, closed lips; small
+// ears flat against the head between the eyes' and the nose's height ------------------------------------------------
 
 constexpr double kHeadNormalSteps = 1.0;  // (the head's light: its relief is a few cells across — surface_nets::mesh)
 constexpr std::size_t kPlainHead = 6;  // (the head's first pieces: the skull, the face, the chin, the jaw's corners and the cut under them, without the relief)
@@ -262,21 +263,39 @@ Part head_part(const Vec3& centre, const Mat3& turn, double u) {
         under.carve = true;
         p.push_back(with_blend(std::move(under), 0.05 * u));
     }
-    // the eyes: a smooth, shallow hollow under the brow on each side of the nose's bridge, taken out of the face — a
-    // broad dish (its walls slope gently: no rim on the cheek), so the eye is a soft shadow under the brow
+    // the brows: no ridge runs across the forehead. Over each eye a low round form, fullest above the middle of the
+    // eye and falling toward the temple (it ends before the side of the head); between the two the forehead runs
+    // down smooth and low to the root of the nose
     {
-        Piece one = ellipsoid(at(0.155, 0.068, -0.465), turn, r(0.14, 0.095, 0.1));
-        Piece other = ellipsoid(at(-0.155, 0.068, -0.465), turn, r(0.14, 0.095, 0.1));
+        const auto brow = [&](double side) {
+            // (its frame: along the brow — outward, a little down and back round the head —, up, and out of the face)
+            const Vec3 along = unit(Vec3{side * 0.86, 0.2, 0.47});
+            Vec3 up{0.0, -1.0, 0.0};
+            up = unit(sub(up, mul(along, dot3(up, along))));
+            const Vec3 out{along[1] * up[2] - along[2] * up[1], along[2] * up[0] - along[0] * up[2], along[0] * up[1] - along[1] * up[0]};
+            Mat3 world{};
+            const Vec3 cols[3] = {out_of(turn, along), out_of(turn, up), out_of(turn, out)};
+            for (std::size_t col = 0; col < 3; ++col) {
+                for (std::size_t row = 0; row < 3; ++row) world[row][col] = cols[col][row];
+            }
+            return ellipsoid(at(side * 0.135, -0.02, -0.31), world, r(0.105, 0.055, 0.075));
+        };
+        pair(p, brow(1.0), brow(-1.0), 0.08 * u);
+    }
+    // the eyes: a shallow oval hollow under each brow, taken out of the face. Each is closed all round — the nose's
+    // bridge inside, the cheekbone and the temple outside —, so the two are never one band, from any side
+    {
+        Piece one = ellipsoid(at(0.145, 0.075, -0.445), turn, r(0.095, 0.066, 0.075));
+        Piece other = ellipsoid(at(-0.145, 0.075, -0.445), turn, r(0.095, 0.066, 0.075));
         one.carve = true;
         other.carve = true;
-        pair(p, std::move(one), std::move(other), 0.08 * u);
+        pair(p, std::move(one), std::move(other), 0.07 * u);
     }
-    // the brow: a ridge over the eyes, a little proud of the forehead (set after the hollows: its round underside
-    // runs down into them whole, with no thin edge left of it)
-    p.push_back(with_blend(ellipsoid(at(0.0, -0.055, -0.265), turn, r(0.29, 0.09, 0.19)), 0.12 * u));
-    // the nose: its bridge from inside the brow down to the tip, and the tip (set after the hollows: it stands clear
-    // between them)
-    p.push_back(with_blend(cone(at(0.0, -0.045, -0.39), 0.05 * u, at(0.0, 0.165, -0.478), 0.044 * u), 0.08 * u));
+    // (the closed lid: a low round in each hollow, two of the head's cells high — as small as the grid carries)
+    pair(p, ellipsoid(at(0.145, 0.08, -0.325), turn, r(0.078, 0.05, 0.06)), ellipsoid(at(-0.145, 0.08, -0.325), turn, r(0.078, 0.05, 0.06)), 0.055 * u);
+    // the nose: narrow at its root between the eyes, where it leaves the face, wider and higher toward the tip; the
+    // tip (set after the hollows: it stands clear between them)
+    p.push_back(with_blend(cone(at(0.0, 0.01, -0.393), 0.03 * u, at(0.0, 0.165, -0.476), 0.046 * u), 0.06 * u));
     p.push_back(with_blend(ellipsoid(at(0.0, 0.188, -0.45), turn, r(0.072, 0.05, 0.06)), 0.06 * u));
     // the mouth: the round of the teeth, the closed lips on it as one soft form, the hollow between the lips and the chin
     p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.125)), 0.08 * u));
