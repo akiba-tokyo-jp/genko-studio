@@ -177,6 +177,11 @@ private slots:
         }
         prims.push_back(with(figure_prim("run", "female", 0.0), "body", ops(R"({"sex": "female", "heads": 4, "legs": 0.6, "hips": 1.6, "shoulders": 0.6})")));
         prims.push_back(with(figure_prim("run", "male", 0.0), "body", ops(R"({"sex": "male", "heads": 10, "legs": 1.5, "hips": 0.6, "shoulders": 1.5, "build": 1.8})")));
+        // (the widest hips on the thinnest build: the pelvis's own forms for it, standing, walking and seated)
+        for (const char* preset : {"stand", "walk", "sit"}) {
+            prims.push_back(with(figure_prim(preset, "", 0.0), "body", ops(R"({"hips": 1.6, "build": 0.5})")));
+            prims.push_back(with(figure_prim(preset, "female", 0.0), "body", ops(R"({"sex": "female", "hips": 1.6, "build": 0.5})")));
+        }
         for (const char* pose : {"open", "relaxed", "fist", "point", "peace", "grip"}) {
             for (const char* side : {"l", "r"}) {
                 prims.push_back(Json::object({{"kind", "hand"}, {"size", Json::array({25, 25, 25})}, {"side", side}, {"pose", pose}}));
