@@ -196,7 +196,7 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
 Part torso_part(const mesh3d::Skeleton& sk);
 Part head_part(const mesh3d::Skeleton& sk);
 // A head on its own (u = its height / 1.1), centred on 0, and its face's guide lines. The face is a mannequin's: a
-// low brow over each eye, the eyes as shallow oval hollows with closed lids, the nose's bridge and tip, closed lips,
+// low brow over each eye, the eyes as smooth shallow oval hollows, the nose's bridge and tip, closed lips,
 // the chin and the jaw's line over a flat underside, small flat ears; no drawn features: a person turned anywhere
 // reads as one.
 FigureMesh head(double u);
