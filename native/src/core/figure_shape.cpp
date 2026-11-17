@@ -1119,13 +1119,14 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     }
     // the furrow of the spine, deepest at the small of the back, fading out toward the neck and toward the pelvis
     relief(swell(rest(0.0, -1.45, 0.46 * dd), kIdentity, radii(0.15, 1.2, 0.3), -0.022 * u));
-    // the collarbones: a low ridge from the pit of the neck out toward each shoulder, fading at both ends
+    // the collarbones: a low, broad ridge from the pit of the neck out to each shoulder, fading at both ends (six of
+    // the grid's cells across: a narrower one shows as thin lines in the light)
     {
         const double sx_ = 0.9 * (0.4 + 0.4 * sh) * g;  // (about where the shoulder's ball begins)
         const auto bone = [&](double side) {
             const Vec3 inner = rest(side * 0.04, -2.75, 0.1 * dd - 0.33 * d_chest - 0.02);
             const Vec3 outer = rest(side * sx_, -2.71, -0.1);
-            return swell(mul(add(inner, outer), 0.5), frame_along(sub(outer, inner)), Vec3{0.52 * length(sub(outer, inner)), 0.12 * u, 0.22 * u}, 0.02 * u);
+            return swell(mul(add(inner, outer), 0.5), frame_along(sub(outer, inner)), Vec3{0.52 * length(sub(outer, inner)), 0.19 * u, 0.22 * u}, 0.03 * u);
         };
         relief_pair(bone(1.0), bone(-1.0));
     }
@@ -1378,6 +1379,21 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             f.parts.push_back(std::move(p));
         }
         const int shin = thigh + 1;
+        {  // the knee's relief, the same swells on the thigh and on the shin (the two are one surface there): the
+            // kneecap, a low round on the front — it sinks between the thigh's end and the shin as the knee folds
+            // (from about 100°, gone by 145°: a knee folded under the body rests on its own round) —, and the hollow
+            // behind the knee, which is the straight leg's (gone as the knee bends: the fold of a bent knee is the
+            // two parts' own)
+            const double bent = bend_of(thigh_r, shin_r);
+            const double open = std::min(1.0, std::max(0.0, 0.95 - bent) / 0.2);
+            const Piece cap = swell(off(knee, shin_r, 0.0, -0.02, -0.27 * g), shin_r, radii(0.17 * g, 0.21, 0.22), 0.022 * u * open);
+            const double straight = std::max(0.0, 1.0 - bent / 0.3);
+            const Piece hollow = swell(off(knee, shin_r, 0.0, 0.0, 0.23 * g), shin_r, radii(0.16 * g, 0.26, 0.2), -0.02 * u * straight);
+            for (const int part : {thigh, shin}) {
+                f.parts[static_cast<std::size_t>(part)].pieces.push_back(cap);
+                f.parts[static_cast<std::size_t>(part)].pieces.push_back(hollow);
+            }
+        }
         {  // the foot, a run of sections from the heel to the toes (wide and low at the ball, a wedge at the toes), the
             // instep rising to the ankle, the big toe's side longer; the sole flat (each section reaches 0.04 u under the
             // sole's plane, the rounding of its cut: the sole is the plane itself)

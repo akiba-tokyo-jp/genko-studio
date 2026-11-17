@@ -489,7 +489,7 @@ private:
                     {"notes", "制御画像（guides/figures.png・regions.png）は出力と同じ大きさ。CFG 1"}};
     }
 
-    static constexpr const char* kFiguresPng = "9d5d99238f8510a898a349e285c0494b2f6f96b439b7748625396bc30b0ac4bb";
+    static constexpr const char* kFiguresPng = "d9d27a3a3bfd48638b28f6b0c123b43e09f08a2820cf9141b27e0bf4d401cac0";
     static constexpr const char* kRegionsPng = "f2ae0217d2f729a4eac6894ddeffa66ac59699ffa150a2e7a479ae9496653486";
 };
 
