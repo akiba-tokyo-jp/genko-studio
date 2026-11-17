@@ -503,7 +503,7 @@ void bag_on_shoulder(Solid& s, const mesh3d::Skeleton& sk, const std::string& si
 }
 
 // A bag hanging from the crook of the arm: its two handles over the forearm near the elbow, the bag below it by the
-// figure's down, its wide faces across the forearm.
+// figure's down, its wide faces across the forearm — beside the body where the body is under the forearm.
 void bag_on_elbow(Solid& s, const mesh3d::Skeleton& sk, const std::string& side, const HandFrame& h) {
     const double u = sk.unit;
     const double L = h.L;
@@ -518,7 +518,31 @@ void bag_on_elbow(Solid& s, const mesh3d::Skeleton& sk, const std::string& side,
     const double r = kCrookRadius * u;
     const double rise = r / std::max(0.5, level);  // (a sloping forearm is cut on the slant: the handle's arch is as much taller)
     const Vec3 anchor = add(elbow, mul(fore, kCrookAlong * u));
-    const Vec3 top = add(anchor, mul(dn, rise + 0.45 * L));
+    // the bag hangs under the forearm — and beside the body, not in it: moved along its own width, away from the body's
+    // middle, until its two wide faces are clear of the torso and of that side's thigh (0.04 u at a time, 0.64 u at most)
+    Vec3 top = add(anchor, mul(dn, rise + 0.45 * L));
+    {
+        const Part torso = torso_part(sk);
+        const Vec3& joint = sk.point(side + "_hip");
+        const Vec3 thigh = sub(sk.point(side + "_knee"), joint);
+        const Vec3 away = mul(across, dot(across, sub(anchor, sk.point("pelvis"))) >= 0.0 ? 1.0 : -1.0);
+        const auto clear = [&](const Vec3& middle) {
+            for (const double a : {-1.0, 0.0, 1.0}) {
+                for (const double b : {-1.0, 0.0, 1.0}) {
+                    for (const double c : {-1.0, 1.0}) {
+                        const Vec3 p = add(middle, add(add(mul(across, 0.78 * L * a), mul(dn, 0.58 * L * b)), mul(deep, 0.22 * L * c)));
+                        if (torso.at(p) < 0.02 * u) return false;
+                        const double t = std::max(0.0, std::min(1.0, dot(sub(p, joint), thigh) / dot(thigh, thigh)));
+                        const Vec3 off = sub(p, add(joint, mul(thigh, t)));
+                        const double thick = (kThighRadius - 0.2 * t + 0.02) * u;
+                        if (dot(off, off) < thick * thick) return false;
+                    }
+                }
+            }
+            return true;
+        };
+        for (int k = 0; k < 16 && !clear(add(top, mul(dn, 0.58 * L))); ++k) top = add(top, mul(away, 0.04 * u));
+    }
     for (const double off : {-1.0, 1.0}) {
         const Vec3 o = mul(deep, 0.1 * L * off);
         std::vector<Vec3> line;
