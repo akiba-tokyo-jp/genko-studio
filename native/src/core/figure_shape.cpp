@@ -222,12 +222,12 @@ Field hand_field(double length, const HandShape& shape, const Stub& stub) {
     return f;
 }
 
-// --- the head: an egg of a skull, the face in front of and below it, the jaw and the chin; a calm face in shallow
-// relief (the brow, the eyes' shallow sockets and their lids, the nose and its bridge, closed lips), small ears flat
-// against the head between the eyes' and the nose's height ------------------------------------------------------------
+// --- the head: an egg of a skull, the face in front of and below it, the chin and the jaw's corners, cut flat under
+// the jaw (the jaw's line); a mannequin's face: the brow's ridge, the eyes as smooth shallow hollows under it, the nose
+// and its bridge, closed lips; small ears flat against the head between the eyes' and the nose's height -------------
 
 constexpr double kHeadNormalSteps = 1.0;  // (the head's light: its relief is a few cells across — surface_nets::mesh)
-constexpr std::size_t kPlainHead = 5;  // (the head's first pieces: the skull, the face, the chin and the jaw's corners, without the relief)
+constexpr std::size_t kPlainHead = 6;  // (the head's first pieces: the skull, the face, the chin, the jaw's corners and the cut under them, without the relief)
 
 Part head_part(const Vec3& centre, const Mat3& turn, double u) {
     const auto at = [&](double x, double y, double z) { return add(centre, out_of(turn, Vec3{x * u, y * u, z * u})); };
@@ -237,30 +237,58 @@ Part head_part(const Vec3& centre, const Mat3& turn, double u) {
     std::vector<Piece>& p = head.pieces;
     p.push_back(ellipsoid(at(0.0, -0.11, 0.055), turn, r(0.375, 0.43, 0.445)));  // the skull
     p.push_back(ellipsoid(at(0.0, 0.14, -0.1), turn, r(0.29, 0.39, 0.335)));     // the face
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.4, -0.235), turn, r(0.16, 0.125, 0.135)), 0.14 * u));  // the chin
-    pair(p, ellipsoid(at(0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), ellipsoid(at(-0.185, 0.27, -0.03), turn, r(0.095, 0.14, 0.16)), 0.14 * u);  // the jaw's corners
-    p.push_back(with_blend(ellipsoid(at(0.0, -0.04, -0.24), turn, r(0.3, 0.12, 0.2)), 0.12 * u));     // the brow
-    // The face's low relief is made of swells (no edge anywhere), each at least three of the head's grid cells across —
-    // a form finer than the grid shows as noise, so a small form is made larger and softer, never finer.
-    const auto both = [&](double x, double y, double z, const Vec3& size, double amount) {
-        Piece one = swell(at(x, y, z), turn, size, amount * u);
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.41, -0.26), turn, r(0.13, 0.125, 0.12)), 0.12 * u));  // the chin
+    pair(p, ellipsoid(at(0.165, 0.28, -0.03), turn, r(0.09, 0.14, 0.16)), ellipsoid(at(-0.165, 0.28, -0.03), turn, r(0.09, 0.14, 0.16)), 0.14 * u);  // the jaw's corners
+    // The line of the jaw: what is under a broad, nearly flat form — from below the chin back and up to under the
+    // jaw's corners — is taken away, so the cheek and the chin turn under along one clear edge (round over 0.05 u)
+    // to the shallow dish between the jaw and the neck: the jaw reads from the front, three quarters and the side,
+    // and the chin stands over the neck. The form falls away at its ends, so it leaves the head with no step behind
+    // the jaw or at the nape.
+    {
+        const Vec3 down{0.0, 0.912, 0.41};     // (the form's own: down and a little back)
+        const Vec3 along{0.0, -0.41, 0.912};
+        const double thick = 0.25;
+        const Vec3 on{0.0, 0.525 - 0.41 * 0.12, -0.27 + 0.912 * 0.12};  // (where its top is, under the middle of the jaw)
+        Mat3 m{};
+        m[0] = Vec3{1.0, down[0], along[0]};
+        m[1] = Vec3{0.0, down[1], along[1]};
+        m[2] = Vec3{0.0, down[2], along[2]};
+        Mat3 world{};
+        for (std::size_t col = 0; col < 3; ++col) {
+            const Vec3 v = out_of(turn, Vec3{m[0][col], m[1][col], m[2][col]});
+            for (std::size_t row = 0; row < 3; ++row) world[row][col] = v[row];
+        }
+        Piece under = ellipsoid(at(on[0] + down[0] * thick, on[1] + down[1] * thick, on[2] + down[2] * thick), world, r(1.2, thick, 0.45));
+        under.carve = true;
+        p.push_back(with_blend(std::move(under), 0.05 * u));
+    }
+    // the eyes: a smooth, shallow hollow under the brow on each side of the nose's bridge, taken out of the face — a
+    // broad dish (its walls slope gently: no rim on the cheek), so the eye is a soft shadow under the brow
+    {
+        Piece one = ellipsoid(at(0.155, 0.068, -0.465), turn, r(0.14, 0.095, 0.1));
+        Piece other = ellipsoid(at(-0.155, 0.068, -0.465), turn, r(0.14, 0.095, 0.1));
+        one.carve = true;
+        other.carve = true;
+        pair(p, std::move(one), std::move(other), 0.08 * u);
+    }
+    // the brow: a ridge over the eyes, a little proud of the forehead (set after the hollows: its round underside
+    // runs down into them whole, with no thin edge left of it)
+    p.push_back(with_blend(ellipsoid(at(0.0, -0.055, -0.265), turn, r(0.29, 0.09, 0.19)), 0.12 * u));
+    // the nose: its bridge from inside the brow down to the tip, and the tip (set after the hollows: it stands clear
+    // between them)
+    p.push_back(with_blend(cone(at(0.0, -0.045, -0.39), 0.05 * u, at(0.0, 0.165, -0.478), 0.044 * u), 0.08 * u));
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.188, -0.45), turn, r(0.072, 0.05, 0.06)), 0.06 * u));
+    // the mouth: the round of the teeth, the closed lips on it as one soft form, the hollow between the lips and the chin
+    p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.125)), 0.08 * u));
+    p.push_back(swell(at(0.0, 0.3, -0.4), turn, r(0.16, 0.08, 0.09), 0.014 * u));
+    p.push_back(swell(at(0.0, 0.39, -0.37), turn, r(0.13, 0.07, 0.09), -0.012 * u));
+    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.06 * u);  // the ears
+    {  // (and the hollow of each)
+        Piece one = swell(at(0.35, 0.1, 0.062), turn, r(0.05, 0.062, 0.036), -0.013 * u);
         one.paired = true;
         p.push_back(std::move(one));
-        p.push_back(swell(at(-x, y, z), turn, size, amount * u));
-    };
-    // the eyes: a socket under the brow on each side of the nose's bridge (they end short of it: the bridge parts
-    // them), the closed lid a swell in each
-    both(0.16, 0.07, -0.39, r(0.105, 0.09, 0.14), -0.04);
-    both(0.16, 0.08, -0.385, r(0.082, 0.06, 0.12), 0.034);
-    // the nose: its bridge down to the tip (set after the sockets: it stands clear between them)
-    p.push_back(with_blend(cone(at(0.0, 0.0, -0.385), 0.045 * u, at(0.0, 0.165, -0.468), 0.05 * u), 0.08 * u));
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.183, -0.443), turn, r(0.068, 0.047, 0.06)), 0.07 * u));
-    // the mouth: the round of the teeth, the closed lips on it as one soft form, the hollow between the lips and the chin
-    p.push_back(with_blend(ellipsoid(at(0.0, 0.3, -0.285), turn, r(0.15, 0.1, 0.13)), 0.08 * u));
-    p.push_back(swell(at(0.0, 0.305, -0.41), turn, r(0.115, 0.06, 0.09), 0.02 * u));
-    p.push_back(swell(at(0.0, 0.385, -0.375), turn, r(0.11, 0.055, 0.09), -0.012 * u));
-    pair(p, ellipsoid(at(0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), ellipsoid(at(-0.318, 0.1, 0.07), turn, r(0.035, 0.095, 0.06)), 0.06 * u);  // the ears
-    both(0.35, 0.1, 0.062, r(0.05, 0.062, 0.036), -0.013);  // (and the hollow of each)
+        p.push_back(swell(at(-0.35, 0.1, 0.062), turn, r(0.05, 0.062, 0.036), -0.013 * u));
+    }
     return head;
 }
 
@@ -1370,8 +1398,10 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
         under.fade_n = down;
         under.fade_d = ring - 0.01 * u;
         hf.parts.push_back(std::move(under));
-        hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.22), 0.24 * u, 0.5 * u, 0.0});  // (at the nape)
-        hf.joints.push_back(Joint{0, 1, neck_top, 0.1 * u, 0.5 * u, 0.5});                         // (under the jaw)
+        // (the head runs into the neck at the nape, and more widely under the jaw, whose shallow underside meets the
+        // neck in a round fold — one joint with its second place under the jaw, a little above the neck's top so
+        // that it is gone at the ring, where the neck is the body's own)
+        hf.joints.push_back(Joint{0, 1, off(HB, Hd, 0.0, -0.05, 0.22), 0.24 * u, 0.5 * u, 0.0, off(HB, Hd, 0.0, -0.12, -0.08), 0.18 * u, 0.36 * u, 0.5});
         hf.joints.push_back(Joint{2, 1, neck_joint.at, neck_joint.k, neck_joint.radius, neck_joint.flat});
         Smooth hm = surface_nets::mesh(hf, u / kHeadCells, kHeadNormalSteps);
         // (from two of the head's cells above where the thinning begins: the head's wider slope reaches that far)
