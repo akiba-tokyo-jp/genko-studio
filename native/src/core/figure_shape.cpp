@@ -1164,28 +1164,16 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     // slowly to show, and it is of the front only (gone before the flank: the body's side is as it was). Sunk, not
     // the ribs raised: the trunk is nowhere larger for it.
     {
-        const double amount = (sx.chest == 1 ? 0.03 : (sx.chest == 2 ? 0.018 : 0.024)) * u;
-        const Vec3 back = radii(1.3 * gb, 0.8, 0.62);
-        relief(slab(rest(0.0, -1.0, front(-1.2) + 0.1), kIdentity, radii(1.3 * gb, 1.1, 0.35), -amount, &back, 0.5, 0.2 * u));
+        const double amount = (sx.chest == 1 ? 0.04 : (sx.chest == 2 ? 0.022 : 0.03)) * u;
+        const Vec3 back = radii(1.3 * gb, 0.6, 0.62);
+        relief(slab(rest(0.0, -1.2, front(-1.3) + 0.1), kIdentity, radii(1.3 * gb, 1.0, 0.35), -amount, &back, 0.75, 0.25 * u));
     }
     // the line down the middle, from the breastbone's end to the navel, fading at both ends
     // (both shallower on a thin body, whose trunk is not deep enough for them)
     const double thin = std::min(1.0, dd / 0.85);
-    relief(swell(rest(0.0, -1.3, front(-1.3)), kIdentity, radii(0.24, 0.6, 0.3), -0.012 * u * thin));
-    // the navel: a soft dimple (seven of the grid's cells across: a smaller one is drawn as a few flat faces)
-    relief(swell(rest(0.0, -0.78, front(-0.78)), kIdentity, radii(0.22, 0.22, 0.25), -0.02 * u * thin));
-    // a hint of the belly's muscle: a long low form on each side of the middle line, from under the ribs to the navel,
-    // and two lower pads along it (a man's; fainter on the body that is neither; a woman's belly stays smooth)
-    if (sx.chest != 2) {
-        const double amount = (sx.chest == 1 ? 1.0 : 0.55) * u;
-        const double bx = 0.24 * gb;
-        relief_pair(swell(rest(bx, -1.34, front(-1.34)), kIdentity, radii(0.25 * gb, 0.66, 0.3), 0.01 * amount),
-                    swell(rest(-bx, -1.34, front(-1.34)), kIdentity, radii(0.25 * gb, 0.66, 0.3), 0.01 * amount));
-        for (const double y : {-1.6, -1.08}) {
-            const Vec3 size = radii(0.25 * gb, 0.27, 0.25);
-            relief_pair(swell(rest(bx, y, front(y)), kIdentity, size, 0.013 * amount), swell(rest(-bx, y, front(y)), kIdentity, size, 0.013 * amount));
-        }
-    }
+    relief(swell(rest(0.0, -1.37, front(-1.37)), kIdentity, radii(0.22, 0.56, 0.3), -0.016 * u * thin));
+    // the navel: one small round dimple, five of the grid's cells across (a smaller one is drawn as a few flat faces)
+    relief(swell(rest(0.0, -0.8, front(-0.8)), kIdentity, radii(0.15, 0.17, 0.25), -0.02 * u * thin));
     return out;
 }
 
