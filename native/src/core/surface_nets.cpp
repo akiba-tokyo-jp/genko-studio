@@ -91,13 +91,18 @@ Smooth mesh(const Field& field, double h, double normal_steps) {
                 // blend it takes part in at a joint whose reach meets the brick's)
                 std::fill(blend.begin(), blend.end(), 0.0);
                 for (const figure_shape::Joint& jt : field.joints) {
-                    const double dx = c[0] - jt.at[0];
-                    const double dy = c[1] - jt.at[1];
-                    const double dz = c[2] - jt.at[2];
-                    const double r = jt.radius + near;
-                    if (!(dx * dx + dy * dy + dz * dz < r * r)) continue;
-                    blend[static_cast<std::size_t>(jt.p)] = std::max(blend[static_cast<std::size_t>(jt.p)], jt.k);
-                    blend[static_cast<std::size_t>(jt.c)] = std::max(blend[static_cast<std::size_t>(jt.c)], jt.k);
+                    const auto within = [&](const Vec3& at, double radius) {
+                        const double dx = c[0] - at[0];
+                        const double dy = c[1] - at[1];
+                        const double dz = c[2] - at[2];
+                        const double r = radius + near;
+                        return dx * dx + dy * dy + dz * dz < r * r;
+                    };
+                    // (the width the joint can have in the brick: its own, and what it has more about its second place)
+                    const double k = (within(jt.at, jt.radius) ? jt.k : 0.0) + (jt.more_k > 0.0 && within(jt.more, jt.more_radius) ? jt.more_k : 0.0);
+                    if (!(k > 0.0)) continue;
+                    blend[static_cast<std::size_t>(jt.p)] = std::max(blend[static_cast<std::size_t>(jt.p)], k);
+                    blend[static_cast<std::size_t>(jt.c)] = std::max(blend[static_cast<std::size_t>(jt.c)], k);
                 }
                 for (std::size_t i = 0; i < parts; ++i) b.use[i] = d[i] - near < keep + 1.25 * blend[i] ? 1 : 0;
                 b.value.resize(static_cast<std::size_t>(kSide * kSide * kSide));

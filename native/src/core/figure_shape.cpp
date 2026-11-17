@@ -466,6 +466,18 @@ Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amou
     return p;
 }
 
+Piece slab(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount, const Vec3* back, double arch, double arch_round) {
+    Piece p = swell(centre, axes, radii, amount);
+    p.round = 2.0;
+    p.b = back != nullptr ? *back : radii;
+    p.arch = arch;
+    p.arch_round = arch_round;
+    // (the ball that holds it: its axes may slant and its edge fall away, so the box's corner is further out than the
+    // radii say — twice the longest, and how far the arch falls, is more than any slant here reaches)
+    p.reach = 2.0 * std::max(p.reach, std::max(p.b[0], std::max(p.b[1], p.b[2]))) + std::fabs(arch) * std::max(radii[0], p.b[0]);
+    return p;
+}
+
 std::vector<Station> run_slopes(const std::vector<Station>& stations, const Station* first, const Station* last) {
     const std::size_t n = stations.size();
     std::vector<Station> out(n);
@@ -698,11 +710,24 @@ inline bool beyond(const Piece& p, const Vec3& x, double least) {
     return dx * dx + dy * dy + dz * dz >= r * r;
 }
 
-// How far a swell lifts the surface at x: its amount × (1 − r²)³ within its ellipsoid (a flat one: (1 − r⁴)³).
+// How far a swell lifts the surface at x: its amount × (1 − r²)³ within its ellipsoid (a flat one: (1 − r⁴)³; a slab:
+// (1 − (x⁴ + y⁴ + z⁴))³ within its rounded box).
 inline double lift_of(const Piece& p, const Vec3& x) {
     const Vec3 r = sub(x, p.a);
     if (!(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] < p.reach * p.reach)) return 0.0;  // (outside the ball that holds it)
     const Vec3 q = into(p.axes, r);
+    if (p.round > 1.5) {
+        // (each side of the middle has its own radius: 1 − q⁴ is flat enough at the middle for the two to meet unseen)
+        const double qx = q[0] / (q[0] < 0.0 ? p.b[0] : p.size[0]);
+        const double along = p.arch != 0.0 ? q[1] - p.arch * (std::sqrt(q[0] * q[0] + p.arch_round * p.arch_round) - p.arch_round) : q[1];
+        const double qy = along / (along < 0.0 ? p.b[1] : p.size[1]);
+        const double qz = q[2] / (q[2] < 0.0 ? p.b[2] : p.size[2]);
+        const double x2 = qx * qx;
+        const double y2 = qy * qy;
+        const double z2 = qz * qz;
+        const double t = 1.0 - (x2 * x2 + y2 * y2 + z2 * z2);
+        return t > 0.0 ? p.ra * (t * t * t) : 0.0;
+    }
     const double qx = q[0] / p.size[0];
     const double qy = q[1] / p.size[1];
     const double qz = q[2] / p.size[2];
@@ -813,17 +838,22 @@ double Field::at(const Vec3& x, const std::uint8_t* use, double* d, int* nearest
             best = static_cast<int>(i);
         }
     }
+    // (how much of a width is left at x: all of it within flat × radius of the place, (1 − s²)² past that, s from 0
+    // there to 1 at the radius)
+    const auto share = [&x](const Vec3& at, double radius, double flat) {
+        const Vec3 r = sub(x, at);
+        const double t2 = dot3(r, r) / (radius * radius);
+        if (!(t2 < 1.0)) return 0.0;
+        if (!(t2 > flat * flat)) return 1.0;
+        const double s = (std::sqrt(t2) - flat) / (1.0 - flat);
+        return (1.0 - s * s) * (1.0 - s * s);
+    };
     for (const Joint& j : joints) {
         if (use != nullptr && (use[j.p] == 0 || use[j.c] == 0)) continue;
-        const Vec3 r = sub(x, j.at);
-        const double t2 = dot3(r, r) / (j.radius * j.radius);
-        if (!(t2 < 1.0)) continue;
-        double w = 1.0;
-        if (t2 > j.flat * j.flat) {  // (past the flat middle: (1 − s²)², s from 0 at its rim to 1 at the radius)
-            const double s = (std::sqrt(t2) - j.flat) / (1.0 - j.flat);
-            w = (1.0 - s * s) * (1.0 - s * s);
-        }
-        f = std::min(f, blend_min(d[j.p], d[j.c], j.k * w));
+        double k = j.k * share(j.at, j.radius, j.flat);
+        if (j.more_k > 0.0) k = k + j.more_k * share(j.more, j.more_radius, j.more_flat);
+        if (!(k > 0.0)) continue;
+        f = std::min(f, blend_min(d[j.p], d[j.c], k));
     }
     if (nearest != nullptr) *nearest = best;
     return f;
@@ -832,7 +862,7 @@ double Field::at(const Vec3& x, const std::uint8_t* use, double* d, int* nearest
 double Field::blend_of(int part) const {
     double k = 0.0;
     for (const Joint& j : joints) {
-        if (j.p == part || j.c == part) k = std::max(k, j.k);
+        if (j.p == part || j.c == part) k = std::max(k, j.k + j.more_k);
     }
     return k;
 }
@@ -842,7 +872,7 @@ void Field::bounds(Vec3& lo, Vec3& hi) const {
     lo = Vec3{inf, inf, inf};
     hi = Vec3{-inf, -inf, -inf};
     double k = 0.0;
-    for (const Joint& j : joints) k = std::max(k, j.k);
+    for (const Joint& j : joints) k = std::max(k, j.k + j.more_k);
     for (const Part& part : parts) {
         Vec3 plo{inf, inf, inf};
         Vec3 phi{-inf, -inf, -inf};
@@ -900,9 +930,10 @@ namespace {
 
 constexpr std::size_t kTrunkAndTrapezius = 3;  // (the torso's first pieces: the trunk and the two sides of the trapezius)
 
-// The torso's pieces.
+// The torso's pieces, and where the fold of each armpit is (on the side of the chest under the shoulder; left, right).
 struct Torso {
     Part part;
+    Vec3 armpit[2]{};
 };
 
 Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
@@ -984,6 +1015,10 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
     };
     const Vec3 lsr = shoulder_rest(ls);
     const Vec3 rsr = shoulder_rest(rs);
+    for (int side = 0; side < 2; ++side) {
+        const Vec3& at = side == 0 ? lsr : rsr;
+        out.armpit[side] = add(W, out_of(C, Vec3{(side == 0 ? 0.98 : -0.98) * r_chest * u, at[1] + 0.42 * u + 1.3 * u, -0.02 * u}));
+    }
     {
         const auto trapezius = [&](const Vec3& shoulder, double side) {
             // (a woman's begins higher on the neck: her narrower neck does not read long)
@@ -1044,15 +1079,59 @@ Torso torso_of(const mesh3d::Skeleton& sk, const Dims& d) {
         };
         relief_pair(bone(1.0), bone(-1.0));
     }
-    // the chest: the pectorals (a man's fuller): each one broad, even swell from beside the breastbone (the two leave
-    // a shallow hollow down the middle) out toward the arm and up over the collarbone — its soft edge shows below and
-    // along the middle only, as a pectoral's does
+    // the chest: the pectorals (a man's fuller): each a slab from beside the breastbone (the two leave a shallow
+    // hollow down the middle) out into the front of the shoulder. Its lower edge is a straight soft step that rises
+    // outward to the fold of the armpit, its inner one runs down beside the breastbone, the corner between them is
+    // round; outward it goes on past the shoulder, and upward it thins as the chest leans back to the collarbone —
+    // a slab of muscle from the breastbone into the shoulder, with no round outline and no upper edge
     if (sx.chest != 2) {
         const double full = sx.chest == 1 ? 1.0 : 0.4;
-        const double px = 0.375 * sh * g;
-        const Vec3 size = radii(0.48 * sh * g, 0.56, 0.6);
-        relief_pair(swell(rest(px, -2.45, -0.47 * d_chest), kIdentity, size, 0.04 * u * full, true),
-                    swell(rest(-px, -2.45, -0.47 * d_chest), kIdentity, size, 0.04 * u * full, true));
+        const double wide = sh * g;
+        const auto pectoral = [&](double side) {
+            Mat3 m{};
+            m[0] = Vec3{side, side * 0.34, 0.0};  // (columns: across; down and a little outward — square to the lower edge; forward)
+            m[1] = Vec3{0.0, 0.94, 0.0};
+            m[2] = Vec3{0.0, 0.0, 1.0};
+            const Vec3 back = radii(0.66 * wide, 0.54, 0.6);
+            return slab(rest(side * 0.7 * wide, -2.6, -0.47 * d_chest), m, radii(0.66 * wide, 0.54, 0.45), 0.045 * u * full, &back);
+        };
+        relief_pair(pectoral(1.0), pectoral(-1.0));
+    }
+    // The belly's relief. (The front of the trunk at a height, between its sections.)
+    const auto front = [&](double y) {
+        const double ys[4] = {-1.92, -1.3, -0.92, -0.3};
+        const double zs[4] = {-0.015 * dd - 0.55 * d_chest, -0.035 * dd - 0.47 * d_chest, -0.435 * dd, -0.45 * dd};
+        if (y <= ys[0]) return zs[0];
+        for (int i = 0; i < 3; ++i) {
+            if (y <= ys[i + 1]) return zs[i] + (zs[i + 1] - zs[i]) * (y - ys[i]) / (ys[i + 1] - ys[i]);
+        }
+        return zs[3];
+    };
+    const double gb = std::max(0.85, g);  // (across: the belly's forms keep to the grid on a thin body)
+    // the lower edge of the ribs: the belly sunk under it — a slab taken away, whose upper edge (a soft step) is an
+    // arch from the breastbone's end down and out toward each flank; downward it fades over the whole belly, too
+    // slowly to show, and it is of the front only (gone before the flank: the body's side is as it was). Sunk, not
+    // the ribs raised: the trunk is nowhere larger for it.
+    {
+        const double amount = (sx.chest == 1 ? 0.03 : (sx.chest == 2 ? 0.018 : 0.024)) * u;
+        const Vec3 back = radii(1.3 * gb, 0.8, 0.62);
+        relief(slab(rest(0.0, -1.0, front(-1.2) + 0.1), kIdentity, radii(1.3 * gb, 1.1, 0.35), -amount, &back, 0.5, 0.2 * u));
+    }
+    // the line down the middle, from the breastbone's end to the navel, fading at both ends
+    relief(swell(rest(0.0, -1.3, front(-1.3)), kIdentity, radii(0.24, 0.6, 0.3), -0.012 * u));
+    // the navel: a soft dimple (seven of the grid's cells across: a smaller one is drawn as a few flat faces)
+    relief(swell(rest(0.0, -0.78, front(-0.78)), kIdentity, radii(0.22, 0.22, 0.25), -0.02 * u));
+    // a hint of the belly's muscle: a long low form on each side of the middle line, from under the ribs to the navel,
+    // and two lower pads along it (a man's; fainter on the body that is neither; a woman's belly stays smooth)
+    if (sx.chest != 2) {
+        const double amount = (sx.chest == 1 ? 1.0 : 0.55) * u;
+        const double bx = 0.24 * gb;
+        relief_pair(swell(rest(bx, -1.34, front(-1.34)), kIdentity, radii(0.25 * gb, 0.66, 0.3), 0.01 * amount),
+                    swell(rest(-bx, -1.34, front(-1.34)), kIdentity, radii(0.25 * gb, 0.66, 0.3), 0.01 * amount));
+        for (const double y : {-1.6, -1.08}) {
+            const Vec3 size = radii(0.25 * gb, 0.27, 0.25);
+            relief_pair(swell(rest(bx, y, front(y)), kIdentity, size, 0.013 * amount), swell(rest(-bx, y, front(y)), kIdentity, size, 0.013 * amount));
+        }
     }
     return out;
 }
@@ -1086,6 +1165,7 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
     enum { kTorso, kNeck };
     // (sizes in u, the skeleton's unit: a head is 1.1 u tall; an adult's widths, girths and depths as such)
     Torso torso = torso_of(sk, dm);
+    const Vec3 armpits[2] = {torso.armpit[0], torso.armpit[1]};
     f.parts.push_back(std::move(torso.part));  // 0 the torso as one smooth body
     const Vec3 neck_low = off(N, C, 0.0, 0.1, 0.05);
     const Vec3 neck_top = off(HB, Hd, 0.0, -0.05, 0.1);
@@ -1166,7 +1246,9 @@ FigureMesh figure(const mesh3d::Skeleton& sk, const HandShape& left, const HandS
             f.parts.push_back(std::move(p));
         }
         const int fore = upper + 1;
-        f.joints.push_back(Joint{kTorso, upper, shoulder, 0.3 * u, 1.1 * u, 0.55});
+        // (the shoulder's join, wider in the fold of the armpit under it: the arm's underside runs into the side of
+        // the chest in a round hollow, not a corner — the shoulder itself, above and in front, keeps its width)
+        f.joints.push_back(Joint{kTorso, upper, shoulder, 0.3 * u, 1.1 * u, 0.55, armpits[side], 0.25 * u, 0.6 * u, 0.25});
         f.joints.push_back(Joint{upper, fore, elbow, 0.07 * u * std::min(1.0, bend_of(arm_r, fore_r) / 0.3), 0.3 * u, 0.3});
         arms[side] = Arm{fore, elbow, wrist, f.parts[static_cast<std::size_t>(fore)].pieces, f.parts[static_cast<std::size_t>(fore)].k, wrist_radii};
 

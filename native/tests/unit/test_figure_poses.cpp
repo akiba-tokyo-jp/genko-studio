@@ -114,8 +114,8 @@ std::string issues_text(const std::vector<checks::Issue>& issues) {
 // The sha256 of four thumbnails (60 × 90 at three quarters: stand's first, fashion's last mirrored, sit_chair's first,
 // kneel_squat's last mirrored), taken with this build (again after the body's anatomy pass of 2026-11-16).
 const char* const kThumbPins =
-    "2ac00a4ecf4880832b2ad495c9d65e57cca21d033f89fa6b17e4a52215504059 1a2c7c68a436bd3fde150c81d08dfe3eb6cafc91a1928b4a58c9698d42d1fba7 "
-    "1cf8a694e543d7ee8085e9b3fa7ba8e14e7c194586ba66745dc2657129344214 b9be8243e7f600b07f8ba3528472ca5a1f2ea6bc9842f94b42d762ee4622e40b ";
+    "376f93469b4b7fe549c380c417214171d9d9b19a804051f17f1ab3859119d5f0 d1de4094a25a78c13e2ac9d4b6084a2917a69a266c619a762881a113221c7c6f "
+    "b41b62889a52073424beac304c32e1049ef43ff1b94181bd8de12ea6e73a2ee8 345998ead531659e9738155e41bca04025bca359fb6c8377aa26aedf345cbf13 ";
 
 std::string sheets_dir() { return qEnvironmentVariable("GENKO_POSE_SHEETS").toStdString(); }
 

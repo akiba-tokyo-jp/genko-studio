@@ -574,10 +574,10 @@ private slots:
     }
 
 private:
-    static constexpr const char* kWalkMesh = "95f78dee587e161bbc7ad8c2cce28b3dfbc67c50a8a3524a28138e09e9bad731";
-    static constexpr const char* kWalkLines = R"({"count":24,"points":741,"sha":"ef9c4c3831dbc07d6a14c89e9bfc70216d2485c5f78f68e907ea096e1d948c6f"})";
+    static constexpr const char* kWalkMesh = "ecc2f7504852225aa392b25224047796acf6b2cb65d1f32970f77f0ccbf06236";
+    static constexpr const char* kWalkLines = R"({"count":24,"points":733,"sha":"05950db93d3c3bb3d2c2de742ae2fa24beb351cdb187d31d9de8bae0f462bfcc"})";
     static constexpr const char* kDrawn =
-        "1bad6e090a6d7ac380785199b0aa8d7d591f1c3e286f37de58353e504a53f3abf0cf1499ea3ba583da9dc25814eb8c6ad7bf3a570074c6ce02bdc1138ef7190c";
+        "8660e10d4efb3877df6f79565abfc7081d3466f629be69388940f63779889fb1d0ef1c07269dd20414727e4fd6696cd7aba43f4e1b84d2b2c24624f507a46c06";
     static constexpr const char* kOtherKinds = "6ffc48c304526a30bca379fe46e33d837b6fc6503902dce057f83812ee7e36f1";
 };
 

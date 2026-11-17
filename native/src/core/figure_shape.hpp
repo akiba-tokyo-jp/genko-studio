@@ -50,12 +50,14 @@ struct Piece {
     bool paired = false;  // (this piece and the next are a left and right pair: joined first)
     bool rest = false;    // set in the part's rest space (Part::bend): the trunk, which bends with the spine
     Vec3 a{};       // cone: one end; ellipsoid, box: the centre; loft: where y = 0 is
-    Vec3 b{};       // cone: the other end
+    Vec3 b{};       // cone: the other end; slab: its radii on the far side of its middle
     double ra = 0;  // cone: the radius at a; loft: the height of the dome that closes its first end; swell: its amount
     double rb = 0;  // cone: the radius at b; loft: of its last end
     Mat3 axes{};    // ellipsoid, box, loft, swell: its axes as columns (a turn; a loft runs along y)
     Vec3 size{};    // ellipsoid, swell: its radii; box: its half sizes; loft: how full its two domes are
-    double round = 0;  // box: the rounding; swell: more than 0 when it is flat
+    double round = 0;  // box: the rounding; swell: 1 when it is flat, 2 when it is a slab
+    double arch = 0;        // slab: how fast its second axis' line falls away along its first
+    double arch_round = 0;  // (and over what length it is round at the middle)
     std::vector<double> loft;  // loft: its stations and the cubics between them (see loft())
 
     double at(const Vec3& x) const;
@@ -67,6 +69,16 @@ Piece box(const Vec3& centre, const Mat3& axes, const Vec3& half, double round);
 // (`flat`: the swell keeps most of its amount over its middle and falls off nearer the rim, as (1 − r⁴)³ does — a
 // broad even form with a soft edge: a pectoral)
 Piece swell(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount, bool flat = false);
+// A slab: a flat swell whose rim is a rounded box, not an ellipsoid — amount × (1 − (x⁴ + y⁴ + z⁴))³, x, y and z the
+// point's places along the three axes over the radii. Its edges run straight between rounded corners, so a broad
+// muscle can end along a line (a pectoral's lower edge, rising to the armpit) with no round outline. The axes need
+// not be square to each other (each is a direction the place is measured along): the rim is then a slanted box.
+// `back` (when given) are the radii on the far side of the middle along each axis: an edge may be a soft step on
+// one side and a long fade on the other (the lowest ribs: a step over the belly, nothing to see toward the chest).
+// `arch` bends the slab along its first axis: its place along the second is taken from a line that falls away by
+// `arch` for each unit out from the middle (round over `arch_round` at the middle: arch × (√(x² + round²) − round)) —
+// an edge that is an arch, as the lowest ribs' is over the belly.
+Piece slab(const Vec3& centre, const Mat3& axes, const Vec3& radii, double amount, const Vec3* back = nullptr, double arch = 0.0, double arch_round = 0.0);
 // A loft from the first station to the last (y rising; two or more) in the frame `axes` at `origin`: between the
 // stations the section's numbers run as cubics through them, and each end is closed by half an ellipsoid as high as
 // cap0 and cap1 (its middle going on as zc slopes at the end: a dome that leans). A run is best begun and ended where
@@ -121,7 +133,9 @@ struct Part {
 };
 
 // A joint: near `at` (within `radius`), parts p and c meet by a smooth minimum of width up to k: the whole k within
-// flat × radius of it, falling to nothing at the radius.
+// flat × radius of it, falling to nothing at the radius. A joint may be wider about a second place too (`more`, by up
+// to `more_k`, the same way): the two widths are added — one smooth width, where two joints of the same pair would
+// leave a crease where one takes over from the other. (The fold of the armpit, under the shoulder.)
 struct Joint {
     int p = 0;
     int c = 0;
@@ -129,6 +143,10 @@ struct Joint {
     double k = 0;
     double radius = 1;
     double flat = 0;
+    Vec3 more{};
+    double more_k = 0;
+    double more_radius = 1;
+    double more_flat = 0;
 };
 
 struct Field {
